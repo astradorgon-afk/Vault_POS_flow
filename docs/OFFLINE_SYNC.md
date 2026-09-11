@@ -1,0 +1,337 @@
+# Offline Operation and Synchronization
+
+The design rule: **a device is an event producer, not a database replica.**
+Nothing is table-synced. The client uploads immutable business events and
+downloads a scoped, versioned change feed.
+
+---
+
+## 1. What a device can do offline
+
+| Capability | Offline | Notes |
+|---|---|---|
+| Product lookup / barcode scan | yes | from cached catalog |
+| Price lookup | yes | cached effective-dated prices for the device's location |
+| POS sale (cash) | yes | full ledger posting locally |
+| POS sale (card) | no | requires the payment provider; cash-only fallback |
+| Receipt print / reprint | yes | reprint still requires `sale.reprint` |
+| Local sales history (current + prior shifts held locally) | yes | 90-day local retention |
+| Open / close shift | yes | shift totals reconciled on sync |
+| Void (same shift, same day) | yes | requires `sale.void` in the cached snapshot |
+| Customer return referencing a **local** sale | yes | goods land in `ReturnPending` |
+| Customer return referencing a **remote** sale | no | needs server lookup; queued as a request |
+| Stock count entry | yes | submitted for approval; **never posts to the ledger offline** |
+| Receiving against a **pre-authorized** transfer or PO | yes | authorization token cached |
+| Receiving anything else | quarantine only | raises an incident |
+| Unknown barcode | quarantine only | raises an incident; never becomes Available |
+| Transfer request | yes | queued as `Requested`, approved centrally later |
+| Transfer approval | **no** | except via a valid pre-approval token |
+| Emergency transfer | yes | `PendingCentralReview`, dual manager auth |
+| Stock adjustment | create only | approval never happens offline |
+| Product creation / price change | **no** | central authority only |
+| Reports beyond the local location and retention window | no | |
+
+The rule behind the table: **offline never widens authority.** If an action
+required approval online, it still requires approval offline — it just gets
+parked in a reviewable state instead of being blocked outright when the goods
+have physically moved.
+
+---
+
+## 2. Local data model
+
+```
+device.db (SQLite, encrypted)
+├── cache_*        master data mirrors, written only by the sync downloader
+│    product, product_barcode, product_price, uom, unit_conversion,
+│    location, supplier_lite, customer_lite, tax_code
+├── snapshot_permission   user -> permission set, policy_version, expires_at_utc
+├── snapshot_token        pre-approval tokens (signed, scoped, expiring)
+├── local_*        authoritative-until-synced local records
+│    sale, sale_item, payment, cashier_shift, sales_return,
+│    inventory_movement, inventory_balance, transfer_order (local),
+│    quarantine_incident, inventory_count
+├── outbox_event   the upload queue
+└── sync_state     cursors, checkpoints, failures
+```
+
+`cache_*` tables are **read-only to application code**; the only writer is
+`ChangeFeedApplier`. This is enforced by a SQLite trigger and by an interceptor
+that rejects tracked changes to cache entities outside the applier's scope.
+
+### 2.1 The outbox
+
+```csharp
+public sealed class OutboxEvent
+{
+    public Guid    EventId          { get; init; }  // UUIDv7, generated once, never regenerated
+    public long    DeviceSequence   { get; init; }  // strictly monotonic per device
+    public SyncEventType Type       { get; init; }
+    public string  PayloadJson      { get; init; }  // canonical JSON, stable property order
+    public byte[]  PayloadHash      { get; init; }  // SHA-256 of PayloadJson
+    public Guid    DeviceId         { get; init; }
+    public Guid    UserId           { get; init; }
+    public Guid    LocationId       { get; init; }
+    public DateTimeOffset OccurredAtUtc { get; init; }   // device clock at creation
+    public long    DeviceUptimeTicks{ get; init; }       // monotonic, clock-tamper evidence
+    public Guid    CorrelationId    { get; init; }
+    public OutboxStatus Status      { get; set; }   // Pending|Sending|Synchronized|Failed|RequiresReview|Conflict
+    public int     AttemptCount     { get; set; }
+    public DateTimeOffset? LastAttemptAtUtc { get; set; }
+    public DateTimeOffset? NextRetryAtUtc   { get; set; }
+    public string? LastError        { get; set; }
+    public string? ServerResponseJson { get; set; }
+}
+```
+
+`EventId` is created **once**, when the business event is created, inside the
+same local transaction as the local business rows. It is never regenerated on
+retry — that is what makes retries safe.
+
+`DeviceSequence` comes from a single-row counter table incremented in the same
+transaction, giving a gapless per-device order.
+
+---
+
+## 3. Upload protocol
+
+```
+POST /api/sync/push
+Authorization: Bearer <access token>          (device-bound)
+X-Device-Id: <guid>
+X-Correlation-Id: <guid>
+Idempotency-Key: <batch guid>
+
+{
+  "deviceId": "...",
+  "batchId": "...",
+  "clientSentAtUtc": "2026-03-04T07:11:52.113Z",
+  "deviceUptimeTicks": 918273645,
+  "events": [
+    { "eventId": "...", "deviceSequence": 4412, "type": "SaleCompleted",
+      "occurredAtUtc": "...", "payload": { ... }, "payloadHash": "base64" }
+  ]
+}
+```
+
+Response — **one result per event**, never a single batch-level verdict:
+
+```json
+{
+  "serverReceivedAtUtc": "2026-03-04T07:11:52.640Z",
+  "clockSkewSeconds": 3.1,
+  "results": [
+    { "eventId": "...", "outcome": "Accepted",
+      "serverDocumentNumber": "SAL-2026-D03-000812",
+      "appliedAtUtc": "..." },
+    { "eventId": "...", "outcome": "Duplicate", "originalAppliedAtUtc": "..." },
+    { "eventId": "...", "outcome": "Rejected",
+      "errorCode": "product.disabled",
+      "message": "Product was disabled on 2026-03-01",
+      "remediation": "QuarantineAndReview" },
+    { "eventId": "...", "outcome": "RequiresReview", "reviewQueue": "EmergencyTransfers" },
+    { "eventId": "...", "outcome": "Conflict", "conflictKind": "TransferAlreadyReceived" }
+  ],
+  "nextCursor": 1902334
+}
+```
+
+### 3.1 Server processing algorithm
+
+For each event, in `deviceSequence` order, in its **own** database transaction:
+
+```
+BEGIN
+  -- 1. idempotency
+  SELECT outcome, result_json FROM sync.processed_event WHERE event_id = @id FOR UPDATE
+  IF FOUND:
+      IF payload_hash <> stored_hash:  record SyncFailure('idempotency-key-reuse'), return Rejected
+      ELSE: return stored result unchanged        -- exactly-once
+  -- 2. ordering
+  IF @deviceSequence <> checkpoint.last_accepted + 1:
+      IF @deviceSequence <= checkpoint.last_accepted: return Duplicate
+      ELSE: buffer the event, return Deferred     -- a gap; wait for the missing one
+  -- 3. device + user authorization, evaluated NOW (not as of event creation)
+  -- 4. domain validation against current server state
+  -- 5. apply the business effect (ledger post, sale insert, ...)
+  -- 6. INSERT sync.processed_event (event_id, hash, outcome, result_json)   <- same tx
+  -- 7. INSERT audit.audit_log
+  -- 8. advance sync.sync_checkpoint.last_accepted_device_sequence
+COMMIT
+```
+
+Because step 6 shares the transaction with step 5, there is no window in which
+the effect is committed but the idempotency record is not. A device that retries
+after a network timeout receives the original result, with the original document
+number, and posts nothing twice.
+
+### 3.2 Retry strategy
+
+Client-side, per event:
+
+```
+attempt 1 : immediately
+attempt n : delay = min(2^(n-1) * 5s, 30 min) * jitter(0.8 .. 1.2)
+after 8 consecutive failures -> Status = Failed, surfaced in the UI, kept forever
+```
+
+Retries are **never** abandoned automatically; a permanently failing event is
+escalated to HQ as a `SyncFailure` with the full server response. Events are
+uploaded in batches of at most 100 or 512 KB, whichever comes first, always in
+`deviceSequence` order, and a batch stops at the first `Deferred`.
+
+---
+
+## 4. Executing the same code on both sides
+
+`Pos.Client` registers a restricted command set against a SQLite
+`PosDbContext`. The sale handler, the ledger, the FEFO allocator and the money
+arithmetic are **the same types** the server runs against PostgreSQL. The
+differences are injected, not branched:
+
+| Port | Server implementation | Client implementation |
+|---|---|---|
+| `IDocumentNumberGenerator` | central counter table | device-scoped counter |
+| `IPermissionEvaluator` | live DB + cache | cached snapshot (+ expiry check) |
+| `IApprovalGate` | resolves approvers, may block | token check, else `PendingCentralReview` |
+| `IClock` | server UTC | device UTC + recorded skew |
+| `IChangeFeedPublisher` | writes `change_log` | writes `outbox_event` |
+| `IPriceResolver` | live effective-dated prices | cached prices + `PriceVersion` stamp |
+
+A command not in the client's whitelist simply has no registered handler, so an
+offline attempt fails closed with `Unavailable`, never by silently degrading.
+
+---
+
+## 5. Download: the change feed
+
+```
+GET /api/sync/pull?cursor=1902334&limit=500
+```
+
+Server returns changes with `change_sequence > cursor` where
+`location_scope_id IS NULL` (global master data) **or** equals the device's
+location, ordered by `change_sequence`. The feed carries:
+
+- catalog changes (products, barcodes, prices, conversions, settings),
+- location and supplier changes,
+- the device's own document acknowledgements and server-side corrections,
+- transfers and POs addressed to the device's location,
+- notifications targeted at the device's location or its users,
+- permission snapshot invalidations,
+- pre-approval tokens issued to the location,
+- device directives (`revoke`, `force-resync`, `purge-cache`).
+
+The client applies a page in one SQLite transaction and advances the cursor
+**after** the transaction commits, so an interrupted pull replays harmlessly.
+
+Full re-baseline: when `master_data_version` on the server exceeds the device's
+by more than the retained feed window (or the device has been offline beyond
+`FeedRetentionDays`, default 30), the server answers with
+`410 Gone { "action": "rebaseline" }` and the device downloads a fresh snapshot
+from `/api/sync/baseline`. Its outbox is preserved and uploaded first.
+
+---
+
+## 6. Clocks
+
+- The device clock is **never** trusted for ordering, business dates, pricing
+  validity, token expiry, or audit timestamps.
+- Every event carries the device's `occurredAtUtc` plus `deviceUptimeTicks`
+  (monotonic). The server stores `occurred_at_utc` as reported and
+  `recorded_at_utc` from its own clock; `recorded_at_utc` orders the ledger.
+- Skew is computed per batch. `|skew| > 120 s` raises a warning notification;
+  `> 15 min` marks subsequent events `RequiresReview` and prompts the device to
+  resynchronise its clock.
+- Backwards jumps in `deviceUptimeTicks` relative to `occurredAtUtc` are
+  clock-tamper evidence and are audited.
+- `business_date` is assigned by the server from the **location's** timezone
+  applied to `recorded_at_utc`, unless the event was created offline, in which
+  case the device's reported date is used **if** it falls within the shift's
+  open window; otherwise the shift's business date wins.
+
+---
+
+## 7. Conflict rules
+
+Generic last-write-wins is **never** used for inventory or money. Each scenario
+has a defined rule:
+
+| Scenario | Rule |
+|---|---|
+| Same event uploaded twice | Idempotency: return the stored result. No second effect. |
+| Same event, different payload hash | `Rejected` + `SyncFailure('idempotency-key-reuse')` + security alert. |
+| Device offline for days, then floods events | Accepted in sequence order; each validated against *current* server state; business dates preserved. |
+| Product changed while device offline (name, category) | Server state wins for master data; the sale keeps the **historical** name/price it printed, stored on `sale_item`. |
+| Price changed while device offline | Sale is accepted at the price actually charged; a `PriceVarianceRecorded` note is attached when it differs from the server's effective price, and it appears on the price-variance report. No silent re-pricing. |
+| Product disabled while device offline | Sale **accepted** (goods left the shelf, the ledger must reflect reality) but flagged `RequiresReview`; the product stays disabled and no further sales are possible once the feed reaches the device. |
+| Product deleted | Impossible — products are never deleted, only deactivated. |
+| User permission reduced while offline | Evaluated at processing time: if the user lacks the permission **now**, the event is `RequiresReview` (not silently accepted, not destroyed). Cash-sale events are always accepted and flagged, because the money already changed hands. |
+| User disabled while offline | Same as above, plus a security alert; the shift is force-closed on the server. |
+| Transfer received quantity ≠ dispatched | Not a conflict — a `TransferDiscrepancy` with a `TransitVariance` ledger leg. |
+| Transfer already received by another device | `Conflict: TransferAlreadyReceived`; the second receipt is rejected and surfaced for manual reconciliation. |
+| Two locations act on the same stock | Impossible at the data level: buckets are location-keyed. Cross-location races resolve at the transfer boundary. |
+| Local sale drove stock negative | Accepted per the location's negative-stock policy; if `Prohibit`, the sale is `RequiresReview` and a `NegativeStockAttempt` is recorded. The sale is never deleted. |
+| Events arrive out of order | Sequence gap ⇒ later events buffered until the gap closes or `GapTimeout` (default 30 min) ⇒ then `RequiresReview`. |
+| Event references stale master data (unknown product id) | `Rejected` with `remediation: QuarantineAndReview`; the device converts it to a quarantine incident. |
+| Duplicate document number from a re-imaged device | Rejected — `sale.number` is unique; the device is forced to rebaseline and re-number pending events. |
+
+Guiding principle, applied consistently: **physical reality is recorded; authority
+is re-verified; anything questionable is flagged, never discarded and never
+silently accepted as normal.**
+
+---
+
+## 8. Sync statuses
+
+Local (`OutboxStatus`): `Pending`, `Sending`, `Synchronized`, `Failed`,
+`RequiresReview`, `Conflict`.
+
+Server (`ServerProcessingStatus` on movements and documents): `Accepted`,
+`Duplicate`, `Rejected`, `RequiresReview`, `Conflict`, `Reversed`.
+
+Both are shown in the client status bar and in the HQ sync-health dashboard:
+
+```
+[ ONLINE ]  Store 1 · D03 · Cashier: Maria S. · Shift SHF-2026-D03-0042 open
+            Sync: 0 pending · last 12s ago            [ OFFLINE ] 14 pending · retry in 2m
+```
+
+---
+
+## 9. Security of the sync channel
+
+- TLS 1.2+ only; certificate pinning on the client against the API's issuer.
+- Access tokens are device-bound: the `device_id` claim must match the
+  `X-Device-Id` header and the device's status must be `Active`.
+- Replay protection = idempotency (`event_id` unique) + per-device monotonic
+  sequence + batch `Idempotency-Key` + server-side clock-skew bounds. A replayed
+  batch produces only `Duplicate` results.
+- Envelope integrity: `payloadHash` is verified server-side; a mismatch between a
+  re-sent `event_id` and its stored hash is treated as tampering.
+- Revoked or suspended devices receive `403` with `{"action":"wipe-local-cache"}`;
+  the client purges `cache_*` and `snapshot_*` but **retains the outbox** so
+  pending sales are not lost, and displays a lock screen.
+- Rate limits: 60 push batches/minute/device, 600 pull requests/hour/device.
+- Payloads are never logged in full; the logger emits event type, id, sequence,
+  hash and outcome only.
+
+---
+
+## 10. Test matrix (`Pos.Sync.Tests`)
+
+| Test | Asserts |
+|---|---|
+| `DuplicateUpload_ReturnsStoredResult_AndPostsOnce` | one sale, one movement group |
+| `RetryAfterTimeout_DoesNotDoublePost` | simulated commit-then-drop response |
+| `OutOfOrderEvents_AreBufferedThenApplied` | seq 5 before 4 |
+| `SequenceGapTimeout_MarksRequiresReview` | gap never closes |
+| `DeviceOffline7Days_UploadsInOrder_PreservesBusinessDates` | batch of 900 events |
+| `DisabledProduct_SaleAccepted_ButFlagged` | conflict rule |
+| `ReducedPermission_TransferApproval_Rejected` | offline approval attempt |
+| `RevokedDevice_PushRejected_OutboxPreserved` | 403 + wipe directive |
+| `TamperedPayloadWithSameEventId_Rejected` | hash mismatch |
+| `EmergencyTransfer_RoutedToReviewQueue_NotAutoCompleted` | emergency path |
+| `FailedTransaction_RollsBackEntirely` | ledger + sale + processed_event |
+| `Rebaseline_PreservesOutbox` | 410 handling |
+| `ClockSkew20Minutes_FlagsEvents` | skew policy |
