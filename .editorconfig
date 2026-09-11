@@ -66,6 +66,14 @@ dotnet_diagnostic.CA1307.severity = error           # StringComparison
 dotnet_diagnostic.CA1310.severity = error           # StringComparison for correctness
 dotnet_diagnostic.IDE0005.severity = warning        # unnecessary usings
 
+# The Result/Error pattern is deliberate and its shape is fixed by convention.
+# CA1716: 'Error' is the accepted name in this pattern; VB interop is not a concern here.
+# CA1000: static factories on Result<T> are the pattern's public surface.
+# IDE0032: Result<T> needs a backing field so Value can throw on failure.
+dotnet_diagnostic.CA1716.severity = none
+dotnet_diagnostic.CA1000.severity = none
+dotnet_diagnostic.IDE0032.severity = suggestion
+
 [tests/**/*.cs]
 dotnet_diagnostic.CA1707.severity = none            # Test_Method_Names_With_Underscores
 dotnet_diagnostic.CA1861.severity = none
