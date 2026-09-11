@@ -278,3 +278,91 @@ RETURNING` counter.
 **Rationale.** A receipt must print a unique number with no network round-trip;
 a purchase order must be globally sequential for control purposes. The device
 short code makes offline numbers collision-free without coordination.
+
+---
+
+## ADR-0016 — The balance guard checks a bounded window, not the whole bucket
+
+**Date:** 2026-09-11 · **Status:** Accepted
+
+**Context.** The trigger that makes `UPDATE inventory_balance SET quantity = 100`
+impossible has to verify that a balance change is backed by movements. The
+obvious implementation re-sums the bucket's entire ledger history on every
+change, which is correct but turns each POS line into a growing aggregate scan.
+
+**Decision.** The trigger sums only the movements that (a) were inserted by the
+current transaction, identified by `xmin`, and (b) fall in the identifier window
+`(OLD.last_movement_id, NEW.last_movement_id]`. Because identifiers are UUIDv7
+and therefore sort in creation order, that window is exactly the set of legs the
+update accounts for. Several posts to the same bucket in one transaction each
+verify their own window, which a naive delta check gets wrong.
+
+Whole-bucket agreement between the ledger and the projection is verified
+separately by the nightly reconciliation job, which is also where drift from any
+other cause would surface.
+
+**Consequences.** The guard is O(legs in this transaction) rather than O(bucket
+history), so it stays cheap on the hot path. It catches every unaccounted
+balance change, which is its purpose. It would not catch a scenario where an
+attacker inserts fabricated movements *and* a matching balance change in one
+transaction — but that attacker already needs INSERT on the ledger, and every
+fabricated row is permanently visible and attributable.
+
+---
+
+## ADR-0017 — `Result` and `Error` live in the domain
+
+**Date:** 2026-09-11 · **Status:** Accepted
+
+**Context.** `Result<T>` is used by the application layer, the infrastructure,
+the API and the client. `Pos.Domain` references nothing, and `Pos.Shared`
+references nothing, so the type cannot live in Shared and still be usable from
+domain services such as the movement-group factory.
+
+**Decision.** `Result`, `Result<T>`, `Error` and `ErrorType` live in
+`Pos.Domain.Common`. Everything else references the domain, so everything else
+gets them. `Pos.Shared` keeps only wire contracts and needs no result type.
+
+**Consequences.** Domain validation returns values rather than throwing, which
+is what lets the ledger report several problems with one event at once instead
+of the first one it hits.
+
+---
+
+## ADR-0018 — Unfinished authorization fails closed
+
+**Date:** 2026-09-11 · **Status:** Accepted
+
+**Context.** Identity lands in Phase 2, but the pipeline that consumes it exists
+now. Something has to implement `IPermissionEvaluator` in the meantime.
+
+**Decision.** `DenyAllPermissionEvaluator` returns false for every question, and
+`HttpCurrentUser` reports no authenticated user until a real scheme is wired.
+Any permission-bearing message therefore fails with an authentication error.
+
+**Rationale.** A development stub that returns `true` is how authorization holes
+ship: it works, so nobody revisits it. A stub that denies everything makes the
+missing module impossible to ignore, and there is no window in which the system
+is accidentally permissive.
+
+**Consequences.** No business endpoint can be exercised end-to-end until Phase 2.
+That is the intended trade.
+
+---
+
+## ADR-0019 — `Pos.Client` is created with Phase 12, not Phase 1
+
+**Date:** 2026-09-11 · **Status:** Accepted
+
+**Context.** The plan calls for creating every project in Phase 1. A .NET MAUI
+project added now would be an empty shell that nonetheless requires the Android
+SDK and a JDK on every build agent.
+
+**Decision.** The MAUI Blazor Hybrid project is created in Phase 12, alongside
+the offline storage work it exists to host. `Pos.SharedUI` exists now, so the
+components the client will consume have a home from the start.
+
+**Consequences.** CI stays fast and dependency-light until there is device code
+to build. The reference rules for `Pos.Client` are already asserted in
+ARCHITECTURE.md and will be enforced by an architecture test when the project
+appears.

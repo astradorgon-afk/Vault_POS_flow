@@ -1,0 +1,40 @@
+# Reverse proxy. Terminates TLS and sets the headers that harden the browser
+# surface. The API sets the same headers itself, so a misconfiguration here
+# degrades rather than silently removes them.
+
+{
+	# Development: a locally trusted certificate. Production overrides this
+	# block with a real ACME e-mail and removes the internal issuer.
+	local_certs
+	admin off
+}
+
+:443 {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "camera=(self), geolocation=(), microphone=(), payment=()"
+		-Server
+	}
+
+	# Readiness probes carry database state; they stay on the internal network.
+	handle /health/ready {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+}
+
+:80 {
+	redir https://{host}{uri} permanent
+}

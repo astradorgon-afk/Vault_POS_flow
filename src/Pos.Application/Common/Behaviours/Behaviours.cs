@@ -1,0 +1,218 @@
+using System.Diagnostics;
+using FluentValidation;
+using FluentValidation.Results;
+using Microsoft.Extensions.Logging;
+using Pos.Application.Common.Abstractions;
+using Pos.Application.Common.Messaging;
+using Pos.Domain.Common;
+
+namespace Pos.Application.Common.Behaviours;
+
+/// <summary>
+/// Runs FluentValidation validators before the handler. Validation failures are
+/// expected outcomes, so they become a failed <see cref="Result"/> rather than
+/// an exception.
+/// </summary>
+/// <typeparam name="TMessage">The message type.</typeparam>
+/// <typeparam name="TResult">The result type.</typeparam>
+/// <param name="validators">Validators registered for this message.</param>
+public sealed class ValidationBehaviour<TMessage, TResult>(IEnumerable<IValidator<TMessage>> validators)
+    : IPipelineBehaviour<TMessage, TResult>
+{
+    /// <inheritdoc />
+    public async Task<Result<TResult>> HandleAsync(
+        TMessage message,
+        Func<Task<Result<TResult>>> next,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        IValidator<TMessage>[] applicable = [.. validators];
+
+        if (applicable.Length == 0)
+        {
+            return await next().ConfigureAwait(false);
+        }
+
+        ValidationContext<TMessage> context = new(message);
+        List<Error> errors = [];
+
+        foreach (IValidator<TMessage> validator in applicable)
+        {
+            ValidationResult result = await validator.ValidateAsync(context, cancellationToken).ConfigureAwait(false);
+
+            foreach (ValidationFailure failure in result.Errors)
+            {
+                errors.Add(Error.Validation(
+                    failure.ErrorCode ?? "validation.failed",
+                    failure.ErrorMessage,
+                    new Dictionary<string, object?> { ["property"] = failure.PropertyName }));
+            }
+        }
+
+        return errors.Count > 0
+            ? Result<TResult>.Failure(errors)
+            : await next().ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Enforces the permission a message declares, plus location scope.
+/// </summary>
+/// <remarks>
+/// This is the second of two independent server-side checks: the HTTP endpoint
+/// also carries a permission attribute. Both exist deliberately, so that a
+/// message dispatched from a background worker, a Blazor server circuit or the
+/// synchronization processor is checked identically to one from a controller.
+/// </remarks>
+/// <typeparam name="TMessage">The message type, which declares its permission.</typeparam>
+/// <typeparam name="TResult">The result type.</typeparam>
+/// <param name="currentUser">The caller.</param>
+/// <param name="permissions">The permission evaluator.</param>
+/// <param name="logger">Logger.</param>
+public sealed class AuthorizationBehaviour<TMessage, TResult>(
+    ICurrentUser currentUser,
+    IPermissionEvaluator permissions,
+    ILogger<AuthorizationBehaviour<TMessage, TResult>> logger)
+    : IPipelineBehaviour<TMessage, TResult>
+    where TMessage : IAuthorizedMessage
+{
+    /// <inheritdoc />
+    public async Task<Result<TResult>> HandleAsync(
+        TMessage message,
+        Func<Task<Result<TResult>>> next,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(next);
+
+        if (currentUser.UserId is not { } userId)
+        {
+            return Result<TResult>.Failure(new Error(
+                "auth.unauthenticated",
+                "Authentication is required.",
+                ErrorType.Unauthenticated));
+        }
+
+        LocationId? scope = message is ILocationScoped scoped ? scoped.LocationId : null;
+
+        bool authorized = await permissions
+            .HasPermissionAsync(userId, message.RequiredPermission, scope, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!authorized)
+        {
+            // Logged at warning: repeated denials are a signal worth watching,
+            // and the audit log records the attempt independently.
+            BehaviourLog.PermissionDenied(
+                logger, message.RequiredPermission, userId.Value, scope?.Value, typeof(TMessage).Name);
+
+            return Result<TResult>.Failure(Error.Forbidden(
+                "auth.permission_denied",
+                "You do not have permission to perform this action."));
+        }
+
+        return await next().ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Logs the start, outcome and duration of every message, with the correlation
+/// identifier attached. Never logs message contents, which can contain personal
+/// or payment data.
+/// </summary>
+/// <typeparam name="TMessage">The message type.</typeparam>
+/// <typeparam name="TResult">The result type.</typeparam>
+/// <param name="currentUser">The caller.</param>
+/// <param name="logger">Logger.</param>
+public sealed class LoggingBehaviour<TMessage, TResult>(
+    ICurrentUser currentUser,
+    ILogger<LoggingBehaviour<TMessage, TResult>> logger)
+    : IPipelineBehaviour<TMessage, TResult>
+{
+    /// <inheritdoc />
+    public async Task<Result<TResult>> HandleAsync(
+        TMessage message,
+        Func<Task<Result<TResult>>> next,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        string name = typeof(TMessage).Name;
+        long startedAt = Stopwatch.GetTimestamp();
+
+        using IDisposable? scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["CorrelationId"] = currentUser.CorrelationId.Value,
+            ["UserId"] = currentUser.UserId?.Value,
+            ["DeviceId"] = currentUser.DeviceId?.Value,
+            ["Message"] = name,
+        });
+
+        try
+        {
+            Result<TResult> result = await next().ConfigureAwait(false);
+            double elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+
+            if (result.IsSuccess)
+            {
+                BehaviourLog.Succeeded(logger, name, elapsedMs);
+            }
+            else
+            {
+                BehaviourLog.Failed(logger, name, elapsedMs, result.Error.Code);
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            BehaviourLog.Threw(logger, ex, name, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+            throw;
+        }
+    }
+}
+
+/// <summary>
+/// Wraps a command in a single database transaction so a business operation is
+/// all-or-nothing. A sale that cannot write its inventory movements does not
+/// leave a sale behind.
+/// </summary>
+/// <typeparam name="TCommand">The command type.</typeparam>
+/// <typeparam name="TResult">The result type.</typeparam>
+/// <param name="unitOfWork">The unit of work.</param>
+public sealed class UnitOfWorkBehaviour<TCommand, TResult>(IUnitOfWork unitOfWork)
+    : IPipelineBehaviour<TCommand, TResult>
+{
+    /// <inheritdoc />
+    public async Task<Result<TResult>> HandleAsync(
+        TCommand message,
+        Func<Task<Result<TResult>>> next,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        if (unitOfWork.HasActiveTransaction)
+        {
+            // Already inside a transaction, for example when the synchronization
+            // processor is applying a batch. Do not nest.
+            return await next().ConfigureAwait(false);
+        }
+
+        await using IUnitOfWorkTransaction transaction =
+            await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        Result<TResult> result = await next().ConfigureAwait(false);
+
+        if (result.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return result;
+        }
+
+        await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        return result;
+    }
+}

@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+
+# One-shot migration job. Runs to completion before any API container starts, so
+# replicas never race each other applying schema changes, and the running
+# application's database role never needs DDL rights.
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+WORKDIR /src
+
+COPY Directory.Build.props Directory.Packages.props global.json ./
+COPY src/Pos.Domain/Pos.Domain.csproj                 src/Pos.Domain/
+COPY src/Pos.Shared/Pos.Shared.csproj                 src/Pos.Shared/
+COPY src/Pos.Application/Pos.Application.csproj       src/Pos.Application/
+COPY src/Pos.Infrastructure/Pos.Infrastructure.csproj src/Pos.Infrastructure/
+
+RUN dotnet restore src/Pos.Infrastructure/Pos.Infrastructure.csproj \
+    && dotnet tool install --global dotnet-ef --version 10.0.9
+
+ENV PATH="$PATH:/root/.dotnet/tools"
+
+COPY src/Pos.Domain/         src/Pos.Domain/
+COPY src/Pos.Shared/         src/Pos.Shared/
+COPY src/Pos.Application/    src/Pos.Application/
+COPY src/Pos.Infrastructure/ src/Pos.Infrastructure/
+
+RUN dotnet ef migrations bundle \
+    --project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
+    --startup-project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
+    --configuration Release \
+    --self-contained --target-runtime linux-musl-x64 \
+    --output /app/migrate
+
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine AS runtime
+WORKDIR /app
+
+RUN addgroup -S vaultflow && adduser -S -G vaultflow -h /app vaultflow
+COPY --from=build --chown=vaultflow:vaultflow /app/migrate ./migrate
+
+USER vaultflow
+
+# POS_MIGRATOR_CONNECTION uses the owning role; the API's role has no DDL rights.
+ENTRYPOINT ["/bin/sh", "-c", "./migrate --connection \"$POS_MIGRATOR_CONNECTION\""]

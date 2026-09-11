@@ -77,3 +77,14 @@ dotnet_diagnostic.IDE0032.severity = suggestion
 [tests/**/*.cs]
 dotnet_diagnostic.CA1707.severity = none            # Test_Method_Names_With_Underscores
 dotnet_diagnostic.CA1861.severity = none
+# xUnit's IAsyncLifetime already owns fixture teardown; CA1001 does not see it.
+dotnet_diagnostic.CA1001.severity = none
+
+# EF Core scaffolds migration files; they are generated code and are not held to
+# the hand-written style rules. Correctness analyzers still apply.
+[**/Persistence/Migrations/**/*.cs]
+generated_code = true
+dotnet_diagnostic.IDE0005.severity = none
+dotnet_diagnostic.IDE0161.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1812.severity = none

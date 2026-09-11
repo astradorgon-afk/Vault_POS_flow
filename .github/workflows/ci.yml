@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CI: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore VaultFlow.slnx
+
+      # Warnings are errors, and NU1903 fails the build on a package with a
+      # published advisory, so a vulnerable dependency cannot merge unnoticed.
+      - name: Build
+        run: dotnet build VaultFlow.slnx --no-restore --configuration Release
+
+      # Docker is available on this runner, so the Testcontainers suites that
+      # skip locally do run here. They are the only place the database triggers
+      # and role grants are actually exercised.
+      - name: Test
+        run: >-
+          dotnet test VaultFlow.slnx
+          --no-build --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory artifacts/test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: artifacts/test-results
+
+  verify-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install EF tools
+        run: dotnet tool install --global dotnet-ef --version 10.0.9
+
+      # A model change without a matching migration is the classic way a schema
+      # drifts from the code that assumes it.
+      - name: Fail if the model has uncommitted migrations
+        run: |
+          dotnet ef migrations has-pending-model-changes \
+            --project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
+            --startup-project src/Pos.Infrastructure/Pos.Infrastructure.csproj
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan tracked files for secrets
+        run: pwsh ./scripts/check-secrets.ps1

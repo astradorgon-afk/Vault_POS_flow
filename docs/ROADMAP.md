@@ -4,6 +4,9 @@ Status legend: `[ ]` Pending · `[~]` In progress · `[x]` Complete
 
 Last updated: 2026-09-11
 
+> Phases 0 and 1 are complete except where marked. Phase 4 was pulled forward
+> because the ledger is the foundation every other module posts through.
+
 ---
 
 ## Phase 0 — Architecture (foundation for everything else)
@@ -27,21 +30,33 @@ Last updated: 2026-09-11
 
 ## Phase 1 — Solution Foundation
 
-- [x] Create solution and all projects with correct references
+- [x] Create solution and the server/web projects with correct references
+      (`Pos.Client` is created in Phase 12 with the rest of the device work, so
+      CI does not need the Android SDK before there is anything to build)
 - [x] Central package management (`Directory.Packages.props`) and build props
 - [x] `.editorconfig`, nullable + warnings-as-errors, analyzers
-- [x] Domain primitives: `Entity`, `AggregateRoot`, `ValueObject`, strongly-typed ids
+- [x] Transitive package pins for published advisories, enforced by NU1903
+- [x] Domain primitives: `Entity`, `AggregateRoot`, `ValueObject`, strongly typed ids
 - [x] `Money`, `Quantity`, `Barcode`, `Sku`, `DocumentNumber` value objects
-- [x] `Result` / `Result<T>` and error catalogue
-- [x] CQRS dispatcher + pipeline behaviours (correlation, logging, validation, authorization, idempotency, unit of work)
-- [x] Configuration and options validation
-- [x] Serilog structured logging + sensitive-data scrubbing
-- [x] Global error handling → RFC 9457 ProblemDetails
-- [x] EF Core `PosDbContext` (PostgreSQL + SQLite providers)
-- [x] Immutability interceptor + audit interceptor
-- [x] Initial migrations (Postgres) incl. triggers and grants
-- [x] Docker compose for Postgres + API
-- [x] Architecture tests (layering, endpoint attribution, ledger write isolation)
+- [x] `Result` / `Result<T>` and the error catalogue
+- [x] CQRS dispatcher + behaviours (logging, validation, authorization, unit of work)
+- [x] Correlation identifier middleware and response header
+- [x] Serilog structured logging, source-generated log messages
+- [x] Global error handling to RFC 9457 ProblemDetails with no internal detail
+- [x] EF Core `PosDbContext` (PostgreSQL + SQLite), strongly typed id conversion,
+      decimal-as-text on SQLite
+- [x] Append-only interceptor
+- [x] Initial PostgreSQL migration, plus the ledger immutability and balance-guard
+      triggers as a hand-written migration
+- [x] Least-privilege database roles and grants (`build/docker/initdb`)
+- [x] Docker: API image, one-shot migrator image, compose, reverse proxy
+- [x] CI: build, test, pending-model-change check, secret scan
+- [x] Architecture tests (layering, ledger write isolation, permission catalogue)
+- [ ] Options binding with `ValidateOnStart` for every configuration section
+- [ ] Serilog sensitive-data destructuring policy (scrubbing)
+- [ ] Idempotency pipeline behaviour (the ledger is idempotent today; the generic
+      behaviour lands with the sync module in Phase 13)
+- [ ] Audit interceptor and `AuditLog` table (Phase 2 depends on it)
 
 ## Phase 2 — Identity and Authorization
 
@@ -69,15 +84,21 @@ Last updated: 2026-09-11
 
 ## Phase 4 — Inventory Core
 
-- [ ] `InventoryMovement` entity + EF mapping + partitioning
-- [ ] `InventoryBalance` projection + balance-guard trigger
-- [ ] `IInventoryLedger.PostAsync` with full validation chain
-- [ ] Inventory states and movement-type transition table
-- [ ] Weighted-average costing and valuation
-- [ ] Negative-stock policy enforcement + `NegativeStockAttempt`
-- [ ] Optimistic concurrency and retry on balance contention
-- [ ] Reconciliation worker + rebuild command
-- [ ] Ledger unit and concurrency tests
+Substantially delivered in Phase 1, because everything else depends on it.
+
+- [x] `InventoryMovement` entity + EF mapping + indexes and check constraints
+- [x] `InventoryBalance` projection + balance-guard trigger
+- [x] `IInventoryLedger.PostAsync` with idempotency, structural validation,
+      state-transition validation and availability checks
+- [x] Inventory states and the movement-type transition table
+- [x] Weighted-average costing on the projection
+- [x] Negative-stock policy enforcement (default: prohibit)
+- [x] Ledger unit tests and provider-level integration tests
+- [ ] Table partitioning by month on `inventory_movement`
+- [ ] `NegativeStockAttempt` record and its exception report
+- [ ] Optimistic concurrency retry on balance contention
+- [ ] Reconciliation worker and `rebuild-balances` command
+- [ ] Concurrency tests (parallel posts to one bucket)
 
 ## Phase 5 — Purchasing
 

@@ -1,0 +1,104 @@
+# VaultFlow - development stack.
+#
+# Production uses this file plus compose.prod.yaml, which swaps the reverse
+# proxy to real TLS, removes the exposed database port, and sources every
+# password from Docker secrets rather than the environment.
+#
+# Start:  docker compose up -d
+# Reset:  docker compose down -v      (drops the database volume)
+
+name: vaultflow
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vaultflow
+      POSTGRES_USER: pos_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POS_APP_PASSWORD: ${POS_APP_PASSWORD:?set POS_APP_PASSWORD in .env}
+      POS_READONLY_PASSWORD: ${POS_READONLY_PASSWORD:?set POS_READONLY_PASSWORD in .env}
+      # Deterministic collation: sorting must not change with the host locale.
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US --encoding=UTF8"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./build/docker/initdb/01-roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+    ports:
+      # Development convenience only; compose.prod.yaml removes this.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos_migrator -d vaultflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=500
+
+  migrator:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.migrator
+    environment:
+      # The owning role. The API never gets these credentials.
+      POS_MIGRATOR_CONNECTION: >-
+        Host=postgres;Port=5432;Database=vaultflow;Username=pos_migrator;Password=${POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_HTTP_PORTS: 8080
+      # Least-privilege role: no DDL, and no UPDATE or DELETE on the ledger.
+      ConnectionStrings__Postgres: >-
+        Host=postgres;Port=5432;Database=vaultflow;Username=pos_app;Password=${POS_APP_PASSWORD}
+      Database__ApplyMigrationsOnStartup: "false"
+      DataProtection__KeyRingPath: /app/keys
+      Organization__TimeZoneId: ${ORGANIZATION_TIMEZONE:-Asia/Manila}
+      Organization__CurrencyCode: ${ORGANIZATION_CURRENCY:-PHP}
+    volumes:
+      - dataprotection-keys:/app/keys
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./build/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  dataprotection-keys:
+  caddy-data:
+  caddy-config:
