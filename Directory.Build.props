@@ -1,0 +1,31 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Product>VaultFlow</Product>
+    <Company>VaultFlow</Company>
+    <Version>0.1.0</Version>
+    <NeutralLanguage>en</NeutralLanguage>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <!--
+    Money and inventory correctness depends on decimals never silently becoming
+    doubles, and on nullability being honest. These stay errors, not warnings.
+  -->
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);CS8600;CS8602;CS8603;CS8604;CS8618;CS8625</WarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

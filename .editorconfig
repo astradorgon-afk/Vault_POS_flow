@@ -1,0 +1,71 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.{json,yml,yaml,csproj,props,targets,slnx,xml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+# Usings
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:warning
+
+# Modern C#
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:silent
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_prefer_braces = true:warning
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_prefer_pattern_matching = true:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_prefer_simple_using_statement = true:suggestion
+
+# Readonly / immutability bias — the domain depends on it
+dotnet_style_readonly_field = true:warning
+csharp_prefer_static_local_function = true:suggestion
+dotnet_style_prefer_auto_properties = true:warning
+
+# Naming
+dotnet_naming_rule.private_fields_underscore.severity = warning
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+dotnet_naming_style.underscore_camel.required_prefix = _
+
+dotnet_naming_rule.constants_pascal.severity = warning
+dotnet_naming_rule.constants_pascal.symbols = constants
+dotnet_naming_rule.constants_pascal.style = pascal
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+# Analyzer severities that matter for this codebase
+dotnet_diagnostic.CA1062.severity = none            # null checks on public args (nullable ref types cover this)
+dotnet_diagnostic.CA2007.severity = none            # ConfigureAwait not needed in ASP.NET Core
+dotnet_diagnostic.CA1848.severity = suggestion      # LoggerMessage delegates
+dotnet_diagnostic.CA1031.severity = warning         # do not catch general exception types
+dotnet_diagnostic.CA2100.severity = error           # SQL injection review
+dotnet_diagnostic.CA5350.severity = error           # weak crypto
+dotnet_diagnostic.CA5351.severity = error           # broken crypto
+dotnet_diagnostic.CA1305.severity = error           # IFormatProvider — decimal parsing must be invariant
+dotnet_diagnostic.CA1307.severity = error           # StringComparison
+dotnet_diagnostic.CA1310.severity = error           # StringComparison for correctness
+dotnet_diagnostic.IDE0005.severity = warning        # unnecessary usings
+
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none            # Test_Method_Names_With_Underscores
+dotnet_diagnostic.CA1861.severity = none
