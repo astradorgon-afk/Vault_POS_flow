@@ -126,14 +126,14 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 6 — Main Warehouse to Store Transfers
 
-- [ ] Transfer aggregate + state machine
-- [ ] Request, review, approve/modify/reject
-- [ ] Picking with FEFO batch selection
-- [ ] Dispatch (ledger: Available → InTransit)
-- [ ] Receiving and verification (ledger: InTransit → Available + variance)
-- [ ] Discrepancy creation and resolution paths
-- [ ] Chain-of-custody events and document timeline
-- [ ] Transfer tests incl. partial receipt and discrepancy
+- [x] Transfer aggregate + state machine
+- [x] Request, review, approve/modify/reject
+- [x] Picking with FEFO batch selection
+- [x] Dispatch (ledger: Available → InTransit)
+- [x] Receiving and verification (ledger: InTransit → Available + variance)
+- [x] Discrepancy creation and resolution paths
+- [x] Chain-of-custody events and document timeline
+- [x] Transfer tests incl. partial receipt and discrepancy
 
 ## Phase 7 — Store to Store Transfers
 

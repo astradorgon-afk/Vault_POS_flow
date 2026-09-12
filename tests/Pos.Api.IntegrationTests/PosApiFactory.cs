@@ -362,9 +362,12 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
     /// <param name="barcode">The primary barcode value.</param>
     /// <param name="tracksBatches">Whether the product is tracked by lot.</param>
     /// <param name="tracksExpiry">Whether the product carries an expiry date.</param>
+    /// <param name="defaultPurchaseCost">Default purchase cost used when a
+    /// movement does not carry a batch with a cost snapshot.</param>
     /// <returns>The created product's identifier.</returns>
     public Task<ProductId> CreateProductAsync(
-        string sku, string name, string barcode, bool tracksBatches = false, bool tracksExpiry = false)
+        string sku, string name, string barcode, bool tracksBatches = false, bool tracksExpiry = false,
+        decimal defaultPurchaseCost = 0m)
         => WithServiceAsync<ProductId>(async context =>
         {
             CategoryId categoryId = (await SeedCategoryAsync(context, "CATEGORY", "Category")).Id;
@@ -375,7 +378,8 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
                 sku, name, categoryId, unitId, systemUser,
                 tracksBatches: tracksBatches,
                 tracksExpiry: tracksExpiry,
-                shelfLifeDays: tracksExpiry ? 270 : null);
+                shelfLifeDays: tracksExpiry ? 270 : null,
+                defaultPurchaseCost: defaultPurchaseCost);
 
             if (created.IsFailure)
             {

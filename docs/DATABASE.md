@@ -321,6 +321,20 @@ transfers.pre_approval_token
   signature bytea
 ```
 
+**Phase 6 deviation (implemented, `20260912203959_AddTransfers`).** Shipment and
+receipt details live **inline on `transfer_order`** (`shipment_id`,
+`shipment_number`, `receipt_id`, `receipt_number`, plus dispatched/received/
+verified actor + timestamp columns) rather than in separate `transfer_shipment`
+/`transfer_receipt` tables; picked stock is a single `transfer_allocation` table
+(`transfer_order_id`, `line_no`, `batch_id`, `quantity`, `unit_cost`,
+`received_quantity`, `damaged_quantity`) instead of shipment/receipt line
+tables; `transfer_discrepancy` carries `batch_id`, `resolution_outcome`,
+`resolved_by/at`, `resolution_note`; custody events have a monotonic
+`sequence` keys and `actor_user_id`. The `number` column is `text` with a
+filtered unique index (`number <> ''`) shared by drafts. `transfer_approval`
+and `pre_approval_token` are Phase 7 — the approvals table deferred (approver +
+timestamp columns inline on `transfer_order`), the token table not yet created.
+
 ---
 
 ## 7. Sales

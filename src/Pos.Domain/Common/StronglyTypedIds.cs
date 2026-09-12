@@ -600,6 +600,78 @@ public readonly record struct TransferReceiptId(Guid Value) : IStronglyTypedId, 
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
 
+/// <summary>Identifies a transfer pick allocation.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct TransferAllocationId(Guid Value) : IStronglyTypedId, IComparable<TransferAllocationId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static TransferAllocationId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="TransferAllocationId"/>.</returns>
+    public static TransferAllocationId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(TransferAllocationId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies a transfer arrival discrepancy (a quantity shortfall).</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct TransferDiscrepancyId(Guid Value) : IStronglyTypedId, IComparable<TransferDiscrepancyId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static TransferDiscrepancyId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="TransferDiscrepancyId"/>.</returns>
+    public static TransferDiscrepancyId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(TransferDiscrepancyId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies one custody event in a transfer's audit timeline.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct TransferCustodyEventId(Guid Value) : IStronglyTypedId, IComparable<TransferCustodyEventId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static TransferCustodyEventId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="TransferCustodyEventId"/>.</returns>
+    public static TransferCustodyEventId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(TransferCustodyEventId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
 /// <summary>Identifies an inventory movement leg.</summary>
 /// <param name="Value">The underlying UUIDv7 value.</param>
 [System.Diagnostics.CodeAnalysis.SuppressMessage(

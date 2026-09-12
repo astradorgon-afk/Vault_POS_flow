@@ -174,6 +174,15 @@ public enum AdjustmentReasonCode
     /// <summary>Contaminated and unfit for sale.</summary>
     Contaminated = 9,
 
+    /// <summary>A dispatched transfer was cancelled before arrival.</summary>
+    TransferCancelled = 10,
+
+    /// <summary>Transfer stock missing on arrival was later found.</summary>
+    TransitVarianceFound = 11,
+
+    /// <summary>Transfer stock missing on arrival is unrecoverable and written off.</summary>
+    TransitVarianceWriteOff = 12,
+
     /// <summary>Anything else. Requires explanatory notes.</summary>
     Other = 99,
 }

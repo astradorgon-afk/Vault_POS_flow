@@ -209,6 +209,7 @@ try
     app.MapPurchaseEndpoints();
     app.MapDirectDeliveryEndpoints();
     app.MapSupplierReturnEndpoints();
+    app.MapTransferEndpoints();
 
     await app.RunAsync();
     return 0;

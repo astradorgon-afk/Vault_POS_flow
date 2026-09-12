@@ -8,6 +8,7 @@ using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
 using Pos.Domain.Organizations;
 using Pos.Domain.Purchasing;
+using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
 
@@ -39,6 +40,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Schema holding purchasing documents: orders, lines and decisions.</summary>
     public const string PurchasingSchema = "purchasing";
+
+    /// <summary>Schema holding transfer orders, allocations and custody events.</summary>
+    public const string TransfersSchema = "transfers";
 
     /// <summary>
     /// Gets the append-only inventory ledger. Insert only: the interceptor and
@@ -136,6 +140,21 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets the supplier return lines.</summary>
     public DbSet<SupplierReturnLine> SupplierReturnLines => Set<SupplierReturnLine>();
+
+    /// <summary>Gets the transfer orders.</summary>
+    public DbSet<Transfer> Transfers => Set<Transfer>();
+
+    /// <summary>Gets the requested lines of transfer orders.</summary>
+    public DbSet<TransferLine> TransferLines => Set<TransferLine>();
+
+    /// <summary>Gets the picking allocations of transfer orders.</summary>
+    public DbSet<TransferPickAllocation> TransferAllocations => Set<TransferPickAllocation>();
+
+    /// <summary>Gets the arrival discrepancies recorded against transfers.</summary>
+    public DbSet<TransferDiscrepancy> TransferDiscrepancies => Set<TransferDiscrepancy>();
+
+    /// <summary>Gets the custody timeline of transfer orders.</summary>
+    public DbSet<TransferCustodyEvent> TransferCustodyEvents => Set<TransferCustodyEvent>();
 
     /// <summary>Gets the received lots of batch-tracked products.</summary>
     public DbSet<Batch> Batches => Set<Batch>();

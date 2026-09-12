@@ -203,6 +203,8 @@ the unique index is filtered (`number <> ''`).
 
 ## 6. Transfers
 
+Implemented (Phase 6 — main warehouse to store):
+
 ```
 GET    /api/v1/transfers                             transfer.view (+ scope)
 POST   /api/v1/transfers                             transfer.request
@@ -218,6 +220,25 @@ POST   /api/v1/transfers/{id}/receive                transfer.receive   -> LEDGE
 POST   /api/v1/transfers/{id}/verify                 transfer.verify
 POST   /api/v1/transfers/{id}/discrepancies/{d}/resolve  transfer.reconcile
 GET    /api/v1/transfers/{id}/custody                transfer.view
+```
+
+Drafts share the blank number; the transfer number is allocated only on
+dispatch (TRF-…, so a failed dispatch never burns a sequence) and the receipt
+number only on receive (TRC-…). Picking is FEFO for transit-tracked products:
+a pick that skips a still-available earlier lot is rejected
+(`transfer.pick_skips_earlier_expiry`). Dispatch posts the balanced
+`Available@source −q ⇄ InTransit@source +q` group; cancel-dispatch reverses it
+against the same shipment number and requires a reason plus an approver. Receiving
+posts the balanced `InTransit@source −q ⇄ Available@dest +q` group per allocation
+(a shortfall lands in `TransitVariance`, damage in `Damaged`); resolving a
+variance to Found returns it to `Available@dest`, and to Write-Off banks it at
+the `EXT-WRITEOFF` location — two legs, so the ledger always sums to zero.
+`partially received` transfers stay open until `verify` confirms every
+discrepancy is resolved, which closes the order.
+
+Planned (Phase 7 — store to store):
+
+```
 POST   /api/v1/transfers/emergency                   transfer.emergency (dual auth body)
 GET    /api/v1/transfers/pending-central-review      transfer.approve
 POST   /api/v1/transfers/{id}/central-review         transfer.approve

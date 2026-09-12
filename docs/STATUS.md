@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-13 · **Milestone:** Phase 5 (Purchasing) parts 1–3 — complete; phase 6 next
+**Last updated:** 2026-09-13 · **Milestone:** Phase 6 (Main Warehouse → Store Transfers) — complete; phase 7 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,18 +13,18 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **261 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
-| Migrations | 10, forward-only, applied cleanly against PostgreSQL 17 |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution) |
-| Phases remaining | 6–18 — see §5 |
+| Tests | **294 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
+| Migrations | 11, forward-only, applied cleanly against PostgreSQL 17 |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store) |
+| Phases remaining | 7–18 — see §5 |
 
 ```
-Pos.Domain.Tests            126 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies)
+Pos.Domain.Tests            151 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers
 Pos.Infrastructure.Tests     29 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           33 passing   authentication, tokens, permission matrix
 Pos.Application.Tests        12 passing   master-data commands and CQRS unit-of-work behaviours
-Pos.Api.IntegrationTests     48 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate)
+Pos.Api.IntegrationTests     56 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate + 8 transfer lifecycle tests)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -224,6 +224,52 @@ costing, negative-stock policy, idempotency by event id.
   dispatch-before-approval refuses and posts nothing, draft uniqueness against
   the filtered index, sourcing refusals, role refusals, and resolve-once.
 
+### Phase 6 — main warehouse → store transfers
+
+- **Aggregate and state machine:** `TransferOrder` (Draft → Submitted →
+  InReview → Approved → Picking → Ready → Dispatched → Received/PartiallyReceived
+  → Closed, plus Cancelled) with line items, pick allocations (quantity,
+  batch, unit cost from the batch at pick time), arrival discrepancies and
+  chain-of-custody events (`TransferCustodyEventKind`). Review can amend lines
+  before approval (`transfer.amendment_invalid` otherwise); approval is gated by
+  tier and refuses the document creator (`transfer.self_approval_forbidden`).
+- **Document numbering:** drafts share the blank number (filtered unique index
+  `number <> ''`, same pattern as supplier returns); the TRF number is allocated
+  only at dispatch — after every authority and state check — and the TRC receipt
+  number only at receive, so refused actions never burn sequence values.
+- **Picking and FEFO:** `Pick` validates source scope, per-line totals, and skips
+  the FEFO guard for non-transit-tracked products. For tracked products a pick
+  that leaves an earlier-expiring lot untouched is refused
+  (`transfer.pick_skips_earlier_expiry`). Allocation cost is captured from the
+  batch's unit cost at pick time.
+- **Ledger:** dispatch posts the balanced `Available@src −q ⇄ InTransit@src +q`
+  group (per allocation, batch-aware) under `TransferDispatch`; cancel-dispatch
+  reverses it under `TransferCancelDispatch` against the same shipment
+  number, requires a reason and an approver, and refuses after any arrival.
+  Receive posts `InTransit@src −q ⇄ Available@dest +q` per allocation under
+  `TransferReceipt` (shortfall → `TransitVariance`, damage → `Damaged`).
+- **Discrepancy resolution:** `resolve` under `transfer.reconcile` is once-only
+  (`transfer.discrepancy_already_resolved` → 409), stays on
+  `PartiallyReceived`, and posts a zero-sum group: `TransitVariance −q` at the
+  destination plus `Available@dest +q` (Found) or `EXT-WRITEOFF +q` (Write-Off).
+  The tests caught a genuine single-leg bug here — the resolution group was
+  posted unbalanced, violating the ledger invariant — now fixed and covered.
+  Verify accepts `Received` and `PartiallyReceived` with all discrepancies
+  resolved (`transfer.verify_has_open_variance` → 409 otherwise) and closes.
+- **Scoping and permissions:** list view filters transfers touching the caller's
+  assigned locations (`transfer.view_location_forbidden` → 403 otherwise); pick
+  and dispatch scope to the source, receive to the destination; cancel-dispatch
+  additionally requires `transfer.approve`. Store managers hold request/pick/
+  dispatch/receive/verify but not approve or reconcile.
+- **Migrations:** `20260912203959_AddTransfers` (`transfers` schema: transfer,
+  line, allocation, discrepancy, custody-event tables + filtered number indexes).
+- **Tests:** 18 transfer domain tests and 8 endpoint tests through the real
+  pipeline — full lifecycle posting a balanced ledger and closing, FEFO
+  enforcement, partial arrival with shortage resolved Found (stock returns to
+  `Available`), write-off posting to the external counterparty, cancel-dispatch
+  reversal with reason and approval, cashier refusal, location-scoped lists, and
+  resolve-without-permission.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -357,14 +403,16 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 3 ships the master data everything downstream reads. The next phases build
-on it:
+Phase 6 shipped the main warehouse → store transfer pipeline. Two strands remain:
 
-1. **Catalog curation** (deferred Phase 3 rows, now unblocked): product edit,
-   barcode management, deactivate/activate, effective-dated pricing endpoints,
-   `ProductLocationSetting`, unit conversions, product-supplier links.
-2. **User-administration endpoints** so roles, overrides and location
-   assignments stop being a database-only concern.
+1. **Phase 7 — store-to-store transfers** (per ROADMAP): central approval queue,
+   pre-approval tokens, emergency offline transfers with dual-manager
+   authorization, and the replenishment recommendations endpoint — the API
+   contracts are already drafted in `API.md` §6.
+2. **Deferred groundwork stays on the table:** catalog curation (product edit,
+   barcode management, pricing, `ProductLocationSetting`, unit conversions) and
+   user-administration endpoints, so roles and location assignments stop being a
+   database-only concern.
 
 ---
 
