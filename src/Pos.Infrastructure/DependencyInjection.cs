@@ -48,6 +48,7 @@ public static class DependencyInjection
         services.AddIdentityServices(configuration);
 
         services.TryAddScoped<IUnitOfWork, UnitOfWork>();
+        services.TryAddScoped<IMasterDataRepository, MasterDataRepository>();
         services.TryAddSingleton<ISystemClock, SystemClock>();
         services.TryAddScoped<IAuditWriter, AuditWriter>();
         services.TryAddScoped<ILedgerPolicyProvider, StrictLedgerPolicyProvider>();

@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Pos.Domain.Auditing;
+using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
 using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
+using Pos.Domain.Organizations;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
 
@@ -30,6 +32,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Schema holding synchronization tables.</summary>
     public const string SyncSchema = "sync";
+
+    /// <summary>Schema holding the product catalogue and reference master data.</summary>
+    public const string CatalogSchema = "catalog";
 
     /// <summary>
     /// Gets the append-only inventory ledger. Insert only: the interceptor and
@@ -73,6 +78,42 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets the device sign-in sessions.</summary>
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
+
+    /// <summary>Gets the product catalogue.</summary>
+    public DbSet<Product> Products => Set<Product>();
+
+    /// <summary>Gets product barcodes.</summary>
+    public DbSet<ProductBarcode> ProductBarcodes => Set<ProductBarcode>();
+
+    /// <summary>Gets product price rows.</summary>
+    public DbSet<ProductPrice> ProductPrices => Set<ProductPrice>();
+
+    /// <summary>Gets the organizations.</summary>
+    public DbSet<Organization> Organizations => Set<Organization>();
+
+    /// <summary>Gets the locations.</summary>
+    public DbSet<Location> Locations => Set<Location>();
+
+    /// <summary>Gets the product categories.</summary>
+    public DbSet<ProductCategory> Categories => Set<ProductCategory>();
+
+    /// <summary>Gets the brands.</summary>
+    public DbSet<Brand> Brands => Set<Brand>();
+
+    /// <summary>Gets the units of measure.</summary>
+    public DbSet<UnitOfMeasure> UnitsOfMeasure => Set<UnitOfMeasure>();
+
+    /// <summary>Gets the suppliers.</summary>
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
+
+    /// <summary>Gets the per-location product settings.</summary>
+    public DbSet<ProductLocationSetting> ProductLocationSettings => Set<ProductLocationSetting>();
+
+    /// <summary>Gets the product unit conversions.</summary>
+    public DbSet<ProductUnitConversion> ProductUnitConversions => Set<ProductUnitConversion>();
+
+    /// <summary>Gets the product-supplier links.</summary>
+    public DbSet<ProductSupplier> ProductSuppliers => Set<ProductSupplier>();
 
     /// <summary>Gets the refresh tokens, stored only as hashes.</summary>
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();

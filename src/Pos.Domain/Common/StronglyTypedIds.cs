@@ -288,6 +288,102 @@ public readonly record struct BatchId(Guid Value) : IStronglyTypedId, IComparabl
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
 
+/// <summary>Identifies an effective-dated product price row.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ProductPriceId(Guid Value) : IStronglyTypedId, IComparable<ProductPriceId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ProductPriceId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ProductPriceId"/>.</returns>
+    public static ProductPriceId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ProductPriceId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies a product unit-of-measure conversion row.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ProductUnitConversionId(Guid Value) : IStronglyTypedId, IComparable<ProductUnitConversionId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ProductUnitConversionId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ProductUnitConversionId"/>.</returns>
+    public static ProductUnitConversionId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ProductUnitConversionId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies per-location settings for a product.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ProductLocationSettingId(Guid Value) : IStronglyTypedId, IComparable<ProductLocationSettingId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ProductLocationSettingId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ProductLocationSettingId"/>.</returns>
+    public static ProductLocationSettingId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ProductLocationSettingId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies a product-to-supplier link.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ProductSupplierId(Guid Value) : IStronglyTypedId, IComparable<ProductSupplierId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ProductSupplierId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ProductSupplierId"/>.</returns>
+    public static ProductSupplierId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ProductSupplierId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
 /// <summary>Identifies a purchase order.</summary>
 /// <param name="Value">The underlying UUIDv7 value.</param>
 [System.Diagnostics.CodeAnalysis.SuppressMessage(

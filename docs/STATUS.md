@@ -1,5 +1,7 @@
 # Project Status
 
+**Last updated:** 2026-09-12 · **Milestone:** Phase 3 (Master Data) — domain, persistence and use cases landed
+
 **Last updated:** 2026-09-12 · **Milestone:** Phase 2 complete — Identity and Authorization
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
@@ -154,6 +156,31 @@ downstream needs products and locations to exist.
    categories and products, and the staff accounts described in the brief.
 
 Two smaller items worth doing alongside, because later phases assume them:
+
+Two smaller items worth doing alongside, because later phases assume them:
+
+- Wire `ILedgerPolicyProvider` to real location settings.
+- Add user-administration endpoints so roles and overrides stop being a
+  database-only concern.
+
+### Phase 3 progress (this session)
+
+- **Domain:** `Location` (with JSON `LocationSettings`), `Organization`,
+  `Product` aggregate with `ProductBarcode`, `ProductPrice`, `ProductUnitConversion`,
+  `ProductLocationSetting`, `ProductSupplier` children, plus `ProductCategory`,
+  `Brand`, `UnitOfMeasure`, `Supplier` master data. New strongly-typed ids for
+  all child rows.
+- **Application:** `CreateLocationCommand`, and create commands with FluentValidation
+  validators for category, brand, unit of measure, supplier and product
+  (`product.create` permission enforced centrally, per the product-master rule).
+- **Infrastructure:** `MasterDataRepository` implements `IMasterDataRepository`;
+  EF configurations for all tables including the price overlap exclusion
+  constraint (btree_gist) and product-name trigram index; migration
+  `20260912074419_MasterDataCatalog` created, drift-checked against a live
+  PostgreSQL instance.
+- Remaining Phase 3 work: API endpoints exposing the new commands, the
+  development seed data (Main Warehouse, stores, staff accounts), and wiring
+  `ILedgerPolicyProvider` to real location settings.
 
 - Wire `ILedgerPolicyProvider` to real location settings.
 - Add user-administration endpoints so roles and overrides stop being a
