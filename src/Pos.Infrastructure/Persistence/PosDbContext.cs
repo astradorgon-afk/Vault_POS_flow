@@ -1,6 +1,11 @@
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Pos.Domain.Auditing;
 using Pos.Domain.Common;
+using Pos.Domain.Devices;
+using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
 
 namespace Pos.Infrastructure.Persistence;
@@ -11,7 +16,8 @@ namespace Pos.Infrastructure.Persistence;
 /// writes the same rows an online sale does.
 /// </summary>
 /// <param name="options">Context options, including the provider.</param>
-public class PosDbContext(DbContextOptions<PosDbContext> options) : DbContext(options)
+public class PosDbContext(DbContextOptions<PosDbContext> options)
+    : IdentityDbContext<AppUser, AppRole, Guid>(options)
 {
     /// <summary>Schema holding inventory tables.</summary>
     public const string InventorySchema = "inventory";
@@ -38,6 +44,42 @@ public class PosDbContext(DbContextOptions<PosDbContext> options) : DbContext(op
     /// </summary>
     public DbSet<InventoryBalance> InventoryBalances => Set<InventoryBalance>();
 
+    /// <summary>
+    /// Gets the append-only audit log. Subject to the same four guards as the
+    /// ledger; an audit trail that can be edited is not a trail.
+    /// </summary>
+    public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
+
+    /// <summary>Gets the permission catalogue, seeded from code.</summary>
+    public DbSet<PermissionRecord> Permissions => Set<PermissionRecord>();
+
+    /// <summary>Gets the role-to-permission grants.</summary>
+    public DbSet<RolePermissionGrant> RolePermissions => Set<RolePermissionGrant>();
+
+    /// <summary>Gets the per-user permission overrides.</summary>
+    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+
+    /// <summary>Gets the locations each user may act in.</summary>
+    public DbSet<UserLocationAssignment> UserLocations => Set<UserLocationAssignment>();
+
+    /// <summary>Gets the authorization policy version row.</summary>
+    public DbSet<AuthorizationPolicyVersion> PolicyVersion => Set<AuthorizationPolicyVersion>();
+
+    /// <summary>Gets the registered devices.</summary>
+    public DbSet<Device> Devices => Set<Device>();
+
+    /// <summary>Gets the outstanding and historical device enrolment codes.</summary>
+    public DbSet<DeviceEnrolmentCode> DeviceEnrolmentCodes => Set<DeviceEnrolmentCode>();
+
+    /// <summary>Gets the device sign-in sessions.</summary>
+    public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
+
+    /// <summary>Gets the refresh tokens, stored only as hashes.</summary>
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    /// <summary>Gets the sign-in attempt history used for throttling and review.</summary>
+    public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+
     /// <summary>Gets a value indicating whether this context is running on SQLite.</summary>
     public bool IsSqlite => Database.ProviderName?.Contains("Sqlite", StringComparison.Ordinal) == true;
 
@@ -63,19 +105,22 @@ public class PosDbContext(DbContextOptions<PosDbContext> options) : DbContext(op
     }
 
     /// <inheritdoc />
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnModelCreating(ModelBuilder builder)
     {
-        ArgumentNullException.ThrowIfNull(modelBuilder);
+        ArgumentNullException.ThrowIfNull(builder);
 
-        modelBuilder.HasDefaultSchema(CoreSchema);
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(PosDbContext).Assembly);
+        builder.HasDefaultSchema(CoreSchema);
+
+        // Identity's own tables first, then our configurations, which rename
+        // them to the project's snake_case convention.
+        base.OnModelCreating(builder);
+
+        builder.ApplyConfigurationsFromAssembly(typeof(PosDbContext).Assembly);
 
         if (IsSqlite)
         {
-            ApplySqliteTypeMappings(modelBuilder);
+            ApplySqliteTypeMappings(builder);
         }
-
-        base.OnModelCreating(modelBuilder);
     }
 
     /// <summary>

@@ -262,13 +262,29 @@ Full detail in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 Full detail in [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md).
 
-- ASP.NET Core Identity for the user store and password hashing.
+- ASP.NET Core Identity for the user store and password hashing (PBKDF2, 600k iterations).
 - Devices authenticate with a registered `DeviceId` bound to their refresh token.
-- Short-lived access tokens (10 min) plus rotating refresh tokens with reuse detection.
-- Authorization is **permission-based**; roles are only bundles of permissions.
-- Every sensitive endpoint carries a permission requirement plus a location-scope check.
-- Full immutable `AuditLog` with before/after values and correlation IDs.
-- HTTPS everywhere; HSTS; strict CSP; rate limiting; login throttling.
+- Short-lived access tokens (10 min) plus rotating refresh tokens with reuse detection:
+  presenting a spent token burns the whole family.
+- Authorization is **permission-based**; roles are only bundles of permissions, and
+  no code anywhere branches on a role name.
+- Access tokens carry **no permission list**. Permissions resolve per request from a
+  cache keyed by the authorization policy version, so revoking authority takes effect
+  immediately rather than at the token's next expiry.
+- Every check is a pair of **(permission, location)**. This single mechanism is what
+  confines a store manager to their own store; `location.all` is the only bypass.
+- Every sensitive endpoint carries a permission requirement, and the application
+  pipeline checks again — so a command dispatched by a background worker or the sync
+  processor is authorized identically.
+- A validated token is re-checked on every request against the account's security
+  stamp and the device's status, because a signature only proves what was true at
+  issue time.
+- Cashier PIN sign-in is device-bound, location-checked, and granted only the
+  offline-capable permission subset (ADR-0022).
+- Full immutable `AuditLog` with before/after values and correlation IDs, under the
+  same four guards as the inventory ledger.
+- HTTPS everywhere; HSTS; strict CSP; configurable rate limiting; login throttling
+  counted per account **and** per address.
 
 ---
 
@@ -371,6 +387,7 @@ with the API base URL and enrolled with a one-time device enrolment code.
 | Document | Contents |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | This document |
+| [STATUS.md](STATUS.md) | Where the build stands, what was learned, what is next |
 | [DOMAIN_MODEL.md](DOMAIN_MODEL.md) | Aggregates, entities, value objects, invariants |
 | [DATABASE.md](DATABASE.md) | Tables, keys, indexes, constraints, numbering |
 | [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md) | Movement model, states, posting rules |

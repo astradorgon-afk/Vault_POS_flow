@@ -98,10 +98,23 @@ public sealed class PostgresLedgerGuardTests : IAsyncLifetime
               AND tgname IN ('trg_inventory_movement_immutable',
                              'trg_inventory_movement_no_truncate',
                              'trg_inventory_balance_guard',
-                             'trg_inventory_balance_no_delete')
+                             'trg_inventory_balance_no_delete',
+                             'trg_audit_log_immutable',
+                             'trg_audit_log_no_truncate',
+                             'trg_login_attempt_immutable')
             """);
 
-        triggers.Should().Be(4);
+        triggers.Should().Be(7);
+
+        // The balance guard must be deferred: it has to see the transaction's
+        // final state, not an arbitrary moment part-way through it.
+        int deferred = await ScalarAsync(
+            """
+            SELECT count(*) FROM pg_trigger
+            WHERE tgname = 'trg_inventory_balance_guard' AND tgdeferrable AND tginitdeferred
+            """);
+
+        deferred.Should().Be(1);
     }
 
     [SkippableFact]

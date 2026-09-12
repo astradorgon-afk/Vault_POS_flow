@@ -42,6 +42,19 @@ public interface ICurrentUser
 
     /// <summary>Gets the caller's IP address, where known.</summary>
     string? IpAddress { get; }
+
+    /// <summary>Gets the caller's user agent, where known.</summary>
+    string? UserAgent { get; }
+
+    /// <summary>
+    /// Gets the roles the caller held when the request began, comma separated.
+    /// </summary>
+    /// <remarks>
+    /// Snapshotted onto each audit entry rather than joined at read time. The
+    /// question an investigation asks is what authority someone had when they
+    /// acted, not what they have now.
+    /// </remarks>
+    string? RoleSnapshot { get; }
 }
 
 /// <summary>

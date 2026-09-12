@@ -1,9 +1,15 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pos.Application.Common.Abstractions;
+using Pos.Application.Identity;
+using Pos.Infrastructure.Auditing;
 using Pos.Infrastructure.Common;
+using Pos.Infrastructure.Configuration;
+using Pos.Infrastructure.Devices;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Inventory;
 using Pos.Infrastructure.Persistence;
 using Pos.Infrastructure.Persistence.Interceptors;
@@ -23,7 +29,7 @@ public enum PersistenceProvider
 /// <summary>Registers infrastructure services with the dependency injection container.</summary>
 public static class DependencyInjection
 {
-    /// <summary>Adds persistence and the inventory ledger.</summary>
+    /// <summary>Adds persistence, identity and the inventory ledger.</summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Application configuration.</param>
     /// <param name="provider">Which database provider to use.</param>
@@ -33,6 +39,91 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration,
         PersistenceProvider provider = PersistenceProvider.Postgres)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddInfrastructureOptions(configuration);
+        services.AddPersistence(configuration, provider);
+        services.AddIdentityServices(configuration);
+
+        services.TryAddScoped<IUnitOfWork, UnitOfWork>();
+        services.TryAddSingleton<ISystemClock, SystemClock>();
+        services.TryAddScoped<IAuditWriter, AuditWriter>();
+        services.TryAddScoped<ILedgerPolicyProvider, StrictLedgerPolicyProvider>();
+        services.TryAddScoped<IInventoryLedger, InventoryLedger>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Binds and validates every configuration section at start-up.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Application configuration.</param>
+    /// <returns>The service collection, for chaining.</returns>
+    /// <remarks>
+    /// <c>ValidateOnStart</c> turns a missing signing key or a malformed
+    /// currency code into a refusal to boot rather than a failure on the first
+    /// request that happens to need it — which, for a token signing key, would
+    /// be the first sign-in of the working day.
+    /// </remarks>
+    public static IServiceCollection AddInfrastructureOptions(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(
+                o => !string.IsNullOrWhiteSpace(o.SigningKeyPem),
+                "Jwt:SigningKeyPem must be supplied through the environment or user secrets.")
+            .ValidateOnStart();
+
+        services.AddOptions<SecurityOptions>()
+            .Bind(configuration.GetSection(SecurityOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<OrganizationOptions>()
+            .Bind(configuration.GetSection(OrganizationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(
+                o => o.ApprovalLimits.Tier1 <= o.ApprovalLimits.Tier2
+                     && o.ApprovalLimits.Tier2 <= o.ApprovalLimits.Tier3,
+                "Approval tier ceilings must increase: Tier1 <= Tier2 <= Tier3.")
+            .ValidateOnStart();
+
+        services.AddOptions<DatabaseOptions>()
+            .Bind(configuration.GetSection(DatabaseOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddOptions<RateLimitOptions>()
+            .Bind(configuration.GetSection(RateLimitOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Optional by design: most installations have users already, and the
+        // bootstrap path must stay shut unless someone deliberately opens it.
+        services.AddOptions<BootstrapOwnerOptions>()
+            .Bind(configuration.GetSection(BootstrapOwnerOptions.SectionName))
+            .ValidateDataAnnotations();
+
+        return services;
+    }
+
+    /// <summary>Adds the database context and its interceptors.</summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Application configuration.</param>
+    /// <param name="provider">Which database provider to use.</param>
+    /// <returns>The service collection, for chaining.</returns>
+    public static IServiceCollection AddPersistence(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        PersistenceProvider provider)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -75,10 +166,72 @@ public static class DependencyInjection
             options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
         });
 
-        services.TryAddScoped<IUnitOfWork, UnitOfWork>();
-        services.TryAddSingleton<ISystemClock, SystemClock>();
-        services.TryAddScoped<ILedgerPolicyProvider, StrictLedgerPolicyProvider>();
-        services.TryAddScoped<IInventoryLedger, InventoryLedger>();
+        return services;
+    }
+
+    /// <summary>Adds ASP.NET Core Identity and the authorization services built on it.</summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Application configuration.</param>
+    /// <returns>The service collection, for chaining.</returns>
+    public static IServiceCollection AddIdentityServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        SecurityOptions security = configuration
+            .GetSection(SecurityOptions.SectionName)
+            .Get<SecurityOptions>() ?? new SecurityOptions();
+
+        services.AddIdentityCore<AppUser>(options =>
+        {
+            // NIST SP 800-63B: length beats composition rules, which mostly
+            // teach people to append an exclamation mark.
+            options.Password.RequiredLength = security.MinimumPasswordLength;
+            options.Password.RequireDigit = false;
+            options.Password.RequireLowercase = false;
+            options.Password.RequireUppercase = false;
+            options.Password.RequireNonAlphanumeric = false;
+            options.Password.RequiredUniqueChars = 4;
+
+            options.Lockout.DefaultLockoutTimeSpan = security.LockoutDuration;
+            options.Lockout.MaxFailedAccessAttempts = security.MaxFailedAccessAttempts;
+            options.Lockout.AllowedForNewUsers = true;
+
+            options.User.RequireUniqueEmail = false;
+            options.SignIn.RequireConfirmedAccount = false;
+        })
+        .AddRoles<AppRole>()
+        .AddEntityFrameworkStores<PosDbContext>()
+        // Only the authenticator provider is registered. Email and SMS token
+        // providers would be dead weight: this system has no mail transport, and
+        // a code sent by SMS is the weakest second factor on offer.
+        .AddTokenProvider<AuthenticatorTokenProvider<AppUser>>(TokenOptions.DefaultAuthenticatorProvider);
+
+        // Identity's default iteration count trails what current hardware makes
+        // sensible, so it is configured explicitly and can be raised over time;
+        // each hash records the parameters it was made with, so raising it does
+        // not invalidate existing passwords.
+        services.Configure<PasswordHasherOptions>(options =>
+        {
+            options.CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV3;
+            options.IterationCount = security.PasswordHashIterations;
+        });
+
+        services.AddMemoryCache();
+
+        services.TryAddSingleton<SigningKeyRing>();
+        services.TryAddScoped<ITokenService, JwtTokenService>();
+        services.TryAddScoped<IPolicyVersionProvider, PolicyVersionProvider>();
+        services.TryAddScoped<DatabasePermissionEvaluator>();
+        services.TryAddScoped<IPermissionEvaluator>(sp => sp.GetRequiredService<DatabasePermissionEvaluator>());
+        services.TryAddScoped<ApprovalGate>();
+        services.TryAddScoped<IApprovalGate>(sp => sp.GetRequiredService<ApprovalGate>());
+        services.TryAddScoped<IAuthenticationService, AuthenticationService>();
+        services.TryAddScoped<IDeviceService, DeviceService>();
+        services.TryAddScoped<IdentitySeeder>();
+        services.TryAddScoped<BootstrapOwnerSeeder>();
 
         return services;
     }

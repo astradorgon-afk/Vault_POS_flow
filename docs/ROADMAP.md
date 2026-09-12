@@ -2,10 +2,12 @@
 
 Status legend: `[ ]` Pending · `[~]` In progress · `[x]` Complete
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
-> Phases 0 and 1 are complete except where marked. Phase 4 was pulled forward
-> because the ledger is the foundation every other module posts through.
+> Phases 0, 1, 2 and 4 are complete except where marked. Phase 4 was pulled
+> forward because the ledger is the foundation every other module posts through.
+> See [STATUS.md](STATUS.md) for where the build actually stands and what to do
+> next.
 
 ---
 
@@ -52,25 +54,30 @@ Last updated: 2026-09-11
 - [x] Docker: API image, one-shot migrator image, compose, reverse proxy
 - [x] CI: build, test, pending-model-change check, secret scan
 - [x] Architecture tests (layering, ledger write isolation, permission catalogue)
-- [ ] Options binding with `ValidateOnStart` for every configuration section
+- [x] Options binding with `ValidateOnStart` for every configuration section
+- [x] Append-only `AuditLog` table, writer and database guards
 - [ ] Serilog sensitive-data destructuring policy (scrubbing)
 - [ ] Idempotency pipeline behaviour (the ledger is idempotent today; the generic
       behaviour lands with the sync module in Phase 13)
-- [ ] Audit interceptor and `AuditLog` table (Phase 2 depends on it)
 
 ## Phase 2 — Identity and Authorization
 
-- [ ] ASP.NET Core Identity integration with Guid keys
-- [ ] Permission catalogue seeding; roles and role-permission mapping
-- [ ] `UserLocationAssignment`, `UserPermissionOverride`
-- [ ] Permission evaluator + cache with policy versioning
-- [ ] `RequirePermission` attribute, dynamic policy provider, location scoping
-- [ ] JWT issuance, refresh-token rotation with reuse detection
-- [ ] Cashier PIN authentication
-- [ ] Device enrolment, suspension, revocation
-- [ ] Login throttling, lockout, rate-limit policies
-- [ ] Approval tiers and `IApprovalGate`
-- [ ] Security tests: authorization matrix, token lifecycle, revocation
+- [x] ASP.NET Core Identity integration with Guid keys and tuned hashing
+- [x] Permission catalogue defined in code and seeded; roles as permission bundles
+- [x] `UserLocationAssignment`, `UserPermissionOverride` with grant/deny and expiry
+- [x] Permission evaluator with a cache keyed by the authorization policy version
+- [x] `RequirePermission` attribute, dynamic policy provider, location scoping
+- [x] JWT issuance with a two-key ring; refresh rotation with reuse detection
+- [x] Cashier PIN authentication, device-bound and narrowed to offline permissions
+- [x] Device registration, one-time enrolment codes, suspension, revocation
+- [x] Login throttling per account and per address; lockout; configurable rate limits
+- [x] Approval tiers, self-approval refusal, eligible-approver lookup
+- [x] Bootstrap owner seeder, refused once any user exists
+- [x] Security tests: authentication, token lifecycle, revocation, permission matrix
+- [ ] Enforce two-factor for Owner and Administrator at sign-in
+      (`RequireTwoFactorForAdmins` is configured and read, not yet enforced)
+- [ ] User, role and override administration endpoints
+- [ ] Redis backplane so permission revocation stays immediate when scaled out
 
 ## Phase 3 — Master Data
 

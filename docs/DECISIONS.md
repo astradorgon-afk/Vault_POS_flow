@@ -366,3 +366,113 @@ components the client will consume have a home from the start.
 to build. The reference rules for `Pos.Client` are already asserted in
 ARCHITECTURE.md and will be enforced by an architecture test when the project
 appears.
+
+---
+
+## ADR-0020 — The balance guard is a deferred constraint trigger
+
+**Date:** 2026-09-12 · **Status:** Accepted · **Supersedes part of ADR-0016**
+
+**Context.** ADR-0016 described a trigger that fires per statement and matches
+movements by `xmin = pg_current_xact_id()` within an identifier window. The
+integration suite, running against a real PostgreSQL instance, showed two
+defects in it.
+
+First, firing per statement requires movements to be inserted before the balance
+rows that summarise them. Nothing guarantees that order: `inventory_balance` has
+no foreign key to `inventory_movement`, so Entity Framework is free to write
+balances first, and it did. A legitimate supplier receipt was rejected.
+
+Second, the `xmin` filter is defeated by savepoints. EF takes a savepoint around
+each `SaveChanges` when one is already inside an explicit transaction, so rows
+written there carry the subtransaction's id while `pg_current_xact_id()` returns
+the top-level one. Two postings in a single transaction matched nothing.
+
+**Decision.** The guard becomes `DEFERRABLE INITIALLY DEFERRED`, running at
+commit, and the `xmin` filter is dropped. The identifier window
+`(OLD.last_movement_id, NEW.last_movement_id]` was always the substantive check;
+because movement identifiers are UUIDv7 and movements are append-only, the window
+names exactly the legs a change claims to account for.
+
+**Consequences.** Statement order stops mattering and the check is strictly
+stronger: it sees the transaction's final state. A bare
+`UPDATE inventory_balance SET quantity = 100` still leaves `last_movement_id`
+untouched, so the window is empty, the expected delta is zero, and the statement
+is rejected — which is the whole point. Cost stays proportional to what the
+transaction wrote. Concurrent postings to one bucket now abort at the guard
+rather than silently racing; adding an optimistic concurrency token to the
+balance row, already on the roadmap, turns that abort into a retry.
+
+**Lesson.** Both defects were invisible in review and invisible on SQLite, which
+has no such trigger. Testing the guarantee against the engine that enforces it is
+what found them.
+
+---
+
+## ADR-0021 — Command paths opt back into change tracking explicitly
+
+**Date:** 2026-09-12 · **Status:** Accepted
+
+**Context.** `PosDbContext` sets `QueryTrackingBehavior.NoTracking` globally,
+because reads dominate and a tracked read that accidentally writes back is a
+hazard. Command paths that read an entity and then mutate it were therefore
+changing detached objects, and `SaveChanges` wrote nothing. Sign-out reported
+success while the session stayed live; device suspension left tokens working;
+the authorization policy version never advanced, so cached permissions were never
+evicted.
+
+**Decision.** The global default stands. Every query whose result is mutated
+carries an explicit `.AsTracking()`.
+
+**Rationale.** The alternative — tracking by default — makes the dangerous case
+silent and the safe case verbose. This way the annotation appears exactly where
+a write is intended, which is also where a reviewer looks for one. Entities
+obtained from outside the context, such as a user from `UserManager`, are
+attached with only the changed property marked, so a stray update can never
+become a blind full-row write.
+
+**Consequences.** A new command path that forgets the annotation fails visibly in
+an integration test rather than quietly in production, which is how this was
+found in the first place.
+
+---
+
+## ADR-0022 — A PIN session is narrower than a password session
+
+**Date:** 2026-09-12 · **Status:** Accepted
+
+**Context.** Cashiers sign in on a shared terminal with an employee code and a
+PIN. A store manager who does the same would otherwise carry their full
+authority — including approval of adjustments and expired-batch overrides — into
+a session authenticated by six digits typed on a touchscreen in front of
+customers.
+
+**Decision.** PIN sign-in issues a token granting only the permissions marked
+`IsOfflineCapable`, and a refresh lifetime of hours rather than days. It is
+refused unless the request carries an enrolled, operational device whose location
+the user is assigned to. Attempts are throttled per device as well as per account.
+
+**Consequences.** A shoulder-surfed PIN buys a till session, not approval
+authority. Anything requiring real authority needs a full sign-in. This is the
+same principle as ADR-0011 — a convenient path must not widen what someone can
+do — applied to credentials rather than to connectivity.
+
+---
+
+## ADR-0023 — The persistence provider is chosen by configuration
+
+**Date:** 2026-09-12 · **Status:** Accepted
+
+**Context.** Integration tests need the API running against SQLite. The first
+attempt removed the PostgreSQL `DbContext` registration from the container and
+substituted another, which failed: `AddDbContext` registers more than the options
+object, and EF refuses two providers in one provider.
+
+**Decision.** `Database:Provider` selects PostgreSQL or SQLite, and the API reads
+it during start-up.
+
+**Rationale.** Deleting a host's registrations and rebuilding them is a test that
+verifies a rearranged copy of the application. Making the provider a first-class
+configuration choice means the tests host the real thing unchanged — real
+middleware, real token validation, the real authorization policy provider — and
+it is a setting the device client needs anyway.

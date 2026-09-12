@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Pos.Domain.Auditing;
 using Pos.Domain.Inventory;
 
 namespace Pos.Infrastructure.Persistence.Interceptors;
@@ -47,7 +48,11 @@ public sealed class AppendOnlyViolationException : InvalidOperationException
 /// </remarks>
 public sealed class AppendOnlyInterceptor : SaveChangesInterceptor
 {
-    private static readonly Type[] AppendOnlyTypes = [typeof(InventoryMovement)];
+    private static readonly Type[] AppendOnlyTypes =
+    [
+        typeof(InventoryMovement),
+        typeof(AuditLogEntry),
+    ];
 
     /// <inheritdoc />
     public override InterceptionResult<int> SavingChanges(

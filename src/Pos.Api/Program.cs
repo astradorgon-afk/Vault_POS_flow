@@ -1,14 +1,21 @@
 using System.Globalization;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Pos.Api.Authorization;
 using Pos.Api.Common;
+using Pos.Api.Endpoints;
 using Pos.Api.Middleware;
 using Pos.Application;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Common;
 using Pos.Infrastructure;
+using Pos.Infrastructure.Configuration;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 using Serilog;
 using Serilog.Events;
@@ -36,13 +43,32 @@ try
     builder.Services.AddOpenApi();
 
     builder.Services.AddApplication();
-    builder.Services.AddInfrastructure(builder.Configuration);
 
-    // Identity arrives in Phase 2. Until then the caller is anonymous and the
-    // permission evaluator denies everything, so no endpoint can be reached with
-    // implicit authority.
+    PersistenceProvider persistence = string.Equals(
+        builder.Configuration[$"{DatabaseOptions.SectionName}:Provider"],
+        nameof(PersistenceProvider.Sqlite),
+        StringComparison.OrdinalIgnoreCase)
+        ? PersistenceProvider.Sqlite
+        : PersistenceProvider.Postgres;
+
+    builder.Services.AddInfrastructure(builder.Configuration, persistence);
+
     builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
-    builder.Services.AddScoped<IPermissionEvaluator, DenyAllPermissionEvaluator>();
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer();
+
+    // Validation parameters are supplied by ConfigureJwtBearerOptions, which can
+    // take the signing key ring from the container.
+    builder.Services
+        .AddSingleton<IConfigureOptions<JwtBearerOptions>, ConfigureJwtBearerOptions>();
+
+    builder.Services.AddScoped<PosJwtBearerEvents>();
+
+    builder.Services.AddAuthorization();
+    builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+    builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
     builder.Services.AddHealthChecks()
         .AddDbContextCheck<PosDbContext>("database");
@@ -57,6 +83,9 @@ try
         options.KnownProxies.Clear();
     });
 
+    RateLimitOptions rateLimits = builder.Configuration
+        .GetSection(RateLimitOptions.SectionName).Get<RateLimitOptions>() ?? new RateLimitOptions();
+
     builder.Services.AddRateLimiter(options =>
     {
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -65,8 +94,19 @@ try
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(5),
+                PermitLimit = rateLimits.LoginPermitLimit,
+                Window = TimeSpan.FromMinutes(rateLimits.LoginWindowMinutes),
+                QueueLimit = 0,
+            }));
+
+        options.AddPolicy("auth-refresh", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Request.Headers[RequestContextMiddleware.DeviceHeader].ToString() is { Length: > 0 } device
+                ? device
+                : httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimits.RefreshPermitLimit,
+                Window = TimeSpan.FromMinutes(rateLimits.RefreshWindowMinutes),
                 QueueLimit = 0,
             }));
 
@@ -74,7 +114,7 @@ try
             partitionKey: httpContext.Request.Headers[RequestContextMiddleware.DeviceHeader].ToString(),
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 60,
+                PermitLimit = rateLimits.SyncPushPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));
@@ -86,7 +126,7 @@ try
                               ?? "anonymous",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 300,
+                    PermitLimit = rateLimits.GlobalPermitLimit,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                 }));
@@ -134,18 +174,15 @@ try
         await problem.ExecuteAsync(context).ConfigureAwait(false);
     }));
 
+    app.UseAuthentication();
+    app.UseAuthorization();
+
     if (app.Environment.IsDevelopment())
     {
         app.MapOpenApi();
-
-        // Development only, and only after an explicit opt-in: an API that
-        // migrates itself on boot races its own replicas in production.
-        if (app.Configuration.GetValue("Database:ApplyMigrationsOnStartup", false))
-        {
-            using IServiceScope scope = app.Services.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<PosDbContext>().Database.MigrateAsync();
-        }
     }
+
+    await app.PrepareDatabaseAsync().ConfigureAwait(false);
 
     app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
     {
@@ -164,13 +201,22 @@ try
     .WithName("GetApiMetadata")
     .AllowAnonymous();
 
+    app.MapAuthEndpoints();
+    app.MapDeviceEndpoints();
+
     await app.RunAsync();
     return 0;
 }
 #pragma warning disable CA1031 // The top-level guard must catch everything: a
                                // start-up failure has to be logged and flushed
                                // before the process exits, or it is invisible.
-catch (Exception ex)
+//
+// The filter matters. WebApplicationFactory starts the host by running this same
+// entry point and intercepting Run() with an internal exception of its own.
+// Swallowing that would leave every integration test reporting "the entry point
+// exited without ever building an IHost" instead of running.
+catch (Exception ex) when (ex is not HostAbortedException
+                           && !string.Equals(ex.GetType().Name, "StopTheHostException", StringComparison.Ordinal))
 {
     Log.Fatal(ex, "Pos.Api terminated unexpectedly during start-up.");
     return 1;
@@ -179,6 +225,59 @@ catch (Exception ex)
 finally
 {
     await Log.CloseAndFlushAsync();
+}
+
+/// <summary>Start-up database work.</summary>
+internal static class DatabaseStartup
+{
+    /// <summary>
+    /// Applies migrations where configured, and always brings the authorization
+    /// tables into line with the code catalogue.
+    /// </summary>
+    /// <param name="app">The application.</param>
+    /// <returns>A task that completes when preparation finishes.</returns>
+    /// <remarks>
+    /// Migrations run here only in development and only on an explicit opt-in:
+    /// replicas racing to migrate on boot is a well-known way to take a system
+    /// down, and production uses a one-shot migration job instead.
+    /// <para>
+    /// Seeding is different. It is idempotent, it never drops anything, and a
+    /// deployment whose permission rows lag the code would fail authorization
+    /// checks that look correct in source, so it runs every time.
+    /// </para>
+    /// </remarks>
+    public static async Task PrepareDatabaseAsync(this WebApplication app)
+    {
+        using IServiceScope scope = app.Services.CreateScope();
+
+        DatabaseOptions database = scope.ServiceProvider
+            .GetRequiredService<IOptions<DatabaseOptions>>().Value;
+
+        PosDbContext context = scope.ServiceProvider.GetRequiredService<PosDbContext>();
+
+        if (database.ApplyMigrationsOnStartup && app.Environment.IsDevelopment())
+        {
+            await context.Database.MigrateAsync().ConfigureAwait(false);
+        }
+
+        if (!await context.Database.CanConnectAsync().ConfigureAwait(false))
+        {
+            Log.Warning("The database is not reachable at start-up; skipping the authorization seed.");
+            return;
+        }
+
+        IdentitySeeder seeder = scope.ServiceProvider.GetRequiredService<IdentitySeeder>();
+        SeedSummary summary = await seeder.SeedAsync(CancellationToken.None).ConfigureAwait(false);
+
+        Log.Information(
+            "Authorization seed complete: {Permissions} permissions, {Roles} roles, {Grants} grants added.",
+            summary.PermissionsAdded,
+            summary.RolesAdded,
+            summary.GrantsAdded);
+
+        BootstrapOwnerSeeder bootstrap = scope.ServiceProvider.GetRequiredService<BootstrapOwnerSeeder>();
+        await bootstrap.SeedAsync(CancellationToken.None).ConfigureAwait(false);
+    }
 }
 
 /// <summary>Entry point marker so integration tests can reference the host.</summary>

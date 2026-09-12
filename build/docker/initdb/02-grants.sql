@@ -12,8 +12,16 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA inventory TO pos_ap
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA sync      TO pos_app;
 
 -- Append-only. No UPDATE. No DELETE. No TRUNCATE.
+-- This is the guard that survives a compromised application: the role it
+-- connects as simply has no statement available to rewrite history.
 REVOKE UPDATE, DELETE, TRUNCATE ON inventory.inventory_movement FROM pos_app;
 GRANT  SELECT, INSERT            ON inventory.inventory_movement TO   pos_app;
+
+GRANT  SELECT, INSERT            ON audit.audit_log              TO   pos_app;
+REVOKE UPDATE, DELETE, TRUNCATE  ON audit.audit_log            FROM   pos_app;
+
+REVOKE UPDATE, DELETE, TRUNCATE  ON core.login_attempt         FROM   pos_app;
+GRANT  SELECT, INSERT            ON core.login_attempt           TO   pos_app;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA core, inventory, sync TO pos_app;
 
