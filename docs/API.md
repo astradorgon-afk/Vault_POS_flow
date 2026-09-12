@@ -174,6 +174,18 @@ DELETE /api/v1/purchasing/orders/{id}                       purchase.create   (D
 POST   /api/v1/purchasing/orders/{id}/receipts              purchase.receive  -> LEDGER, atomically Posted
 GET    /api/v1/purchasing/orders/{id}/receipts              purchase.view
 GET    /api/v1/purchasing/orders/{id}/receipts/{receiptId}  purchase.view
+POST   /api/v1/purchasing/receiving-discrepancies/{id}/resolve  purchase.discrepancy.resolve  (once only; 409 on repeat)
+GET    /api/v1/purchasing/supplier-returns                  purchase.view
+POST   /api/v1/purchasing/supplier-returns                  purchase.return
+POST   /api/v1/purchasing/supplier-returns/{id}/submit      purchase.return
+POST   /api/v1/purchasing/supplier-returns/{id}/approve     purchase.approve + tier
+POST   /api/v1/purchasing/supplier-returns/{id}/reject      purchase.approve
+POST   /api/v1/purchasing/supplier-returns/{id}/dispatch    purchase.return   -> LEDGER, allocates SRT number last
+POST   /api/v1/purchasing/supplier-returns/{id}/confirm     purchase.return
+GET    /api/v1/purchasing/supplier-returns/{id}             purchase.view
+GET    /api/v1/purchasing/direct-delivery-authorizations    purchase.view    (newest first; ?activeOnly=true)
+POST   /api/v1/purchasing/direct-delivery-authorizations    purchase.direct_to_store.authorize
+POST   /api/v1/purchasing/direct-delivery-authorizations/{id}/revoke  purchase.direct_to_store.authorize
 ```
 
 Receipts are created and posted in one atomic request (GRN number, receipt,
@@ -181,13 +193,11 @@ discrepancies, movements and the order's received totals commit together); there
 is no mutable draft stage. A receipt line names its PO line, so the order detail
 exposes each line's `id`.
 
-Scheduled with Phase 5 part 3:
-
-```
-POST   /api/v1/receiving-discrepancies/{id}/resolve  purchase.discrepancy.resolve
-POST   /api/v1/supplier-returns                      purchase.return
-POST   /api/v1/direct-delivery-authorizations        purchase.direct_to_store.authorize
-```
+Supplier returns source only `Damaged`/`Expired`/`Quarantine` stock (never
+`Available`), carry a supplier authorization number on dispatch, and post the
+balanced `Loc/<state> −q ⇄ EXT-SUPPLIER +q` group against the SRT number. A
+failed dispatch never burns a sequence value. Drafts share the blank number, so
+the unique index is filtered (`number <> ''`).
 
 ---
 

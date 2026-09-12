@@ -164,3 +164,8 @@ These feed `GET /api/v1/reports/supplier-performance` and the supplier's rating.
 | `CostVarianceAboveTolerance_RequiresApproval` | costing control |
 | `UnauthorizedDirectDelivery_Quarantines_AndNotifies` | exception path |
 | `SupplierReturn_CannotSourceFromAvailable` | control |
+| `DirectDeliveryAuthorization_IssueFilterAndRevoke` | DDA windows/caps, active-only list, revoke-once |
+| `SupplierReturn_FullLifecycle_DispatchesTheLedgerAgainstTheSrtNumber` | drafts unique, SRT stamped on both legs, state machine |
+| `SupplierReturn_DispatchBeforeApproval_IsRejected_AndPostsNothing` | no ledger rows on refusal |
+| `ReceivingDiscrepancy_ResolvedThroughThePipeline_AndOnlyOnce` | outcome recorded, 409 on repeat |
+| `ReceivingDiscrepancy_ResolveWithoutPermission_IsForbidden` | role + location scope |

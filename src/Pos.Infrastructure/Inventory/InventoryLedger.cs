@@ -295,6 +295,7 @@ public sealed class InventoryLedger(
         ProductId[] products = [.. group.Movements.Select(m => m.ProductId).Distinct()];
 
         List<InventoryBalance> loaded = await context.InventoryBalances
+            .AsTracking()
             .Where(b => locations.Contains(b.LocationId) && products.Contains(b.ProductId))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);

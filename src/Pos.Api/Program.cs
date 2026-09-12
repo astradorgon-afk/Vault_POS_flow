@@ -207,6 +207,8 @@ try
     app.MapCatalogEndpoints();
     app.MapInventoryEndpoints();
     app.MapPurchaseEndpoints();
+    app.MapDirectDeliveryEndpoints();
+    app.MapSupplierReturnEndpoints();
 
     await app.RunAsync();
     return 0;

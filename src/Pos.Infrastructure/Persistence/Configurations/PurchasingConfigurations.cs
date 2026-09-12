@@ -271,6 +271,124 @@ public sealed class ReceivingDiscrepancyConfiguration : IEntityTypeConfiguration
             .HasColumnName("value_impact")
             .HasPrecision(19, Money.StorageScale)
             .IsRequired();
+
+        builder.Property(d => d.ResolutionOutcome).HasColumnName("resolution_outcome").HasConversion<short>();
+        builder.Property(d => d.ResolutionNote).HasColumnName("resolution_note").HasMaxLength(512);
+        builder.Property(d => d.ResolvedByUserId).HasColumnName("resolved_by_user_id");
+        builder.Property(d => d.ResolvedAtUtc).HasColumnName("resolved_at_utc");
+    }
+}
+
+/// <summary>Maps a direct-to-store delivery authorization.</summary>
+public sealed class DirectDeliveryAuthorizationConfiguration : IEntityTypeConfiguration<DirectDeliveryAuthorization>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<DirectDeliveryAuthorization> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("direct_delivery_authorization", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(a => a.Id);
+        builder.Property(a => a.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(a => a.Status).HasColumnName("status").HasConversion<short>().IsRequired();
+        builder.Property(a => a.SupplierId).HasColumnName("supplier_id").IsRequired();
+        builder.Property(a => a.StoreLocationId).HasColumnName("store_location_id").IsRequired();
+        builder.Property(a => a.ValidFrom).HasColumnName("valid_from").IsRequired();
+        builder.Property(a => a.ValidUntil).HasColumnName("valid_until").IsRequired();
+        builder.Property(a => a.ProductId).HasColumnName("product_id");
+        builder.Property(a => a.ValueCap).HasColumnName("value_cap").HasPrecision(19, Money.StorageScale);
+
+        builder.Property(a => a.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+        builder.Property(a => a.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+        builder.Property(a => a.RevokedByUserId).HasColumnName("revoked_by_user_id");
+        builder.Property(a => a.RevokedAtUtc).HasColumnName("revoked_at_utc");
+
+        // The receiving path looks authorizations up by supplier, store and
+        // window, so the index mirrors that lookup.
+        builder.HasIndex(a => new { a.SupplierId, a.StoreLocationId, a.ValidFrom, a.ValidUntil })
+            .HasDatabaseName("ix_dda_supplier_store_window");
+    }
+}
+
+/// <summary>Maps a supplier return document.</summary>
+public sealed class SupplierReturnConfiguration : IEntityTypeConfiguration<SupplierReturn>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SupplierReturn> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("supplier_return", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Id).HasColumnName("id").ValueGeneratedNever();
+
+        // A draft has no number; the SRT number is allocated at dispatch so a
+        // never-dispatched return does not consume a sequence value.
+        builder.Property(r => r.Number).HasColumnName("number").HasMaxLength(20).IsRequired();
+        builder.Property(r => r.Status).HasColumnName("status").HasConversion<short>().IsRequired();
+        builder.Property(r => r.SupplierId).HasColumnName("supplier_id").IsRequired();
+        builder.Property(r => r.LocationId).HasColumnName("location_id").IsRequired();
+
+        builder.Property(r => r.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+        builder.Property(r => r.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+        builder.Property(r => r.ApprovedByUserId).HasColumnName("approved_by_user_id");
+        builder.Property(r => r.ApprovedAtUtc).HasColumnName("approved_at_utc");
+        builder.Property(r => r.SupplierAuthorizationNumber).HasColumnName("supplier_authorization_number").HasMaxLength(64);
+        builder.Property(r => r.DispatchedAtUtc).HasColumnName("dispatched_at_utc");
+        builder.Property(r => r.ConfirmedAtUtc).HasColumnName("confirmed_at_utc");
+
+        builder.HasIndex(r => r.Number)
+                .IsUnique()
+                .HasDatabaseName("ux_supplier_return_number")
+                .HasFilter(@"""number"" <> ''");
+        builder.HasIndex(r => new { r.LocationId, r.CreatedAtUtc })
+            .HasDatabaseName("ix_supplier_return_location_time");
+
+        builder.HasMany(r => r.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.SupplierReturnId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Maps a supplier return line.</summary>
+public sealed class SupplierReturnLineConfiguration : IEntityTypeConfiguration<SupplierReturnLine>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SupplierReturnLine> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("supplier_return_line", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(l => l.Id);
+        builder.Property(l => l.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(l => l.SupplierReturnId).HasColumnName("supplier_return_id").IsRequired();
+        builder.Property(l => l.LineNo).HasColumnName("line_no").IsRequired();
+        builder.Property(l => l.ProductId).HasColumnName("product_id").IsRequired();
+        builder.Property(l => l.BatchId).HasColumnName("batch_id");
+        builder.Property(l => l.SourceState).HasColumnName("source_state").HasConversion<short>().IsRequired();
+
+        builder.Property(l => l.Quantity)
+            .HasColumnName("quantity")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+
+        builder.Property(l => l.UnitCost)
+            .HasColumnName("unit_cost")
+            .HasPrecision(19, Money.StorageScale)
+            .IsRequired();
+
+        builder.Property(l => l.Reason).HasColumnName("reason").HasConversion<short>().IsRequired();
+        builder.Property(l => l.Notes).HasColumnName("notes").HasMaxLength(512);
+
+        builder.HasIndex(l => new { l.SupplierReturnId, l.LineNo })
+            .IsUnique()
+            .HasDatabaseName("ux_supplier_return_line_no");
     }
 }
 

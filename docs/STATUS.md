@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-13 · **Milestone:** Phase 5 (Purchasing) parts 1–2 — complete; part 3 (supplier returns, direct delivery) next
+**Last updated:** 2026-09-13 · **Milestone:** Phase 5 (Purchasing) parts 1–3 — complete; phase 6 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,18 +13,18 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **223 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
-| Migrations | 9, forward-only, applied cleanly against PostgreSQL 17 |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts) |
-| Phases remaining | 5 part 3 (returns, direct delivery), 6–18 — see §5 |
+| Tests | **261 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
+| Migrations | 10, forward-only, applied cleanly against PostgreSQL 17 |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution) |
+| Phases remaining | 6–18 — see §5 |
 
 ```
-Pos.Domain.Tests            95 passing   invariants, money, ledger rules, purchasing/GNRs
-Pos.Infrastructure.Tests    29 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers
-Pos.Architecture.Tests      13 passing   layering, ledger isolation, permission catalogue
-Pos.Security.Tests          33 passing   authentication, tokens, permission matrix
-Pos.Application.Tests       12 passing   master-data commands and CQRS unit-of-work behaviours
-Pos.Api.IntegrationTests    41 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate)
+Pos.Domain.Tests            126 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies)
+Pos.Infrastructure.Tests     29 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers
+Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
+Pos.Security.Tests           33 passing   authentication, tokens, permission matrix
+Pos.Application.Tests        12 passing   master-data commands and CQRS unit-of-work behaviours
+Pos.Api.IntegrationTests     48 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -183,6 +183,47 @@ costing, negative-stock policy, idempotency by event id.
   two-receipts-make-`FullyReceived` accumulation, and both cost-variance
   authority paths — on top of the part-1 PO lifecycle suite.
 
+### Phase 5 (part 3) — direct delivery, supplier returns, discrepancy resolution
+
+- **Direct-delivery authorizations (DDA):** issue, list (newest first,
+  `activeOnly` filter) and revoke. An authorization carries a validity window
+  (default 180 days, cap < 365 days), an optional per-DDA value cap and the
+  revoker's identity. Write permission is `purchase.direct_to_store.authorize`;
+  `purchase.view` covers the list. Only `Active` authorizations survive the
+  filter; revoking twice is refused (`purchasing.direct_delivery_already_revoked`).
+- **Supplier returns (SRT):** full lifecycle draft → submit → approve → dispatch
+  → confirm. A return sources only from `Damaged`/`Expired`/`Quarantine` stock
+  at the location (`purchasing.return_source_state_invalid` otherwise — returns
+  may never source available stock). Discrepancies are recorded on the document.
+  The creater cannot self-approve (same separation-of-duties gate as orders);
+  approval records the approver. **Dispatch** allocates the SRT number last —
+  after every authority and state check — so a refused dispatch can never burn a
+  sequence value — and posts a balanced `SupplierReturn` movement group: the
+  source state at the location (negative leg) to the `EXT-SUPPLIER` counterparty
+  (`External` state, positive leg), both stamped with the SRT number and the
+  approver as the ledger actor. Drafts share a blank number, so the unique
+  number index is filtered (`number <> ''`) on both the domain entity and the
+  database. Confirm closes the document.
+- **Receiving-discrepancy resolution:** `POST
+  /api/v1/purchasing/discrepancies/{id}/resolve` under
+  `purchase.discrepancy.resolve`, with an outcome from the resolution enum
+  (`SupplierCredit`, `Replace`, `WriteOff`, `Refund`, `NoAction`, `Other`) and a
+  note. Location scope is enforced explicitly on the resolver (`purchasing.discrepancy_resolve_forbidden`
+  → 403). Resolution is once-only (`purchasing.discrepancy_already_resolved` → 409).
+- **Endpoints:** `POST/GET /api/v1/purchasing/direct-deliveries`, `GET
+  /api/v1/purchasing/direct-deliveries/active`, `POST
+  .../direct-deliveries/{id}/revoke`; `GET/POST
+  /api/v1/purchasing/supplier-returns`, and `submit`/`approve`/`dispatch`/`confirm`
+  actions; `POST /api/v1/purchasing/discrepancies/{id}/resolve`.
+- **Migrations:** `20260912180239_PurchasingDirectDeliveryAndReturns` adds the
+  DDA and supplier-return tables, the return lines, the resolution columns, and
+  the filtered `ux_supplier_return_number` index.
+- **Tests:** 30 purchasing domain tests (DDA window/cap/revoke rules, the return
+  state machine, resolution) and 7 endpoint tests through the real pipeline —
+  the full SRT lifecycle asserting the ledger legs carry the SRT number,
+  dispatch-before-approval refuses and posts nothing, draft uniqueness against
+  the filtered index, sourcing refusals, role refusals, and resolve-once.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -197,6 +238,18 @@ policy-version bumps — were changing detached objects, so `SaveChanges` wrote
 nothing. Sign-out appeared to succeed and the session stayed live. Fixed by
 opting those paths back into tracking explicitly, which also documents intent at
 each call site.
+
+**The same default nearly corrupted the balance projection.** `InventoryLedger`
+loads existing balance buckets to apply a posting's deltas. Under the global
+`NoTracking` default those rows came back detached, so `Apply` mutated objects
+no one was tracking: new buckets were inserted (explicit `Add`), but every
+subsequent posting into an existing bucket — a second receipt, a sale off the
+shelf, a return — silently wrote nothing, leaving the projection stale while the
+movement ledger marched on. A booking appeared healthy; the balances drifted.
+The ledger's `LoadBucketsAsync` now opts into `.AsTracking()` so the versioned
+apply persists, and the reconciler (which replays the whole ledger and compares)
+surfaced this exact failure as a 47/48 integration-suite regression before any
+changes shipped.
 
 **The balance-guard trigger depended on statement order.** It fired per statement
 and assumed EF would insert movements before the balance rows summarising them.
@@ -290,8 +343,8 @@ Stated plainly so they are not mistaken for finished work:
 | `NegativeStockAttempt` record and exception report not built | Phase 4 | Guard blocks the attempt today; the diagnostic record for the dashboard awaits. |
 | `AutoPassInspection` per location/category not built | Phase 5 | Receipts always land in `PendingInspection`; the trusted-category fast path is a settings-driven follow-up. |
 | Cost-variance notification not raised | Phase 5 | The receipt flags `costVariancePendingApproval` and records the approver; the notification/queue item is not built. |
-| Receiving-discrepancy resolution endpoint not built | Phase 5 | `purchase.discrepancy.resolve` is seeded into roles; the resolve flow lands with Part 3. |
-| Supplier performance report and returns/direct-delivery endpoints not built | Phase 5 | PURCHASING.md §6–§8; Part 3 scope. |
+| Supplier performance report not built | Phase 5 | Measurable after returns post; dashboard/analytics phase. |
+| Supplier-return dispatch does not yet quarantine unreported stock | Phase 5 | The PO-less unauthorized-delivery quarantine path needs `QuarantineIncident` (Phase 8). |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
 | Serilog sensitive-data scrubbing policy not implemented | Phase 1 | No secret is currently logged, but nothing enforces that. |
@@ -307,15 +360,10 @@ Stated plainly so they are not mistaken for finished work:
 Phase 3 ships the master data everything downstream reads. The next phases build
 on it:
 
-1. **Phase 5 (part 3) — Purchasing completion:** receiving-discrepancy
-   resolution (`purchase.discrepancy.resolve`), supplier returns
-   (`purchase.return`, sourcing from Damaged/Expired/Quarantine only), and
-   direct supplier-to-store delivery authorization
-   (`purchase.direct_to_store.authorize`). PURCHASING.md §6–§8.
-2. **Catalog curation** (deferred Phase 3 rows, now unblocked): product edit,
+1. **Catalog curation** (deferred Phase 3 rows, now unblocked): product edit,
    barcode management, deactivate/activate, effective-dated pricing endpoints,
    `ProductLocationSetting`, unit conversions, product-supplier links.
-3. **User-administration endpoints** so roles, overrides and location
+2. **User-administration endpoints** so roles, overrides and location
    assignments stop being a database-only concern.
 
 ---

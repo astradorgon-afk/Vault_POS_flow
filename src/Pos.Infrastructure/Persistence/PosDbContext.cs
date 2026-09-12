@@ -128,6 +128,15 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the receiving discrepancies.</summary>
     public DbSet<ReceivingDiscrepancy> ReceivingDiscrepancies => Set<ReceivingDiscrepancy>();
 
+    /// <summary>Gets the direct-to-store delivery authorizations.</summary>
+    public DbSet<DirectDeliveryAuthorization> DirectDeliveryAuthorizations => Set<DirectDeliveryAuthorization>();
+
+    /// <summary>Gets the supplier returns.</summary>
+    public DbSet<SupplierReturn> SupplierReturns => Set<SupplierReturn>();
+
+    /// <summary>Gets the supplier return lines.</summary>
+    public DbSet<SupplierReturnLine> SupplierReturnLines => Set<SupplierReturnLine>();
+
     /// <summary>Gets the received lots of batch-tracked products.</summary>
     public DbSet<Batch> Batches => Set<Batch>();
 

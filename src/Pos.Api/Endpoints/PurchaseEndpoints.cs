@@ -44,6 +44,13 @@ public sealed record PurchaseOrderDecisionBody(string? Notes = null);
 /// <param name="Reason">The reason, required for non-draft cancels and set on closes.</param>
 public sealed record PurchaseOrderCancellationBody(string? Reason = null);
 
+/// <summary>The body of a discrepancy resolution.</summary>
+/// <param name="Outcome">The closing decision.</param>
+/// <param name="Note">Optional note attached to the resolution.</param>
+public sealed record ResolveReceivingDiscrepancyBody(
+    ReceivingDiscrepancyResolutionOutcome Outcome,
+    string? Note = null);
+
 /// <summary>A purchase order as listed.</summary>
 public sealed record PurchaseOrderSummary(
     Guid Id,
@@ -160,11 +167,16 @@ public sealed record GoodsReceiptLineSummary(
 
 /// <summary>A receiving discrepancy recorded against a receipt.</summary>
 public sealed record ReceivingDiscrepancySummary(
+    Guid Id,
     Guid PurchaseOrderLineId,
     int LineNo,
     string Kind,
     decimal Quantity,
-    decimal ValueImpact);
+    decimal ValueImpact,
+    string? ResolutionOutcome = null,
+    string? ResolutionNote = null,
+    Guid? ResolvedByUserId = null,
+    DateTimeOffset? ResolvedAtUtc = null);
 
 /// <summary>A goods receipt with its lines and discrepancies.</summary>
 public sealed record GoodsReceiptDetail(
@@ -298,6 +310,14 @@ public static class PurchaseEndpoints
             })
             .WithName("GetGoodsReceipt")
             .WithSummary("Gets one goods receipt by identifier.");
+
+        group.MapPost("/receiving-discrepancies/{id:guid}/resolve", ResolveReceivingDiscrepancyAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Purchasing.ResolveDiscrepancy)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ResolveReceivingDiscrepancy")
+            .WithSummary("Closes a receiving discrepancy with a resolution decision.");
 
         return app;
     }
@@ -623,11 +643,16 @@ public static class PurchaseEndpoints
                     .OrderBy(d => d.LineNo)
                     .ThenBy(d => d.Kind)
                     .Select(d => new ReceivingDiscrepancySummary(
+                        d.Id.Value,
                         d.PurchaseOrderLineId.Value,
                         d.LineNo,
                         d.Kind.ToString(),
                         d.Quantity,
-                        d.ValueImpact))
+                        d.ValueImpact,
+                        d.ResolutionOutcome != null ? d.ResolutionOutcome.ToString() : null,
+                        d.ResolutionNote,
+                        d.ResolvedByUserId != null ? d.ResolvedByUserId.Value.Value : null,
+                        d.ResolvedAtUtc))
                     .ToList()))
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -637,5 +662,26 @@ public static class PurchaseEndpoints
                 Result.Failure(PurchasingErrors.ReceiptUnknown(new GoodsReceiptId(receiptId))),
                 currentUser.CorrelationId.Value)
             : TypedResults.Ok(detail);
+    }
+
+    private static async Task<IResult> ResolveReceivingDiscrepancyAsync(
+        Guid id,
+        [FromBody] ResolveReceivingDiscrepancyBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<GoodsReceiptId> result = await dispatcher
+            .SendAsync(
+                new ResolveReceivingDiscrepancyCommand(
+                    new ReceivingDiscrepancyId(id),
+                    body.Outcome,
+                    body.Note),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 }

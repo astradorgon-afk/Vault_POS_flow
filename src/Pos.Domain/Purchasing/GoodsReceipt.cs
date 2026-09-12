@@ -44,6 +44,28 @@ public enum ReceivingDiscrepancyKind
 }
 
 /// <summary>
+/// How a receiving discrepancy was closed. The outcome is the business decision;
+/// the ledger effects of each option are executed separately (a credit is owed,
+/// a replacement arrives as a later receipt, a write-off goes through the
+/// adjustment flow) so resolving a discrepancy is a document action, not a
+/// posting action. Persisted as <see cref="short"/>; values must never be renumbered.
+/// </summary>
+public enum ReceivingDiscrepancyResolutionOutcome
+{
+    /// <summary>The supplier owes a credit for the discrepant value.</summary>
+    SupplierCredit = 1,
+
+    /// <summary>The supplier will replace the discrepant quantity.</summary>
+    Replacement = 2,
+
+    /// <summary>The discrepant quantity is written off.</summary>
+    WriteOff = 3,
+
+    /// <summary>The discrepancy is closed without further action.</summary>
+    NoAction = 4,
+}
+
+/// <summary>
 /// The receiving policy knobs. Defaults stand in for settings that a later
 /// phase will make configurable per location and category
 /// (<c>AutoPassInspection</c>, <c>MinimumAcceptableShelfLifeDays</c>);
@@ -291,6 +313,35 @@ public sealed class ReceivingDiscrepancy : Entity<ReceivingDiscrepancyId>
 
     /// <summary>Gets the monetary impact at the receipt unit cost.</summary>
     public decimal ValueImpact { get; private set; }
+
+    /// <summary>Gets the resolution outcome, once the discrepancy has been closed.</summary>
+    public ReceivingDiscrepancyResolutionOutcome? ResolutionOutcome { get; private set; }
+
+    /// <summary>Gets the free-text note attached to the resolution, if any.</summary>
+    public string? ResolutionNote { get; private set; }
+
+    /// <summary>Gets the user who resolved the discrepancy, once closed.</summary>
+    public UserId? ResolvedByUserId { get; private set; }
+
+    /// <summary>Gets the instant the discrepancy was resolved, once closed.</summary>
+    public DateTimeOffset? ResolvedAtUtc { get; private set; }
+
+    /// <summary>Records the resolution decision. Called by the owning receipt.</summary>
+    /// <param name="outcome">The closing decision.</param>
+    /// <param name="note">The optional note.</param>
+    /// <param name="resolver">The resolving user.</param>
+    /// <param name="now">The current instant.</param>
+    internal void Resolve(
+        ReceivingDiscrepancyResolutionOutcome outcome,
+        string? note,
+        UserId resolver,
+        DateTimeOffset now)
+    {
+        ResolutionOutcome = outcome;
+        ResolutionNote = note?.Trim();
+        ResolvedByUserId = resolver;
+        ResolvedAtUtc = now;
+    }
 }
 
 /// <summary>
@@ -741,6 +792,50 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
             line.ApproveCostVariance(approver, now);
         }
 
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Closes a receiving discrepancy with the outcome decision. The resolution
+    /// is a document action: the follow-up (credit issued, replacement arrives,
+    /// write-off approved) is executed through its own flow.
+    /// </summary>
+    /// <param name="discrepancyId">The discrepancy to resolve.</param>
+    /// <param name="outcome">The closing decision.</param>
+    /// <param name="note">An optional free-text note.</param>
+    /// <param name="resolver">The user closing the discrepancy.</param>
+    /// <param name="now">The current instant.</param>
+    /// <returns>Success, or a validation or conflict error.</returns>
+    public Result ResolveDiscrepancy(
+        ReceivingDiscrepancyId discrepancyId,
+        ReceivingDiscrepancyResolutionOutcome outcome,
+        string? note,
+        UserId resolver,
+        DateTimeOffset now)
+    {
+        if (Status != GoodsReceiptStatus.Posted)
+        {
+            return Result.Failure(PurchasingErrors.ReceiptNotPostedForResolution(Id));
+        }
+
+        if (!Enum.IsDefined(outcome))
+        {
+            return Result.Failure(PurchasingErrors.DiscrepancyResolutionOutcomeInvalid);
+        }
+
+        ReceivingDiscrepancy? discrepancy = _discrepancies.Find(d => d.Id == discrepancyId);
+
+        if (discrepancy is null)
+        {
+            return Result.Failure(PurchasingErrors.DiscrepancyUnknown(discrepancyId));
+        }
+
+        if (discrepancy.ResolvedAtUtc is not null)
+        {
+            return Result.Failure(PurchasingErrors.DiscrepancyAlreadyResolved(discrepancyId));
+        }
+
+        discrepancy.Resolve(outcome, note, resolver, now);
         return Result.Success();
     }
 

@@ -185,4 +185,131 @@ public sealed class PurchaseOrderRepository(PosDbContext context) : IPurchaseOrd
         // and the GRN counter atomic.
         return Task.FromResult(Result<GoodsReceiptId>.Success(receipt.Id));
     }
+
+    /// <inheritdoc />
+    public Task<GoodsReceipt?> GetGoodsReceiptByDiscrepancyAsync(
+        ReceivingDiscrepancyId discrepancyId,
+        CancellationToken cancellationToken)
+        => context.GoodsReceipts
+            .AsTracking()
+            .Include(r => r.Lines)
+            .Include(r => r.Discrepancies)
+            .FirstOrDefaultAsync(r => r.Discrepancies.Any(d => d.Id == discrepancyId), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> IsActiveStoreLocationAsync(LocationId locationId, CancellationToken cancellationToken)
+        => context.Locations
+            .AsNoTracking()
+            .AnyAsync(l => l.Id == locationId && l.Kind == LocationKind.Store, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Result<DirectDeliveryAuthorizationId>> AddDirectDeliveryAuthorizationAsync(
+        DirectDeliveryAuthorization authorization,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(authorization);
+
+        context.DirectDeliveryAuthorizations.Add(authorization);
+
+        return Task.FromResult(Result<DirectDeliveryAuthorizationId>.Success(authorization.Id));
+    }
+
+    /// <inheritdoc />
+    public Task<DirectDeliveryAuthorization?> GetDirectDeliveryAuthorizationByIdAsync(
+        DirectDeliveryAuthorizationId id,
+        CancellationToken cancellationToken)
+        => context.DirectDeliveryAuthorizations
+            .AsTracking()
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DirectDeliveryAuthorization>> FindDirectDeliveryAuthorizationsAsync(
+        SupplierId? supplierId,
+        LocationId? storeLocationId,
+        bool activeOnly,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<DirectDeliveryAuthorization> query = context.DirectDeliveryAuthorizations.AsNoTracking();
+
+        if (supplierId is { } supplier)
+        {
+            query = query.Where(a => a.SupplierId == supplier);
+        }
+
+        if (storeLocationId is { } store)
+        {
+            query = query.Where(a => a.StoreLocationId == store);
+        }
+
+        if (activeOnly)
+        {
+            query = query.Where(a => a.Status == DirectDeliveryAuthorizationStatus.Active);
+        }
+
+        return await query
+            .OrderByDescending(a => a.CreatedAtUtc)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task<Result<SupplierReturnId>> AddSupplierReturnAsync(
+        SupplierReturn returnDocument,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(returnDocument);
+
+        context.SupplierReturns.Add(returnDocument);
+
+        return Task.FromResult(Result<SupplierReturnId>.Success(returnDocument.Id));
+    }
+
+    /// <inheritdoc />
+    public Task<SupplierReturn?> GetSupplierReturnByIdAsync(
+        SupplierReturnId id,
+        CancellationToken cancellationToken)
+        => context.SupplierReturns
+            .AsTracking()
+            .Include(r => r.Lines)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<ReturnDispatchContext?> GetReturnDispatchContextAsync(
+        LocationId locationId,
+        CancellationToken cancellationToken)
+    {
+        Location? location = await context.Locations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(l => l.Id == locationId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (location is null)
+        {
+            return null;
+        }
+
+        Location? external = await context.Locations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(l => l.Code == SystemLocationCodes.ExternalSupplier, cancellationToken)
+            .ConfigureAwait(false);
+
+        return new ReturnDispatchContext(external?.Id, location.TimeZoneId, location.Kind);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Batch>> GetBatchesAsync(
+        IReadOnlyCollection<BatchId> batchIds,
+        CancellationToken cancellationToken)
+    {
+        if (batchIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await context.Batches
+            .AsNoTracking()
+            .Where(b => batchIds.Contains(b.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
 }

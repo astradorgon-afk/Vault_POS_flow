@@ -17,8 +17,14 @@ public sealed class InventoryEndpointTests(PosApiFactory factory)
     [Fact]
     public async Task Reconcile_OnAnEmptyLedger_ReportsHealthy()
     {
-        await factory.CreateUserAsync("inv-admin-reconcile", Roles.Administrator);
-        using HttpClient client = factory.CreateClient();
+        // "Empty ledger" can only be guaranteed on a host with a fresh database:
+        // any earlier test in the shared collection posts movements, and the
+        // reconciler replays the whole ledger into buckets. The independent
+        // factory owns its own database, like the rebuild test below.
+        await using PosApiFactory emptyFactory = new();
+        await emptyFactory.InitializeAsync();
+        await emptyFactory.CreateUserAsync("inv-admin-reconcile", Roles.Administrator);
+        using HttpClient client = emptyFactory.CreateClient();
 
         string token = await SignInAsync(client, "inv-admin-reconcile");
 
