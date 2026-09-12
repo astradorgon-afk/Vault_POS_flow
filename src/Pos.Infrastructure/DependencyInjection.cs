@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Inventory;
+using Pos.Application.Purchasing;
 using Pos.Infrastructure.Auditing;
 using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Configuration;
@@ -57,6 +58,8 @@ public static class DependencyInjection
         services.TryAddScoped<ILedgerPolicyProvider, LocationSettingsLedgerPolicyProvider>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
         services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
+        services.TryAddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();
+        services.TryAddScoped<IPurchaseOrderRepository, PurchaseOrderRepository>();
 
         // The reconciliation tripwire is optional so a host can run without it
         // (tests, short-lived tools); when enabled it only reads.

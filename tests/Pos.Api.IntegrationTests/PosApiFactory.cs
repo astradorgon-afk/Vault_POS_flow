@@ -390,6 +390,34 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
             return created.Value.Id;
         });
 
+    /// <summary>Creates a supplier directly in the database, or returns the one
+    /// already bearing the code.</summary>
+    /// <param name="code">The short unique code.</param>
+    /// <param name="name">The display name.</param>
+    /// <returns>The supplier's identifier.</returns>
+    public Task<SupplierId> CreateSupplierAsync(string code, string name)
+        => WithServiceAsync<SupplierId>(async context =>
+        {
+            Supplier? existing = await context.Suppliers.FirstOrDefaultAsync(s => s.Code == code);
+
+            if (existing is not null)
+            {
+                return existing.Id;
+            }
+
+            Result<Supplier> created = Supplier.Create(code, name, taxId: null, paymentTermsDays: 30, leadTimeDays: 7);
+
+            if (created.IsFailure)
+            {
+                throw new InvalidOperationException(
+                    "Could not create test supplier: " + string.Join("; ", created.Errors.Select(e => e.Code)));
+            }
+
+            context.Suppliers.Add(created.Value);
+            await context.SaveChangesAsync();
+            return created.Value.Id;
+        });
+
     private static async Task<ProductCategory> SeedCategoryAsync(PosDbContext context, string code, string name)
     {
         ProductCategory? existing = await context.Categories.FirstOrDefaultAsync(c => c.Code == code);

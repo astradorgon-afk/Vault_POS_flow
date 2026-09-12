@@ -7,6 +7,7 @@ using Pos.Domain.Devices;
 using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
 using Pos.Domain.Organizations;
+using Pos.Domain.Purchasing;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
 
@@ -35,6 +36,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Schema holding the product catalogue and reference master data.</summary>
     public const string CatalogSchema = "catalog";
+
+    /// <summary>Schema holding purchasing documents: orders, lines and decisions.</summary>
+    public const string PurchasingSchema = "purchasing";
 
     /// <summary>
     /// Gets the append-only inventory ledger. Insert only: the interceptor and
@@ -105,6 +109,21 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets the suppliers.</summary>
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+
+    /// <summary>Gets the purchase orders.</summary>
+    public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+
+    /// <summary>Gets the purchase order lines.</summary>
+    public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
+
+    /// <summary>Gets the purchase order approval decisions.</summary>
+    public DbSet<PurchaseApproval> PurchaseApprovals => Set<PurchaseApproval>();
+
+    /// <summary>
+    /// Gets the central document counter rows. Advanced exclusively by raw upsert
+    /// SQL; the change tracker never writes these rows.
+    /// </summary>
+    public DbSet<DocumentCounter> DocumentCounters => Set<DocumentCounter>();
 
     /// <summary>Gets the per-location product settings.</summary>
     public DbSet<ProductLocationSetting> ProductLocationSettings => Set<ProductLocationSetting>();

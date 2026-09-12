@@ -6,4 +6,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Internal pipeline members (e.g. PurchaseOrder.RecordReceipt) are
+         consumed by the application layer and exercised by the domain tests. -->
+    <InternalsVisibleTo Include="Pos.Application" />
+    <InternalsVisibleTo Include="Pos.Domain.Tests" />
+  </ItemGroup>
+
 </Project>
