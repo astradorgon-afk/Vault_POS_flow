@@ -51,7 +51,9 @@ public static class DependencyInjection
         services.TryAddScoped<IMasterDataRepository, MasterDataRepository>();
         services.TryAddSingleton<ISystemClock, SystemClock>();
         services.TryAddScoped<IAuditWriter, AuditWriter>();
-        services.TryAddScoped<ILedgerPolicyProvider, StrictLedgerPolicyProvider>();
+        // Real policies now come from each location's own settings. The strict
+        // provider remains for tests that need the conservative baseline.
+        services.TryAddScoped<ILedgerPolicyProvider, LocationSettingsLedgerPolicyProvider>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
 
         return services;
@@ -100,6 +102,10 @@ public static class DependencyInjection
 
         services.AddOptions<DatabaseOptions>()
             .Bind(configuration.GetSection(DatabaseOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddOptions<SeedingOptions>()
+            .Bind(configuration.GetSection(SeedingOptions.SectionName))
             .ValidateOnStart();
 
         services.AddOptions<RateLimitOptions>()
@@ -233,6 +239,7 @@ public static class DependencyInjection
         services.TryAddScoped<IDeviceService, DeviceService>();
         services.TryAddScoped<IdentitySeeder>();
         services.TryAddScoped<BootstrapOwnerSeeder>();
+        services.TryAddScoped<DevelopmentDataSeeder>();
 
         return services;
     }

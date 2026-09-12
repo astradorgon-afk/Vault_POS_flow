@@ -153,6 +153,29 @@ public sealed class Location : AggregateRoot<LocationId>
             LocationSettings.Default);
     }
 
+    /// <summary>
+    /// Replaces the operational settings. Settings on a system counterparty or a
+    /// closed location are meaningless: one has no operations and the other
+    /// cannot have any more, so both are refused.
+    /// </summary>
+    /// <param name="settings">The new settings, or <see langword="null"/> for the conservative defaults.</param>
+    /// <returns>A success result, or a failure when the location cannot change settings.</returns>
+    public Result UpdateSettings(LocationSettings? settings)
+    {
+        if (IsSystemCreated)
+        {
+            return Result.Failure(LocationErrors.CannotUpdateSystemLocationSettings);
+        }
+
+        if (!IsActive)
+        {
+            return Result.Failure(LocationErrors.AlreadyClosed);
+        }
+
+        Settings = settings ?? LocationSettings.Default;
+        return Result.Success();
+    }
+
     /// <summary>Closes a location, refusing when balances or documents are open.</summary>
     /// <param name="closingDate">The effective closing business date.</param>
     /// <returns>A success result, or a failure when work is still open.</returns>

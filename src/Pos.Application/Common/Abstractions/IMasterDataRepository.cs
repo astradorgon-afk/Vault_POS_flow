@@ -18,6 +18,20 @@ public interface IMasterDataRepository
     /// <returns>The persisted identifier, or a conflict failure.</returns>
     Task<Result<LocationId>> CreateLocationAsync(Location location, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Replaces a location's operational settings. The location is loaded inside
+    /// the caller's transaction, so the change applies atomically with the audit
+    /// entry and any surrounding work.
+    /// </summary>
+    /// <param name="locationId">The location to change.</param>
+    /// <param name="settings">The new settings.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identifier, or a not-found/conflict failure.</returns>
+    Task<Result<LocationId>> UpdateLocationSettingsAsync(
+        LocationId locationId,
+        LocationSettings settings,
+        CancellationToken cancellationToken);
+
     /// <summary>Persists a newly created category.</summary>
     /// <param name="category">The aggregate.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -179,6 +179,25 @@ public sealed class ApprovalTierLimits
     public decimal SelfApprovalLimit { get; set; }
 }
 
+/// <summary>Development seeding behaviour.</summary>
+/// <remarks>
+/// Splitting the switch from <c>Database:SeedDevelopmentData</c> lets a developer
+/// exercise the master data and the staff accounts independently, and lets a
+/// shared dev database keep its reference data while accounts stay off.
+/// </remarks>
+public sealed class SeedingOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "Seeding";
+
+    /// <summary>
+    /// Gets or sets whether development staff accounts are created with a known
+    /// password. Never enabled outside development: these accounts carry
+    /// standard-role authority and a published credential.
+    /// </summary>
+    public bool EnableDevelopmentAccounts { get; set; }
+}
+
 /// <summary>
 /// Request rate limits.
 /// </summary>

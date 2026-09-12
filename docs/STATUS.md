@@ -1,8 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-12 · **Milestone:** Phase 3 (Master Data) — domain, persistence and use cases landed
-
-**Last updated:** 2026-09-12 · **Milestone:** Phase 2 complete — Identity and Authorization
+**Last updated:** 2026-09-12 · **Milestone:** Phase 3 (Master Data) — complete, pending final verification
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -15,16 +13,18 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **103 passing, 0 failing, 0 skipped** |
-| Migrations | 5, forward-only, applied cleanly against PostgreSQL 17 |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 4 (inventory core) |
-| Phases remaining | 3, 5–18 — see §5 |
+| Tests | **126 passing, 0 failing, 0 skipped** (local run, SQLite; PostgreSQL suite self-skips without Docker) |
+| Migrations | 6, forward-only, applied cleanly against PostgreSQL 17 |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core) |
+| Phases remaining | 5–18 — see §5 |
 
 ```
 Pos.Domain.Tests            41 passing   invariants, money, ledger rules
-Pos.Infrastructure.Tests    16 passing   ledger posting + real PostgreSQL triggers
+Pos.Infrastructure.Tests    19 passing   ledger posting + real PostgreSQL triggers + policy provider
 Pos.Architecture.Tests      13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests          33 passing   authentication, tokens, permission matrix
+Pos.Application.Tests        8 passing   master-data commands and validators
+Pos.Api.IntegrationTests    12 passing   endpoints through the real pipeline (SQLite)
 ```
 
 The PostgreSQL suite needs a Docker daemon. It self-skips without one, so a
@@ -57,7 +57,7 @@ setters, an EF interceptor, PostgreSQL triggers, and a database role with only
 `SELECT, INSERT` on the ledger. Movement-type rules table, weighted-average
 costing, negative-stock policy, idempotency by event id.
 
-### Phase 2 — Identity and authorization (this session)
+### Phase 2 — Identity and authorization
 - ASP.NET Core Identity with Guid keys, PBKDF2 at 600,000 iterations,
   NIST-style password policy (length over composition rules).
 - 74-permission catalogue defined **in code** and seeded to the database, so a
@@ -81,6 +81,37 @@ costing, negative-stock policy, idempotency by event id.
 - Append-only audit log under the same four guards as the ledger, plus sign-in
   attempt history with hashed identifiers.
 - Bootstrap owner seeder that refuses to run if any user exists.
+
+### Phase 3 — Master data (this session)
+- **Domain and persistence:** `Location` (JSON `LocationSettings`),
+  `Organization`, `Product` aggregate with `ProductBarcode`, `ProductPrice`,
+  `ProductUnitConversion`, `ProductLocationSetting`, `ProductSupplier` children,
+  plus `ProductCategory`, `Brand`, `UnitOfMeasure`, `Supplier`. Price overlap
+  exclusion constraint and product-name trigram index in migration
+  `20260912074419_MasterDataCatalog`.
+- **Locations:** `CreateLocationCommand` and `UpdateLocationSettingsCommand`
+  (`settings.manage`, route-scoped). Settings on a system counterparty or a
+  closed location are refused. `ILedgerPolicyProvider` now reads the negative-
+  stock policy from the location's own settings, failing closed to the strictest
+  option on a missing or unreadable row (`LocationSettingsLedgerPolicyProvider`).
+- **Endpoints** (all behind the real authorization pipeline): `GET/POST
+  /api/v1/locations`, `PUT /api/v1/locations/{id}/settings`, and the
+  `/api/v1/catalog/**` group — product list (search/filter/page), by id, by
+  barcode, product create, and read+create for categories, brands, units of
+  measure and suppliers. List reads use the deliberately relaxed `product.view`
+  so POS devices can resolve catalogue and location scope offline; writes sit on
+  their `*.manage` permissions.
+- **Development seed data:** idempotent `DevelopmentDataSeeder` gated by
+  `Database:SeedDevelopmentData`. Seeds the three system counterparties, one Main
+  Warehouse, three stores, reference master data, a small product catalogue with
+  barcodes, and — only when additionally gated by `Seeding:EnableDevelopmentAccounts`
+  — ten staff accounts with a documented development password. The whole seed
+  runs in one transaction; the accounts seed is intentionally conservative
+  (default location settings stay strict).
+- **Tests:** command validator + handler unit tests, `LocationSettingsLedgerPolicyProvider`
+  tests against SQLite, and endpoint integration tests through the real pipeline:
+  authentication, authorization, validation, persistence, and the 404/409
+  contracts the POS and quarantine clients depend on.
 
 ---
 
@@ -116,6 +147,19 @@ the real check; the filter was removed.
 — an exception list is the first step to a `double` in a money field — so it
 became `decimal?`, which costs nothing here.
 
+**SKU partial search did not translate through the value converter.** The product
+search filter used `p.Sku.Value.Contains(term)`, which EF cannot translate — the
+SKU is a value-converted key. It compiled clean and blew up with a 500 on the
+first request. Replaced with a translatable shape: name via `LIKE`, exact SKU
+equality on the normalized key, barcode partial via the barcode table. The seeder's
+idempotency check used the same broken pattern and was fixed at the same time.
+
+**Disposing an `HttpRequestMessage` before the TestHost read its body.** The
+test helpers returned `client.SendAsync(...)` from inside a `using`, disposing
+the request content before the server consumed it — every POST/PUT test failed
+with `ObjectDisposedException` on `StreamContent`. Awaiting inside the `using`
+scope fixed the whole class at once.
+
 ---
 
 ## 4. Known gaps in what is marked complete
@@ -127,64 +171,28 @@ Stated plainly so they are not mistaken for finished work:
 | No optimistic concurrency token on `InventoryBalance` | Phase 4 | Concurrent posts to one bucket abort at the guard rather than retry. Safe failure, but a retry loop is wanted. |
 | `inventory_movement` and `audit_log` not yet partitioned | Phase 4 | Fine at current volume; the maintenance job is designed, not built. |
 | Reconciliation worker and `rebuild-balances` command not built | Phase 4 | Drift between ledger and projection would go unnoticed. |
+| Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
+| `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
 | Serilog sensitive-data scrubbing policy not implemented | Phase 1 | No secret is currently logged, but nothing enforces that. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Two-factor is supported but not enforced for admins | Phase 2 | `RequireTwoFactorForAdmins` is configured and read, not yet enforced at sign-in. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
-| No user-administration endpoints | Phase 2 | Users, roles and overrides are manageable through the database and the seeder only. |
+| No user-administration endpoints | Phase 2 | Users, roles and overrides are manageable through the database and the seeders only. |
 
 ---
 
 ## 5. What to do next
 
-**Phase 3 — Master Data** is the natural next step, because almost everything
-downstream needs products and locations to exist.
+Phase 3 ships the master data everything downstream reads. The next phases build
+on it:
 
-1. **Organization and locations.** Main Warehouse, stores, and the three virtual
-   `External` locations the ledger already depends on (`EXT-SUPPLIER`,
-   `EXT-CUSTOMER`, `EXT-WRITEOFF`). Location settings carry the negative-stock
-   policy, which `StrictLedgerPolicyProvider` currently hard-codes to the
-   strictest option — replacing that provider is the first real wiring job.
-2. **Suppliers, categories, brands, units of measure**, with unit conversions.
-3. **Products and barcodes.** The centralized Product Master rule is already
-   enforced in the permission catalogue; this builds the aggregate behind it.
-   Barcode uniqueness is global and deliberate.
-4. **Effective-dated pricing** with the overlap-exclusion constraint described in
-   [DATABASE.md](DATABASE.md).
-5. **`ProductLocationSetting`** — min, reorder, target, max, preferred quantity.
-6. **Development seed data**: the Main Warehouse, three stores, a supplier, a few
-   categories and products, and the staff accounts described in the brief.
-
-Two smaller items worth doing alongside, because later phases assume them:
-
-Two smaller items worth doing alongside, because later phases assume them:
-
-- Wire `ILedgerPolicyProvider` to real location settings.
-- Add user-administration endpoints so roles and overrides stop being a
-  database-only concern.
-
-### Phase 3 progress (this session)
-
-- **Domain:** `Location` (with JSON `LocationSettings`), `Organization`,
-  `Product` aggregate with `ProductBarcode`, `ProductPrice`, `ProductUnitConversion`,
-  `ProductLocationSetting`, `ProductSupplier` children, plus `ProductCategory`,
-  `Brand`, `UnitOfMeasure`, `Supplier` master data. New strongly-typed ids for
-  all child rows.
-- **Application:** `CreateLocationCommand`, and create commands with FluentValidation
-  validators for category, brand, unit of measure, supplier and product
-  (`product.create` permission enforced centrally, per the product-master rule).
-- **Infrastructure:** `MasterDataRepository` implements `IMasterDataRepository`;
-  EF configurations for all tables including the price overlap exclusion
-  constraint (btree_gist) and product-name trigram index; migration
-  `20260912074419_MasterDataCatalog` created, drift-checked against a live
-  PostgreSQL instance.
-- Remaining Phase 3 work: API endpoints exposing the new commands, the
-  development seed data (Main Warehouse, stores, staff accounts), and wiring
-  `ILedgerPolicyProvider` to real location settings.
-
-- Wire `ILedgerPolicyProvider` to real location settings.
-- Add user-administration endpoints so roles and overrides stop being a
-  database-only concern.
+1. **Phase 5 — Purchasing:** purchase orders, goods receipts, batch/expiry
+   capture, receiving discrepancies, direct-supplier delivery authorization.
+2. **Catalog curation** (deferred Phase 3 rows, now unblocked): product edit,
+   barcode management, deactivate/activate, effective-dated pricing endpoints,
+   `ProductLocationSetting`, unit conversions, product-supplier links.
+3. **User-administration endpoints** so roles, overrides and location
+   assignments stop being a database-only concern.
 
 ---
 
@@ -207,3 +215,9 @@ dotnet test VaultFlow.slnx
 The bootstrap owner account is created only on an empty database, only when
 `BootstrapOwner:Enabled` is true, and its password comes from configuration.
 Sign in, change it, then turn the flag off.
+
+The development seed runs only when `Database:SeedDevelopmentData` is true (the
+Development configuration sets it). Staff accounts additionally need
+`Seeding:EnableDevelopmentAccounts`; their shared password is
+`DevVaultFlow!2026`, documented so nobody mistakes it for a deployed credential.
+```

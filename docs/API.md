@@ -65,8 +65,8 @@ Status mapping: validation → `400`; unauthenticated → `401`; permission or s
 
 | Method | Route | Permission |
 |---|---|---|
-| GET | `/api/v1/locations` | `inventory.view` |
-| POST/PUT | `/api/v1/locations[/{id}]` | `location.manage` |
+| GET | `/api/v1/locations` | `product.view` (list reads are deliberately relaxed so POS devices can resolve location scope offline) |
+| POST | `/api/v1/locations` | `location.manage` |
 | PUT | `/api/v1/locations/{id}/settings` | `settings.manage` |
 | GET | `/api/v1/products` (search, filter, page) | `product.view` |
 | GET | `/api/v1/products/{id}` | `product.view` |
@@ -78,11 +78,27 @@ Status mapping: validation → `400`; unauthenticated → `401`; permission or s
 | POST | `/api/v1/products/{id}/prices` | `product.price.manage` |
 | PUT | `/api/v1/products/{id}/location-settings/{locationId}` | `product.edit` |
 | POST | `/api/v1/products/{id}/deactivate` \| `/activate` | `product.disable` |
-| CRUD | `/api/v1/categories`, `/brands`, `/units`, `/suppliers` | respective `*.manage` |
+| GET/POST | `/api/v1/categories` | read `product.view` / write `category.manage` |
+| GET/POST | `/api/v1/brands` | read `product.view` / write `brand.manage` |
+| GET/POST | `/api/v1/units` | read `product.view` / write `uom.manage` |
+| GET/POST | `/api/v1/suppliers` | read `supplier.view` / write `supplier.manage` |
+
+The product edit, barcode, price, location-settings and deactivate rows are
+contracts agreed but not yet implemented: Phase 3 delivers location create +
+settings, the catalogue reads, and the create commands for products, categories,
+brands and units + suppliers. The deferred rows arrive with the catalog curation
+phase.
 
 `GET /products/by-barcode/{barcode}` returns `404` with
 `errorCode: catalog.barcode_unknown` — the POS and receiving clients treat that
 specific code as the trigger for the quarantine workflow, never as "create it".
+`GET /products/{id}` returns `404` with `errorCode: catalog.product_unknown`.
+
+`GET /products?q=...` matches the query against the product name (partial, via
+`LIKE`), an exact SKU (the SKU is a value-converted key, so partial string
+functions cannot translate through it), or any attached barcode (partial). The
+`includeInactive`, `offset` and `limit` query parameters (`limit` is clamped to
+200) apply the same way on this route and on `GET /suppliers`.
 
 ---
 

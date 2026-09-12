@@ -5,6 +5,20 @@ namespace Pos.Domain.Catalog;
 /// <summary>The catalog's error catalogue. Codes are part of the API contract.</summary>
 public static class CatalogErrors
 {
+    /// <summary>A referenced product does not exist.</summary>
+    /// <param name="id">The identifier that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error ProductUnknown(ProductId id) => Error.NotFound(
+        "catalog.product_unknown",
+        FormattableString.Invariant($"Product {id.Value} was not found."));
+
+    /// <summary>No product was found for the given barcode.</summary>
+    /// <param name="barcode">The barcode that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error BarcodeUnknown(string barcode) => Error.NotFound(
+        "catalog.barcode_unknown",
+        FormattableString.Invariant($"No product is registered under barcode '{barcode}'."));
+
     /// <summary>A barcode was attached that already belongs to the same product.</summary>
     /// <param name="barcode">The duplicated barcode.</param>
     /// <returns>The error.</returns>

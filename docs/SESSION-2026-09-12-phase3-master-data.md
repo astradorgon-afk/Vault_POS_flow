@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-12
 **Baseline:** commit `3e95482` (`milestone/phase-2-identity`) — Phases 0, 1, 2 and 4 (core) complete
-**Status at end of session:** solution builds clean (0 warnings, warnings-as-errors on), **103 / 103 tests passing**, PostgreSQL migration applies and passes the drift check.
+**Status at end of session:** solution builds clean (0 warnings, warnings-as-errors on), **126 / 126 tests passing** (41 domain, 19 infrastructure, 13 architecture, 33 security, 8 application, 12 API integration), PostgreSQL migration applies and passes the drift check.
 
 ---
 
@@ -117,3 +117,105 @@ dotnet test VaultFlow.slnx      → 103 passed, 0 failed, 0 skipped
 
 `docs/STATUS.md` was updated with a Phase 3 progress section reflecting all of
 the above.
+
+---
+
+# Part 2 — Endpoints, policy wiring, seed data, tests
+
+**Baseline:** commit `fa99bf0` (`master-data: Phase 3 domain, persistence,
+use cases`) — the domain/persistence/application milestone above.
+
+---
+
+## 6. What was built in Part 2
+
+### 6.1 API layer (`Pos.Api`)
+
+| File | Contents |
+|---|---|
+| `Endpoints/LocationEndpoints.cs` | `GET /api/v1/locations` (`product.view` — list reads deliberately relaxed for POS offline scope resolution), `POST /api/v1/locations` (`location.manage`), `PUT /api/v1/locations/{id}/settings` (`settings.manage`, route-scoped so it is a pair of (permission, location)) |
+| `Endpoints/CatalogEndpoints.cs` | `GET/POST /api/v1/catalog/products`, `GET /api/v1/catalog/products/{id}`, `GET /api/v1/catalog/products/by-barcode/{barcode}`, `GET/POST /api/v1/catalog/{categories,brands,units,suppliers}` |
+
+Endpoint permission map: reads → `product.view` (suppliers read →
+`supplier.view`); writes → `location.manage` / `settings.manage` /
+`product.create` / `supplier.manage` / `category.manage` / `brand.manage` /
+`uom.manage`.
+
+Search surface: `GET /catalog/products?q=…` matches name (partial, `LIKE`),
+an **exact** SKU, or barcode partial; `includeInactive`, `offset`, `limit`
+(param capped at 200). `GET /suppliers` shares the pagination parameters.
+
+### 6.2 Infrastructure (`Pos.Infrastructure`)
+
+| File | Contents |
+|---|---|
+| `Inventory/LocationSettingsLedgerPolicyProvider.cs` | `ILedgerPolicyProvider` reading each location's own settings (`AsNoTracking`); missing/unreadable settings fail closed to `NegativeStockPolicy.Prohibit`. Registered in DI, replacing the hard-coded strict provider |
+| `Identity/DevelopmentDataSeeder.cs` | Idempotent seeder (one transaction for master data): the three system counterparties from `SystemLocationCodes`, Main Warehouse + STORE01–03, categories, units, brands, suppliers, six products with barcodes; staff accounts (owner, admins, store managers, inv staff, cashiers, auditor) with `UserLocationAssignment` + `ApprovalTier`, gated separately by `Seeding:EnableDevelopmentAccounts` |
+| `Configuration/Options.cs` | `SeedingOptions` (`SectionName = "Seeding"`) bound and validated on start |
+| `Program.cs` | `PrepareDatabaseAsync` now runs IdentitySeeder → DevelopmentDataSeeder → BootstrapOwner |
+
+### 6.3 Tests (new)
+
+| Project | Files | Count |
+|---|---|---|
+| `Pos.Application.Tests` | `Organizations/UpdateLocationSettingsCommandValidatorTests.cs`, `UpdateLocationSettingsCommandHandlerTests.cs` | 8 |
+| `Pos.Infrastructure.Tests` | `Inventory/LocationSettingsLedgerPolicyProviderTests.cs` (SQLite) | 3 |
+| `Pos.Api.IntegrationTests` (new project) | `PosApiFactory` (SQLite `WebApplicationFactory<Program>`, `[Collection("api")]`), `LocationEndpointTests.cs`, `CatalogEndpointTests.cs` | 12 |
+
+---
+
+## 7. Key decisions in Part 2
+
+1. **Search/SKU translatability.** The first cut used `p.Sku.Value.Contains(term)`
+   — untranslatable through the value converter, and it produced a 500 at
+   runtime even though it compiled clean. Replaced with name `LIKE` + exact SKU
+   equality on the normalized key + barcode partial. The seeder's idempotency
+   probe had the same latent bug and was fixed identically. A compile-time-safe
+   translatable-filter probe is a candidate for the architecture tests.
+2. **`UpdateLocationSettingsCommand` returns nothing useful → `LocationId`.**
+   The dispatcher only supports `ICommand<TResult>`; returning `LocationId`
+   documents what changed in audit logs, and the endpoint maps it to 204.
+3. **Permissions are carried by the messages, not the endpoints.** Endpoints
+   declare no permission checks of their own; the authorization behaviour reads
+   `IAuthorizedMessage`. The route-scoped pairs (`settings.manage` × location)
+   are the only endpoint-side additions.
+4. **Development seed is defensively scoped.** Master data requires only
+   `Database:SeedDevelopmentData`; **staff accounts additionally require**
+   `Seeding:EnableDevelopmentAccounts`, so a `Development=true` host that is
+   not a dev box never gains credentialed users. BootstrapOwner still runs on
+   an empty database only.
+5. **Shared in-memory SQLite for HTTP tests.** One factory per test class, one
+   shared-cache in-memory database — so seed helpers must be idempotent by code
+   (return the existing row) and assertions must tolerate rows created by other
+   tests in the same class. That constraint is deliberate: it makes the suite
+   run in seconds without an external database.
+
+---
+
+## 8. Verification (Part 2)
+
+```
+dotnet build VaultFlow.slnx     → Build succeeded. 0 Warning(s), 0 Error(s)
+dotnet test VaultFlow.slnx      → 126 passed, 0 failed, 0 skipped
+  Pos.Domain.Tests             41 passing
+  Pos.Infrastructure.Tests     19 passing   (16 existing + 3 policy provider; PG suite self-skips without Docker)
+  Pos.Architecture.Tests       13 passing
+  Pos.Security.Tests           33 passing
+  Pos.Application.Tests         8 passing   (settings command + validator)
+  Pos.Api.IntegrationTests     12 passing   (6 location + 5 catalog + 1 duplicate-conflict; real auth pipeline)
+```
+
+---
+
+## 9. Not done (next session)
+
+1. **Catalog curation endpoints** — deferred Phase 3 rows in `API.md` §3:
+   product edit, barcode manage, price manage, per-location product settings,
+   deactivate/activate. The aggregate already supports them.
+2. **Phase 5 — Purchasing** now has its foundations (suppliers, locations,
+   products, approval tiers) and is the natural next phase.
+3. **User-administration endpoints** so roles / overrides / location
+   assignments stop being a database-only concern.
+4. **Data-aware security tests** — the permission matrix tests cover
+   `settings.manage` by construction, but an integration-level matrix sweep is
+   worth adding while the catalogue of endpoints is still small.

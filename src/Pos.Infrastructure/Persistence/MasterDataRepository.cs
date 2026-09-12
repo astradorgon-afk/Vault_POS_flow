@@ -37,6 +37,40 @@ public sealed class MasterDataRepository(PosDbContext context) : IMasterDataRepo
     }
 
     /// <inheritdoc />
+    public async Task<Result<LocationId>> UpdateLocationSettingsAsync(
+        LocationId locationId,
+        LocationSettings settings,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        // Opted into tracking explicitly: the context defaults to NoTracking
+        // because reads dominate, and a detached mutation would silently save
+        // nothing. This is the same intent marker used on the identity write
+        // paths.
+        Location? location = await context.Locations
+            .AsTracking()
+            .FirstOrDefaultAsync(l => l.Id == locationId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (location is null)
+        {
+            return Result<LocationId>.Failure(LocationErrors.Unknown(locationId));
+        }
+
+        Result applied = location.UpdateSettings(settings);
+
+        if (applied.IsFailure)
+        {
+            return Result<LocationId>.Failure(applied.Errors);
+        }
+
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<LocationId>.Success(location.Id);
+    }
+
+    /// <inheritdoc />
     public async Task<Result<CategoryId>> CreateCategoryAsync(
         ProductCategory category,
         CancellationToken cancellationToken)

@@ -81,13 +81,17 @@ Last updated: 2026-09-12
 
 ## Phase 3 — Master Data
 
-- [ ] Organization, locations (main warehouse, stores, external virtual locations)
-- [ ] Location settings (negative-stock policy, thresholds, receipt text)
-- [ ] Suppliers, categories, brands, units of measure
-- [ ] Products, barcodes, unit conversions, product-supplier links
-- [ ] Effective-dated pricing with overlap prevention
-- [ ] `ProductLocationSetting` (min/reorder/target/max/preferred)
-- [ ] Admin UI for master data with search, filters, pagination, audit drill-down
+- [x] Organization, locations (main warehouse, stores, external virtual locations)
+- [x] Location settings (negative-stock policy, receipt text, direct delivery, offline grace)
+- [x] Location settings live-wired into `ILedgerPolicyProvider` (replaces the strict provider)
+- [x] Suppliers, categories, brands, units of measure — read and create endpoints
+- [x] Products and barcodes — read (list / by id / by barcode) and create endpoints
+- [ ] Product edit, barcode management, deactivate/activate endpoints (catalog curation phase)
+- [ ] `ProductLocationSetting` (min/reorder/target/max/preferred) endpoints
+- [ ] Effective-dated pricing endpoints (domain + exclusion constraint landed; API deferred)
+- [ ] Unit-conversion and product-supplier link endpoints
+- [ ] Development seed data — locations, counterparties, reference data, products, staff accounts
+- [ ] Admin UI for master data (client application phase; the API surface this phase builds against is agreed above)
 
 ## Phase 4 — Inventory Core
 

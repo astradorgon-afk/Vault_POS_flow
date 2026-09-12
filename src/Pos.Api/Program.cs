@@ -203,6 +203,8 @@ try
 
     app.MapAuthEndpoints();
     app.MapDeviceEndpoints();
+    app.MapLocationEndpoints();
+    app.MapCatalogEndpoints();
 
     await app.RunAsync();
     return 0;
@@ -274,6 +276,19 @@ internal static class DatabaseStartup
             summary.PermissionsAdded,
             summary.RolesAdded,
             summary.GrantsAdded);
+
+        DevelopmentDataSeeder development = scope.ServiceProvider.GetRequiredService<DevelopmentDataSeeder>();
+        DevelopmentDataSummary developmentSummary =
+            await development.SeedAsync(CancellationToken.None).ConfigureAwait(false);
+
+        if (developmentSummary != DevelopmentDataSummary.None)
+        {
+            Log.Information(
+                "Development seed complete: {Locations} locations, {Products} products, {Accounts} accounts.",
+                developmentSummary.LocationsCreated,
+                developmentSummary.ProductsCreated,
+                developmentSummary.AccountsCreated);
+        }
 
         BootstrapOwnerSeeder bootstrap = scope.ServiceProvider.GetRequiredService<BootstrapOwnerSeeder>();
         await bootstrap.SeedAsync(CancellationToken.None).ConfigureAwait(false);

@@ -32,4 +32,16 @@ public static class LocationErrors
         "location.code_taken",
         FormattableString.Invariant($"The location code {code} is already in use."),
         new Dictionary<string, object?> { ["code"] = code });
+
+    /// <summary>A referenced location does not exist.</summary>
+    /// <param name="id">The identifier that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error Unknown(LocationId id) => Error.NotFound(
+        "location.unknown",
+        FormattableString.Invariant($"Location {id.Value} was not found."));
+
+    /// <summary>Settings on a system counterparty location were requested.</summary>
+    public static Error CannotUpdateSystemLocationSettings { get; } = Error.Conflict(
+        "location.cannot_update_system_settings",
+        "A system counterparty location has no operational settings to change.");
 }
