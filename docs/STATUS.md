@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-12 · **Milestone:** Phase 4 (Inventory Core) — complete, pending final verification
+**Last updated:** 2026-09-13 · **Milestone:** Phase 5 (Purchasing) parts 1–2 — complete; part 3 (supplier returns, direct delivery) next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,18 +13,18 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **144 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
-| Migrations | 7, forward-only, applied cleanly against PostgreSQL 17 |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core) |
-| Phases remaining | 5–18 — see §5 |
+| Tests | **223 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
+| Migrations | 9, forward-only, applied cleanly against PostgreSQL 17 |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts) |
+| Phases remaining | 5 part 3 (returns, direct delivery), 6–18 — see §5 |
 
 ```
-Pos.Domain.Tests            41 passing   invariants, money, ledger rules
+Pos.Domain.Tests            95 passing   invariants, money, ledger rules, purchasing/GNRs
 Pos.Infrastructure.Tests    29 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers
 Pos.Architecture.Tests      13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests          33 passing   authentication, tokens, permission matrix
 Pos.Application.Tests       12 passing   master-data commands and CQRS unit-of-work behaviours
-Pos.Api.IntegrationTests    16 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate)
+Pos.Api.IntegrationTests    41 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -146,6 +146,43 @@ costing, negative-stock policy, idempotency by event id.
   authentication, authorization, validation, persistence, and the 404/409
   contracts the POS and quarantine clients depend on.
 
+### Phase 5 — Purchasing (part 1: PO lifecycle, part 2: goods receipts)
+
+- **Purchase order lifecycle:** draft → submit (`purchase.create`) → approve /
+  reject (`purchase.approve` + value tier) → send → `Ordered`; cancel, withdraw
+  (DELETE, Draft only), and close (reason required unless `FullyReceived`).
+  Self-approval above the limit is refused and every decision writes a
+  `purchase_approval` row. PO numbers (`PO-…`) are allocated only on submit, so a
+  rejected submit never burns a sequence value.
+- **Goods receipts (atomic post):** `POST /api/v1/purchasing/orders/{id}/receipts`
+  validates and posts in one transaction — GRN number (`GRN-…`), receipt rows,
+  discrepancies, ledger movements, batch rows and the order's received totals
+  commit together. There is no mutable receipt draft.
+- **Disposition planning** (`GoodsReceipt.Create`): expected quantity is derived
+  from the PO line minus cumulative receipts; overage within 5% is accepted into
+  `PendingInspection`, excess beyond tolerance quarantines; `Damaged`,
+  `WrongItem`, `Expired` and `MissingDocuments` produce discrepancy rows with
+  value impact; shortages create discrepancies but no ledger rows.
+- **Batches and expiry:** batch-tracked products require a lot number
+  (unique per product), expiry-tracked products require `ExpiresOn`, and an
+  expired-on-arrival lot is refused unless the *entire* lot is rejected (which
+  posts it to quarantine). The batch id travels with subsequent movements.
+- **Costing:** actual unit cost updates `ProductSupplier.LastCost`; a deviation
+  beyond 5% refuses to post unless the receiver holds `purchase.approve` (with
+  the usual tier check), then records the approver on each deviating line. The
+  tests caught that the order *creator* cannot be that approver — the
+  self-approval rule extends to the cost-variance grant, so a receipt on your
+  own order must be received by someone else or at the ordered cost.
+- **Ledger:** `SupplierReceipt` movement group (external → accepted/damaged/
+  quarantined states) under `inventory.receive`, refenced by the GRN number.
+- **Migrations:** `20260912145040_PurchasingCore`, `20260912161554_GoodsReceiptCore`
+  (`inventory.batch`, `purchasing.goods_receipt`, `purchasing.goods_receipt_line`,
+  `purchasing.receiving_discrepancy`, purchase approvals, document counters).
+- **Tests:** 24 domain tests for receiving plus 11 endpoint tests through the
+  real pipeline — including the location-scoped store-manager receiving path, the
+  two-receipts-make-`FullyReceived` accumulation, and both cost-variance
+  authority paths — on top of the part-1 PO lifecycle suite.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -251,6 +288,10 @@ Stated plainly so they are not mistaken for finished work:
 |---|---|---|
 | `inventory_movement` and `audit_log` not yet partitioned | Phase 4 | Fine at current volume; the maintenance job is designed, not built. |
 | `NegativeStockAttempt` record and exception report not built | Phase 4 | Guard blocks the attempt today; the diagnostic record for the dashboard awaits. |
+| `AutoPassInspection` per location/category not built | Phase 5 | Receipts always land in `PendingInspection`; the trusted-category fast path is a settings-driven follow-up. |
+| Cost-variance notification not raised | Phase 5 | The receipt flags `costVariancePendingApproval` and records the approver; the notification/queue item is not built. |
+| Receiving-discrepancy resolution endpoint not built | Phase 5 | `purchase.discrepancy.resolve` is seeded into roles; the resolve flow lands with Part 3. |
+| Supplier performance report and returns/direct-delivery endpoints not built | Phase 5 | PURCHASING.md §6–§8; Part 3 scope. |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
 | Serilog sensitive-data scrubbing policy not implemented | Phase 1 | No secret is currently logged, but nothing enforces that. |
@@ -266,8 +307,11 @@ Stated plainly so they are not mistaken for finished work:
 Phase 3 ships the master data everything downstream reads. The next phases build
 on it:
 
-1. **Phase 5 — Purchasing:** purchase orders, goods receipts, batch/expiry
-   capture, receiving discrepancies, direct-supplier delivery authorization.
+1. **Phase 5 (part 3) — Purchasing completion:** receiving-discrepancy
+   resolution (`purchase.discrepancy.resolve`), supplier returns
+   (`purchase.return`, sourcing from Damaged/Expired/Quarantine only), and
+   direct supplier-to-store delivery authorization
+   (`purchase.direct_to_store.authorize`). PURCHASING.md §6–§8.
 2. **Catalog curation** (deferred Phase 3 rows, now unblocked): product edit,
    barcode management, deactivate/activate, effective-dated pricing endpoints,
    `ProductLocationSetting`, unit conversions, product-supplier links.

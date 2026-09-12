@@ -399,6 +399,88 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
             .CountAsync(b => b.LotNumber == "LOT-EXP-1"))).Should().Be(1);
     }
 
+    [Fact]
+    public async Task SecondReceipt_AccumulatesToFullyReceived()
+    {
+        Seed seed = await SeedAsync("grnacc");
+        await factory.CreateUserAsync("grnacc-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("grnacc-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, "grnacc-rec");
+        string approver = await SignInAsync(client, "grnacc-app");
+
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        using HttpResponseMessage first = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            ReceiptBody(lineId, received: 6m, unitCost: 100m),
+            receiver);
+        first.StatusCode.Should().Be(HttpStatusCode.OK, await first.Content.ReadAsStringAsync());
+
+        (HttpStatusCode _, JsonElement afterFirst) = await GetOrderAsync(client, receiver, orderId);
+        afterFirst.GetProperty("status").GetString().Should().Be("PartiallyReceived");
+
+        // The second line expects only the remaining four.
+        using HttpResponseMessage second = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            ReceiptBody(lineId, received: 4m, unitCost: 100m),
+            receiver);
+        second.StatusCode.Should().Be(HttpStatusCode.OK, await second.Content.ReadAsStringAsync());
+
+        using JsonDocument created = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
+        Guid receiptId = created.RootElement.GetProperty("id").GetGuid();
+
+        (HttpStatusCode _, JsonElement detail) = await GetReceiptAsync(client, receiver, orderId, receiptId);
+        JsonElement line = detail.GetProperty("lines").EnumerateArray().Single();
+        line.GetProperty("quantityExpected").GetDecimal().Should().Be(4m);
+        line.GetProperty("quantityReceived").GetDecimal().Should().Be(4m);
+        line.GetProperty("quantityAccepted").GetDecimal().Should().Be(4m);
+        line.GetProperty("acceptedState").GetString().Should().Be("PendingInspection");
+        detail.GetProperty("discrepancies").GetArrayLength().Should().Be(0);
+
+        (HttpStatusCode _, JsonElement completed) = await GetOrderAsync(client, receiver, orderId);
+        completed.GetProperty("status").GetString().Should().Be("FullyReceived");
+    }
+
+    [Fact]
+    public async Task StoreManager_ReceivesAtTheirOwnStore_ThroughTheScopedPath()
+    {
+        Seed seed = await SeedAsync("grnscope");
+        await factory.CreateUserAsync("grnscope-manager", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("grnscope-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        // A store manager holds purchase.receive and inventory.receive but never
+        // location.all: every check must resolve through the location assignment.
+        await factory.CreateUserAsync("grnscope-store", Roles.StoreManager, locations: [seed.Store]);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string manager = await SignInAsync(client, "grnscope-manager");
+        string approver = await SignInAsync(client, "grnscope-approver");
+        string store = await SignInAsync(client, "grnscope-store");
+
+        Guid orderId = await CreateOrderAsync(client, manager, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, manager, approver, orderId);
+        Guid lineId = await LineIdAsync(client, store, orderId);
+
+        using HttpResponseMessage post = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            ReceiptBody(lineId, received: 10m, unitCost: 100m),
+            store);
+        post.StatusCode.Should().Be(HttpStatusCode.OK, await post.Content.ReadAsStringAsync());
+
+        using JsonDocument created = JsonDocument.Parse(await post.Content.ReadAsStringAsync());
+        Guid receiptId = created.RootElement.GetProperty("id").GetGuid();
+
+        (HttpStatusCode _, JsonElement detail) = await GetReceiptAsync(client, store, orderId, receiptId);
+        detail.GetProperty("status").GetString().Should().Be("Posted");
+        detail.GetProperty("destinationLocationId").GetGuid().Should().Be(seed.Store.Value);
+    }
+
     private async Task<Seed> SeedAsync(string suffix, bool batchTracked = false, bool expiryTracked = false)
     {
         SupplierId supplier = await factory.CreateSupplierAsync($"SUP-{suffix}", $"Supplier {suffix}");

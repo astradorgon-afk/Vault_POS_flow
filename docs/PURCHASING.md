@@ -59,8 +59,8 @@ performance report and the invoice reconciliation.
 | Discrepancy kind | Ledger effect | Follow-up |
 |---|---|---|
 | `Shortage` | none | credit expected from supplier |
-| `Overage` within tolerance | received into `PendingInspection` | PO line over-receipt recorded |
-| `Overage` beyond tolerance | excess into `Quarantine` | quarantine incident, HQ decision |
+| `Overage` within tolerance | received into `PendingInspection` | no discrepancy row; accumulates into the PO line's received total |
+| `Overage` beyond tolerance | excess into `Quarantine` | `Overage` discrepancy row; quarantine incident / HQ decision is a follow-up |
 | `Damaged` | into `Damaged` state | supplier return or write-off |
 | `WrongItem` | into `Quarantine` | quarantine incident |
 | `Expired` / short-dated | into `Quarantine` | reject or accept with price concession |
@@ -81,8 +81,11 @@ creates (or reuses) a `Batch` carrying supplier, received date, manufacture date
 expiry, and unit cost. That batch id then travels with every subsequent movement
 of those goods, which is what makes recall and FEFO exact rather than estimated.
 
-Receiving validation rejects an expiry date already in the past, and warns when
-the remaining shelf life is below the product's `MinimumAcceptableShelfLifeDays`.
+Receiving validation refuses an expiry date already in the past unless the
+*entire* lot is rejected on arrival — a partially accepted expired lot is
+`receipt_expired_on_arrival`, because the past-dated units would otherwise leak
+into stock. A short-dated cutoff (warn below the product's minimum acceptable
+shelf life) is a planned follow-up.
 
 ---
 
@@ -93,9 +96,12 @@ the remaining shelf life is below the product's `MinimumAcceptableShelfLifeDays`
 - It updates `ProductSupplier.LastCost` and feeds the weighted average on
   `InventoryBalance` (INVENTORY_LEDGER.md §4.2).
 - A receipt whose unit cost deviates from the PO's by more than
-  `CostVarianceTolerancePercent` (default 5%) requires `purchase.approve` to post
-  and raises a cost-variance notification. Silent cost drift is a common source
-  of margin erosion, so it is surfaced rather than absorbed.
+  `CostVarianceTolerancePercent` (default 5%) refuses to post unless the receiver
+  holds `purchase.approve` (the usual value-tier check applies), and the
+  approving user is then recorded on each deviating line. The order's creator
+  cannot fill that role: the self-approval rule extends to the cost-variance
+  grant. The receipt is flagged `costVariancePendingApproval` so the variance is
+  surfaced rather than absorbed; a notification/queue item is a known follow-up.
 - `Product.DefaultPurchaseCost` is **not** updated automatically by receiving; it
   is a planning figure changed deliberately under `product.edit`.
 

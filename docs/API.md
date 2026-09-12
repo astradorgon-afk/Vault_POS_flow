@@ -158,20 +158,32 @@ Both routes respond with the same report:
 
 ## 5. Purchasing
 
+Implemented:
+
 ```
-GET    /api/v1/purchase-orders                       purchase.view
-POST   /api/v1/purchase-orders                       purchase.create
-PUT    /api/v1/purchase-orders/{id}                  purchase.create   (Draft only)
-POST   /api/v1/purchase-orders/{id}/submit           purchase.create
-POST   /api/v1/purchase-orders/{id}/approve          purchase.approve + tier
-POST   /api/v1/purchase-orders/{id}/reject           purchase.approve
-POST   /api/v1/purchase-orders/{id}/order            purchase.create
-POST   /api/v1/purchase-orders/{id}/cancel           purchase.approve
-POST   /api/v1/purchase-orders/{id}/close            purchase.approve   (reason required)
-POST   /api/v1/goods-receipts                        purchase.receive
-POST   /api/v1/goods-receipts/{id}/lines             purchase.receive
-POST   /api/v1/goods-receipts/{id}/post              purchase.receive   (posts the ledger)
-GET    /api/v1/goods-receipts/{id}/discrepancies     purchase.view
+GET    /api/v1/purchasing/orders                            purchase.view
+POST   /api/v1/purchasing/orders                            purchase.create
+GET    /api/v1/purchasing/orders/{id}                       purchase.view
+POST   /api/v1/purchasing/orders/{id}/submit                purchase.create
+POST   /api/v1/purchasing/orders/{id}/approve               purchase.approve + tier
+POST   /api/v1/purchasing/orders/{id}/reject                purchase.approve
+POST   /api/v1/purchasing/orders/{id}/send                  purchase.approve   (marks Ordered)
+POST   /api/v1/purchasing/orders/{id}/cancel                purchase.approve
+POST   /api/v1/purchasing/orders/{id}/close                 purchase.approve   (reason required)
+DELETE /api/v1/purchasing/orders/{id}                       purchase.create   (Draft only; withdraw)
+POST   /api/v1/purchasing/orders/{id}/receipts              purchase.receive  -> LEDGER, atomically Posted
+GET    /api/v1/purchasing/orders/{id}/receipts              purchase.view
+GET    /api/v1/purchasing/orders/{id}/receipts/{receiptId}  purchase.view
+```
+
+Receipts are created and posted in one atomic request (GRN number, receipt,
+discrepancies, movements and the order's received totals commit together); there
+is no mutable draft stage. A receipt line names its PO line, so the order detail
+exposes each line's `id`.
+
+Scheduled with Phase 5 part 3:
+
+```
 POST   /api/v1/receiving-discrepancies/{id}/resolve  purchase.discrepancy.resolve
 POST   /api/v1/supplier-returns                      purchase.return
 POST   /api/v1/direct-delivery-authorizations        purchase.direct_to_store.authorize
