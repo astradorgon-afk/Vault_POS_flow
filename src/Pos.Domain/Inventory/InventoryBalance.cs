@@ -69,6 +69,14 @@ public sealed class InventoryBalance
     public DateTimeOffset LastMovementAtUtc { get; private set; }
 
     /// <summary>
+    /// Gets the optimistic-concurrency token. Starts at one when the bucket is
+    /// created and is bumped on every <see cref="Apply"/>, so a writer that
+    /// read the bucket before another writer committed is refused instead of
+    /// silently overwriting the newer projection.
+    /// </summary>
+    public long Version { get; private set; }
+
+    /// <summary>
     /// Creates an empty bucket. Only the ledger calls this, immediately before
     /// applying the movement that brings the bucket into existence.
     /// </summary>
@@ -82,7 +90,7 @@ public sealed class InventoryBalance
         ProductId productId,
         BatchId batchKey,
         InventoryState state)
-        => new(locationId, productId, batchKey, state);
+        => new(locationId, productId, batchKey, state) { Version = 1 };
 
     /// <summary>
     /// Applies one movement leg to this bucket. This is the only way the
@@ -135,6 +143,7 @@ public sealed class InventoryBalance
 
         LastMovementId = movement.Id;
         LastMovementAtUtc = movement.RecordedAtUtc;
+        Version++;
     }
 
     /// <summary>

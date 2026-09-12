@@ -4,7 +4,7 @@ Status legend: `[ ]` Pending · `[~]` In progress · `[x]` Complete
 
 Last updated: 2026-09-12
 
-> Phases 0, 1, 2 and 4 are complete except where marked. Phase 4 was pulled
+> Phases 0, 1, 2, 3 and 4 are complete except where marked. Phase 4 was pulled
 > forward because the ledger is the foundation every other module posts through.
 > See [STATUS.md](STATUS.md) for where the build actually stands and what to do
 > next.
@@ -107,9 +107,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Ledger unit tests and provider-level integration tests
 - [ ] Table partitioning by month on `inventory_movement`
 - [ ] `NegativeStockAttempt` record and its exception report
-- [ ] Optimistic concurrency retry on balance contention
-- [ ] Reconciliation worker and `rebuild-balances` command
-- [ ] Concurrency tests (parallel posts to one bucket)
+- [x] Optimistic concurrency retry on balance contention (`Version` token, in-ledger
+      projection retry, `max_standalone_attempts` 10)
+- [x] Reconciliation worker and `rebuild-balances` command (`IBalanceReconciler`,
+      tripwire worker, maintenance-gated endpoint)
+- [x] Concurrency tests (parallel posts to one bucket, stale write, cost drift —
+      SQLite and PostgreSQL)
 
 ## Phase 5 — Purchasing
 

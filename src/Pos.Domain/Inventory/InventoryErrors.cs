@@ -146,4 +146,12 @@ public static class InventoryErrors
     public static Error IdempotencyKeyReuse { get; } = Error.Conflict(
         "inventory.idempotency_key_reuse",
         "This event identifier has already been processed with different content.");
+
+    /// <summary>
+    /// A concurrent writer committed a newer balance projection while this
+    /// posting was in flight. The caller should retry the whole operation.
+    /// </summary>
+    public static Error BalanceContention { get; } = Error.ConcurrencyConflict(
+        "inventory.balance_contention",
+        "Another writer changed the balance while this posting was in flight; retry the operation.");
 }

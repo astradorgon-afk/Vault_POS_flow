@@ -66,6 +66,14 @@ public sealed record Error(
     public static Error Forbidden(string code, string message)
         => new(code, message, ErrorType.Forbidden);
 
+    /// <summary>Creates an optimistic-concurrency error. Maps to HTTP 412.</summary>
+    public static Error ConcurrencyConflict(string code, string message, IReadOnlyDictionary<string, object?>? metadata = null)
+        => new(code, message, ErrorType.ConcurrencyConflict, metadata);
+
+    /// <summary>Creates an unavailable-in-this-context error. Maps to HTTP 503.</summary>
+    public static Error Unavailable(string code, string message, IReadOnlyDictionary<string, object?>? metadata = null)
+        => new(code, message, ErrorType.Unavailable, metadata);
+
     /// <summary>Creates an approval-required error.</summary>
     public static Error ApprovalRequired(string code, string message, IReadOnlyDictionary<string, object?>? metadata = null)
         => new(code, message, ErrorType.ApprovalRequired, metadata);

@@ -121,10 +121,38 @@ functions cannot translate through it), or any attached barcode (partial). The
 | POST | `/api/v1/inventory/counts/{id}/submit` | `inventory.count` |
 | POST | `/api/v1/inventory/counts/{id}/approve` | `inventory.count.approve` + tier |
 | POST | `/api/v1/inventory/rebuild-balances` | `inventory.rebuild_balances` |
+| POST | `/api/v1/inventory/reconcile` | `inventory.rebuild_balances` |
 | GET | `/api/v1/inventory/exceptions/negative-attempts` | `inventory.view.all` |
 
 There is **no** endpoint that sets a quantity. The only inventory-affecting
 routes are document-driven.
+
+### Reconciliation
+
+Both routes respond with the same report:
+
+```json
+{
+  "isHealthy": true,           // stored projection matches the ledger
+  "wasRebuilt": false,         // true only on a rebuild that wrote rows
+  "bucketCount": 34,           // buckets the ledger implies
+  "rebuiltBucketCount": 0,
+  "driftedBucketCount": 0,
+  "discrepancies": []          // kinds: Missing, Quantity, AverageUnitCost,
+                               // TotalValue, LastMovement, Unexpected
+}
+```
+
+- `POST /api/v1/inventory/reconcile` is **read-only**: it replays the ledger and
+  compares it with the stored projection. It never writes, so it is always allowed.
+- `POST /api/v1/inventory/rebuild-balances` **drops and recreates** the
+  projection from the ledger, so it is gated on configuration and returns
+  `503 { "errorCode": "maintenance.disabled" }` when
+  `Maintenance:AllowBalanceRebuild` is false. When no drift exists it writes
+  nothing (`wasRebuilt: false`).
+- Discrepancies are reported from the ledger's point of view: the **ledger is
+  authoritative**, so a matching bucket that the ledger disagrees with is a
+  projection bug, not a ledger one.
 
 ---
 

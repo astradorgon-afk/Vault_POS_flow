@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
 
 namespace Pos.Application.Common.Behaviours;
 
@@ -178,6 +179,13 @@ public sealed class LoggingBehaviour<TMessage, TResult>(
 /// all-or-nothing. A sale that cannot write its inventory movements does not
 /// leave a sale behind.
 /// </summary>
+/// <remarks>
+/// An optimistic-concurrency failure does not escape as an exception: the
+/// transaction is rolled back and the command fails with the conflict error, so
+/// the caller sees a retryable outcome instead of a server fault. Contention
+/// can only come from the inventory balance projection today, so the mapping is
+/// unambiguous (see <see cref="Pos.Domain.Common.ConcurrencyConflictException"/>).
+/// </remarks>
 /// <typeparam name="TCommand">The command type.</typeparam>
 /// <typeparam name="TResult">The result type.</typeparam>
 /// <param name="unitOfWork">The unit of work.</param>
@@ -210,7 +218,20 @@ public sealed class UnitOfWorkBehaviour<TCommand, TResult>(IUnitOfWork unitOfWor
             return result;
         }
 
-        await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            // A concurrent writer committed between this read and this save.
+            // Rolling back and failing the command is the only honest outcome:
+            // the retry must reload the projection, which cannot happen inside
+            // a rolled-back transaction.
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return Result<TResult>.Failure(InventoryErrors.BalanceContention);
+        }
+
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         return result;

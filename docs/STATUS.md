@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-12 · **Milestone:** Phase 3 (Master Data) — complete, pending final verification
+**Last updated:** 2026-09-12 · **Milestone:** Phase 4 (Inventory Core) — complete, pending final verification
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,19 +13,21 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **126 passing, 0 failing, 0 skipped** (local run, SQLite; PostgreSQL suite self-skips without Docker) |
-| Migrations | 6, forward-only, applied cleanly against PostgreSQL 17 |
+| Tests | **144 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
+| Migrations | 7, forward-only, applied cleanly against PostgreSQL 17 |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core) |
 | Phases remaining | 5–18 — see §5 |
 
 ```
 Pos.Domain.Tests            41 passing   invariants, money, ledger rules
-Pos.Infrastructure.Tests    19 passing   ledger posting + real PostgreSQL triggers + policy provider
+Pos.Infrastructure.Tests    29 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers
 Pos.Architecture.Tests      13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests          33 passing   authentication, tokens, permission matrix
-Pos.Application.Tests        8 passing   master-data commands and validators
-Pos.Api.IntegrationTests    12 passing   endpoints through the real pipeline (SQLite)
+Pos.Application.Tests       12 passing   master-data commands and CQRS unit-of-work behaviours
+Pos.Api.IntegrationTests    16 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate)
 ```
+
+(Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
 
 The PostgreSQL suite needs a Docker daemon. It self-skips without one, so a
 developer with no Docker still gets a green local run; CI always has one.
@@ -38,7 +40,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (23 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (24 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -49,13 +51,44 @@ limiting, RFC 9457 problem details that leak no internal detail. Docker images
 for the API and a one-shot migrator, compose stack with Caddy, least-privilege
 database roles, CI with a secret scan and a migration-drift check.
 
-### Phase 4 — Inventory ledger (pulled forward)
+### Phase 4 — Inventory ledger (pulled forward, this session)
 The double-entry, append-only ledger everything else posts through. Immutable
 movements, a balance projection that can only change by applying a movement, and
 four independent guards against direct stock assignment: domain types with no
 setters, an EF interceptor, PostgreSQL triggers, and a database role with only
 `SELECT, INSERT` on the ledger. Movement-type rules table, weighted-average
 costing, negative-stock policy, idempotency by event id.
+
+**Hardened this session (balances under contention):**
+- `InventoryBalance.Version` optimistic-concurrency token (starts at 1, bumped
+  on every `Apply`, `.IsConcurrencyToken()`). A writer whose projected row moved
+  underneath it is refused by `DbUpdateConcurrencyException` instead of silently
+  overwriting the newer projection.
+- In-ledger retry: `InventoryLedger.PostAsync` replays only the projection step
+  (`Apply`) under contention with exponential backoff, up to
+  `MaxStandaloneAttempts` (10). The ledger append is never re-attempted —
+  `event_id` idempotency would make re-inserts a no-op but re-reading the
+  movements is still wasteful. The same retry protects idempotent-projection
+  adjustments (corrections) whose movement already exists. Exhaustion surfaces
+  `inventory.balance_contention` → HTTP 412.
+- `IBalanceReconciler` (`BalanceReconciler`): replays the ledger into a fresh
+  projection and compares it with the stored one. Detects missing/quantity/cost/
+  value/last-movement/unexpected bucket drift. `RebuildAsync` forces
+  `OriginalValue` of the version token, deletes, and re-inserts — under the
+  still-armed deferred balance-guard trigger, which validates the rebuilt rows
+  at commit.
+- `BalanceReconcilerWorker`: optional read-only tripwire
+  (`Reconciliation:Enabled`), runs a detect pass on startup and on an interval,
+  and logs drift. Repair is deliberate and separately authorized via the
+  rebuild endpoint.
+- Endpoints: `POST /api/v1/inventory/reconcile` (read-only) and
+  `POST /api/v1/inventory/rebuild-balances` (gated by `Maintenance:AllowBalanceRebuild`,
+  503 `maintenance.disabled` when off). Both require `inventory.rebuild_balances`.
+- Concurrency tests against SQLite **and** PostgreSQL (Docker): parallel posts
+  to one bucket, a stale read pinned to an earlier version, cost-drift under
+  interleaved writes, idempotent-projection repair under contention, and a
+  reconciler suite that also proves the rebuilt projection and the deleted-row
+  case. Migration `20260912122753_BalanceConcurrencyToken`.
 
 ### Phase 2 — Identity and authorization
 - ASP.NET Core Identity with Guid keys, PBKDF2 at 600,000 iterations,
@@ -82,7 +115,7 @@ costing, negative-stock policy, idempotency by event id.
   attempt history with hashed identifiers.
 - Bootstrap owner seeder that refuses to run if any user exists.
 
-### Phase 3 — Master data (this session)
+### Phase 3 — Master data (earlier session)
 - **Domain and persistence:** `Location` (JSON `LocationSettings`),
   `Organization`, `Product` aggregate with `ProductBarcode`, `ProductPrice`,
   `ProductUnitConversion`, `ProductLocationSetting`, `ProductSupplier` children,
@@ -160,6 +193,54 @@ the request content before the server consumed it — every POST/PUT test failed
 with `ObjectDisposedException` on `StreamContent`. Awaiting inside the `using`
 scope fixed the whole class at once.
 
+**Concurrent posts to one bucket let the stale projection pass the guard.**
+The version-free projection meant two writers could both read quantity 100, both
+apply +10, and the second would commit a projection that had never seen the
+first's movement — a permanently lost 10 units that no guard caught. The
+`Version` token makes the second writer's `SaveChanges` throw
+`DbUpdateConcurrencyException`, and the ledger now retries the projection step
+instead of letting the whole posting fail.
+
+**SQLite cannot upgrade a deferred read transaction once a peer has committed.**
+The first stale-write test held a read transaction across another writer's
+commit and then tried to write — SQLite refuses with `SQLITE_BUSY` (snapshot
+upgrade limitation), no busy timeout helps. The test pins the token's
+`OriginalValue` to the version the stale reader actually saw, which is exactly
+what the production code does on a genuine stale write. There is no bespoke
+time-window.
+
+**Raw balance updates via `SqliteParameter` blow up with "Value must be set".**
+EF's `ExecuteSqlRawAsync` + `SqliteParameter` failed with an
+`InvalidOperationException` at parameter bind before the statement ever ran. The
+reconciler's raw statements use `FormattableString.Invariant` inline SQL
+instead, which also keeps the SQLite and PostgreSQL branches visibly parallel.
+
+**Microsoft.Data.Sqlite stores GUIDs in uppercase "D" format.** A reconciler
+comparison that interpolated `guid.ToString()` (lowercase) against the stored
+uppercase row matched zero rows — a healthy database looked catastrophically
+drifted. The `SqliteGuid` helper emits `.ToString("D").ToUpperInvariant()`, and
+the PostgreSQL branch relies on EF's parameterization.
+
+**Rebuilding under the deferred balance guard hit PG 55006.** Re-enabling the
+deferred constraint trigger inside the same transaction caused any transaction
+that had deleted rows to panic at the final `SET CONSTRAINTS`. The rebuild now
+runs one transaction: `DISABLE` → `DELETE` → `ENABLE` **before** the inserts
+(the trigger events are all `INSERT`, so nothing is left pending) → insert →
+commit, where the still-armed guard validates the rebuilt rows.
+
+**The rebuild collided with the EF identity map.** A replayed bucket updated
+through one context, then re-added through another in the same long-lived
+context, hit a key collision. `ChangeTracker.Clear()` before the delete phase
+removes everything the replay tracked so the rebuild sees a pristine context.
+
+**Disposing a derived `WebApplicationFactory` kills the shared host's signing
+key.** The switch-on endpoint test built its configuration with
+`factory.WithWebHostBuilder(...)`; disposing that derived factory took the
+shared host's RSA with it (`ObjectDisposedException: RSABCrypt`, then 401s for
+every later test). The switch-on test now owns an independent `PosApiFactory`
+instance with `Maintenance__AllowBalanceRebuild=true` in the environment, which
+is restored on dispose and never tears down a sibling factory's keys.
+
 ---
 
 ## 4. Known gaps in what is marked complete
@@ -168,9 +249,8 @@ Stated plainly so they are not mistaken for finished work:
 
 | Gap | Where | Impact |
 |---|---|---|
-| No optimistic concurrency token on `InventoryBalance` | Phase 4 | Concurrent posts to one bucket abort at the guard rather than retry. Safe failure, but a retry loop is wanted. |
 | `inventory_movement` and `audit_log` not yet partitioned | Phase 4 | Fine at current volume; the maintenance job is designed, not built. |
-| Reconciliation worker and `rebuild-balances` command not built | Phase 4 | Drift between ledger and projection would go unnoticed. |
+| `NegativeStockAttempt` record and exception report not built | Phase 4 | Guard blocks the attempt today; the diagnostic record for the dashboard awaits. |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
 | Serilog sensitive-data scrubbing policy not implemented | Phase 1 | No secret is currently logged, but nothing enforces that. |

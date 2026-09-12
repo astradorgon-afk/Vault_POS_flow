@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
+using Pos.Application.Inventory;
 using Pos.Infrastructure.Auditing;
 using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Configuration;
@@ -55,6 +56,18 @@ public static class DependencyInjection
         // provider remains for tests that need the conservative baseline.
         services.TryAddScoped<ILedgerPolicyProvider, LocationSettingsLedgerPolicyProvider>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
+        services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
+
+        // The reconciliation tripwire is optional so a host can run without it
+        // (tests, short-lived tools); when enabled it only reads.
+        ReconciliationOptions reconciliation = configuration
+            .GetSection(ReconciliationOptions.SectionName)
+            .Get<ReconciliationOptions>() ?? new ReconciliationOptions();
+
+        if (reconciliation.Enabled)
+        {
+            services.AddHostedService<BalanceReconcilerWorker>();
+        }
 
         return services;
     }
@@ -110,6 +123,16 @@ public static class DependencyInjection
 
         services.AddOptions<RateLimitOptions>()
             .Bind(configuration.GetSection(RateLimitOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<ReconciliationOptions>()
+            .Bind(configuration.GetSection(ReconciliationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<MaintenanceOptions>()
+            .Bind(configuration.GetSection(MaintenanceOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

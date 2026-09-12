@@ -400,8 +400,8 @@ stronger: it sees the transaction's final state. A bare
 untouched, so the window is empty, the expected delta is zero, and the statement
 is rejected — which is the whole point. Cost stays proportional to what the
 transaction wrote. Concurrent postings to one bucket now abort at the guard
-rather than silently racing; adding an optimistic concurrency token to the
-balance row, already on the roadmap, turns that abort into a retry.
+rather than silently racing; the optimistic-concurrency token landed with ADR-0024
+and turns that abort into a retry.
 
 **Lesson.** Both defects were invisible in review and invisible on SQLite, which
 has no such trigger. Testing the guarantee against the engine that enforces it is
@@ -476,3 +476,55 @@ verifies a rearranged copy of the application. Making the provider a first-class
 configuration choice means the tests host the real thing unchanged — real
 middleware, real token validation, the real authorization policy provider — and
 it is a setting the device client needs anyway.
+
+---
+
+## ADR-0024 — Balance projection concurrency and reconciliation
+
+**Date:** 2026-09-12 · **Status:** Accepted
+
+**Context.** The balance projection must lose no writes under concurrency. Two
+writers that both read quantity 100, both apply +10, and commit in turn produced
+a projection that never saw the first movement — a permanently lost 10 units
+that the ADR-0016 guard could not catch, because the second writer's check ran
+against its own stale read. Earlier the guard was the fail-safe for exactly this
+class of bug, and it remains so for bare UPDATEs; it cannot arbitrate two
+legitimate postings racing on the same bucket.
+
+**Decision.** `InventoryBalance.Version` is an optimistic-concurrency token
+(`long`, starts at 1, bumped on every `Apply`, `.IsConcurrencyToken()`). A
+writer whose row moved underneath it fails `SaveChanges` with
+`DbUpdateConcurrencyException`. `InventoryLedger.PostAsync` catches that specific
+failure for the projection step and re-applies the deltas to a fresh row with
+exponential backoff, up to `MaxStandaloneAttempts` (10); the ledger append is
+never re-attempted. Idempotent-projection adjustments (corrections whose
+movement already exists) retry the same way. A reconciler (`IBalanceReconciler`)
+replays the ledger into a fresh projection and compares it against the stored
+one; a rebuild deletes and re-inserts under the still-armed deferred guard by
+running `DISABLE → DELETE → ENABLE (before inserts) → INSERT → commit`, so the
+rebuilt rows are validated at commit.
+
+**Rationale.** Projecting is pure: applying the same movements to the same base
+yields the same result, so replaying it under contention is always safe and
+cheap. Re-inserting a ledger row is provably a no-op only because of `event_id`
+idempotency, but it still re-runs validation, transitions, triggers and audit —
+retrying the append converts a benign race into a wasteful write. Failing open
+without a token was rejected: a lost projection write is silent corruption, and
+the POS answers quantity questions from this table. Backing off rather than
+spinning keeps unrelated contention low; 10 attempts bound worst-case latency
+at the cost of one exception per attempt.
+
+**Consequences.** Concurrent postings to one bucket now either both land
+correctly or surface `inventory.balance_contention` (HTTP 412) on exhaustion.
+The trigger remains the last line of defence against direct mutation. A rebuild
+cannot run while a batch of postings commits because SQLite's writer lock and
+PostgreSQL's row lock serialize them — contention on rebuild surfaces the same
+412. Cost: one comparison on the version column per projected row; the guard
+window (ADR-0016) still names exactly the movements a change claims.
+
+**Lesson.** The race was invisible on the surface and on SQLite in single-writer
+tests; only tests with genuinely concurrent writers against both engines found
+it. The SQLite suite also exposed engine asymmetry: SQLite refuses to upgrade a
+deferred read transaction after a peer commits (tests pin the token's
+`OriginalValue` instead), and Microsoft.Data.Sqlite stores GUIDs in uppercase
+"D" format, which matters for raw comparisons.

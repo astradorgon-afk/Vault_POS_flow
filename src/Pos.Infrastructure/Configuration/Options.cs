@@ -268,3 +268,37 @@ public sealed class DatabaseOptions
     /// </remarks>
     public string Provider { get; set; } = "Postgres";
 }
+
+/// <summary>Inventory balance reconciliation settings.</summary>
+public sealed class ReconciliationOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "Reconciliation";
+
+    /// <summary>Gets or sets whether the background reconciliation worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets how many hours between reconciliation passes.</summary>
+    [Range(1, 168)]
+    public int IntervalHours { get; set; } = 24;
+
+    /// <summary>Gets or sets whether a reconciliation pass runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
+}
+
+/// <summary>Maintenance-gated operations such as balance rebuilding.</summary>
+public sealed class MaintenanceOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "Maintenance";
+
+    /// <summary>
+    /// Gets or sets whether the <c>POST /api/v1/inventory/rebuild-balances</c>
+    /// endpoint may execute. Must be true in production; keeping it off in
+    /// development prevents accidental drops.
+    /// </summary>
+    public bool AllowBalanceRebuild { get; set; }
+}

@@ -32,7 +32,12 @@ namespace Pos.Api.IntegrationTests;
 /// </remarks>
 public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly List<string> _environmentKeys = [];
+    // Environment variables are process-wide, so an instance that overrides a
+    // key must restore the value it displaced rather than nulling it: it may
+    // not own the key (a sibling factory set it first).
+    private readonly Dictionary<string, string?> _restoreValues = [];
+
+    private readonly IReadOnlyDictionary<string, string?> _environmentOverrides;
 
     private readonly string _connectionString =
         FormattableString.Invariant($"Data Source=vaultflow-integration-{Guid.CreateVersion7():N};Mode=Memory;Cache=Shared");
@@ -42,6 +47,29 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
 
     /// <summary>Gets the password used for every seeded test account.</summary>
     public const string TestPassword = "correct-horse-battery-staple";
+
+    /// <summary>Creates a factory with the standard test environment.</summary>
+    public PosApiFactory()
+        : this(new Dictionary<string, string?>())
+    {
+    }
+
+    /// <summary>
+    /// Creates a factory with extra environment overrides applied on top of the
+    /// standard test environment. Useful for a test that needs a different
+    /// configuration (for example a maintenance switch) without mutating the
+    /// environment of sibling factories.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> so that xUnit still resolves this type as a collection
+    /// fixture: fixtures may only expose a single public constructor.
+    /// </remarks>
+    /// <param name="environmentOverrides">Extra environment variables, with the
+    /// <c>__</c> double-underscore configuration separator.</param>
+    internal PosApiFactory(IReadOnlyDictionary<string, string?> environmentOverrides)
+    {
+        _environmentOverrides = environmentOverrides;
+    }
 
     /// <inheritdoc />
     public async Task InitializeAsync()
@@ -55,8 +83,13 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         // the factory's configuration callbacks are applied.
         foreach ((string key, string value) in TestConfiguration())
         {
+            if (_restoreValues.ContainsKey(key))
+            {
+                continue;
+            }
+
+            _restoreValues[key] = Environment.GetEnvironmentVariable(key);
             Environment.SetEnvironmentVariable(key, value);
-            _environmentKeys.Add(key);
         }
 
         // A shared-cache in-memory database, not ":memory:". The keep-alive
@@ -100,10 +133,20 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         yield return ("RateLimits__LoginPermitLimit", "10000");
         yield return ("RateLimits__RefreshPermitLimit", "10000");
         yield return ("RateLimits__GlobalPermitLimit", "100000");
+
+        // Instance overrides come last so they displace the shared defaults for
+        // this factory's host only.
+        foreach ((string key, string? value) in _environmentOverrides)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                yield return (key, value);
+            }
+        }
     }
 
     /// <inheritdoc />
-    async Task IAsyncLifetime.DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
 
@@ -112,13 +155,17 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
             await _connection.DisposeAsync();
         }
 
-        // Environment variables are process-wide, so they are removed again
-        // rather than left to leak into whatever runs next in this process.
-        foreach (string key in _environmentKeys)
+        // Environment variables are process-wide, so they are restored to the
+        // values this instance displaced (usually null) rather than hard-cleared,
+        // so a sibling factory's environment is never torn down.
+        foreach ((string key, string? original) in _restoreValues)
         {
-            Environment.SetEnvironmentVariable(key, null);
+            Environment.SetEnvironmentVariable(key, original);
         }
     }
+
+    /// <inheritdoc />
+    async Task IAsyncLifetime.DisposeAsync() => await DisposeAsync();
 
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)

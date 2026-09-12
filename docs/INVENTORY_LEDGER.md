@@ -255,7 +255,7 @@ public sealed class InventoryBalance
     public decimal TotalValue        { get; private set; }
     public Guid    LastMovementId    { get; private set; }
     public DateTimeOffset LastMovementAtUtc { get; private set; }
-    public uint    Version           { get; }     // xmin / rowversion
+    public long    Version           { get; private set; }  // optimistic-concurrency token
 }
 ```
 

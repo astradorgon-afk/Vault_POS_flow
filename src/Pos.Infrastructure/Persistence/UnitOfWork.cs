@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore.Storage;
 using Pos.Application.Common.Abstractions;
+using Pos.Domain.Common;
 
 namespace Pos.Infrastructure.Persistence;
 
@@ -13,8 +14,20 @@ public sealed class UnitOfWork(PosDbContext context) : IUnitOfWork
     public bool HasActiveTransaction => context.Database.CurrentTransaction is not null;
 
     /// <inheritdoc />
-    public Task<int> SaveChangesAsync(CancellationToken cancellationToken)
-        => context.SaveChangesAsync(cancellationToken);
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException ex)
+        {
+            // The provider's exception is storage-specific; the application
+            // layer must map contention without knowing which provider. See the
+            // remarks on ConcurrencyConflictException.
+            throw new ConcurrencyConflictException(ex);
+        }
+    }
 
     /// <inheritdoc />
     public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)

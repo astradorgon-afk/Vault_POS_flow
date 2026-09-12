@@ -205,6 +205,7 @@ try
     app.MapDeviceEndpoints();
     app.MapLocationEndpoints();
     app.MapCatalogEndpoints();
+    app.MapInventoryEndpoints();
 
     await app.RunAsync();
     return 0;

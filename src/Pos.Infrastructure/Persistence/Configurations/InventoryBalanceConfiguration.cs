@@ -42,6 +42,14 @@ public sealed class InventoryBalanceConfiguration : IEntityTypeConfiguration<Inv
         builder.Property(b => b.LastMovementId).HasColumnName("last_movement_id").IsRequired();
         builder.Property(b => b.LastMovementAtUtc).HasColumnName("last_movement_at_utc").IsRequired();
 
+        // Optimistic concurrency: writes to a bucket carry the version read when
+        // the bucket was loaded, and the database refuses the write when it no
+        // longer matches, instead of silently overwriting a newer projection.
+        builder.Property(b => b.Version)
+            .HasColumnName("version")
+            .IsConcurrencyToken()
+            .IsRequired();
+
         builder.HasIndex(b => new { b.ProductId, b.LocationId })
             .HasDatabaseName("ix_inventory_balance_product_location");
 
