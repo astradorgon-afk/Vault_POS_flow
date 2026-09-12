@@ -110,3 +110,43 @@ public sealed class ClosePurchaseOrderCommandValidator : AbstractValidator<Close
             .NotEqual(PurchaseOrderId.Empty)
             .WithErrorCode(PurchasingErrors.OrderIdRequired.Code);
 }
+
+/// <summary>Validates <see cref="CreateGoodsReceiptCommand"/>.</summary>
+public sealed class CreateGoodsReceiptCommandValidator : AbstractValidator<CreateGoodsReceiptCommand>
+{
+    /// <summary>Initializes the validator.</summary>
+    public CreateGoodsReceiptCommandValidator()
+    {
+        RuleFor(c => c.PurchaseOrderId)
+            .NotEqual(PurchaseOrderId.Empty)
+            .WithErrorCode(PurchasingErrors.OrderIdRequired.Code);
+
+        RuleFor(c => c.Lines)
+            .NotNull()
+            .NotEmpty()
+            .WithErrorCode(PurchasingErrors.NothingReceived.Code);
+
+        RuleForEach(c => c.Lines).ChildRules(line =>
+        {
+            line.RuleFor(l => l.QuantityReceived)
+                .GreaterThanOrEqualTo(0m)
+                .WithErrorCode(PurchasingErrors.ReceiptNegativeQuantity(1).Code);
+
+            line.RuleFor(l => l.QuantityDamaged)
+                .GreaterThanOrEqualTo(0m)
+                .WithErrorCode(PurchasingErrors.ReceiptNegativeQuantity(1).Code);
+
+            line.RuleFor(l => l.QuantityWrongItem)
+                .GreaterThanOrEqualTo(0m)
+                .WithErrorCode(PurchasingErrors.ReceiptNegativeQuantity(1).Code);
+
+            line.RuleFor(l => l.QuantityExpired)
+                .GreaterThanOrEqualTo(0m)
+                .WithErrorCode(PurchasingErrors.ReceiptNegativeQuantity(1).Code);
+
+            line.RuleFor(l => l.UnitCost)
+                .GreaterThanOrEqualTo(0m)
+                .WithErrorCode(PurchasingErrors.InvalidUnitCost(1).Code);
+        });
+    }
+}

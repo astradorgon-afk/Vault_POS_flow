@@ -128,6 +128,152 @@ public sealed class PurchaseApprovalConfiguration : IEntityTypeConfiguration<Pur
     }
 }
 
+/// <summary>Maps a goods receipt: the physical delivery against a purchase order.</summary>
+public sealed class GoodsReceiptConfiguration : IEntityTypeConfiguration<GoodsReceipt>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<GoodsReceipt> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("goods_receipt", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(r => r.Number).HasColumnName("number").HasMaxLength(20).IsRequired();
+        builder.Property(r => r.Status).HasColumnName("status").HasConversion<short>().IsRequired();
+        builder.Property(r => r.PurchaseOrderId).HasColumnName("purchase_order_id").IsRequired();
+        builder.Property(r => r.SupplierId).HasColumnName("supplier_id").IsRequired();
+        builder.Property(r => r.DestinationLocationId).HasColumnName("destination_location_id").IsRequired();
+        builder.Property(r => r.DocumentsMissing).HasColumnName("documents_missing").IsRequired();
+        builder.Property(r => r.BusinessDate).HasColumnName("business_date").IsRequired();
+        builder.Property(r => r.ReceivedAtUtc).HasColumnName("received_at_utc").IsRequired();
+        builder.Property(r => r.ReceivedByUserId).HasColumnName("received_by_user_id").IsRequired();
+        builder.Property(r => r.CostVariancePendingApproval).HasColumnName("cost_variance_pending_approval").IsRequired();
+
+        builder.Property(r => r.CostVarianceValueAtStake)
+            .HasColumnName("cost_variance_value_at_stake")
+            .HasPrecision(19, Money.StorageScale)
+            .IsRequired();
+
+        builder.HasIndex(r => r.Number).IsUnique().HasDatabaseName("ux_goods_receipt_number");
+
+        builder.HasIndex(r => new { r.PurchaseOrderId, r.ReceivedAtUtc })
+            .HasDatabaseName("ix_goods_receipt_order_time");
+
+        builder.HasMany(r => r.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.GoodsReceiptId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(r => r.Discrepancies)
+            .WithOne()
+            .HasForeignKey(d => d.GoodsReceiptId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Maps a goods receipt line with its disposition plan.</summary>
+public sealed class GoodsReceiptLineConfiguration : IEntityTypeConfiguration<GoodsReceiptLine>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<GoodsReceiptLine> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("goods_receipt_line", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(l => l.Id);
+        builder.Property(l => l.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(l => l.GoodsReceiptId).HasColumnName("goods_receipt_id").IsRequired();
+        builder.Property(l => l.LineNo).HasColumnName("line_no").IsRequired();
+        builder.Property(l => l.PurchaseOrderLineId).HasColumnName("purchase_order_line_id").IsRequired();
+        builder.Property(l => l.ProductId).HasColumnName("product_id").IsRequired();
+
+        builder.Property(l => l.QuantityExpected)
+            .HasColumnName("quantity_expected")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.QuantityReceived)
+            .HasColumnName("quantity_received")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.QuantityDamaged)
+            .HasColumnName("quantity_damaged")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.QuantityWrongItem)
+            .HasColumnName("quantity_wrong_item")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.QuantityExpired)
+            .HasColumnName("quantity_expired")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.OverageBeyondTolerance)
+            .HasColumnName("overage_beyond_tolerance")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.QuantityAccepted)
+            .HasColumnName("quantity_accepted")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+        builder.Property(l => l.AcceptedState).HasColumnName("accepted_state").HasConversion<short>().IsRequired();
+
+        builder.Property(l => l.UnitCost)
+            .HasColumnName("unit_cost")
+            .HasPrecision(19, Money.StorageScale)
+            .IsRequired();
+
+        builder.Property(l => l.LotNumber).HasColumnName("lot_number").HasMaxLength(64);
+        builder.Property(l => l.ManufacturedOn).HasColumnName("manufactured_on");
+        builder.Property(l => l.ExpiresOn).HasColumnName("expires_on");
+
+        builder.Property(l => l.CostVariancePercent)
+            .HasColumnName("cost_variance_percent")
+            .HasPrecision(19, 4)
+            .IsRequired();
+        builder.Property(l => l.CostVarianceApprovedByUserId).HasColumnName("cost_variance_approved_by_user_id");
+        builder.Property(l => l.CostVarianceApprovedAtUtc).HasColumnName("cost_variance_approved_at_utc");
+
+        builder.HasIndex(l => new { l.GoodsReceiptId, l.LineNo })
+            .IsUnique()
+            .HasDatabaseName("ux_goods_receipt_line_no");
+    }
+}
+
+/// <summary>Maps a receiving discrepancy recorded against a receipt.</summary>
+public sealed class ReceivingDiscrepancyConfiguration : IEntityTypeConfiguration<ReceivingDiscrepancy>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<ReceivingDiscrepancy> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("receiving_discrepancy", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(d => d.Id);
+        builder.Property(d => d.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(d => d.GoodsReceiptId).HasColumnName("goods_receipt_id").IsRequired();
+        builder.Property(d => d.PurchaseOrderLineId).HasColumnName("purchase_order_line_id").IsRequired();
+        builder.Property(d => d.LineNo).HasColumnName("line_no").IsRequired();
+        builder.Property(d => d.Kind).HasColumnName("kind").HasConversion<short>().IsRequired();
+
+        builder.Property(d => d.Quantity)
+            .HasColumnName("quantity")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+
+        builder.Property(d => d.ValueImpact)
+            .HasColumnName("value_impact")
+            .HasPrecision(19, Money.StorageScale)
+            .IsRequired();
+    }
+}
+
 /// <summary>Maps the central document counter rows.</summary>
 public sealed class DocumentCounterConfiguration : IEntityTypeConfiguration<DocumentCounter>
 {

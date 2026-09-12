@@ -141,6 +141,138 @@ public static class PurchasingErrors
         "purchasing.numbered_cannot_be_withdrawn",
         "A purchase order that has been submitted cannot be withdrawn; cancel it instead.");
 
+    /// <summary>A referenced goods receipt does not exist.</summary>
+    /// <param name="id">The identifier that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptUnknown(GoodsReceiptId id) => Error.NotFound(
+        "purchasing.receipt_unknown",
+        FormattableString.Invariant($"Goods receipt {id.Value} was not found."));
+
+    /// <summary>A receipt must physically receive something: a delivery of nothing
+    /// is not a delivery.</summary>
+    /// <returns>The error.</returns>
+    public static Error NothingReceived => Error.Validation(
+        "purchasing.receipt_nothing_received",
+        "A goods receipt must record received quantity on at least one line.");
+
+    /// <summary>A receipt line references a line that is not on the purchase order.</summary>
+    /// <param name="purchaseOrderLineId">The identifier that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptLineUnknown(PurchaseOrderLineId purchaseOrderLineId) => Error.Validation(
+        "purchasing.receipt_unknown_line",
+        FormattableString.Invariant(
+            $"Purchase order line {purchaseOrderLineId.Value} is not on this order."));
+
+    /// <summary>The same purchase order line appeared on more than one receipt line.</summary>
+    /// <param name="purchaseOrderLineId">The duplicated line.</param>
+    /// <returns>The error.</returns>
+    public static Error DuplicateReceiptLine(PurchaseOrderLineId purchaseOrderLineId) => Error.Validation(
+        "purchasing.receipt_duplicate_line",
+        FormattableString.Invariant(
+            $"Purchase order line {purchaseOrderLineId.Value} appears on more than one goods receipt line."));
+
+    /// <summary>A line carried a negative received or rejected quantity.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptNegativeQuantity(int lineNo) => Error.Validation(
+        "purchasing.receipt_negative_quantity",
+        FormattableString.Invariant($"Receipt line {lineNo}: received and rejected quantities cannot be negative."));
+
+    /// <summary>A line rejected more units than it received.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptRejectedExceedsReceived(int lineNo) => Error.Validation(
+        "purchasing.receipt_rejected_exceeds_received",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo}: rejected quantity cannot exceed the received quantity."));
+
+    /// <summary>A batch-tracked product was received without a lot number.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptLotRequired(int lineNo) => Error.Validation(
+        "purchasing.receipt_batch_required",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo}: a batch-tracked product must be received with a lot number."));
+
+    /// <summary>A lot number was supplied for a product that is not batch-tracked.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptLotNotAllowed(int lineNo) => Error.Validation(
+        "purchasing.receipt_lot_not_allowed",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo}: a lot number was supplied for a product that is not batch-tracked."));
+
+    /// <summary>An expiry-tracked product was received without an expiry date.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptExpiryRequired(int lineNo) => Error.Validation(
+        "purchasing.receipt_expires_on_required",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo}: an expiry-tracked product must be received with an expiry date."));
+
+    /// <summary>
+    /// The goods were already past their expiry date on arrival. None of the
+    /// lot may be accepted: every counted unit must be recorded as refused so
+    /// the delivery posts to quarantine.
+    /// </summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <param name="expiresOn">The date carried by the delivery.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptExpiredOnArrival(int lineNo, DateOnly expiresOn) => Error.Validation(
+        "purchasing.receipt_expired_on_arrival",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo}: the lot expired on {expiresOn:yyyy-MM-dd}, which has already passed. Every received unit must be recorded as refused (expired on arrival) so the goods post to quarantine."),
+        new Dictionary<string, object?> { ["expiresOn"] = expiresOn });
+
+    /// <summary>A receipt line carried an expiry date before its manufacture date.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptExpiryBeforeManufacture(int lineNo) => Error.Validation(
+        "purchasing.receipt_expiry_before_manufacture",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo}: a lot cannot expire before it was manufactured."));
+
+    /// <summary>The system's supplier counterparty location is missing.</summary>
+    /// <returns>The error.</returns>
+    public static Error ExternalSupplierLocationMissing => Error.Unavailable(
+        "purchasing.receipt_external_supplier_missing",
+        "The EXT-SUPPLIER counterparty location has not been provisioned; receipts cannot be posted.");
+
+    /// <summary>The receiving location carries no timezone, so its business date cannot be computed.</summary>
+    /// <param name="locationId">The receiving location.</param>
+    /// <returns>The error.</returns>
+    public static Error ReceiptLocationTimeZoneMissing(LocationId locationId) => Error.Unavailable(
+        "purchasing.receipt_location_time_zone_missing",
+        FormattableString.Invariant(
+            $"Receiving location {locationId.Value} has no timezone configured; receipts cannot be posted there."));
+
+    /// <summary>A receipt line's unit cost deviated from the purchase order by more
+    /// than the tolerance, and the receiving user does not hold sufficient
+    /// purchase-approval authority to approve the variance.</summary>
+    /// <param name="lineNo">The offending receipt line.</param>
+    /// <param name="poUnitCost">The purchase order unit cost.</param>
+    /// <param name="receiptUnitCost">The received unit cost.</param>
+    /// <param name="variancePercent">The deviation as a percentage.</param>
+    /// <param name="tolerancePercent">The tolerance applied.</param>
+    /// <returns>The error.</returns>
+    public static Error CostVarianceRequiresApproval(
+        int lineNo,
+        decimal poUnitCost,
+        decimal receiptUnitCost,
+        decimal variancePercent,
+        decimal tolerancePercent) => Error.ApprovalRequired(
+        "purchasing.cost_variance_requires_approval",
+        FormattableString.Invariant(
+            $"Receipt line {lineNo} carries a unit cost of {receiptUnitCost} against a purchase order cost of {poUnitCost} ({variancePercent:0.##}% variance, tolerance {tolerancePercent:0.##}%). Posting it requires purchase approval authority covering the received value."),
+        new Dictionary<string, object?>
+        {
+            ["purchaseOrderLineNo"] = lineNo,
+            ["poUnitCost"] = poUnitCost,
+            ["receiptUnitCost"] = receiptUnitCost,
+            ["variancePercent"] = variancePercent,
+            ["tolerancePercent"] = tolerancePercent,
+        });
+
     private static string ExpectedPhrase(IReadOnlyCollection<PurchaseOrderStatus> expected)
         => expected.Count switch
         {

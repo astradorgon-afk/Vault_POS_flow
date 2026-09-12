@@ -61,7 +61,7 @@ public static class MovementTypeRules
 
         [InventoryMovementType.SupplierReceipt] = new(
             External,
-            Set(InventoryState.Available, InventoryState.PendingInspection, InventoryState.Quarantine),
+            Set(InventoryState.Available, InventoryState.PendingInspection, InventoryState.Quarantine, InventoryState.Damaged),
             ReferenceDocumentType.GoodsReceipt,
             RequiresApprover: false,
             RequiresReasonCode: false,

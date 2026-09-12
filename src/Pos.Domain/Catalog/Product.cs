@@ -149,6 +149,26 @@ public sealed class Product : AggregateRoot<ProductId>
     public IReadOnlyList<ProductSupplier> Suppliers => _suppliers.ToArray();
 
     /// <summary>
+    /// Records an actual purchase cost from a supplier on the product-supplier
+    /// link, so replenishment planning sees the latest cost. Products that have
+    /// no link for the supplier are untouched, as are receipt lines that deliver
+    /// no quantity.
+    /// </summary>
+    /// <param name="supplierId">The supplier the goods were received from.</param>
+    /// <param name="unitCost">The actual unit cost of the receipt.</param>
+    /// <param name="receivedQuantity">The quantity received; zero skips the update.</param>
+    internal void RecordSupplierReceipt(SupplierId supplierId, decimal unitCost, decimal receivedQuantity)
+    {
+        if (receivedQuantity <= 0m)
+        {
+            return;
+        }
+
+        ProductSupplier? link = _suppliers.FirstOrDefault(s => s.SupplierId == supplierId);
+        link?.RecordPurchaseCost(unitCost);
+    }
+
+    /// <summary>
     /// Creates a product. The SKU is validated and normalised by
     /// <see cref="Sku"/>; the base unit of measure is immutable for the life of
     /// the product.

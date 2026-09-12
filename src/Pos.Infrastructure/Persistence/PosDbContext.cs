@@ -119,6 +119,18 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the purchase order approval decisions.</summary>
     public DbSet<PurchaseApproval> PurchaseApprovals => Set<PurchaseApproval>();
 
+    /// <summary>Gets the goods receipts.</summary>
+    public DbSet<GoodsReceipt> GoodsReceipts => Set<GoodsReceipt>();
+
+    /// <summary>Gets the goods receipt lines.</summary>
+    public DbSet<GoodsReceiptLine> GoodsReceiptLines => Set<GoodsReceiptLine>();
+
+    /// <summary>Gets the receiving discrepancies.</summary>
+    public DbSet<ReceivingDiscrepancy> ReceivingDiscrepancies => Set<ReceivingDiscrepancy>();
+
+    /// <summary>Gets the received lots of batch-tracked products.</summary>
+    public DbSet<Batch> Batches => Set<Batch>();
+
     /// <summary>
     /// Gets the central document counter rows. Advanced exclusively by raw upsert
     /// SQL; the change tracker never writes these rows.

@@ -360,15 +360,22 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
     /// <param name="sku">The stock-keeping unit code.</param>
     /// <param name="name">The display name.</param>
     /// <param name="barcode">The primary barcode value.</param>
+    /// <param name="tracksBatches">Whether the product is tracked by lot.</param>
+    /// <param name="tracksExpiry">Whether the product carries an expiry date.</param>
     /// <returns>The created product's identifier.</returns>
-    public Task<ProductId> CreateProductAsync(string sku, string name, string barcode)
+    public Task<ProductId> CreateProductAsync(
+        string sku, string name, string barcode, bool tracksBatches = false, bool tracksExpiry = false)
         => WithServiceAsync<ProductId>(async context =>
         {
             CategoryId categoryId = (await SeedCategoryAsync(context, "CATEGORY", "Category")).Id;
             UnitOfMeasureId unitId = (await SeedUnitAsync(context, "PC", "Piece")).Id;
             UserId systemUser = new(Guid.CreateVersion7());
 
-            Result<Product> created = Product.Create(sku, name, categoryId, unitId, systemUser);
+            Result<Product> created = Product.Create(
+                sku, name, categoryId, unitId, systemUser,
+                tracksBatches: tracksBatches,
+                tracksExpiry: tracksExpiry,
+                shelfLifeDays: tracksExpiry ? 270 : null);
 
             if (created.IsFailure)
             {

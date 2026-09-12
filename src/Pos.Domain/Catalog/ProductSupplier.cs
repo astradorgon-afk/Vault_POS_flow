@@ -46,7 +46,17 @@ public sealed class ProductSupplier
     public string? SupplierSku { get; }
 
     /// <summary>Gets the last recorded unit cost from this supplier, if any.</summary>
-    public decimal? LastCost { get; }
+    public decimal? LastCost { get; private set; }
+
+    /// <summary>
+    /// Updates the last recorded purchase cost from this supplier.
+    /// Called by the goods receipt handler after each receipt line is posted.
+    /// </summary>
+    /// <param name="cost">The actual cost of the latest receipt.</param>
+    internal void RecordPurchaseCost(decimal cost)
+    {
+        LastCost = cost;
+    }
 
     /// <summary>Gets this supplier's typical lead time for the product.</summary>
     public int LeadTimeDays { get; }
