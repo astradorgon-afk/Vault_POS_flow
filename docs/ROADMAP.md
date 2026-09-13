@@ -137,11 +137,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 7 — Store to Store Transfers
 
-- [ ] Store-to-store request with central approval
-- [ ] Pre-approval tokens (issue, scope, consume, expire)
-- [ ] Emergency offline transfers with dual manager authorization
-- [ ] `PendingCentralReview` queue and ratify/correct/reject outcomes
-- [ ] Emergency transfer visibility and monthly caps
+- [x] Store-to-store request with central approval
+- [x] Pre-approval tokens (issue, scope, consume, expire)
+- [x] Emergency offline transfers with dual manager authorization
+- [x] `PendingCentralReview` queue and ratify/correct/reject outcomes
+- [x] Emergency transfer visibility and monthly caps
 
 ## Phase 8 — Quarantine and Unauthorized Inventory
 

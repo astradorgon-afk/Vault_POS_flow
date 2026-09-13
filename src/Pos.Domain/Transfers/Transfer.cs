@@ -37,6 +37,53 @@ public enum TransferStatus
 
     /// <summary>The dispatch was cancelled before the destination received any of it.</summary>
     Cancelled = 11,
+
+    /// <summary>An emergency transfer posted its stock but awaits head office review.</summary>
+    PendingCentralReview = 12,
+}
+
+/// <summary>
+/// The shape of the route a transfer travels. Derived from the source and
+/// destination location kinds; the main warehouse is the approval authority for
+/// store-to-store movement, so the distinction drives which workflow applies.
+/// </summary>
+public enum TransferKind
+{
+    /// <summary>Main warehouse to a store.</summary>
+    WarehouseToStore = 1,
+
+    /// <summary>Between two stores. Requires main warehouse approval.</summary>
+    StoreToStore = 2,
+
+    /// <summary>A store returning stock to the main warehouse.</summary>
+    StoreToWarehouse = 3,
+}
+
+/// <summary>
+/// How a transfer obtained approval. Normal transfers run the stateful review
+/// workflow; pre-approved transfers carry a head office token; emergency
+/// transfers are co-signed by two store managers and reviewed centrally.
+/// </summary>
+public enum TransferMode
+{
+    /// <summary>The transfer waits for the ordinary review workflow.</summary>
+    Normal = 1,
+
+    /// <summary>The transfer carries a head office pre-approval token and bypasses review.</summary>
+    PreApproved = 2,
+
+    /// <summary>The transfer was raised as an emergency and awaits central review.</summary>
+    EmergencyOffline = 3,
+}
+
+/// <summary>The decision a central reviewer reaches on a pending emergency transfer.</summary>
+public enum TransferReviewOutcome
+{
+    /// <summary>The emergency is accepted; the transfer proceeds as received.</summary>
+    Ratified = 1,
+
+    /// <summary>The emergency is rejected; the posted stock is reversed.</summary>
+    Rejected = 2,
 }
 
 /// <summary>What kind of arrival discrepancy a transfer records.</summary>
@@ -94,6 +141,18 @@ public enum TransferCustodyEventKind
 
     /// <summary>The transfer was verified and closed.</summary>
     Verified = 12,
+
+    /// <summary>The transfer was approved through a pre-approval token.</summary>
+    PreApprovedApproval = 13,
+
+    /// <summary>An emergency transfer was created and its stock posted.</summary>
+    EmergencyCreated = 14,
+
+    /// <summary>Central review ratified the emergency transfer.</summary>
+    CentralReviewRatified = 15,
+
+    /// <summary>Central review rejected the emergency transfer; its stock was reversed.</summary>
+    CentralReviewRejected = 16,
 }
 
 /// <summary>One requested line of a transfer.</summary>
@@ -388,7 +447,10 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         LocationId destinationLocationId,
         IReadOnlyList<TransferLine> lines,
         UserId createdBy,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        TransferKind kind,
+        TransferMode mode,
+        PreApprovalTokenId? preApprovalTokenId)
     {
         Id = id;
         SourceLocationId = sourceLocationId;
@@ -396,6 +458,9 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         _lines.AddRange(lines);
         CreatedByUserId = createdBy;
         CreatedAtUtc = createdAtUtc;
+        Kind = kind;
+        Mode = mode;
+        PreApprovalTokenId = preApprovalTokenId;
         Status = TransferStatus.Draft;
         _custodyEvents.Add(new TransferCustodyEvent(
             TransferCustodyEventId.New(),
@@ -422,13 +487,22 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
     /// <param name="specs">The lines to move.</param>
     /// <param name="createdBy">The user raising the transfer.</param>
     /// <param name="createdAtUtc">The current instant.</param>
+    /// <param name="kind">The route shape, derived from the location kinds.</param>
+    /// <param name="mode">How the transfer is approved; normal unless a token is attached.</param>
+    /// <param name="preApprovalTokenId">
+    /// The head office token the transfer is pre-approved by, when supplied.
+    /// Validated by the handler; the aggregate records it.
+    /// </param>
     /// <returns>The draft transfer, or validation errors.</returns>
     public static Result<Transfer> Create(
         LocationId sourceLocationId,
         LocationId destinationLocationId,
         IReadOnlyList<TransferLineSpec> specs,
         UserId createdBy,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        TransferKind kind = TransferKind.WarehouseToStore,
+        TransferMode mode = TransferMode.Normal,
+        PreApprovalTokenId? preApprovalTokenId = null)
     {
         if (sourceLocationId.IsEmpty)
         {
@@ -491,8 +565,118 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
                 destinationLocationId,
                 lines,
                 createdBy,
-                createdAtUtc))
+                createdAtUtc,
+                kind,
+                mode,
+                preApprovalTokenId))
             : Result<Transfer>.Failure(errors);
+    }
+
+    /// <summary>
+    /// Creates an emergency transfer: stock physically moves between two stores
+    /// co-signed by their managers, the ledger posts immediately against the TRF
+    /// number allocated here, and the transfer lands in
+    /// <see cref="TransferStatus.PendingCentralReview"/> until head office
+    /// ratifies or rejects it.
+    /// </summary>
+    /// <param name="sourceLocationId">The store the stock leaves.</param>
+    /// <param name="destinationLocationId">The store the stock is destined for.</param>
+    /// <param name="specs">The lines to move, in the products' base units.</param>
+    /// <param name="number">The TRF number allocated for the emergency.</param>
+    /// <param name="createdBy">The originating store manager.</param>
+    /// <param name="createdAtUtc">The current instant.</param>
+    /// <returns>The emergency transfer, or validation errors.</returns>
+    public static Result<Transfer> CreateEmergency(
+        LocationId sourceLocationId,
+        LocationId destinationLocationId,
+        IReadOnlyList<TransferLineSpec> specs,
+        DocumentNumber number,
+        UserId createdBy,
+        DateTimeOffset createdAtUtc)
+    {
+        if (sourceLocationId.IsEmpty)
+        {
+            return Result<Transfer>.Failure(TransferErrors.SourceRequired);
+        }
+
+        if (destinationLocationId.IsEmpty)
+        {
+            return Result<Transfer>.Failure(TransferErrors.DestinationRequired);
+        }
+
+        if (sourceLocationId == destinationLocationId)
+        {
+            return Result<Transfer>.Failure(TransferErrors.SameLocation);
+        }
+
+        if (specs is null || specs.Count == 0)
+        {
+            return Result<Transfer>.Failure(TransferErrors.EmptyTransfer);
+        }
+
+        List<Error> errors = [];
+        List<TransferLine> lines = [];
+        TransferOrderId transferId = TransferOrderId.New();
+
+        for (int i = 0; i < specs.Count; i++)
+        {
+            TransferLineSpec spec = specs[i];
+            int lineNo = i + 1;
+
+            if (spec.RequestedQuantity <= 0m)
+            {
+                errors.Add(TransferErrors.LineQuantityInvalid(lineNo));
+            }
+
+            bool duplicated = lines.Any(l => l.ProductId == spec.ProductId);
+
+            if (duplicated)
+            {
+                errors.Add(TransferErrors.DuplicateLine(lineNo));
+            }
+            else
+            {
+                lines.Add(new TransferLine(
+                    TransferOrderLineId.New(),
+                    transferId,
+                    lineNo,
+                    spec.ProductId,
+                    spec.RequestedQuantity,
+                    spec.Note?.Trim()));
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            return Result<Transfer>.Failure(errors);
+        }
+
+        Transfer transfer = new(
+            transferId,
+            sourceLocationId,
+            destinationLocationId,
+            lines,
+            createdBy,
+            createdAtUtc,
+            TransferKind.StoreToStore,
+            TransferMode.EmergencyOffline,
+            preApprovalTokenId: null)
+        {
+            Number = number.Value,
+            Status = TransferStatus.PendingCentralReview,
+            EmergencyLedgerGroupId = null,
+        };
+
+        transfer._custodyEvents.Add(new TransferCustodyEvent(
+            TransferCustodyEventId.New(),
+            transferId,
+            transfer._custodyEvents.Count + 1,
+            TransferCustodyEventKind.EmergencyCreated,
+            createdBy,
+            createdAtUtc,
+            $"Emergency transfer allocated {number.Value}."));
+
+        return Result<Transfer>.Success(transfer);
     }
 
     /// <summary>Submits the transfer for review.</summary>
@@ -508,6 +692,119 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
 
         Status = TransferStatus.Submitted;
         _custodyEvents.Add(Event(TransferCustodyEventKind.Submitted, submittedBy, now, null));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Submits a pre-approved transfer: the head office token stands in for the
+    /// review workflow, so the transfer goes straight to Approved under the
+    /// token issuer's authority. The handler validates the token before calling
+    /// this and consumes it after; the two are one transaction.
+    /// </summary>
+    /// <param name="tokenIssuer">The head office user who issued the token.</param>
+    /// <param name="now">The current instant.</param>
+    /// <returns>Success, or a state error.</returns>
+    public Result SubmitPreApproved(UserId tokenIssuer, DateTimeOffset now)
+    {
+        if (Mode != TransferMode.PreApproved)
+        {
+            return Result.Failure(TransferErrors.SubmitPreApprovedModeRequired);
+        }
+
+        if (PreApprovalTokenId is null)
+        {
+            return Result.Failure(TransferErrors.SubmitPreApprovedTokenMissing);
+        }
+
+        if (Status != TransferStatus.Draft)
+        {
+            return Result.Failure(TransferErrors.InvalidTransferState(TransferStatus.Draft, Status));
+        }
+
+        Status = TransferStatus.Approved;
+        ApprovedByUserId = tokenIssuer;
+        ApprovedAtUtc = now;
+        _custodyEvents.Add(Event(TransferCustodyEventKind.PreApprovedApproval, tokenIssuer, now, null));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Ratifies a pending emergency at central review: the stock has already
+    /// moved, so the transfer records as received under the reviewer's authority
+    /// and no further ledger movement posts.
+    /// </summary>
+    /// <param name="reviewer">The head office reviewer.</param>
+    /// <param name="now">The current instant.</param>
+    /// <param name="note">An optional ratification note.</param>
+    /// <returns>Success, or a state error.</returns>
+    public Result Ratify(UserId reviewer, DateTimeOffset now, string? note)
+    {
+        if (Status != TransferStatus.PendingCentralReview)
+        {
+            return Result.Failure(TransferErrors.InvalidTransferState(
+                TransferStatus.PendingCentralReview, Status));
+        }
+
+        Status = TransferStatus.Received;
+        ReviewOutcome = TransferReviewOutcome.Ratified;
+        ReviewedByUserId = reviewer;
+        ReviewedAtUtc = now;
+        ReviewNote = note?.Trim();
+        _custodyEvents.Add(Event(TransferCustodyEventKind.CentralReviewRatified, reviewer, now, note?.Trim()));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Rejects a pending emergency at central review: the posted stock is
+    /// reversed by the handler, and the transfer lands in
+    /// <see cref="TransferStatus.Cancelled"/> with the reviewer's decision
+    /// recorded for the audit trail.
+    /// </summary>
+    /// <param name="reviewer">The head office reviewer.</param>
+    /// <param name="now">The current instant.</param>
+    /// <param name="note">Why the emergency was rejected; recorded on the ledger.</param>
+    /// <returns>Success, or a state error.</returns>
+    public Result RejectReview(UserId reviewer, DateTimeOffset now, string? note)
+    {
+        if (Status != TransferStatus.PendingCentralReview)
+        {
+            return Result.Failure(TransferErrors.InvalidTransferState(
+                TransferStatus.PendingCentralReview, Status));
+        }
+
+        if (string.IsNullOrWhiteSpace(note))
+        {
+            return Result.Failure(TransferErrors.ReviewRejectReasonRequired);
+        }
+
+        Status = TransferStatus.Cancelled;
+        ReviewOutcome = TransferReviewOutcome.Rejected;
+        ReviewedByUserId = reviewer;
+        ReviewedAtUtc = now;
+        ReviewNote = note.Trim();
+        _custodyEvents.Add(Event(TransferCustodyEventKind.CentralReviewRejected, reviewer, now, note.Trim()));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Records the ledger group that moved the emergency stock, so a later
+    /// rejection can post its reversal against the original group.
+    /// </summary>
+    /// <param name="groupId">The posted emergency movement group.</param>
+    /// <returns>Success, or a state error.</returns>
+    public Result RecordEmergencyLedgerPost(MovementGroupId groupId)
+    {
+        if (Mode != TransferMode.EmergencyOffline)
+        {
+            return Result.Failure(TransferErrors.EmergencyLedgerLinkInvalid);
+        }
+
+        if (EmergencyLedgerGroupId is not null)
+        {
+            return Result.Failure(TransferErrors.EmergencyAlreadyPosted);
+        }
+
+        EmergencyLedgerGroupId = groupId;
         return Result.Success();
     }
 
@@ -1021,6 +1318,30 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
 
     /// <summary>Gets the instant the transfer was verified and closed.</summary>
     public DateTimeOffset? VerifiedAtUtc { get; private set; }
+
+    /// <summary>Gets the route shape of this transfer.</summary>
+    public TransferKind Kind { get; private set; }
+
+    /// <summary>Gets how this transfer was approved.</summary>
+    public TransferMode Mode { get; private set; }
+
+    /// <summary>Gets the pre-approval token this transfer was raised against, when any.</summary>
+    public PreApprovalTokenId? PreApprovalTokenId { get; private set; }
+
+    /// <summary>Gets the central review decision, once reviewed.</summary>
+    public TransferReviewOutcome? ReviewOutcome { get; private set; }
+
+    /// <summary>Gets the head office reviewer who decided the central review.</summary>
+    public UserId? ReviewedByUserId { get; private set; }
+
+    /// <summary>Gets when the central review decision was recorded.</summary>
+    public DateTimeOffset? ReviewedAtUtc { get; private set; }
+
+    /// <summary>Gets the reviewer's note; required when rejecting.</summary>
+    public string? ReviewNote { get; private set; }
+
+    /// <summary>Gets the ledger group that posted the emergency stock movement.</summary>
+    public MovementGroupId? EmergencyLedgerGroupId { get; private set; }
 
     /// <summary>Gets the requested lines, in creation order.</summary>
     public IReadOnlyList<TransferLine> Lines => _lines;

@@ -163,6 +163,45 @@ public sealed class TransferRepository(PosDbContext context) : ITransferReposito
     }
 
     /// <inheritdoc />
+    public async Task<Result<PreApprovalTokenId>> AddPreApprovalTokenAsync(
+        PreApprovalToken token,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+
+        context.PreApprovalTokens.Add(token);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<PreApprovalTokenId>.Success(token.Id);
+    }
+
+    /// <inheritdoc />
+    public Task<PreApprovalToken?> GetPreApprovalTokenAsync(
+        PreApprovalTokenId tokenId,
+        CancellationToken cancellationToken)
+        => context.PreApprovalTokens
+            .AsTracking()
+            .Include(t => t.ProductRows)
+            .FirstOrDefaultAsync(t => t.Id == tokenId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<int> CountEmergencyCreatedInMonthAsync(
+        LocationId sourceLocationId,
+        DateTimeOffset monthStartUtc,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset monthEndUtc = monthStartUtc.AddMonths(1);
+
+        return context.Transfers.CountAsync(
+            t => t.SourceLocationId == sourceLocationId
+                && t.Kind == TransferKind.StoreToStore
+                && t.Mode == TransferMode.EmergencyOffline
+                && t.CreatedAtUtc >= monthStartUtc
+                && t.CreatedAtUtc < monthEndUtc,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task<LocationId?> GetExternalWriteOffLocationIdAsync(CancellationToken cancellationToken)
         => context.Locations
             .AsNoTracking()

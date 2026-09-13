@@ -44,6 +44,9 @@ public enum DocumentType
 
     /// <summary>Transfer receipt, prefix <c>TRC</c>.</summary>
     TransferReceipt = 12,
+
+    /// <summary>Pre-approval token, prefix <c>PAT</c>.</summary>
+    PreApprovalToken = 13,
 }
 
 /// <summary>
@@ -79,6 +82,8 @@ public readonly partial record struct DocumentNumber
         DocumentType.SupplierReturn => "SRT",
         DocumentType.TransferShipment => "SHP",
         DocumentType.TransferReceipt => "TRC",
+
+        DocumentType.PreApprovalToken => "PAT",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown document type."),
     };
 

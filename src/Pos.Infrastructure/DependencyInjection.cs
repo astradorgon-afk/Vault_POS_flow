@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Inventory;
@@ -140,6 +141,16 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(MaintenanceOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.AddOptions<EmergencyTransfersOptions>()
+            .Bind(configuration.GetSection(EmergencyTransfersOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Application-layer command handlers are activated by the dispatcher
+        // outside the Options pattern, so the bound instance is registered
+        // directly as the configuration snapshot the options pipeline produced.
+        services.AddSingleton(sp => sp.GetRequiredService<IOptions<EmergencyTransfersOptions>>().Value);
 
         // Optional by design: most installations have users already, and the
         // bootstrap path must stay shut unless someone deliberately opens it.

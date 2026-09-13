@@ -6,7 +6,11 @@ using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
 using Pos.Application.Transfers;
+using Pos.Domain.Catalog;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
+using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
 using Pos.Domain.Transfers;
 using Pos.Infrastructure.Persistence;
 
@@ -16,10 +20,14 @@ namespace Pos.Api.Endpoints;
 /// <param name="SourceLocationId">The location the stock leaves.</param>
 /// <param name="DestinationLocationId">The location the stock is destined for.</param>
 /// <param name="Lines">The lines to move, in the products' base units.</param>
+/// <param name="PreApprovalTokenId">
+/// The head office token the transfer is pre-approved by, when supplied.
+/// </param>
 public sealed record CreateTransferBody(
     Guid SourceLocationId,
     Guid DestinationLocationId,
-    IReadOnlyList<CreateTransferLineBody> Lines);
+    IReadOnlyList<CreateTransferLineBody> Lines,
+    Guid? PreApprovalTokenId = null);
 
 /// <summary>One line of a transfer creation.</summary>
 /// <param name="ProductId">The product to move.</param>
@@ -74,6 +82,88 @@ public sealed record ReceiveTransferBody(IReadOnlyList<TransferReceiveBody> Rece
 public sealed record ResolveTransferDiscrepancyBody(
     TransferDiscrepancyResolutionOutcome Outcome,
     string? Note = null);
+
+/// <summary>One line of an emergency transfer.</summary>
+/// <param name="ProductId">The product to move.</param>
+/// <param name="Quantity">The requested quantity, in the base unit.</param>
+public sealed record EmergencyTransferLineBody(Guid ProductId, decimal Quantity);
+
+/// <summary>The destination store manager co-signing an emergency transfer.</summary>
+/// <param name="UserName">Their username or e-mail address.</param>
+/// <param name="Password">Their password.</param>
+public sealed record EmergencyCoAuthorizationBody(string UserName, string Password);
+
+/// <summary>The body of an emergency transfer creation.</summary>
+/// <param name="SourceLocationId">The store the stock leaves.</param>
+/// <param name="DestinationLocationId">The store the stock is destined for.</param>
+/// <param name="Lines">The lines to move; batch-tracked products are refused.</param>
+/// <param name="CoAuthorization">The destination store manager co-signing the movement.</param>
+/// <param name="Note">Why the movement is an emergency; recorded on the ledger.</param>
+public sealed record InitiateEmergencyBody(
+    Guid SourceLocationId,
+    Guid DestinationLocationId,
+    IReadOnlyList<EmergencyTransferLineBody> Lines,
+    EmergencyCoAuthorizationBody CoAuthorization,
+    string Note);
+
+/// <summary>The body of a central review decision.</summary>
+/// <param name="Approve">Whether to ratify or reject.</param>
+/// <param name="Note">Required when rejecting; recorded on the reversal's ledger group.</param>
+public sealed record CentralReviewBody(bool Approve, string? Note = null);
+
+/// <summary>The body of a pre-approval token issue.</summary>
+/// <param name="SourceLocationId">The store the covered transfers leave.</param>
+/// <param name="DestinationLocationId">The store the covered transfers arrive at.</param>
+/// <param name="Products">The covered products; empty means every stock product.</param>
+/// <param name="MaxValue">The value ceiling of one covered transfer, or null.</param>
+/// <param name="ValidFromUtc">The instant the token becomes usable.</param>
+/// <param name="ValidUntilUtc">The instant the token expires.</param>
+/// <param name="Note">An optional note explaining why the token was issued.</param>
+public sealed record IssuePreApprovalTokenBody(
+    Guid SourceLocationId,
+    Guid DestinationLocationId,
+    IReadOnlyList<Guid> Products,
+    decimal? MaxValue,
+    DateTimeOffset ValidFromUtc,
+    DateTimeOffset ValidUntilUtc,
+    string? Note = null);
+
+/// <summary>A pre-approval token as it appears in a list.</summary>
+public sealed record PreApprovalTokenSummary(
+    Guid Id,
+    string Number,
+    string Status,
+    Guid SourceLocationId,
+    Guid DestinationLocationId,
+    IReadOnlyList<Guid> Products,
+    decimal? MaxValue,
+    DateTimeOffset ValidFromUtc,
+    DateTimeOffset ValidUntilUtc,
+    Guid CreatedByUserId,
+    DateTimeOffset CreatedAtUtc,
+    Guid? ConsumedByTransferId,
+    DateTimeOffset? ConsumedAtUtc);
+
+/// <summary>The body of a token revocation.</summary>
+/// <param name="Reason">Why the token is withdrawn.</param>
+public sealed record RevokePreApprovalTokenBody(string Reason);
+
+/// <summary>One replenishment recommendation for a stocked product at a location.</summary>
+/// <param name="LocationId">The store needing stock.</param>
+/// <param name="ProductId">The product running low.</param>
+/// <param name="Available">The sellable quantity on hand.</param>
+/// <param name="Deficit">How far below the target the location is.</param>
+/// <param name="Urgency">Critical, High or Normal based on the thresholds.</param>
+/// <param name="SuggestedSourceLocationId">The suggested source of the stock, when one exists.</param>
+/// <param name="SuggestedQuantity">How much to request, bounded by the source surplus and preference.</param>
+public sealed record ReplenishmentRecommendation(
+    Guid LocationId,
+    Guid ProductId,
+    decimal Available,
+    decimal Deficit,
+    string Urgency,
+    Guid? SuggestedSourceLocationId,
+    decimal SuggestedQuantity);
 
 /// <summary>A transfer as it appears in a list.</summary>
 public sealed record TransferSummary(
@@ -221,6 +311,66 @@ public static class TransferEndpoints
             .WithName("GetTransferCustody")
             .WithSummary("Gets a transfer's custody timeline.");
 
+        group.MapPost("/emergency", InitiateEmergencyTransferAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Emergency)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("InitiateEmergencyTransfer")
+            .WithSummary("Creates an emergency store-to-store transfer under two managers' co-signature.");
+
+        group.MapGet("/pending-central-review", GetPendingCentralReviewAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Approve)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetPendingCentralReview")
+            .WithSummary("Lists emergency transfers awaiting central review.");
+
+        group.MapPost("/{id:guid}/central-review", ReviewCentralTransferAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Approve)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ReviewCentralTransfer")
+            .WithSummary("Ratifies or rejects a pending emergency transfer.");
+
+        RouteGroupBuilder preApprovals = app.MapGroup("/api/v1/pre-approvals").WithTags("Pre-Approvals");
+
+        preApprovals.MapPost("/", IssuePreApprovalTokenAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.IssuePreApproval)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("IssuePreApprovalToken")
+            .WithSummary("Issues a single-use pre-approval token.");
+
+        preApprovals.MapGet("/", ListPreApprovalTokensAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.IssuePreApproval)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ListPreApprovalTokens")
+            .WithSummary("Lists pre-approval tokens.");
+
+        preApprovals.MapPost("/{id:guid}/revoke", RevokePreApprovalTokenAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.IssuePreApproval)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("RevokePreApprovalToken")
+            .WithSummary("Revokes a pre-approval token before it is used.");
+
+        RouteGroupBuilder replenishment = app.MapGroup("/api/v1/replenishment").WithTags("Replenishment");
+
+        replenishment.MapGet("/recommendations", GetReplenishmentRecommendationsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Request)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetReplenishmentRecommendations")
+            .WithSummary("Recommends replenishment quantities for the caller's stocked locations.");
+
         return app;
     }
 
@@ -274,7 +424,10 @@ public static class TransferEndpoints
                     [.. body.Lines.Select(l => new TransferLineSpec(
                         new ProductId(l.ProductId),
                         l.Quantity,
-                        l.Note))]),
+                        l.Note))],
+                    body.PreApprovalTokenId is null
+                        ? null
+                        : new PreApprovalTokenId(body.PreApprovalTokenId.Value)),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -461,6 +614,280 @@ public static class TransferEndpoints
             .ConfigureAwait(false);
 
         return TypedResults.Ok(events);
+    }
+
+    private static async Task<IResult> InitiateEmergencyTransferAsync(
+        [FromBody] InitiateEmergencyBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+        => await DispatchAsync(
+            new InitiateEmergencyTransferCommand(
+                new LocationId(body.SourceLocationId),
+                new LocationId(body.DestinationLocationId),
+                [.. body.Lines.Select(l => new TransferLineSpec(
+                    new ProductId(l.ProductId),
+                    l.Quantity,
+                    null))],
+                new EmergencyCoAuthorization(body.CoAuthorization.UserName, body.CoAuthorization.Password),
+                body.Note),
+            dispatcher,
+            currentUser,
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<IResult> GetPendingCentralReviewAsync(
+        PosDbContext context,
+        CancellationToken cancellationToken)
+    {
+        List<TransferSummary> summaries = await context.Transfers
+            .AsNoTracking()
+            .Where(t => t.Status == TransferStatus.PendingCentralReview)
+            .OrderBy(t => t.CreatedAtUtc)
+            .Select(t => new TransferSummary(
+                t.Id.Value,
+                t.Number,
+                t.Status.ToString(),
+                t.SourceLocationId.Value,
+                t.DestinationLocationId.Value,
+                t.CreatedByUserId.Value,
+                t.CreatedAtUtc,
+                t.DispatchedAtUtc,
+                t.ReceivedAtUtc,
+                t.TotalValue,
+                t.Lines.Count))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(summaries);
+    }
+
+    private static async Task<IResult> ReviewCentralTransferAsync(
+        Guid id,
+        [FromBody] CentralReviewBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+        => await DispatchAsync(
+            new ReviewCentralTransferCommand(new TransferOrderId(id), body.Approve, body.Note),
+            dispatcher,
+            currentUser,
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<IResult> IssuePreApprovalTokenAsync(
+        [FromBody] IssuePreApprovalTokenBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<PreApprovalTokenId> result = await dispatcher
+            .SendAsync(
+                new IssuePreApprovalTokenCommand(
+                    new LocationId(body.SourceLocationId),
+                    new LocationId(body.DestinationLocationId),
+                    [.. body.Products.Select(p => new ProductId(p))],
+                    body.MaxValue,
+                    body.ValidFromUtc,
+                    body.ValidUntilUtc,
+                    body.Note),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> ListPreApprovalTokensAsync(
+        PosDbContext context,
+        CancellationToken cancellationToken)
+    {
+        List<PreApprovalTokenSummary> tokens = await context.PreApprovalTokens
+            .AsNoTracking()
+            .OrderByDescending(t => t.CreatedAtUtc)
+            .Select(t => new PreApprovalTokenSummary(
+                t.Id.Value,
+                t.Number,
+                t.Status.ToString(),
+                t.SourceLocationId.Value,
+                t.DestinationLocationId.Value,
+                t.ProductRows.Select(p => p.ProductId.Value).ToList(),
+                t.MaxValue,
+                t.ValidFromUtc,
+                t.ValidUntilUtc,
+                t.CreatedByUserId.Value,
+                t.CreatedAtUtc,
+                t.ConsumedByTransferId != null ? t.ConsumedByTransferId.Value.Value : null,
+                t.ConsumedAtUtc))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(tokens);
+    }
+
+    private static async Task<IResult> RevokePreApprovalTokenAsync(
+        Guid id,
+        [FromBody] RevokePreApprovalTokenBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<PreApprovalTokenId> result = await dispatcher
+            .SendAsync(new RevokePreApprovalTokenCommand(new PreApprovalTokenId(id), body.Reason), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> GetReplenishmentRecommendationsAsync(
+        PosDbContext context,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        if (currentUser.UserId is not { } userId)
+        {
+            return TypedResults.Ok(Array.Empty<ReplenishmentRecommendation>());
+        }
+
+        // Scoping is assignments-based, matching the rest of the API: a user
+        // sees recommendations for the stores they are assigned to, whatever
+        // their role grants. The token only carries the primary location, so
+        // the full assignment set comes from the database.
+        List<LocationId> assignedLocations = await context.UserLocations
+            .AsNoTracking()
+            .Where(a => a.UserId == userId)
+            .Select(a => a.LocationId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<Location> stores = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Kind == LocationKind.Store && assignedLocations.Contains(l.Id))
+            .OrderBy(l => l.Code)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (stores.Count == 0)
+        {
+            return TypedResults.Ok(Array.Empty<ReplenishmentRecommendation>());
+        }
+
+        List<Location> sources = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Kind != LocationKind.External)
+            .OrderBy(l => l.Kind == LocationKind.MainWarehouse ? 0 : 1)
+            .ThenBy(l => l.Code)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<LocationId> storeIds = stores.Select(s => s.Id).ToList();
+        List<LocationId> sourceIds = sources.Select(s => s.Id).ToList();
+
+        List<InventoryBalance> balances = await context.InventoryBalances
+            .AsNoTracking()
+            .Where(b => b.State == InventoryState.Available
+                && (storeIds.Contains(b.LocationId) || sourceIds.Contains(b.LocationId)))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        Dictionary<(Guid LocationId, Guid ProductId), decimal> availableByLocationProduct = [];
+        foreach (InventoryBalance balance in balances)
+        {
+            (Guid, Guid) key = (balance.LocationId.Value, balance.ProductId.Value);
+            availableByLocationProduct[key] = availableByLocationProduct.GetValueOrDefault(key) + balance.Quantity;
+        }
+
+        List<ProductLocationSetting> settings = await context.ProductLocationSettings
+            .AsNoTracking()
+            .Where(s => s.IsStocked && storeIds.Contains(s.LocationId))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        Dictionary<(Guid LocationId, Guid ProductId), decimal> minimumByLocationProduct = [];
+        foreach (ProductLocationSetting s in settings)
+        {
+            minimumByLocationProduct[(s.LocationId.Value, s.ProductId.Value)] = s.MinimumStock;
+        }
+
+        List<Location> mainWarehouses = sources
+            .Where(s => s.Kind == LocationKind.MainWarehouse)
+            .ToList();
+
+        List<ReplenishmentRecommendation> recommendations = [];
+
+        foreach (ProductLocationSetting setting in settings
+            .Where(s => availableByLocationProduct.GetValueOrDefault((s.LocationId.Value, s.ProductId.Value))
+                < s.ReorderPoint)
+            .OrderBy(s => s.LocationId)
+            .ThenBy(s => s.ProductId))
+        {
+            decimal onHand = availableByLocationProduct.GetValueOrDefault(
+                (setting.LocationId.Value, setting.ProductId.Value));
+            decimal deficit = Math.Max(0m, setting.TargetStock - onHand);
+            if (deficit <= 0m)
+            {
+                continue;
+            }
+
+            string urgency = onHand < setting.MinimumStock
+                ? "Critical"
+                : onHand <= setting.ReorderPoint ? "High" : "Normal";
+
+            // The Main Warehouse holding the largest surplus is the preferred
+            // source; otherwise the store with the largest excess above its own
+            // minimum.
+            Guid? sourceId = null;
+            decimal sourceSurplus = 0m;
+
+            foreach (Location warehouse in mainWarehouses)
+            {
+                decimal surplus = Math.Max(
+                    0m,
+                    availableByLocationProduct.GetValueOrDefault((warehouse.Id.Value, setting.ProductId.Value)));
+                if (surplus > sourceSurplus)
+                {
+                    sourceSurplus = surplus;
+                    sourceId = warehouse.Id.Value;
+                }
+            }
+
+            if (sourceId is null)
+            {
+                foreach (Location store in stores.Where(s => s.Id != setting.LocationId))
+                {
+                    decimal minimum = minimumByLocationProduct.GetValueOrDefault(
+                        (store.Id.Value, setting.ProductId.Value));
+                    decimal surplus = Math.Max(
+                        0m,
+                        availableByLocationProduct.GetValueOrDefault((store.Id.Value, setting.ProductId.Value))
+                            - minimum);
+                    if (surplus > sourceSurplus)
+                    {
+                        sourceSurplus = surplus;
+                        sourceId = store.Id.Value;
+                    }
+                }
+            }
+
+            decimal preferred = setting.PreferredReplenishmentQuantity > 0m
+                ? setting.PreferredReplenishmentQuantity
+                : decimal.MaxValue;
+            decimal quantity = sourceId is null
+                ? 0m
+                : Math.Min(deficit, Math.Min(sourceSurplus, preferred));
+
+            recommendations.Add(new ReplenishmentRecommendation(
+                setting.LocationId.Value,
+                setting.ProductId.Value,
+                onHand,
+                deficit,
+                urgency,
+                sourceId,
+                quantity));
+        }
+
+        return TypedResults.Ok(recommendations);
     }
 
     private static async Task<IResult> DispatchAsync(

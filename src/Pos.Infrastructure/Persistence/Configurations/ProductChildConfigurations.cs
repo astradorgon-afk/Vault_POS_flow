@@ -88,7 +88,9 @@ public sealed class ProductLocationSettingConfiguration : IEntityTypeConfigurati
 
         builder.ToTable(t => t.HasCheckConstraint(
             "ck_product_location_thresholds",
-            "minimum_stock <= reorder_point AND reorder_point <= target_stock AND target_stock <= maximum_stock"));
+            "CAST(minimum_stock AS NUMERIC) <= CAST(reorder_point AS NUMERIC) "
+            + "AND CAST(reorder_point AS NUMERIC) <= CAST(target_stock AS NUMERIC) "
+            + "AND CAST(target_stock AS NUMERIC) <= CAST(maximum_stock AS NUMERIC)"));
     }
 }
 

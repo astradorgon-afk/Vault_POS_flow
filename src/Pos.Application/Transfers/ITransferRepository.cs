@@ -81,6 +81,36 @@ public interface ITransferRepository
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The counterparty location identifier, or <see langword="null"/> when not provisioned.</returns>
     Task<LocationId?> GetExternalWriteOffLocationIdAsync(CancellationToken cancellationToken);
+
+    /// <summary>Stages a new pre-approval token on the context.</summary>
+    /// <param name="token">The aggregate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The persisted identifier.</returns>
+    Task<Result<PreApprovalTokenId>> AddPreApprovalTokenAsync(
+        PreApprovalToken token,
+        CancellationToken cancellationToken);
+
+    /// <summary>Loads a pre-approval token with its product scope, tracked.</summary>
+    /// <param name="tokenId">The token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The token, or <see langword="null"/> when it does not exist.</returns>
+    Task<PreApprovalToken?> GetPreApprovalTokenAsync(
+        PreApprovalTokenId tokenId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Counts the emergency transfers a store originated in the calendar month,
+    /// as the monthly budget gate. The window is a UTC month start: the count
+    /// bounds emergencies in real time rather than by any business date.
+    /// </summary>
+    /// <param name="sourceLocationId">The store that originated them.</param>
+    /// <param name="monthStartUtc">The UTC instant the month began.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many emergency transfers the store created in the month.</returns>
+    Task<int> CountEmergencyCreatedInMonthAsync(
+        LocationId sourceLocationId,
+        DateTimeOffset monthStartUtc,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>What a transfer handler needs to know about one location.</summary>

@@ -50,6 +50,16 @@ public sealed class TransferConfiguration : IEntityTypeConfiguration<Transfer>
         builder.Property(t => t.VerifiedByUserId).HasColumnName("verified_by_user_id");
         builder.Property(t => t.VerifiedAtUtc).HasColumnName("verified_at_utc");
 
+        builder.Property(t => t.Kind).HasColumnName("kind").HasConversion<short>().IsRequired();
+        builder.Property(t => t.Mode).HasColumnName("mode").HasConversion<short>().IsRequired();
+        builder.Property(t => t.PreApprovalTokenId).HasColumnName("pre_approval_token_id");
+
+        builder.Property(t => t.ReviewOutcome).HasColumnName("review_outcome").HasConversion<short>();
+        builder.Property(t => t.ReviewedByUserId).HasColumnName("reviewed_by_user_id");
+        builder.Property(t => t.ReviewedAtUtc).HasColumnName("reviewed_at_utc");
+        builder.Property(t => t.ReviewNote).HasColumnName("review_note").HasMaxLength(512);
+        builder.Property(t => t.EmergencyLedgerGroupId).HasColumnName("emergency_ledger_group_id");
+
         // The empty draft number makes the column non-unique at the database
         // level, so uniqueness is enforced only where the number is populated.
         builder.HasIndex(t => t.Number)
@@ -61,6 +71,9 @@ public sealed class TransferConfiguration : IEntityTypeConfiguration<Transfer>
             .HasDatabaseName("ix_transfer_order_source_time");
         builder.HasIndex(t => new { t.DestinationLocationId, t.CreatedAtUtc })
             .HasDatabaseName("ix_transfer_order_destination_time");
+
+        builder.HasIndex(t => new { t.Status, t.CreatedAtUtc })
+            .HasDatabaseName("ix_transfer_order_status_time");
 
         builder.HasMany(t => t.Lines)
             .WithOne()

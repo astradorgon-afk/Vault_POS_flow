@@ -236,7 +236,7 @@ the `EXT-WRITEOFF` location — two legs, so the ledger always sums to zero.
 `partially received` transfers stay open until `verify` confirms every
 discrepancy is resolved, which closes the order.
 
-Planned (Phase 7 — store to store):
+Phase 7 (store to store) — implemented:
 
 ```
 POST   /api/v1/transfers/emergency                   transfer.emergency (dual auth body)
@@ -245,6 +245,16 @@ POST   /api/v1/transfers/{id}/central-review         transfer.approve
 POST   /api/v1/pre-approvals                         transfer.preapproval.issue
 GET    /api/v1/replenishment/recommendations         transfer.request
 ```
+
+Emergency transfers are the offline path: two co-signers on the originating
+device move stock immediately, land in `PendingCentralReview`, and can be
+ratified or rejected from HQ (a rejection reverses every unit with a recorded
+reason). A per-store monthly cap bounds how many emergencies a store can open.
+Pre-approval tokens are single-use, product- and route-scoped, value-capped,
+validity-windowed, and revocable; a transfer created under a token submits
+straight to `Approved`. Replenishment recommendations scope to the caller's
+assigned locations and suggest the source with the most surplus — the Main
+Warehouse first, then a sibling store.
 
 ---
 

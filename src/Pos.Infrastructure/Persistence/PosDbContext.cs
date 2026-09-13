@@ -156,6 +156,12 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the custody timeline of transfer orders.</summary>
     public DbSet<TransferCustodyEvent> TransferCustodyEvents => Set<TransferCustodyEvent>();
 
+    /// <summary>Gets the pre-approval tokens issued by head office.</summary>
+    public DbSet<PreApprovalToken> PreApprovalTokens => Set<PreApprovalToken>();
+
+    /// <summary>Gets the product scope rows of pre-approval tokens.</summary>
+    public DbSet<PreApprovalTokenProduct> PreApprovalTokenProducts => Set<PreApprovalTokenProduct>();
+
     /// <summary>Gets the received lots of batch-tracked products.</summary>
     public DbSet<Batch> Batches => Set<Batch>();
 

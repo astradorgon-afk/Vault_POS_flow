@@ -38,6 +38,8 @@ public static class MovementTypeRules
     private const string PermTransferDispatch = "transfer.dispatch";
     private const string PermTransferReceive = "transfer.receive";
     private const string PermTransferReconcile = "transfer.reconcile";
+    private const string PermTransferEmergency = "transfer.emergency";
+    private const string PermTransferApprove = "transfer.approve";
     private const string PermQuarantineCreate = "quarantine.create";
     private const string PermQuarantineRelease = "quarantine.release";
     private const string PermQuarantineReject = "quarantine.reject";
@@ -255,6 +257,22 @@ public static class MovementTypeRules
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermInventoryAdjustApprove),
+
+        [InventoryMovementType.TransferEmergency] = new(
+            Available,
+            Available,
+            ReferenceDocumentType.TransferOrder,
+            RequiresApprover: true,
+            RequiresReasonCode: true,
+            PermTransferEmergency),
+
+        [InventoryMovementType.TransferEmergencyReversal] = new(
+            Available,
+            Available,
+            ReferenceDocumentType.TransferOrder,
+            RequiresApprover: true,
+            RequiresReasonCode: true,
+            PermTransferApprove),
     };
 
     /// <summary>Gets every movement type that has a rule defined.</summary>

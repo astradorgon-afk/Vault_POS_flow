@@ -215,4 +215,54 @@ public static class TransferErrors
     public static Error WriteOffExternalLocationMissing => Error.Conflict(
         "transfer.writeoff_external_missing",
         "The EXT-WRITEOFF counterparty location is not provisioned; variance write-offs cannot post.");
+
+    /// <summary>An emergency transfer can only move stock between two stores.</summary>
+    public static Error EmergencyInvalidRoute => Error.Validation(
+        "transfer.emergency_invalid_route",
+        "An emergency transfer can only move stock between two store locations.");
+
+    /// <summary>Emergency transfers cannot carry batch-tracked products.</summary>
+    public static Error EmergencyBatchNotSupported(int lineNo) => Error.Validation(
+        "transfer.emergency_batch_not_supported",
+        $"Line {lineNo} names a batch-tracked product; emergency movements cannot name a lot and are restricted to non-batch products.");
+
+    /// <summary>A store has already exhausted its monthly emergency budget.</summary>
+    public static Error EmergencyMonthlyCapExceeded => Error.Conflict(
+        "transfer.emergency_monthly_cap_exceeded",
+        "This store has exhausted its monthly emergency transfer budget; raise a normal transfer and wait for approval.");
+
+    /// <summary>An emergency transfer must name a distinct co-signing manager.</summary>
+    public static Error EmergencyCoSignerSameAsBearer => Error.Validation(
+        "transfer.emergency_co_signer_same",
+        "The co-signing manager must be a different user from the originating manager.");
+
+    /// <summary>The co-signing manager could not be authorised against the destination.</summary>
+    public static Error EmergencyCoSignerUnauthorized => Error.Validation(
+        "transfer.emergency_co_signer_unauthorized",
+        "The named co-signing manager does not hold emergency transfer permission at the destination store.");
+
+    /// <summary>Submitting pre-approved requires the transfer to carry a token.</summary>
+    public static Error SubmitPreApprovedTokenMissing => Error.Conflict(
+        "transfer.submit_preapproved_token_missing",
+        "A pre-approved transfer must carry a pre-approval token.");
+
+    /// <summary>Submitting pre-approved requires the transfer to be in pre-approved mode.</summary>
+    public static Error SubmitPreApprovedModeRequired => Error.Conflict(
+        "transfer.submit_preapproved_mode_required",
+        "Only transfers raised against a pre-approval token can be submitted as pre-approved.");
+
+    /// <summary>Rejecting an emergency requires a reason, which is recorded on the ledger.</summary>
+    public static Error ReviewRejectReasonRequired => Error.Validation(
+        "transfer.review_reject_reason_required",
+        "Rejecting an emergency transfer requires a reason explaining why the stock movement is reversed.");
+
+    /// <summary>Only emergency transfers carry an emergency ledger link.</summary>
+    public static Error EmergencyLedgerLinkInvalid => Error.Conflict(
+        "transfer.emergency_ledger_link_invalid",
+        "Only an emergency transfer can record an emergency ledger group.");
+
+    /// <summary>An emergency transfer can only link one ledger group.</summary>
+    public static Error EmergencyAlreadyPosted => Error.Conflict(
+        "transfer.emergency_already_posted",
+        "This emergency transfer already recorded its ledger group; a second group cannot be attached.");
 }

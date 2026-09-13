@@ -93,6 +93,12 @@ public enum InventoryMovementType
 
     /// <summary>A reversal of a previously posted group, referencing the original.</summary>
     Reversal = 28,
+
+    /// <summary>An emergency store transfer: available stock moves between two stores.</summary>
+    TransferEmergency = 29,
+
+    /// <summary>A reversal of an emergency store transfer, posted on central rejection.</summary>
+    TransferEmergencyReversal = 30,
 }
 
 /// <summary>
@@ -182,6 +188,12 @@ public enum AdjustmentReasonCode
 
     /// <summary>Transfer stock missing on arrival is unrecoverable and written off.</summary>
     TransitVarianceWriteOff = 12,
+
+    /// <summary>Stock moved on an emergency store transfer.</summary>
+    EmergencyTransfer = 13,
+
+    /// <summary>An emergency store transfer was reversed on central rejection.</summary>
+    EmergencyTransferReversed = 14,
 
     /// <summary>Anything else. Requires explanatory notes.</summary>
     Other = 99,

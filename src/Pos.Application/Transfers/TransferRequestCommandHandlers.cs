@@ -9,8 +9,10 @@ using Pos.Domain.Transfers;
 namespace Pos.Application.Transfers;
 
 /// <summary>
-/// Handles <see cref="CreateTransferCommand"/>. Validates the locations and
-/// stages the draft transfer.
+/// Handles <see cref="CreateTransferCommand"/>. Validates the locations, derives
+/// the transfer kind from the route, and when a pre-approval token is named
+/// validates its lifecycle, scope and value ceiling before staging the transfer
+/// as pre-approved.
 /// </summary>
 public sealed class CreateTransferCommandHandler(
     ITransferRepository transfers,
@@ -23,20 +25,6 @@ public sealed class CreateTransferCommandHandler(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-
-        Result<Transfer> created = Transfer.Create(
-            command.SourceLocationId,
-            command.DestinationLocationId,
-            command.Lines,
-            currentUser.UserId ?? UserId.Empty,
-            clock.UtcNow);
-
-        if (created.IsFailure)
-        {
-            return Result<TransferOrderId>.Failure(created.Errors);
-        }
-
-        Transfer transfer = created.Value;
 
         TransferLocationInfo? source = await transfers
             .GetLocationInfoAsync(command.SourceLocationId, cancellationToken)
@@ -68,11 +56,113 @@ public sealed class CreateTransferCommandHandler(
                 TransferErrors.DestinationLocationExternal(command.DestinationLocationId));
         }
 
+        TransferKind kind = KindFor(source.Kind, destination.Kind);
+        TransferMode mode = TransferMode.Normal;
+        PreApprovalToken? token = null;
+
+        if (command.PreApprovalTokenId is { } tokenId)
+        {
+            token = await transfers
+                .GetPreApprovalTokenAsync(tokenId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (token is null)
+            {
+                return Result<TransferOrderId>.Failure(PreApprovalTokenErrors.TokenUnknown(tokenId));
+            }
+
+            Result availability = ValidateTokenAvailability(token, clock.UtcNow);
+
+            if (availability.IsFailure)
+            {
+                return Result<TransferOrderId>.Failure(availability.Errors);
+            }
+
+            if (token.SourceLocationId != command.SourceLocationId
+                || token.DestinationLocationId != command.DestinationLocationId)
+            {
+                return Result<TransferOrderId>.Failure(PreApprovalTokenErrors.ScopeMismatch);
+            }
+
+            ProductId[] productIds = [.. command.Lines.Select(l => l.ProductId).Distinct()];
+
+            if (token.Products.Count > 0 && productIds.Any(p => !token.Products.Contains(p)))
+            {
+                return Result<TransferOrderId>.Failure(PreApprovalTokenErrors.ScopeMismatch);
+            }
+
+            Dictionary<ProductId, Product> productById = (await transfers
+                .GetProductsAsync(productIds, cancellationToken)
+                .ConfigureAwait(false)).ToDictionary(p => p.Id);
+
+            foreach (ProductId productId in productIds)
+            {
+                if (!productById.ContainsKey(productId))
+                {
+                    return Result<TransferOrderId>.Failure(TransferErrors.ProductUnknown(productId));
+                }
+            }
+
+            decimal estimatedValue = command.Lines
+                .Sum(l => productById[l.ProductId].DefaultPurchaseCost * l.RequestedQuantity);
+
+            if (token.ValueExceeds(estimatedValue))
+            {
+                return Result<TransferOrderId>.Failure(PreApprovalTokenErrors.ValueExceeded);
+            }
+
+            mode = TransferMode.PreApproved;
+        }
+
+        Result<Transfer> created = Transfer.Create(
+            command.SourceLocationId,
+            command.DestinationLocationId,
+            command.Lines,
+            currentUser.UserId ?? UserId.Empty,
+            clock.UtcNow,
+            kind,
+            mode,
+            token?.Id);
+
+        if (created.IsFailure)
+        {
+            return Result<TransferOrderId>.Failure(created.Errors);
+        }
+
+        Transfer transfer = created.Value;
+
         return await transfers.AddAsync(transfer, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Validates the token's lifecycle at the current instant, distinguishing
+    /// consumed, revoked, and not-yet-valid tokens from plain expiry.
+    /// </summary>
+    private static Result ValidateTokenAvailability(PreApprovalToken token, DateTimeOffset now)
+        => token.Status == PreApprovalTokenStatus.Consumed
+            ? Result.Failure(PreApprovalTokenErrors.AlreadyConsumed(token.Id))
+            : token.Status == PreApprovalTokenStatus.Revoked
+                ? Result.Failure(PreApprovalTokenErrors.Revoked(token.Id))
+                : now < token.ValidFromUtc
+                    ? Result.Failure(PreApprovalTokenErrors.NotYetValid)
+                    : now > token.ValidUntilUtc
+                        ? Result.Failure(PreApprovalTokenErrors.Expired)
+                        : Result.Success();
+
+    /// <summary>Derives the transfer kind from the route's location kinds.</summary>
+    private static TransferKind KindFor(LocationKind source, LocationKind destination)
+        => source == LocationKind.MainWarehouse && destination == LocationKind.Store
+            ? TransferKind.WarehouseToStore
+            : source == LocationKind.Store && destination == LocationKind.MainWarehouse
+                ? TransferKind.StoreToWarehouse
+                : TransferKind.StoreToStore;
 }
 
-/// <summary>Handles <see cref="SubmitTransferCommand"/>.</summary>
+/// <summary>
+/// Handles <see cref="SubmitTransferCommand"/>. Pre-approved transfers are
+/// submitted under the token issuer's authority: the token is consumed
+/// atomically in the same save as the state change, which is the single-use gate.
+/// </summary>
 public sealed class SubmitTransferCommandHandler(
     ITransferRepository transfers,
     ICurrentUser currentUser,
@@ -94,11 +184,51 @@ public sealed class SubmitTransferCommandHandler(
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
         }
 
+        if (transfer.Mode == TransferMode.PreApproved)
+        {
+            return await SubmitPreApprovedAsync(transfer, cancellationToken).ConfigureAwait(false);
+        }
+
         Result submitted = transfer.Submit(currentUser.UserId ?? UserId.Empty, clock.UtcNow);
 
         return submitted.IsSuccess
             ? Result<TransferOrderId>.Success(transfer.Id)
             : Result<TransferOrderId>.Failure(submitted.Errors);
+    }
+
+    private async Task<Result<TransferOrderId>> SubmitPreApprovedAsync(
+        Transfer transfer,
+        CancellationToken cancellationToken)
+    {
+        if (transfer.PreApprovalTokenId is not { } tokenId)
+        {
+            return Result<TransferOrderId>.Failure(TransferErrors.SubmitPreApprovedTokenMissing);
+        }
+
+        PreApprovalToken? token = await transfers
+            .GetPreApprovalTokenAsync(tokenId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (token is null)
+        {
+            return Result<TransferOrderId>.Failure(PreApprovalTokenErrors.TokenUnknown(tokenId));
+        }
+
+        Result preApproved = transfer.SubmitPreApproved(token.CreatedByUserId, clock.UtcNow);
+
+        if (preApproved.IsFailure)
+        {
+            return Result<TransferOrderId>.Failure(preApproved.Errors);
+        }
+
+        Result consumed = token.Consume(transfer.Id, clock.UtcNow);
+
+        if (consumed.IsFailure)
+        {
+            return Result<TransferOrderId>.Failure(consumed.Errors);
+        }
+
+        return Result<TransferOrderId>.Success(transfer.Id);
     }
 }
 

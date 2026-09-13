@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-13 · **Milestone:** Phase 6 (Main Warehouse → Store Transfers) — complete; phase 7 next
+**Last updated:** 2026-09-13 · **Milestone:** Phase 7 (Store to Store Transfers) — complete; phase 8 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,10 +13,10 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **294 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
+| Tests | **304 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
 | Migrations | 11, forward-only, applied cleanly against PostgreSQL 17 |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store) |
-| Phases remaining | 7–18 — see §5 |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations) |
+| Phases remaining | 8–18 — see §5 |
 
 ```
 Pos.Domain.Tests            151 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers
@@ -403,12 +403,13 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 6 shipped the main warehouse → store transfer pipeline. Two strands remain:
+Phase 7 shipped the store-to-store transfer pipeline: central review for
+emergency transfers, dual-manager authorization, single-use pre-approval tokens,
+and replenishment recommendations. Two strands remain:
 
-1. **Phase 7 — store-to-store transfers** (per ROADMAP): central approval queue,
-   pre-approval tokens, emergency offline transfers with dual-manager
-   authorization, and the replenishment recommendations endpoint — the API
-   contracts are already drafted in `API.md` §6.
+1. **Phase 8 — quarantine and unauthorized inventory** (per ROADMAP): scan-while-
+   receiving unknown-barcode detection, the `QuarantineIncident` aggregate,
+   HQ review outcomes, release caps, and the dashboard exception panel.
 2. **Deferred groundwork stays on the table:** catalog curation (product edit,
    barcode management, pricing, `ProductLocationSetting`, unit conversions) and
    user-administration endpoints, so roles and location assignments stop being a
