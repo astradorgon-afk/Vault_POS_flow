@@ -144,6 +144,15 @@ public static class AuthenticationErrors
         "This account has been disabled.",
         ErrorType.Unauthenticated);
 
+    /// <summary>
+    /// The account holds administrative authority and must enrol an authenticator
+    /// before it can sign in (Security:RequireTwoFactorForAdmins).
+    /// </summary>
+    public static Error TwoFactorEnrolmentRequired { get; } = new(
+        "auth.two_factor_enrolment_required",
+        "This account must set up two-factor sign-in before it can be used. Enrol an authenticator app, then sign in with its code.",
+        ErrorType.Forbidden);
+
     /// <summary>A second factor is required and was missing or wrong.</summary>
     public static Error TwoFactorRequired { get; } = new(
         "auth.two_factor_required",

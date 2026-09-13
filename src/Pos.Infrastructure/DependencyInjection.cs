@@ -279,6 +279,10 @@ public static class DependencyInjection
         services.TryAddScoped<IApprovalGate>(sp => sp.GetRequiredService<ApprovalGate>());
         services.TryAddScoped<IAuthenticationService, AuthenticationService>();
         services.TryAddScoped<IDeviceService, DeviceService>();
+        services.TryAddScoped<AdministrationSafeguards>();
+        services.TryAddScoped<IUserAdministration, UserAdministrationService>();
+        services.TryAddScoped<IRoleAdministration, RoleAdministrationService>();
+        services.TryAddScoped<ITwoFactorEnrolment, TwoFactorEnrolmentService>();
         services.TryAddScoped<IdentitySeeder>();
         services.TryAddScoped<BootstrapOwnerSeeder>();
         services.TryAddScoped<DevelopmentDataSeeder>();

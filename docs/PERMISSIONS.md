@@ -240,6 +240,42 @@ margin, and cannot void or refund without a manager override.
 transfers, and cannot approve adjustments above tier 1 — and every permission
 they do hold is confined to their assigned store.
 
+### 3.1 Governance permissions and administration safeguards
+
+Roles and overrides are editable through the administration API (API.md §12,
+ADR-0028). A subset of the catalogue is marked **governance** in code
+(`Permissions.Privileged`) because it confers authority over authority, over the
+whole business, or over the controls themselves:
+
+`user.manage`, `role.manage`, `settings.manage`, `location.manage`,
+`location.all`, `audit.view`, `inventory.negative_stock`,
+`inventory.rebuild_balances`, `inventory.adjust.approve`,
+`inventory.count.approve`, `purchase.approve`,
+`purchase.direct_to_store.authorize`, `transfer.approve`,
+`transfer.preapproval.issue`.
+
+Every administrative change is checked against the administrator's own authority:
+
+1. **No self-administration** — nobody changes their own roles, locations,
+   overrides, approval tier, PIN, two-factor or account status, or edits a role
+   they hold.
+2. **Hold it to give it** — a governance permission (by role, role edit, grant
+   override or lifting a deny) and an approval tier can only be given by someone
+   who holds it. Operational permissions (selling, receiving, counting) are not
+   governance, so an Administrator can create cashiers and store managers.
+3. **No overreach** — nobody changes an account or role holding governance
+   authority, or a tier, they lack: an Administrator cannot disable, demote or
+   reset the Owner, and cannot make anyone an Owner (`inventory.negative_stock`).
+4. **Always an administrator** — a change that would leave no active account
+   holding both `user.manage` and `role.manage` is rolled back.
+
+Default role grants from the code are applied to the seeded roles once. An
+administrator's later removal of a default grant is permanent; a permission added
+to the catalogue in a new release still reaches the roles that should have it.
+
+Accounts holding `user.manage` or `role.manage` must enrol an authenticator app
+when `Security:RequireTwoFactorForAdmins` is on (the production default).
+
 ---
 
 ## 4. Approval value tiers

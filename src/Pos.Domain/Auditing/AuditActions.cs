@@ -43,6 +43,12 @@ public static class AuditActions
 
         /// <summary>A permission check refused an action.</summary>
         public const string PermissionDenied = "auth.permission.denied";
+
+        /// <summary>A user enrolled an authenticator and turned on two-factor sign-in.</summary>
+        public const string TwoFactorEnabled = "auth.two_factor.enabled";
+
+        /// <summary>An administrator cleared a user's authenticator so they must enrol again.</summary>
+        public const string TwoFactorReset = "auth.two_factor.reset";
     }
 
     /// <summary>User, role and permission administration.</summary>

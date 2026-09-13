@@ -10,6 +10,7 @@ using Pos.Api.Authorization;
 using Pos.Api.Common;
 using Pos.Api.Development;
 using Pos.Api.Endpoints;
+using Pos.Api.Logging;
 using Pos.Api.Middleware;
 using Pos.Application;
 using Pos.Application.Common.Abstractions;
@@ -25,6 +26,7 @@ using Serilog.Events;
 // which is exactly when a missing secret or a bad connection string shows up.
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
+    .Enrich.With<SensitiveDataScrubber>()
     .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture)
     .CreateBootstrapLogger();
 
@@ -41,6 +43,7 @@ try
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
         .Enrich.FromLogContext()
+        .Enrich.With<SensitiveDataScrubber>()
         .Enrich.WithMachineName()
         .Enrich.WithProperty("Application", "Pos.Api"));
 
@@ -242,6 +245,7 @@ try
     app.MapTransferEndpoints();
     app.MapQuarantineEndpoints();
     app.MapReceiptEndpoints();
+    app.MapAdministrationEndpoints();
 
     await app.RunAsync();
     return 0;

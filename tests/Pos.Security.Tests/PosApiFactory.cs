@@ -94,6 +94,10 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         yield return ("Database__ApplyMigrationsOnStartup", "false");
         yield return ("BootstrapOwner__Enabled", "false");
 
+        // Owners and administrators sign in throughout the suite; two-factor
+        // enforcement is covered by its own tests in Pos.Api.IntegrationTests.
+        yield return ("Security__RequireTwoFactorForAdmins", "false");
+
         // Password hashing would otherwise dominate the runtime of every
         // authentication test. The production count is asserted separately,
         // against configuration, rather than paid for here.

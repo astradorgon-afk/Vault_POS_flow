@@ -15,8 +15,8 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Gap batch 3 — logging scrubbing, two-factor enforcement, user/role administration.
-**Last commit:** G1 + G2 — correctness, deployment and receipts completion (see log).
+**Now:** Gap batch 4 — catalog curation (product edit, barcodes, activation, pricing, location settings, unit conversions, supplier links).
+**Last commit:** G3 — identity administration, two-factor enforcement, log scrubbing (see log).
 
 ---
 
@@ -41,7 +41,15 @@ and the test suites pass. Nothing is pushed.
   - [x] Quarantine body without `lines` returned 500 → 400 `quarantine.empty`
   - [x] ADR-0027 (no retrying execution strategy); DEPLOYMENT, DATABASE, API, STATUS, ROADMAP updated (Phase 5 boxes ticked)
 - [x] **G2 — Receipts completion:** `GET /api/v1/receipts` with location/kind/date filters and paging, scoped to the caller's locations (folded into the G1 commit)
-- [ ] **G3 — Phase 1–2 leftovers:** Serilog sensitive-data scrubbing; enforce two-factor for Owner/Administrator; user, role and override administration endpoints
+- [x] **G3 — Phase 1–2 leftovers**
+  - [x] User administration: create, update, disable/enable, roles, locations, overrides, password reset, PIN, two-factor reset
+  - [x] Role administration: list roles and permissions, replace a role's permissions
+  - [x] Safeguards (ADR-0028): no self-administration, hold-it-to-give-it for governance permissions and tiers, no overreach, always an administrator
+  - [x] Seeder re-added removed default grants at every start → applied-once record + migration
+  - [x] Two-factor enforced for user/role managers: password-authenticated enrolment, recovery codes, administrator reset
+  - [x] Identity token writes were discarded under the no-tracking default (recovery codes reusable, reset did not rotate the key) → `TrackingScope`
+  - [x] Serilog `SensitiveDataScrubber`
+  - [x] Full test run (367 passed) and commit
 - [ ] **G4 — Phase 3 leftovers (catalog curation):** product edit, barcode management, activate/deactivate, effective-dated pricing, `ProductLocationSetting`, unit conversions, product–supplier links
 - [ ] **G5 — Phase 4 leftovers:** `NegativeStockAttempt` record and report; decision on monthly partitioning of `inventory_movement`
 
@@ -77,6 +85,14 @@ and the test suites pass. Nothing is pushed.
   Running the real deployment found three problems no test could see: the images
   had never built, migrations applied out of order under invariant globalization,
   and Caddy could not complete a TLS handshake.
+- **G1 + G2 committed** as `53346fe`.
+- **G3 finished.** User and role administration with the ADR-0028 safeguards,
+  two-factor enforcement for user/role managers, log scrubbing. Its tests found two
+  more real defects: the seeder re-added default grants an administrator removed,
+  and Identity's token writes were silently discarded under the no-tracking default
+  (recovery codes reusable, two-factor reset not rotating the key). Verification:
+  full solution **367 passed, 0 failed, 0 skipped** (Domain 160, Application 16,
+  Infrastructure 37, Security 52, Architecture 13, API 89); no pending model changes.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

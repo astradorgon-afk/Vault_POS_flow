@@ -106,6 +106,24 @@ public sealed class PermissionRecordConfiguration : IEntityTypeConfiguration<Per
     }
 }
 
+/// <summary>Maps the record of default grants already applied to seeded roles.</summary>
+public sealed class RoleDefaultGrantAppliedConfiguration : IEntityTypeConfiguration<RoleDefaultGrantApplied>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<RoleDefaultGrantApplied> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("role_default_grant_applied", PosDbContext.CoreSchema);
+
+        builder.HasKey(g => new { g.RoleName, g.PermissionCode });
+
+        builder.Property(g => g.RoleName).HasColumnName("role_name").HasMaxLength(256);
+        builder.Property(g => g.PermissionCode).HasColumnName("permission_code").HasMaxLength(64);
+        builder.Property(g => g.AppliedAtUtc).HasColumnName("applied_at_utc").IsRequired();
+    }
+}
+
 /// <summary>Maps role-to-permission grants.</summary>
 public sealed class RolePermissionConfiguration : IEntityTypeConfiguration<RolePermissionGrant>
 {

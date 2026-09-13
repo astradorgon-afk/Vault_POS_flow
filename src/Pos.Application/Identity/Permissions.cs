@@ -375,6 +375,35 @@ public static class Permissions
     public static IReadOnlyList<PermissionDefinition> ReadOnly
         => [.. Catalogue.Where(p => p.IsReadOnly)];
 
+    /// <summary>
+    /// Gets the governance permissions: authority over other people's authority,
+    /// over the whole business, or over the controls themselves.
+    /// </summary>
+    /// <remarks>
+    /// Administration refuses to hand one of these to anyone — by role, by role
+    /// edit, or by override — unless the administrator holds it too (ADR-0028).
+    /// Operational permissions such as selling or counting are deliberately not
+    /// here, so an administrator can still set up cashiers and store managers
+    /// without being able to sell.
+    /// </remarks>
+    public static IReadOnlySet<string> Privileged { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        Administration.ManageUsers,
+        Administration.ManageRoles,
+        Administration.ManageSettings,
+        Administration.ManageLocations,
+        Administration.AllLocations,
+        Administration.ViewAudit,
+        Inventory.NegativeStock,
+        Inventory.RebuildBalances,
+        Inventory.ApproveAdjustment,
+        Inventory.ApproveCount,
+        Purchasing.Approve,
+        Purchasing.AuthorizeDirectToStore,
+        Transfer.Approve,
+        Transfer.IssuePreApproval,
+    };
+
     /// <summary>Looks up a permission definition by code.</summary>
     /// <param name="code">The permission code.</param>
     /// <returns>The definition, or <see langword="null"/> when the code is unknown.</returns>

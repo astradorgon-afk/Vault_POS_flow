@@ -13,8 +13,8 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **341 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
-| Migrations | 15, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **367 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
+| Migrations | 16, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
@@ -24,9 +24,9 @@ and what to pick up next.
 Pos.Domain.Tests            160 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
 Pos.Infrastructure.Tests     37 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, migration order (15 need Docker)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
-Pos.Security.Tests           33 passing   authentication, tokens, permission matrix
+Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests        16 passing   master-data commands, CQRS unit-of-work behaviours, receipt rendering
-Pos.Api.IntegrationTests     82 passing   endpoints through the real pipeline (SQLite) plus one API host run on PostgreSQL (Docker)
+Pos.Api.IntegrationTests     89 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, one API host run on PostgreSQL (Docker)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -42,7 +42,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (27 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (28 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -116,6 +116,21 @@ costing, negative-stock policy, idempotency by event id.
 - Append-only audit log under the same four guards as the ledger, plus sign-in
   attempt history with hashed identifiers.
 - Bootstrap owner seeder that refuses to run if any user exists.
+- **Administration (2026-09-14, ADR-0028):** `/api/v1/users` (create, update,
+  disable/enable, roles, locations, overrides, password, PIN, two-factor reset) and
+  `/api/v1/roles`, `/api/v1/permissions`. Every change is audited and bumps the
+  policy version in the same transaction. Safeguards resolved fresh from the
+  database: no self-administration; governance permissions (`Permissions.Privileged`)
+  and approval tiers can only be given by someone holding them; nobody changes an
+  account or role that outranks them; a change leaving no active user/role manager
+  is rolled back. Default role grants are applied once
+  (`core.role_default_grant_applied`), so an administrator's removal survives restarts.
+- **Two-factor enforced** for accounts holding `user.manage`/`role.manage` when
+  `Security:RequireTwoFactorForAdmins` is on (production default): password-
+  authenticated enrolment (`auth/two-factor/setup`, `/enable`), eight one-time
+  recovery codes, administrator reset that rotates the key.
+- **Log scrubbing:** `SensitiveDataScrubber` masks secret-named properties in every
+  log event, including nested objects and dictionaries.
 
 ### Phase 3 — Master data (earlier session)
 - **Domain and persistence:** `Location` (JSON `LocationSettings`),
@@ -365,6 +380,25 @@ The PostgreSQL statement now aliases the target (`AS c ... c.next_value + 1`),
 matching the SQL already in DATABASE.md §10, and
 `PostgresDocumentNumberGeneratorTests` allocates on a real engine.
 
+**Role management would have undone itself at every restart.** The identity
+seeder runs on each start so that permissions added to the catalogue reach
+existing roles, and it did so by re-adding any default grant a role was missing —
+including one an administrator had just removed. Harmless while roles could only
+be edited in the database; fatal once `PUT /api/v1/roles/{id}/permissions`
+existed. The seeder now records each default grant it applies
+(`core.role_default_grant_applied`, migration
+`20260913190959_RoleDefaultGrantApplied`) and applies each one once.
+
+**Identity silently discarded changes to its own token rows.** Writing the
+two-factor tests showed a recovery code accepted twice: redemption succeeded, but
+the code stayed in storage. ASP.NET Core Identity's store loads the existing token
+row and edits it, and under the context's no-tracking default that edit was made to
+a detached object and never saved — the same trap as the sign-out bug below, in
+framework code this time. The same path meant an administrator's two-factor reset
+would not have rotated the authenticator key. Identity operations that modify
+existing rows now run inside `TrackingScope`, with the sign-in's user instance
+attached first; the tests assert the code is consumed and the key is new.
+
 **The container images had never built.** Neither Dockerfile copied
 `.editorconfig`, so inside the image the analyzer rules the repository relaxes
 (CA1716 on `Error`, CA1000 on `Result<T>`) became warnings-as-errors and the build
@@ -533,11 +567,8 @@ Stated plainly so they are not mistaken for finished work:
 | No quarantine notifications or dashboard exception panel | Phase 8 | Raises and resolutions post through the API; age-based escalation and the Owner-dashboard exception panel are Phase 14. |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
-| Serilog sensitive-data scrubbing policy not implemented | Phase 1 | No secret is currently logged, but nothing enforces that. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
-| Two-factor is supported but not enforced for admins | Phase 2 | `RequireTwoFactorForAdmins` is configured and read, not yet enforced at sign-in. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
-| No user-administration endpoints | Phase 2 | Users, roles and overrides are manageable through the database and the seeders only. |
 
 ---
 

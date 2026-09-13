@@ -74,6 +74,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the role-to-permission grants.</summary>
     public DbSet<RolePermissionGrant> RolePermissions => Set<RolePermissionGrant>();
 
+    /// <summary>Gets the record of default grants already applied to seeded roles.</summary>
+    public DbSet<RoleDefaultGrantApplied> RoleDefaultGrantsApplied => Set<RoleDefaultGrantApplied>();
+
     /// <summary>Gets the per-user permission overrides.</summary>
     public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
 

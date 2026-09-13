@@ -45,6 +45,28 @@ public sealed class RolePermissionGrant
 }
 
 /// <summary>
+/// Records that a default grant from the code catalogue has been applied to a
+/// seeded role, so it is applied exactly once.
+/// </summary>
+/// <remarks>
+/// Without this the seeder, which runs on every start so that permissions added
+/// to the catalogue reach existing roles, would also re-add any default grant an
+/// administrator had deliberately removed, and role management would silently
+/// undo itself at the next restart.
+/// </remarks>
+public sealed class RoleDefaultGrantApplied
+{
+    /// <summary>Gets or sets the seeded role's name.</summary>
+    public string RoleName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the permission code.</summary>
+    public string PermissionCode { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets when the default was first applied.</summary>
+    public DateTimeOffset AppliedAtUtc { get; set; }
+}
+
+/// <summary>
 /// A single row holding the authorization policy version.
 /// </summary>
 /// <remarks>

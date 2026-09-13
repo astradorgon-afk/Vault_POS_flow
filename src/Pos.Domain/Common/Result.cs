@@ -49,6 +49,17 @@ public class Result
     /// <param name="errors">The failures.</param>
     public static Result Failure(IReadOnlyList<Error> errors) => new(false, errors);
 
+    /// <summary>Combines independent checks: successful only when every one succeeded.</summary>
+    /// <param name="results">The checks, in the order their failures should be reported.</param>
+    /// <returns>Success, or a failure carrying every failed check's errors.</returns>
+    public static Result Combine(params Result[] results)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+
+        List<Error> errors = [.. results.Where(r => r.IsFailure).SelectMany(r => r.Errors)];
+        return errors.Count == 0 ? Success() : Failure(errors);
+    }
+
     /// <summary>Creates a successful result carrying a value.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
     /// <param name="value">The value.</param>

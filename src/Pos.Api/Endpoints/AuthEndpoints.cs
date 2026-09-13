@@ -6,6 +6,7 @@ using Pos.Api.Middleware;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Domain.Common;
+using Pos.Infrastructure.Identity;
 
 namespace Pos.Api.Endpoints;
 
@@ -24,6 +25,17 @@ public sealed record PinSignInBody(string EmployeeCode, string Pin, string? AppV
 /// <summary>The body of a token exchange.</summary>
 /// <param name="RefreshToken">The token the client holds.</param>
 public sealed record RefreshBody(string RefreshToken);
+
+/// <summary>The body that starts authenticator enrolment.</summary>
+/// <param name="UserName">The username.</param>
+/// <param name="Password">The password.</param>
+public sealed record TwoFactorSetupBody(string UserName, string Password);
+
+/// <summary>The body that confirms authenticator enrolment.</summary>
+/// <param name="UserName">The username.</param>
+/// <param name="Password">The password.</param>
+/// <param name="Code">The current code from the authenticator app.</param>
+public sealed record TwoFactorEnableBody(string UserName, string Password, string Code);
 
 /// <summary>What the caller is told about themselves.</summary>
 /// <param name="UserId">Their identifier.</param>
@@ -85,6 +97,22 @@ public static class AuthEndpoints
             .WithSummary("Ends the session the refresh token belongs to.")
             .WithMetadata(new PublicEndpointAttribute(
                 "Signing out must work even when the access token has already expired."));
+
+        group.MapPost("/two-factor/setup", BeginTwoFactorAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth-login")
+            .WithName("BeginTwoFactorEnrolment")
+            .WithSummary("Issues the authenticator key for an account that has not enrolled yet.")
+            .WithMetadata(new PublicEndpointAttribute(
+                "An account required to use two-factor cannot obtain a token until it has enrolled."));
+
+        group.MapPost("/two-factor/enable", CompleteTwoFactorAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth-login")
+            .WithName("CompleteTwoFactorEnrolment")
+            .WithSummary("Confirms the first authenticator code, turns two-factor on, returns recovery codes.")
+            .WithMetadata(new PublicEndpointAttribute(
+                "An account required to use two-factor cannot obtain a token until it has enrolled."));
 
         group.MapGet("/me", GetCurrentUserAsync)
             .RequireAuthorization()
@@ -168,6 +196,36 @@ public static class AuthEndpoints
             .ConfigureAwait(false);
 
         return ToResponse(result, currentUser);
+    }
+
+    private static async Task<IResult> BeginTwoFactorAsync(
+        [FromBody] TwoFactorSetupBody body,
+        ITwoFactorEnrolment enrolment,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<TwoFactorSetup> result = await enrolment
+            .BeginAsync(body.UserName, body.Password, cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(result.Value)
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> CompleteTwoFactorAsync(
+        [FromBody] TwoFactorEnableBody body,
+        ITwoFactorEnrolment enrolment,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<IReadOnlyList<string>> result = await enrolment
+            .CompleteAsync(body.UserName, body.Password, body.Code, cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { recoveryCodes = result.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 
     private static async Task<IResult> SignOutAsync(

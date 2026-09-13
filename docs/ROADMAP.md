@@ -57,7 +57,7 @@ Last updated: 2026-09-14
 - [x] Architecture tests (layering, ledger write isolation, permission catalogue)
 - [x] Options binding with `ValidateOnStart` for every configuration section
 - [x] Append-only `AuditLog` table, writer and database guards
-- [ ] Serilog sensitive-data destructuring policy (scrubbing)
+- [x] Serilog sensitive-data scrubbing (`SensitiveDataScrubber` enricher)
 - [ ] Idempotency pipeline behaviour (the ledger is idempotent today; the generic
       behaviour lands with the sync module in Phase 13)
 
@@ -75,9 +75,9 @@ Last updated: 2026-09-14
 - [x] Approval tiers, self-approval refusal, eligible-approver lookup
 - [x] Bootstrap owner seeder, refused once any user exists
 - [x] Security tests: authentication, token lifecycle, revocation, permission matrix
-- [ ] Enforce two-factor for Owner and Administrator at sign-in
-      (`RequireTwoFactorForAdmins` is configured and read, not yet enforced)
-- [ ] User, role and override administration endpoints
+- [x] Enforce two-factor for accounts holding `user.manage`/`role.manage` at sign-in,
+      with password-authenticated enrolment, recovery codes and administrator reset
+- [x] User, role and override administration endpoints, with the ADR-0028 safeguards
 - [ ] Redis backplane so permission revocation stays immediate when scaled out
 
 ## Phase 3 — Master Data

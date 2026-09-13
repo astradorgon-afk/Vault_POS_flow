@@ -727,3 +727,76 @@ not a driver setting. Explicit transactions keep that decision visible.
   command to carry an idempotency key; that is a new decision on top of this one.
 
 ---
+## ADR-0028 — Identity administration safeguards and two-factor for administrators
+
+**Date:** 2026-09-14 · **Status:** Accepted
+
+**Context.** Users, roles, location assignments and permission overrides could
+only be changed in the database. Administration endpoints make them manageable,
+and also make them the most valuable thing an attacker or a careless
+administrator can reach: whoever controls authority controls everything else.
+Two latent problems surfaced while building it. The identity seeder, which runs
+on every start, re-added any default role grant that was missing, so a
+permission an administrator removed would silently return at the next restart.
+And `Security:RequireTwoFactorForAdmins` was configured and read, but nothing
+enforced it.
+
+**Decision.**
+
+- **Endpoints:** `/api/v1/users` (list, create, detail, update, disable, enable,
+  roles, locations, overrides, password, PIN, two-factor reset) under
+  `user.manage`; `/api/v1/roles`, `/api/v1/roles/{id}/permissions` and
+  `/api/v1/permissions` under `role.manage`. Every change runs in one transaction
+  with its audit entry and a policy-version bump, so it takes effect on the next
+  request and cannot exist without its record.
+- **Governance permissions** are a code-defined set (`Permissions.Privileged`):
+  user and role management, settings, locations, all-locations access, audit,
+  negative stock, balance rebuild, and every approval authority. Operational
+  permissions (selling, counting, receiving) are not in it.
+- **Safeguards**, checked against authority resolved fresh from the database:
+  1. No self-administration: nobody changes their own roles, locations,
+     overrides, approval tier, PIN, two-factor or account status.
+  2. No escalation: a governance permission (by role, role edit, override, or by
+     lifting a deny) or an approval tier can only be handed out by someone who
+     holds it.
+  3. No overreach: nobody changes an account or a role that holds governance
+     authority, or a tier, the caller lacks — an administrator cannot disable or
+     demote the owner.
+  4. Always an administrator: a change that would leave no active account able to
+     manage both users and roles is rolled back.
+- **Default grants are applied once.** The seeder records each default grant it
+  applies (`core.role_default_grant_applied`); a removed grant stays removed,
+  while a permission new to the catalogue still reaches existing roles.
+- **Two-factor for administrators.** When `RequireTwoFactorForAdmins` is on (the
+  production default), an account holding `user.manage` or `role.manage` without
+  an authenticator is refused sign-in with `auth.two_factor_enrolment_required`.
+  It enrols through `POST /api/v1/auth/two-factor/setup` and `/enable`, which
+  authenticate with the password, are rate-limited like sign-in, count towards
+  lockout, and only work before two-factor is on. Enabling issues eight one-time
+  recovery codes, accepted at sign-in in place of the authenticator code. A
+  lost authenticator is reset by another administrator, which rotates the key.
+  Development and the test hosts turn enforcement off; dedicated tests turn it on.
+- **Log scrubbing.** A Serilog enricher masks properties whose names mark them as
+  secrets (passwords, tokens, PINs, keys, connection strings, codes), including
+  inside destructured objects and dictionaries.
+
+**Rationale.** Decisions about authority are made from what an account can do,
+never from role names, which keeps the rules correct when roles are edited. The
+"hold it to give it" rule is what stops administration from being a privilege
+escalation path, and restricting it to governance permissions keeps ordinary
+administration possible: an administrator can set up cashiers and store managers
+without being able to sell or to make someone an owner. Password-authenticated
+enrolment is no weaker than sign-in was before enforcement, and it closes the
+bootstrap problem of an owner who cannot obtain a token to enrol.
+
+**Consequences.**
+- The last-administrator rule is a backstop: with rules 1–3 in place it is hard to
+  reach, and it exists so a future rule change cannot lock the business out.
+- Recovery codes are shown once. An administrator who loses both authenticator
+  and codes needs another administrator; a sole owner in that position needs
+  database access, which is deliberate.
+- Identity's stores need tracking queries to persist changes to existing rows,
+  which the context's no-tracking default silently discarded; identity operations
+  run inside a `TrackingScope` (see STATUS.md §3).
+
+---

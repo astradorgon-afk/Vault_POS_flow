@@ -60,9 +60,18 @@ a location outside the caller's scope, carries the problem document.
 | POST | `/api/v1/auth/login/pin` | anonymous, device-bound, throttled |
 | POST | `/api/v1/auth/refresh` | anonymous + valid refresh token |
 | POST | `/api/v1/auth/logout` | authenticated |
-| POST | `/api/v1/auth/change-password` | authenticated |
-| POST | `/api/v1/auth/2fa/*` | authenticated |
+| POST | `/api/v1/auth/change-password` | authenticated *(planned; administrators reset passwords today)* |
+| POST | `/api/v1/auth/two-factor/setup` | anonymous, username + password, throttled — returns `sharedKey` and an `otpauth://` URI for an account that has not enrolled |
+| POST | `/api/v1/auth/two-factor/enable` | anonymous, username + password + current code — turns two-factor on, returns eight one-time `recoveryCodes` |
 | GET | `/api/v1/auth/me` | authenticated — profile, locations, effective permissions |
+
+Sign-in (`/login`) takes an optional `twoFactorCode`: the authenticator code, or
+one unused recovery code. When `Security:RequireTwoFactorForAdmins` is on (the
+production default), an account holding `user.manage` or `role.manage` that has
+not enrolled is refused with `403 auth.two_factor_enrolment_required` until it
+completes the two enrolment calls above. Enrolment refuses an account that is
+already enrolled (`409 identity.two_factor_already_enabled`) and a wrong code
+(`400 identity.two_factor_code_invalid`).
 | POST | `/api/v1/devices/enrol` | anonymous + enrolment code |
 | GET | `/api/v1/devices` | `device.manage` |
 | POST | `/api/v1/devices/{id}/suspend` \| `/revoke` \| `/reactivate` | `device.manage` |
@@ -481,19 +490,44 @@ hold `location.all`.
 GET    /api/v1/notifications                 authenticated
 POST   /api/v1/notifications/{id}/read       authenticated
 POST   /api/v1/notifications/read-all        authenticated
-GET    /api/v1/users                         user.manage
-POST   /api/v1/users                         user.manage
-PUT    /api/v1/users/{id}                    user.manage
-POST   /api/v1/users/{id}/disable|enable     user.manage
-PUT    /api/v1/users/{id}/roles              user.manage
-PUT    /api/v1/users/{id}/locations          user.manage
-PUT    /api/v1/users/{id}/overrides          user.manage
-GET    /api/v1/roles                         role.manage
-PUT    /api/v1/roles/{id}/permissions        role.manage
-GET    /api/v1/permissions                   role.manage
 GET    /api/v1/audit                         audit.view
 GET    /api/v1/health/live  |  /health/ready anonymous (ready is IP-restricted)
 ```
+
+### User and role administration (implemented, ADR-0028)
+
+```
+GET    /api/v1/users?search=&includeInactive=&offset=&limit=    user.manage  -> list
+POST   /api/v1/users                                            user.manage  -> 201 { id }
+GET    /api/v1/users/{id}                                       user.manage  -> detail: roles, locations, overrides, effective permissions
+PUT    /api/v1/users/{id}                                       user.manage  -> 204 name, e-mail, employee code, approval tier
+POST   /api/v1/users/{id}/disable        { reason }             user.manage  -> 204, sessions ended
+POST   /api/v1/users/{id}/enable                                user.manage  -> 204, lockout cleared
+PUT    /api/v1/users/{id}/roles          { roles: [...] }       user.manage  -> 204 replaces roles
+PUT    /api/v1/users/{id}/locations      { locations: [{locationId, isPrimary}] }  user.manage -> 204 replaces assignments
+POST   /api/v1/users/{id}/overrides      { permissionCode, effect, reason, expiresAtUtc?, locationId? }  user.manage -> 201 { id }
+POST   /api/v1/users/{id}/overrides/{overrideId}/remove  { reason }   user.manage  -> 204
+PUT    /api/v1/users/{id}/password       { newPassword }        user.manage  -> 204, sessions ended
+PUT    /api/v1/users/{id}/pin            { pin }                user.manage  -> 204 (employee code required)
+POST   /api/v1/users/{id}/two-factor/reset  { reason }          user.manage  -> 204, key rotated, must enrol again
+GET    /api/v1/roles                                            role.manage  -> roles with permissions and member counts
+PUT    /api/v1/roles/{id}/permissions    { permissions: [...], reason }  role.manage -> 204 replaces the bundle
+GET    /api/v1/permissions                                      role.manage  -> catalogue, isPrivileged marked
+```
+
+Every change is audited, bumps the authorization policy version (effective on
+the caller's next request, without signing anyone out) and passes the safeguards
+in ADR-0028:
+
+| Error | Status | When |
+|---|---|---|
+| `identity.self_administration_forbidden` | 403 | changing your own roles, locations, overrides, tier, PIN, two-factor or status, or editing a role you hold |
+| `identity.privilege_escalation_forbidden` | 403 | handing out a governance permission or approval tier you do not hold |
+| `identity.target_outranks_caller` | 403 | changing an account or role holding governance authority you lack |
+| `identity.last_administrator` | 409 | the change would leave no active account able to manage users and roles |
+| `identity.user_unknown` / `identity.override_unknown` | 404 | |
+| `identity.role_unknown`, `identity.permission_unknown`, `identity.location_unknown`, `identity.location_external`, `identity.primary_location_invalid`, `identity.password_rejected`, `identity.pin_invalid`, `identity.employee_code_required`, `identity.reason_required`, `identity.override_reason_required` | 400 | |
+| `identity.username_taken`, `identity.employee_code_taken`, `identity.account_state_unchanged` | 409 | |
 
 ---
 

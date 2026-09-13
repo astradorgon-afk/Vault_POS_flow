@@ -134,6 +134,20 @@ public sealed class AuthenticationService(
             return Result<AuthenticationResult>.Failure(AuthenticationErrors.InvalidCredentials);
         }
 
+        // Accounts that can change other people's authority must have a second
+        // factor. Decided by what the account can do, never by a role name.
+        if (_security.RequireTwoFactorForAdmins
+            && !user.TwoFactorEnabled
+            && await HoldsAdministrativeAuthorityAsync(userId, cancellationToken).ConfigureAwait(false))
+        {
+            await RecordFailureAsync(
+                identifierHash, LoginFailureReason.TwoFactorRequired, LoginMethod.Password,
+                userId, request.DeviceId, request.IpAddress, request.UserAgent, cancellationToken)
+                .ConfigureAwait(false);
+
+            return Result<AuthenticationResult>.Failure(AuthenticationErrors.TwoFactorEnrolmentRequired);
+        }
+
         Result twoFactor = await VerifyTwoFactorAsync(user, request.TwoFactorCode).ConfigureAwait(false);
 
         if (twoFactor.IsFailure)
@@ -609,10 +623,40 @@ public sealed class AuthenticationService(
             return Result.Failure(AuthenticationErrors.TwoFactorRequired);
         }
 
+        string normalized = code.Replace(" ", string.Empty, StringComparison.Ordinal);
+
+        // Redeeming a recovery code rewrites an existing token row through
+        // Identity's store, which only persists under tracking queries. The user
+        // is attached first, so a tracking query for the same account resolves to
+        // this instance instead of conflicting with it.
+        if (context.Entry(user).State == EntityState.Detached)
+        {
+            context.Attach(user);
+        }
+
+        using TrackingScope tracking = TrackingScope.Begin(context);
+
         bool valid = await users.VerifyTwoFactorTokenAsync(
-            user, users.Options.Tokens.AuthenticatorTokenProvider, code).ConfigureAwait(false);
+            user, users.Options.Tokens.AuthenticatorTokenProvider, normalized).ConfigureAwait(false);
+
+        // A lost phone must not lock an owner out for good: each one-time recovery
+        // code issued at enrolment works once in place of the authenticator code.
+        if (!valid)
+        {
+            valid = (await users.RedeemTwoFactorRecoveryCodeAsync(user, normalized).ConfigureAwait(false)).Succeeded;
+        }
 
         return valid ? Result.Success() : Result.Failure(AuthenticationErrors.TwoFactorRequired);
+    }
+
+    private async Task<bool> HoldsAdministrativeAuthorityAsync(UserId userId, CancellationToken cancellationToken)
+    {
+        IReadOnlySet<string> held = await permissions
+            .GetEffectivePermissionsAsync(userId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return held.Contains(Permissions.Administration.ManageUsers)
+               || held.Contains(Permissions.Administration.ManageRoles);
     }
 
     private async Task<Result<Device?>> ResolveDeviceAsync(

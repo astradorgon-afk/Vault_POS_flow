@@ -36,7 +36,15 @@
 - Password policy: minimum 12 characters, no composition rules (NIST SP 800-63B),
   rejected against a local list of the top 10k breached passwords plus
   organization-specific terms.
-- Optional TOTP second factor; **required** for Owner and Administrator.
+- Optional TOTP second factor; **required** for any account holding `user.manage`
+  or `role.manage` when `Security:RequireTwoFactorForAdmins` is on (the production
+  default; off in Development and the test hosts). Decided by permissions, never by
+  role name. Such an account is refused sign-in (`auth.two_factor_enrolment_required`)
+  until it enrols through the password-authenticated, throttled
+  `auth/two-factor/setup` and `/enable` calls, which only work before two-factor is
+  on. Enrolment returns eight one-time recovery codes accepted at sign-in in place
+  of the authenticator code. A lost authenticator is reset by another
+  administrator, which rotates the key and ends the account's sessions.
 - Lockout: 5 failed attempts → 15-minute lockout, exponential thereafter.
   Throttling is applied per account **and** per IP so a lockout cannot be used to
   deny service to a cashier.
@@ -193,9 +201,17 @@ endpoints are audited.
 
 ## 8. Logging and error handling
 
-- Serilog with a `SensitiveDataDestructuringPolicy` that redacts
-  `password`, `pin`, `token`, `refreshToken`, `accessToken`, `secret`,
-  `authorization`, `cardNumber`, `cvv`, `pan`.
+- Serilog with a `SensitiveDataScrubber` enricher (on the bootstrap logger and
+  the host logger) that replaces with `***` any property whose name ends in a
+  secret marker — `password`, `secret`, `token`, `apikey`, `privatekey`,
+  `signingkeypem`, `connectionstring`, `authorization`, `cookie`, `pin`,
+  `pinhash`, `twofactorcode`, `recoverycode(s)`, `enrolmentcode`, `sharedkey`,
+  `authenticatorkey` — at the top level, inside destructured objects and inside
+  dictionaries. Names like `PreApprovalTokenId` and `ErrorCode` are left alone.
+  The pipeline itself logs message names, error codes and identifiers, never
+  request bodies; the scrubber guards against a future log line that does.
+  *(Card fields — `cardNumber`, `cvv`, `pan` — join the list with card payments in
+  Phase 11.)*
 - Production error responses are RFC 9457 `ProblemDetails` with a stable
   `errorCode`, a safe message, and the `correlationId`. **No stack traces, no
   exception types, no SQL.** The full exception goes to the log, correlated by id.

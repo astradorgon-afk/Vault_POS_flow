@@ -170,17 +170,37 @@ public sealed class IdentitySeeder(
                 .ToHashSetAsync(StringComparer.Ordinal, cancellationToken)
                 .ConfigureAwait(false);
 
-            foreach (string code in codes.Where(c => !existing.Contains(c)))
-            {
-                context.RolePermissions.Add(new RolePermissionGrant
-                {
-                    RoleId = role.Id,
-                    PermissionCode = code,
-                    GrantedAtUtc = now,
-                    GrantedByUserId = null,
-                });
+            // A default is applied once. Once recorded, a grant an administrator
+            // later removed stays removed; a permission new to the catalogue has
+            // no record yet and still reaches the role on the next start.
+            HashSet<string> applied = await context.RoleDefaultGrantsApplied
+                .AsNoTracking()
+                .Where(g => g.RoleName == roleName)
+                .Select(g => g.PermissionCode)
+                .ToHashSetAsync(StringComparer.Ordinal, cancellationToken)
+                .ConfigureAwait(false);
 
-                added++;
+            foreach (string code in codes.Where(c => !applied.Contains(c)))
+            {
+                if (!existing.Contains(code))
+                {
+                    context.RolePermissions.Add(new RolePermissionGrant
+                    {
+                        RoleId = role.Id,
+                        PermissionCode = code,
+                        GrantedAtUtc = now,
+                        GrantedByUserId = null,
+                    });
+
+                    added++;
+                }
+
+                context.RoleDefaultGrantsApplied.Add(new RoleDefaultGrantApplied
+                {
+                    RoleName = roleName,
+                    PermissionCode = code,
+                    AppliedAtUtc = now,
+                });
             }
         }
 
