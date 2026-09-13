@@ -9,6 +9,7 @@ using Pos.Application.Identity;
 using Pos.Application.Inventory;
 using Pos.Application.Purchasing;
 using Pos.Application.Quarantine;
+using Pos.Application.Receipts;
 using Pos.Application.Transfers;
 using Pos.Infrastructure.Auditing;
 using Pos.Infrastructure.Common;
@@ -65,6 +66,7 @@ public static class DependencyInjection
         services.TryAddScoped<IPurchaseOrderRepository, PurchaseOrderRepository>();
         services.TryAddScoped<ITransferRepository, TransferRepository>();
         services.TryAddScoped<IQuarantineRepository, QuarantineRepository>();
+        services.TryAddScoped<IReceiptRepository, ReceiptRepository>();
 
         // The reconciliation tripwire is optional so a host can run without it
         // (tests, short-lived tools); when enabled it only reads.
@@ -192,14 +194,13 @@ public static class DependencyInjection
         {
             if (provider == PersistenceProvider.Postgres)
             {
+                // No EnableRetryOnFailure: a retrying execution strategy refuses
+                // user-initiated transactions, and the unit-of-work behaviour, the
+                // ledger, the reconciler and the development seeder all open one.
+                // Contention is retried where it is safe to replay (the ledger's
+                // projection step), not by re-running a whole command blindly.
                 options.UseNpgsql(connectionString, npgsql =>
-                {
-                    npgsql.MigrationsHistoryTable("__migrations_history", PosDbContext.CoreSchema);
-                    npgsql.EnableRetryOnFailure(
-                        maxRetryCount: 3,
-                        maxRetryDelay: TimeSpan.FromSeconds(5),
-                        errorCodesToAdd: null);
-                });
+                    npgsql.MigrationsHistoryTable("__migrations_history", PosDbContext.CoreSchema));
             }
             else
             {

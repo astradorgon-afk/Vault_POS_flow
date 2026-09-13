@@ -1223,3 +1223,27 @@ public readonly record struct PreApprovalTokenId(Guid Value) : IStronglyTypedId,
     /// <inheritdoc />
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
+
+/// <summary>Identifies a payment receipt.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ReceiptId(Guid Value) : IStronglyTypedId, IComparable<ReceiptId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ReceiptId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ReceiptId"/>.</returns>
+    public static ReceiptId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ReceiptId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}

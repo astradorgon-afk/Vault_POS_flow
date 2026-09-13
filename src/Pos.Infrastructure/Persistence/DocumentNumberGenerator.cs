@@ -86,12 +86,15 @@ public sealed class DocumentNumberGenerator(PosDbContext context, ISystemClock c
         "DO UPDATE SET next_value = next_value + 1 " +
         "RETURNING next_value";
 
+    // PostgreSQL rejects the unqualified column in DO UPDATE as ambiguous between
+    // the existing row and EXCLUDED (42702), so the target is aliased; SQLite
+    // resolves it to the existing row and accepts the short form.
     private const string PostgresUpsert =
-        "INSERT INTO core.document_counter (document_type, period_key, scope_key, next_value) " +
+        "INSERT INTO core.document_counter AS c (document_type, period_key, scope_key, next_value) " +
         "VALUES (@type, @period, @scope, 2) " +
         "ON CONFLICT (document_type, period_key, scope_key) " +
-        "DO UPDATE SET next_value = next_value + 1 " +
-        "RETURNING next_value";
+        "DO UPDATE SET next_value = c.next_value + 1 " +
+        "RETURNING c.next_value";
 
     private static DbParameter Parameter(DbCommand command, string name, object value)
     {

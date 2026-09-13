@@ -9,6 +9,7 @@ using Pos.Domain.Inventory;
 using Pos.Domain.Organizations;
 using Pos.Domain.Purchasing;
 using Pos.Domain.Quarantine;
+using Pos.Domain.Receipts;
 using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
@@ -186,6 +187,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets the audit timelines of incidents.</summary>
     public DbSet<QuarantineEvent> QuarantineTimelineEvents => Set<QuarantineEvent>();
+
+    /// <summary>Gets payment receipts.</summary>
+    public DbSet<Receipt> Receipts => Set<Receipt>();
 
     /// <summary>Gets the per-location product settings.</summary>
     public DbSet<ProductLocationSetting> ProductLocationSettings => Set<ProductLocationSetting>();

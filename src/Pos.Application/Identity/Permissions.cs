@@ -187,6 +187,16 @@ public static class Permissions
         public const string Reject = "quarantine.reject";
     }
 
+    /// <summary>Payment receipt permissions. Interim by ADR-0026.</summary>
+    public static class Receipts
+    {
+        /// <summary>Issue a payment receipt.</summary>
+        public const string Create = "receipt.create";
+
+        /// <summary>See payment receipts.</summary>
+        public const string View = "receipt.view";
+    }
+
     /// <summary>Point-of-sale permissions.</summary>
     public static class Sales
     {
@@ -322,6 +332,9 @@ public static class Permissions
         Def(Quarantine.Investigate, "Quarantine", "Investigate an incident.", offline: false, readOnly: false),
         Def(Quarantine.Release, "Quarantine", "Release quantity from quarantine.", offline: false, readOnly: false),
         Def(Quarantine.Reject, "Quarantine", "Reject quarantined goods.", offline: false, readOnly: false),
+
+        Def(Receipts.Create, "Receipts", "Issue a payment receipt.", offline: false, readOnly: false),
+        Def(Receipts.View, "Receipts", "See payment receipts.", offline: false, readOnly: true),
 
         Def(Sales.Create, "Sales", "Ring up and complete a sale.", offline: true, readOnly: false),
         Def(Sales.Discount, "Sales", "Apply a manual discount.", offline: true, readOnly: false),

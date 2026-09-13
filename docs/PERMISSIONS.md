@@ -127,6 +127,16 @@ Codes are stable strings; renaming one requires a migration that rewrites
 | `quarantine.release` | Release quantity to Available (HQ only) |
 | `quarantine.reject` | Reject / return to supplier |
 
+### Receipts
+
+Interim by ADR-0026: standalone RCT-numbered payment receipts. Neither permission
+is offline-capable.
+
+| Code | Grants |
+|---|---|
+| `receipt.create` | Issue a payment receipt (walk-in sale, branch expense, owner withdrawal) |
+| `receipt.view` | See and print payment receipts |
+
 ### Sales
 
 | Code | Grants |
@@ -198,6 +208,8 @@ Codes are stable strings; renaming one requires a migration that rewrites
 | `quarantine.create` | ✓ | ✓ | ✓ | S | S | S | — |
 | `quarantine.investigate` | ✓ | ✓ | ✓ | S | — | — | — |
 | `quarantine.release` / `reject` | ✓ | ✓ | ✓ | — | — | — | — |
+| `receipt.create` | ✓ | ✓ | ✓ | S | — | — | — |
+| `receipt.view` | ✓ | ✓ | ✓ | S | — | — | ✓ |
 | `sale.create` | ✓ | — | — | S | — | S | — |
 | `sale.discount` / `price_override` | ✓ | — | — | S | — | — | — |
 | `sale.void` | ✓ | — | — | S | — | — | — |

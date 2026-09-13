@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-13 · **Milestone:** Phase 8 (Quarantine and Unauthorized Inventory) — complete; phase 9 next
+**Last updated:** 2026-09-14 · **Milestone:** Phase 8 (Quarantine and Unauthorized Inventory) complete, plus interim payment receipts (ADR-0026); phase 9 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,18 +13,20 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **314 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
-| Migrations | 13, forward-only, applied cleanly against PostgreSQL 17 |
+| Tests | **329 passing, 0 failing, 0 skipped** (2026-09-14 local run, per project, SQLite + PostgreSQL with Docker) |
+| Migrations | 14, forward-only, applied cleanly against PostgreSQL 17 (Testcontainers suites and a live API host) |
+| API host on PostgreSQL | Smoke-run 2026-09-14: starts, migrates, seeds, signs in, issues/prints receipts, raises a quarantine incident that posts a balanced ledger group. See §3 for the two PostgreSQL-only bugs this found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
+| Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
 | Phases remaining | 9–18 — see §5 |
 
 ```
-Pos.Domain.Tests            151 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers
-Pos.Infrastructure.Tests     29 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers
+Pos.Domain.Tests            160 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
+Pos.Infrastructure.Tests     31 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers + document numbering + context registration (11 need Docker)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           33 passing   authentication, tokens, permission matrix
 Pos.Application.Tests        12 passing   master-data commands and CQRS unit-of-work behaviours
-Pos.Api.IntegrationTests     66 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate + 8 transfer + 10 quarantine tests)
+Pos.Api.IntegrationTests     80 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate, transfers, 10 quarantine + 4 receipt tests)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -40,7 +42,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (24 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (26 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -93,7 +95,7 @@ costing, negative-stock policy, idempotency by event id.
 ### Phase 2 — Identity and authorization
 - ASP.NET Core Identity with Guid keys, PBKDF2 at 600,000 iterations,
   NIST-style password policy (length over composition rules).
-- 74-permission catalogue defined **in code** and seeded to the database, so a
+- 73-permission catalogue defined **in code** and seeded to the database, so a
   permission cannot be invented by editing a table.
 - Seven roles as permission bundles. No code branches on a role name.
 - Per-user overrides with grant/deny, expiry and a mandatory reason. Deny always
@@ -313,12 +315,55 @@ costing, negative-stock policy, idempotency by event id.
   reject netting the supplier bucket to zero, write-off gated by the second
   permission and reason whitelist, cross-store 403s, and photo flows.
 
+### Interim payment receipts (ADR-0026)
+
+ADR-0025 weighed an organisation-level subscription billing module and was
+superseded the same day: the stores are branches of one business, so the only
+real v1 need was a printable record of cash taken in or paid out.
+
+- **Aggregate:** `Receipt` — `ReceiptKind` (`WalkInSale`, `BranchExpense`,
+  `OwnerWithdrawal`), branch, positive amount, optional trimmed counterparty and
+  note, optional reference number normalised through `DocumentNumber.Parse`,
+  issuer and issue time. No ledger entry, no balance, no child tables.
+- **Numbering:** `RCT-{yyyy}-{000000}` from the shared document counter
+  (`DocumentType.Receipt = 14`), allocated inside the issuing transaction.
+- **Endpoints:** `POST /api/v1/receipts` (`receipt.create`, location-scoped in the
+  pipeline, external counterparties refused), `GET /api/v1/receipts/{id}` and
+  `GET .../{id}/print` (`receipt.view`, re-scoped to the receipt's location).
+  Printing is plain text from `ReceiptRenderer`, the seam for a thermal or PDF
+  layout later.
+- **Roles:** Owner, Administrator, Main Inventory Manager, Store Manager (scoped)
+  issue and view; Auditor views.
+- **Migration:** `20260913112917_AddReceipts` (`core.receipt`).
+- **Tests:** 9 domain tests on the creation contract and 4 endpoint tests —
+  issue/detail/print at the manager's own store, fresh numbers per receipt,
+  cashier/auditor/other-store refusals, and the external-location and
+  input-validation errors.
+
 ---
 
 ## 3. Bugs the tests caught this session
 
 Worth recording, because each was invisible in review and would have been
 expensive in production.
+
+**The API had never started on PostgreSQL.** Every endpoint test hosts the API
+on SQLite, and the PostgreSQL suites build their own context. Running the real
+host against PostgreSQL 17 on 2026-09-14 crashed at start-up:
+`EnableRetryOnFailure` installs a retrying execution strategy, which refuses
+user-initiated transactions — and the unit-of-work behaviour, the ledger, the
+reconciler and the development seeder all open one. Every command would have
+failed the same way. The retry option is removed (the ledger already retries the
+one step that is safe to replay), and `PersistenceRegistrationTests` asserts the
+registered PostgreSQL context does not retry.
+
+**Every document number failed on PostgreSQL.** The counter upsert's
+`DO UPDATE SET next_value = next_value + 1` is ambiguous to PostgreSQL (42702:
+existing row or `EXCLUDED`), while SQLite silently resolves it — so PO, GRN, TRF,
+QRT, RCT and every other central number worked in tests and threw in production.
+The PostgreSQL statement now aliases the target (`AS c ... c.next_value + 1`),
+matching the SQL already in DATABASE.md §10, and
+`PostgresDocumentNumberGeneratorTests` allocates on a real engine.
 
 **The no-tracking default silently discarded writes.** `PosDbContext` defaults to
 `NoTracking` because reads dominate. Command paths that read an entity and then
@@ -436,6 +481,12 @@ Stated plainly so they are not mistaken for finished work:
 | Supplier-return dispatch does not automatically raise a quarantine incident for unreported stock | Phase 5 | `QuarantineIncident` (Phase 8) exists; the automated bridge from dispatch is not built. |
 | Incident raising is manual — no automatic scan/POS triggers | Phase 8 | `POST /api/v1/quarantine` exists; the automated triggers in QUARANTINE.md §1 (unknown barcode at scan, over-receipt excess, unclear returns) are a future integration. ROADMAP §8 keeps that item unchecked. |
 | Register-product is two dispatches; a mid-flow failure could orphan a product | Phase 8 | The unidentified-line pre-check prevents it in the normal path; only a crash between the product creation and the line identification would leave the product in the master with its barcode reserved. |
+| The endpoint suite never hosts the API on PostgreSQL | Tests | The two §3 PostgreSQL-only bugs went unnoticed from the day each was written because of it. A Testcontainers-backed `WebApplicationFactory` smoke (start, sign in, one numbered command) would close the gap. |
+| A quarantine line with a null `barcode` returns 500 | Phase 8 | `CreateQuarantineIncidentCommandHandler` dereferences the barcode (line 57) before any validator refuses it; should be a 400. |
+| Malformed request bodies return 500 in Development | API | Minimal APIs throw `BadHttpRequestException` in Development and the global handler maps every exception to `server.unexpected`; production returns a bare 400. Map it to a 400 problem. |
+| `compose.yaml` never passes `Jwt__SigningKeyPem` to the `api` service | Deployment | `ValidateOnStart` refuses to boot without it, so `docker compose up` cannot start the API container as written; the API currently runs via `dotnet run` against the compose database. |
+| Receipts have issue/detail/print only — no list, void or email | ADR-0026 | `ix_receipt_location_time` is in place for a location/date list; a mistaken receipt cannot be voided or corrected through the API, and nothing sends email. |
+| Receipt rows carry no immutability guard | ADR-0026 | No update path exists in code, but unlike the ledger and audit log there is no interceptor, trigger or grant restriction stopping an edit. |
 | No quarantine notifications or dashboard exception panel | Phase 8 | Raises and resolutions post through the API; age-based escalation and the Owner-dashboard exception panel are Phase 14. |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
@@ -452,7 +503,8 @@ Stated plainly so they are not mistaken for finished work:
 Phase 8 shipped quarantine and unauthorized inventory: the `QuarantineIncident`
 aggregate with lines and photos, quarantine ledger postings, HQ review outcomes
 (register/link/investigate/release/reject/write-off with per-line caps and
-approvers), and scope-exact list/detail reads. Three strands remain:
+approvers), and scope-exact list/detail reads. Interim payment receipts
+(ADR-0026) landed alongside it. Three strands remain:
 
 1. **Phase 9 — inventory control** (per ROADMAP): stock adjustments with reasons
    and approval thresholds, damage/expiry/spoilage/loss/theft flows, and
@@ -471,17 +523,41 @@ approvers), and scope-exact list/detail reads. Three strands remain:
 
 ## 6. Running it
 
-```bash
-# One-time: generate local secrets into the user-secrets store (never the repo)
-./scripts/init-dev-secrets.ps1
+There is no user interface yet (the web and POS clients are Phases 11, 12 and
+16), so "running it" means the HTTP API. The path verified on 2026-09-14 is a
+development PostgreSQL in Docker plus the API under `dotnet run`, which applies
+migrations and seeds in Development:
 
-# Copy the printed POS_APP_PASSWORD into .env, then:
-cp .env.example .env
-docker compose up -d
+```bash
+# 1. A development database (owner role, so Development can migrate on start-up)
+docker run -d --name vaultflow-dev-pg -e POSTGRES_DB=vaultflow -e POSTGRES_USER=pos_migrator \
+  -e POSTGRES_PASSWORD=<choose-one> -p 127.0.0.1:55432:5432 postgres:17-alpine
+
+# 2. One-time secrets, kept in the user-secrets store (never the repo)
+openssl genrsa -out jwt-dev.pem 2048   # Git Bash ships openssl; keep the file outside the repo
+dotnet user-secrets set "Jwt:SigningKeyPem" "$(cat jwt-dev.pem)" --project src/Pos.Api
+dotnet user-secrets set "ConnectionStrings:Postgres" \
+  "Host=localhost;Port=55432;Database=vaultflow;Username=pos_migrator;Password=<choose-one>" --project src/Pos.Api
+dotnet user-secrets set "BootstrapOwner:Enabled" "false" --project src/Pos.Api
+
+# 3. Run: http://localhost:5177, OpenAPI document at /openapi/v1.json
+dotnet run --project src/Pos.Api --launch-profile http
 ```
 
+In Development the API also serves an interactive explorer at
+`http://localhost:5177/scalar` (Scalar, `src/Pos.Api/Development/ApiExplorer.cs`):
+sign in through `POST /api/v1/auth/login`, paste the `accessToken` into the
+Bearer Token field, then use **Test Request** on any route. Its page alone gets a
+same-origin Content-Security-Policy; Scalar's cloud features (Ask AI, registry,
+Deploy) are blocked by that policy on purpose. It is never mapped outside
+Development.
+
+`scripts/init-dev-secrets.ps1` does step 2 with PowerShell 7 (`pwsh`); it does
+not run under Windows PowerShell 5.1. The full `docker compose up -d` stack does
+not boot the API container yet — see the compose row in §4.
+
 ```bash
-# Build and test without Docker; the PostgreSQL suite self-skips
+# Tests; the PostgreSQL suites self-skip when no Docker daemon is reachable
 dotnet test VaultFlow.slnx
 ```
 

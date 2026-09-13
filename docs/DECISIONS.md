@@ -528,3 +528,163 @@ it. The SQLite suite also exposed engine asymmetry: SQLite refuses to upgrade a
 deferred read transaction after a peer commits (tests pin the token's
 `OriginalValue` instead), and Microsoft.Data.Sqlite stores GUIDs in uppercase
 "D" format, which matters for raw comparisons.
+
+---
+
+## ADR-0025 — Subscription billing is organisation-level with internal settlement
+
+**Date:** 2026-09-13 · **Status:** Superseded by ADR-0026 · **Revised:** 2026-09-13
+
+**Revised.** The first recording scoped the subscription per location and was
+briefly marked Revoked. The stores are branches of the one business, so the
+licence is for the whole organisation: a single subscription on the
+`core.organization` row, one invoice and one receipt per period, with usage
+metered organisation-wide. The internal settlement and receipt mechanism from
+the original decision is unchanged.
+
+**Superseded.** The subscription is not needed for v1: the stores are branches
+of the one business, there is no third-party to license, and no payment
+processor is in play. What remained useful was the receipt document — a
+printable, emailable record of money taken in (walk-in sales, branch expenses,
+owner cash withdrawals). ADR-0026 records that narrower decision. Deciding to
+bundle, meter or invoice later is a new decision, not an extension of this one.
+
+**Context.** VaultFlow is a single-organization deployment; multi-tenant SaaS is
+an explicit non-goal (ARCHITECTURE.md §1.1), and no billing code exists anywhere
+in the product. The stores are branches of the one business, so the commercial
+unit is the whole organisation, not each location: there is no need to invoice
+the owner for their own branches. A subscription that meters usage needs an
+immutable usage record first — without it "usage-based" is a fiction on top of
+a flat fee. No payment-processor integration is planned for v1.
+
+**Decision.**
+
+- A new `SubscriptionBilling` module (Domain and Application folders, `billing`
+  database schema) models a single, organisation-level subscription:
+  - **Subscription** — the licensing contract for the whole business: plan
+    (a fixed tier set), status (`Trial`, `Active`, `Suspended`, `Cancelled`),
+    the current billing period, a seat cap, and the assigned seat count. Seats
+    are derived from the organisation's active user accounts, not a parallel
+    list, so seat count cannot drift from who can actually log in.
+  - **Price** — effective-dated rows; a new row supersedes an old one and
+    nothing is ever edited, the DOMAIN_MODEL §5 pricing precedent.
+  - **UsageEvent** — append-only, immutable metering records captured at the
+    location grain (POS sales transactions, sync batches, and anything else a
+    tier meters) but accumulated organisation-wide for billing; carrying the
+    location keeps usage traceable to the branch that produced it. Captured
+    with `EventId` idempotency (ADR-0007) so a retry can never double-count.
+  - **UsageBalance** — a materialized projection of the period's usage,
+    concurrency-guarded exactly like the inventory balance projection
+    (ADR-0024): optimistic-concurrency token, retry with backoff on contention,
+    replayable from the usage ledger by a reconciler.
+  - **Invoice** — generated once per period with three line groups: tier base
+    fee, seats × seat price, metered usage × unit price. Numbered `INV-` by the
+    document counter (ADR-0015). Money follows ADR-0004 strictly: `decimal`,
+    stored `numeric(19,4)`, 4-dp line arithmetic, the document total rounded
+    once to 2 dp with `AwayFromZero`.
+  - **Payment and Receipt** — internal settlement. A payment is an append-only
+    ledger entry against an invoice, never edited or deleted; the same four
+    immutability layers that protect the inventory ledger (ADR-0012) — init-only
+    types, EF interceptor, DB triggers, least-privilege role — protect the
+    financial tables. The receipt is a numbered document (`RCT-`) carrying the
+    settled invoice, amount and method, renderable for print and email.
+- A `BillingPaymentProvider` port is the seam for a certified external
+  processor; the v1 implementation is an internal stub that records the payment
+  against the invoice and issues the receipt. Cards remain prohibited by
+  SECURITY.md T10; the stub accepts only `Cash`, `BankTransfer` and `Internal`
+  methods.
+- New permission constants `Permissions.Billing.*` (`billing.manage`,
+  `billing.review`), endpoints under `/api/v1/billing` as minimal-API groups
+  carrying `RequirePermissionAttribute`, returning `Result<T>` through the
+  shared problem-details mapping (ADR-0017). Usage capture is an internal
+  `EventId`-keyed `ICommand`, deliberately not an HTTP route a POS must call.
+- The multi-tenant non-goal is unchanged: this licences the one Organization.
+  What is new, and acknowledged, is a vendor↔organisation relationship, where
+  "vendor" is an operational role inside the deployment — not a second tenancy
+  model.
+
+**Rationale.** The inventory ledger is the perfect prior art and it is in the
+same codebase: append-only event rows, a derived projection, a reconciler, and
+optimistic concurrency on the projection (ADR-0001, ADR-0024). Billing has the
+same shape — immutable charges, materialized balances, periodic settlement — so
+the module reuses a proven pattern instead of inventing a moneyless duplicate.
+Organisation-level licensing matches the physical reality the revision
+corrected: branches share one P&L, so metering is summed across locations rather
+than charged per store, while the location grain on each `UsageEvent` preserves
+traceability for whoever reviews the bill. Internal settlement keeps v1
+shippable without a merchant account while the provider port buys the option to
+go external later; the payments recorded by the stub remain the ledger of record
+when a real provider replaces it.
+
+**Consequences.**
+- The first commercial capability enters the codebase; its ledger inherits the
+  inventory ledger's durability and audit guarantees at the cost of a `billing`
+  schema, two new document counters and a permission group.
+- Invoices can be marked paid with no money actually moving. That is the point
+  of the stub, and it is documented; the Provider seam on a payment
+  (`Provider`, `ProviderTransactionRef`, `Status`) keeps the record honest when
+  real processing arrives.
+- Invoice accuracy is bounded by usage capture: `EventId` idempotency limits the
+  failure mode to "an event never arrives" rather than "it arrives twice", and
+  the reconciler can replay a period from the ledger to prove the bill.
+- Suspension now affects the whole deployment, not one branch: a `Suspended`
+  subscription must eventually constrain sign-in and POS sessions everywhere.
+  That enforcement is deliberately later-phase; the subscription row carries
+  the state, and the follow-up is recorded, not silently assumed.
+
+---
+
+## ADR-0026 — Receipts are standalone payment documents; subscription billing is deferred
+
+**Date:** 2026-09-13 · **Status:** Accepted
+
+**Context.** ADR-0025 considered subscription billing and was set aside: the
+stores are branches of the one business, there is no external licensee, and the
+"temporary internal billing and receipt" requirement was the only part with a
+real v1 need. The deployment genuinely needs a printable, emailable record of
+money taken in and paid out — walk-in sales, branch expenses, and owner cash
+withdrawals. Standing up a billing domain (subscriptions, plans, prices,
+invoices, usage metering) for that is overbuilding.
+
+**Decision.**
+
+- A standalone **Receipt** document type replaces subscription billing, as a
+  temporary first build. No `Subscription`, `Invoice`, or `UsageEvent` —
+  nothing is ever bundled, metered or invoiced in v1.
+- A receipt is created with a `ReceiptKind`: `WalkInSale`, `BranchExpense` or
+  `OwnerWithdrawal`. It records the branch (`LocationId`), amount, optional
+  counter-party name, purpose note, and optional reference to an existing
+  document (a sale, a purchase order) — it does not own a ledger entry.
+- Receipts are numbered `RCT-` by the shared document counter (ADR-0015), so
+  every receipt has a unique, human-readable number that printer and email
+  rendering can reference.
+- Money follows ADR-0004: `decimal`, stored `numeric(19,4)`, rendered to 2 dp.
+  A single-line document, so there is no multi-line rounding question.
+- A `ReceiptRenderer` service renders the receipt for print and email from one
+  template; `GET /api/v1/receipts/{id}/print` renders the stored document
+  through it, so issuing stays a plain `201 { id }` like every other create.
+  Emailing is out of scope for v1 — the render is the seam.
+- Permission `receipt.create` gates issuing (with `receipt.view` for reading);
+  the endpoint is a minimal-API group under `/api/v1/receipts` using
+  `RequirePermissionAttribute` and the shared `Result<T>` problem-details
+  mapping (ADR-0017) like every other route.
+- If subscription billing is ever wanted, it returns as a new decision on top
+  of this one; receipts under this ADR are the durable record it would reconcile
+  against. Nothing in this ADR blocks that.
+
+**Rationale.** The minimum requirement is "a recoverable, printable proof of a
+cash event". One aggregate, one number counter, one permission, one endpoint
+group delivers that with the same shape as every other module. Deferring
+billing keeps the codebase honest: there is no half-built subscription engine
+to maintain, and the receipt is the auditable ancestor a future invoice can
+reference.
+
+**Consequences.**
+- No financial ledger is introduced. VaultFlow does not yet track where money
+  sits; a receipt records that a cash event happened, not the resulting balance.
+- `RCT-` becomes the next shared document counter. Printing and emailing are
+  render concerns separated behind `ReceiptRenderer`.
+- The ADR-0025 subscription design is preserved in the log for revival, but is
+  not carried into code.
+
+---

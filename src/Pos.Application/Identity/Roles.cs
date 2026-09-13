@@ -64,6 +64,8 @@ public static class Roles
                 Permissions.Quarantine.Investigate, Permissions.Quarantine.Release,
                 Permissions.Quarantine.Reject,
 
+                Permissions.Receipts.Create, Permissions.Receipts.View,
+
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
                 Permissions.Administration.ExportReports, Permissions.Administration.ViewAudit,
                 Permissions.Administration.ManageUsers, Permissions.Administration.ManageRoles,
@@ -96,6 +98,8 @@ public static class Roles
                 Permissions.Quarantine.Investigate, Permissions.Quarantine.Release,
                 Permissions.Quarantine.Reject,
 
+                Permissions.Receipts.Create, Permissions.Receipts.View,
+
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
                 Permissions.Administration.ExportReports, Permissions.Administration.ManageDevices,
                 Permissions.Administration.ManageSync, Permissions.Administration.AllLocations,
@@ -120,6 +124,8 @@ public static class Roles
                 Permissions.Transfer.Emergency,
 
                 Permissions.Quarantine.View, Permissions.Quarantine.Create, Permissions.Quarantine.Investigate,
+
+                Permissions.Receipts.Create, Permissions.Receipts.View,
 
                 Permissions.Sales.Create, Permissions.Sales.Discount, Permissions.Sales.PriceOverride,
                 Permissions.Sales.Void, Permissions.Sales.Return, Permissions.Sales.ReturnBlind,
@@ -162,6 +168,7 @@ public static class Roles
                 Permissions.Inventory.ViewMovements,
                 Permissions.Transfer.View,
                 Permissions.Quarantine.View,
+                Permissions.Receipts.View,
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
                 Permissions.Administration.ExportReports, Permissions.Administration.ViewAudit,
                 Permissions.Administration.AllLocations,

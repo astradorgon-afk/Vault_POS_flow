@@ -59,6 +59,28 @@ Constraints
    WHERE kind = 0 AND is_active;`
 - `CHECK (kind BETWEEN 0 AND 2)`
 
+### `core.receipt`
+Standalone payment receipts (ADR-0026). A record that a cash event happened, not
+a balance: no ledger rows and no child tables.
+```
+id                    uuid PK
+number                varchar(20)      -- 'RCT-2026-000001'
+kind                  smallint         -- 1 WalkInSale, 2 BranchExpense, 3 OwnerWithdrawal
+location_id           uuid             -- the branch; never an External counterparty
+amount                numeric(19,4)    -- > 0, enforced by the domain and validator
+counterparty          varchar(128) NULL
+note                  varchar(512) NULL
+reference_number      varchar(24) NULL -- printed document number, not a foreign key
+issued_by_user_id     uuid
+issued_at_utc         timestamptz
+```
+Indexes
+- `ux_receipt_number` UNIQUE (`number`)
+- `ix_receipt_location_time` (`location_id`, `issued_at_utc`)
+
+Migration `20260913112917_AddReceipts`. Grants come from the `core` schema's
+default privileges; no table-specific grant is needed.
+
 ### Identity (ASP.NET Core Identity, customised)
 `core.app_user`, `core.app_role`, `core.app_user_role`, `core.app_user_claim`,
 `core.app_role_claim`, `core.app_user_login`, `core.app_user_token`.
@@ -482,6 +504,7 @@ Formats
 | Quarantine | `QRT-{yyyy}-{000000}` | `QRT-2026-000001` | server |
 | Shift | `SHF-{yyyy}-{device}-{0000}` | `SHF-2026-D03-0042` | **device** |
 | SupplierReturn | `SRT-{yyyy}-{000000}` | `SRT-2026-000001` | server |
+| Receipt | `RCT-{yyyy}-{000000}` | `RCT-2026-000001` | server |
 
 Device-scoped numbers embed the device short code so an offline device can issue
 a globally unique, printable receipt number with no server round-trip. Server

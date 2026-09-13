@@ -47,6 +47,9 @@ public enum DocumentType
 
     /// <summary>Pre-approval token, prefix <c>PAT</c>.</summary>
     PreApprovalToken = 13,
+
+    /// <summary>Payment receipt, prefix <c>RCT</c>.</summary>
+    Receipt = 14,
 }
 
 /// <summary>
@@ -60,6 +63,10 @@ public enum DocumentType
 /// </remarks>
 public readonly partial record struct DocumentNumber
 {
+    /// <summary>Gets the longest value the format can represent, used to bound
+    /// reference fields that store a document number.</summary>
+    public const int MaxLength = 24;
+
     private DocumentNumber(string value) => Value = value;
 
     /// <summary>Gets the formatted number.</summary>
@@ -84,6 +91,7 @@ public readonly partial record struct DocumentNumber
         DocumentType.TransferReceipt => "TRC",
 
         DocumentType.PreApprovalToken => "PAT",
+        DocumentType.Receipt => "RCT",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown document type."),
     };
 

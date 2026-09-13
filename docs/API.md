@@ -333,7 +333,52 @@ Notes:
 
 ---
 
-## 8. POS
+## 8. Receipts
+
+Implemented (ADR-0026, interim). A payment receipt is a standalone, RCT-numbered
+record that a cash event happened at a branch — a walk-in sale, a branch expense
+or an owner withdrawal. It posts nothing to the inventory ledger and tracks no
+money balance; there is no subscription, invoice or usage metering behind it.
+
+```
+POST   /api/v1/receipts                  receipt.create   -> 201 { id }, Location header; RCT number allocated
+GET    /api/v1/receipts/{id}             receipt.view     -> detail, 403 receipt.outside_scope
+GET    /api/v1/receipts/{id}/print       receipt.view     -> text/plain rendering for print or email
+```
+
+Notes:
+
+- **Issuing** takes `{ locationId, kind, amount, counterparty?, note?,
+  referenceNumber? }`. `kind` is the numeric `ReceiptKind` (`1` WalkInSale, `2`
+  BranchExpense, `3` OwnerWithdrawal); the detail returns it by name. `amount`
+  must be greater than zero and is stored `numeric(19,4)`, rendered to 2 dp.
+  `counterparty` (≤ 128) and `note` (≤ 512) are trimmed. `referenceNumber`, when
+  given, must parse as a business document number (`PO-2026-000017`,
+  `SAL-2026-D03-000812`) and is stored upper-cased; it is a printed reference,
+  not a foreign key.
+- **Scope:** the command is location-scoped in the pipeline, so issuing at a
+  store the caller is not assigned to — or, for a store-scoped user, at a system
+  counterparty — is refused `403` before any business rule runs. A business-wide
+  user who names an external counterparty gets `receipt.location_external`.
+  Detail and print re-check `receipt.view` against the receipt's own location.
+- **Who holds it:** Owner, Administrator, Main Inventory Manager and Store Manager
+  (scoped) issue and view; Auditor views business-wide; Cashier and Inventory
+  Staff hold neither.
+- **Rendering:** `ReceiptRenderer` produces the plain-text form (number, issue
+  time in UTC, location, type, amount, optional counterparty/reference/note,
+  issuer). Emailing is out of scope; the rendering is the seam a thermal or PDF
+  layout replaces.
+- **Errors:** `receipt.location_external`, `receipt.location_unknown`,
+  `receipt.kind_unknown`, `receipt.amount_invalid`,
+  `receipt.counterparty_too_long`, `receipt.note_too_long`,
+  `receipt.reference_number_invalid` (400); `receipt.outside_scope` (403);
+  `receipt.unknown` (404).
+- Receipt numbers are `RCT-{yyyy}-{000000}` from the shared server-side counter,
+  allocated inside the issuing transaction, so a refused issue never burns one.
+
+---
+
+## 9. POS
 
 ```
 POST   /api/v1/shifts/open                           shift.open
@@ -356,7 +401,7 @@ There is no "add line to server-side cart" chatter — the cart lives on the dev
 
 ---
 
-## 9. Synchronization
+## 10. Synchronization
 
 ```
 POST   /api/v1/sync/push        authenticated device — batch of events, per-event results
@@ -373,7 +418,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ---
 
-## 10. Reporting and dashboard
+## 11. Reporting and dashboard
 
 ```
 GET /api/v1/reports/sales                     report.view
@@ -411,7 +456,7 @@ hold `location.all`.
 
 ---
 
-## 11. Notifications and admin
+## 12. Notifications and admin
 
 ```
 GET    /api/v1/notifications                 authenticated
@@ -433,7 +478,7 @@ GET    /api/v1/health/live  |  /health/ready anonymous (ready is IP-restricted)
 
 ---
 
-## 12. SignalR
+## 13. SignalR
 
 Hub `/hubs/ops`, bearer-authenticated, groups joined on connect:
 
@@ -449,7 +494,7 @@ a client that was disconnected recovers the same information on reconnect.
 
 ---
 
-## 13. OpenAPI
+## 14. OpenAPI
 
 Generated at `/openapi/v1.json`, with the UI exposed only outside Production.
 Each endpoint documents its required permission, so the generated spec doubles as

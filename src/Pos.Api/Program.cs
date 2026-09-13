@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pos.Api.Authorization;
 using Pos.Api.Common;
+using Pos.Api.Development;
 using Pos.Api.Endpoints;
 using Pos.Api.Middleware;
 using Pos.Application;
@@ -40,7 +41,7 @@ try
 
     builder.Services.AddProblemDetails();
     builder.Services.AddHttpContextAccessor();
-    builder.Services.AddOpenApi();
+    builder.Services.AddApiDocument();
 
     builder.Services.AddApplication();
 
@@ -179,7 +180,7 @@ try
 
     if (app.Environment.IsDevelopment())
     {
-        app.MapOpenApi();
+        app.MapApiExplorer();
     }
 
     await app.PrepareDatabaseAsync().ConfigureAwait(false);
@@ -211,6 +212,7 @@ try
     app.MapSupplierReturnEndpoints();
     app.MapTransferEndpoints();
     app.MapQuarantineEndpoints();
+    app.MapReceiptEndpoints();
 
     await app.RunAsync();
     return 0;
