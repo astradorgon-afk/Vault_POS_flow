@@ -2,7 +2,7 @@
 
 Status legend: `[ ]` Pending · `[~]` In progress · `[x]` Complete
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 > Phases 0, 1, 2, 3 and 4 are complete except where marked. Phase 4 was pulled
 > forward because the ledger is the foundation every other module posts through.
@@ -146,11 +146,15 @@ Substantially delivered in Phase 1, because everything else depends on it.
 ## Phase 8 — Quarantine and Unauthorized Inventory
 
 - [ ] Unknown-barcode detection at receiving and POS
-- [ ] `QuarantineIncident` aggregate, lines, photos
-- [ ] Quarantine ledger entries
-- [ ] HQ review: register product, link barcode, approve, reject, investigate, return
-- [ ] Release to Available with quantity caps
-- [ ] Notifications and dashboard exception panel
+      *(not built: incidents are raised through `POST /api/v1/quarantine`; the
+      automated scan/over-receipt/return triggers in QUARANTINE.md §1 are a
+      future integration)*
+- [x] `QuarantineIncident` aggregate, lines, photos
+- [x] Quarantine ledger entries
+- [x] HQ review: register product, link barcode, approve, reject, investigate, return
+- [x] Release to Available with quantity caps
+- [ ] Notifications and dashboard exception panel *(Phase 14 notifications;
+      Owner-dashboard panel not built)*
 
 ## Phase 9 — Inventory Control
 

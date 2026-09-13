@@ -8,6 +8,7 @@ using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
 using Pos.Domain.Organizations;
 using Pos.Domain.Purchasing;
+using Pos.Domain.Quarantine;
 using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
@@ -43,6 +44,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Schema holding transfer orders, allocations and custody events.</summary>
     public const string TransfersSchema = "transfers";
+
+    /// <summary>Schema holding quarantine incidents, lines, photographs and timelines.</summary>
+    public const string QuarantineSchema = "quarantine";
 
     /// <summary>
     /// Gets the append-only inventory ledger. Insert only: the interceptor and
@@ -170,6 +174,18 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// SQL; the change tracker never writes these rows.
     /// </summary>
     public DbSet<DocumentCounter> DocumentCounters => Set<DocumentCounter>();
+
+    /// <summary>Gets the quarantine incidents.</summary>
+    public DbSet<QuarantineIncident> QuarantineIncidents => Set<QuarantineIncident>();
+
+    /// <summary>Gets the quarantined lines of incidents.</summary>
+    public DbSet<QuarantineIncidentLine> QuarantineIncidentLines => Set<QuarantineIncidentLine>();
+
+    /// <summary>Gets the photographs attached to incidents.</summary>
+    public DbSet<QuarantinePhoto> QuarantinePhotos => Set<QuarantinePhoto>();
+
+    /// <summary>Gets the audit timelines of incidents.</summary>
+    public DbSet<QuarantineEvent> QuarantineTimelineEvents => Set<QuarantineEvent>();
 
     /// <summary>Gets the per-location product settings.</summary>
     public DbSet<ProductLocationSetting> ProductLocationSettings => Set<ProductLocationSetting>();

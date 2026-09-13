@@ -5,6 +5,16 @@ guarantee that the box never becomes sellable inventory without an explicit,
 recorded, authorized decision by the Main Warehouse. That guarantee is this
 module's entire purpose.
 
+> **Status (Phase 8 delivered, 2026-09-13):** the incident aggregate, lines and
+> photos, the quarantine ledger postings, and every HQ resolution below
+> (register, link, release with caps, reject, write-off) are implemented and
+> covered by endpoint tests. The sections that are **not yet built** are the
+> *automatic* triggers in §1 (incidents are raised through `POST
+> /api/v1/quarantine`; scan/receiving/POS detection is future integration), the
+> direct-delivery machinery in §3 (receiving POSTs to quarantine only when an
+> incident is raised), and all of §7. See [API.md §7](API.md) for the live route
+> table and [STATUS.md](STATUS.md) for where the build stands.
+
 ---
 
 ## 1. Triggers

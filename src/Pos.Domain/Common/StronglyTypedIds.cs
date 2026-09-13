@@ -816,6 +816,78 @@ public readonly record struct QuarantineIncidentId(Guid Value) : IStronglyTypedI
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
 
+/// <summary>Identifies one line of a quarantine incident.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct QuarantineLineId(Guid Value) : IStronglyTypedId, IComparable<QuarantineLineId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static QuarantineLineId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="QuarantineLineId"/>.</returns>
+    public static QuarantineLineId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(QuarantineLineId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies a photograph attached to a quarantine incident.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct QuarantinePhotoId(Guid Value) : IStronglyTypedId, IComparable<QuarantinePhotoId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static QuarantinePhotoId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="QuarantinePhotoId"/>.</returns>
+    public static QuarantinePhotoId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(QuarantinePhotoId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies one step in a quarantine incident's timeline.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct QuarantineEventId(Guid Value) : IStronglyTypedId, IComparable<QuarantineEventId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static QuarantineEventId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="QuarantineEventId"/>.</returns>
+    public static QuarantineEventId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(QuarantineEventId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
 /// <summary>Identifies a sale.</summary>
 /// <param name="Value">The underlying UUIDv7 value.</param>
 [System.Diagnostics.CodeAnalysis.SuppressMessage(

@@ -260,17 +260,76 @@ Warehouse first, then a sibling store.
 
 ## 7. Quarantine
 
+Implemented (Phase 8). Routes live under `/api/v1/quarantine` (no `/incidents`
+segment). Every command is **location-scoped** a second time inside the
+application pipeline against the incident's own location, so an endpoint token
+alone is never sufficient — a store manager raising at somebody else's store, or
+at a system counterparty, is refused `403 auth.permission_denied` before any
+business validation runs. Lists and details resolve scope from the database
+authorization (locations the user is assigned to, or `location.all`), not from
+the token, so the scope is exact when a user is assigned to several stores.
+
 ```
-GET    /api/v1/quarantine/incidents                  quarantine.view
-POST   /api/v1/quarantine/incidents                  quarantine.create   -> LEDGER (to Quarantine)
-POST   /api/v1/quarantine/incidents/{id}/photos      quarantine.create
-POST   /api/v1/quarantine/incidents/{id}/investigate quarantine.investigate
-POST   /api/v1/quarantine/incidents/{id}/link-product   quarantine.release + product.barcode.manage
-POST   /api/v1/quarantine/incidents/{id}/register-product quarantine.release + product.create
-POST   /api/v1/quarantine/incidents/{id}/release     quarantine.release  -> LEDGER (to Available)
-POST   /api/v1/quarantine/incidents/{id}/reject      quarantine.reject   -> LEDGER (to supplier)
-POST   /api/v1/quarantine/incidents/{id}/write-off   quarantine.reject + inventory.adjust.approve
+GET    /api/v1/quarantine                            quarantine.view          -> list, scoped
+POST   /api/v1/quarantine                            quarantine.create         -> LEDGER (to Quarantine)
+GET    /api/v1/quarantine/{id}                       quarantine.view          -> detail, 403 quarantine.outside_scope
+GET    /api/v1/quarantine/{id}/photos/{photoId}      quarantine.view          -> photo bytes (image stored in the database)
+POST   /api/v1/quarantine/{id}/photos                quarantine.create         -> attach photo (5 MB ceiling, base64 body)
+POST   /api/v1/quarantine/{id}/investigate           quarantine.investigate   -> Open -> UnderReview
+POST   /api/v1/quarantine/{id}/link-product          quarantine.release       -> identify existing product, LEDGER (to Quarantine)
+POST   /api/v1/quarantine/{id}/register-product      quarantine.release       -> create product, then identify, LEDGER
+POST   /api/v1/quarantine/{id}/release               quarantine.release       -> LEDGER (to Available), approver recorded
+POST   /api/v1/quarantine/{id}/reject                quarantine.reject        -> LEDGER (to EXT-SUPPLIER), approver + reason
+POST   /api/v1/quarantine/{id}/write-off             quarantine.reject + inventory.adjust.approve -> LEDGER (to EXT-WRITEOFF), whitelisted reasons
 ```
+
+Notes:
+
+- **Creating an incident** takes `{ locationId, lines: [{ barcode, quantity,
+  unitCost?, claimedProductName? }], note? }`. Lines whose barcode already
+  resolves to a product that does **not** track batches are identified at raise
+  and their `QuarantineEntry` group posts immediately; batch-tracked and unknown
+  barcodes wait for HQ identification (lot required for the former).
+- **`link-product`** posts `{ lineNo, productId, batchId?, note? }`. The scanned
+  barcode must already belong to the named product
+  (`quarantine.barcode_not_owned`): identification never attaches a barcode, so
+  the incident's raw code is never auto-linked by heuristic (see QUARANTINE.md
+  invariants). A lot on a non-batch-tracked product is refused
+  (`quarantine.batch_mismatch`); a batch-tracked product demands one
+  (`quarantine.batch_required`).
+- **`register-product`** posts `{ lineNo, sku, name, categoryId,
+  baseUnitOfMeasureId, ..., batchId?, note? }`. The endpoint dispatches the
+  catalogue `CreateProductCommand` (transitively requiring `product.create`,
+  held by HQ roles) with the scanned barcode as the new product's primary
+  barcode, then identifies the line against it. A pre-check that the line is
+  still unidentified runs before the create is dispatched, so a conflict cannot
+  normally create an orphan product; a failure between the two dispatches would
+  still leave the product in the master (the barcode stays reserved).
+- **`release` / `reject` / `write-off`** take `{ lineNo, quantity, note? }` plus
+  `reasonCode` for write-off. Quantities are capped at what remains per line and
+  an incident resolves only when every line is fully dispositioned
+  (`quarantine.resolved` → 409 afterwards). `release` and `reject` still refuse
+  an unidentified line (`quarantine.line_unknown`) and `reject` demands an
+  approver and reason on the ledger legs. Write-off reasons are whitelisted to
+  shrinkage codes (`quarantine.write_off_reason_not_allowed` otherwise) and the
+  ledger requires `inventory.adjust.approve` as a second gate.
+- **Disposition only from Quarantine**: entry posts `EXT-SUPPLIER/External −q ⇄
+  Loc/Quarantine +q` (`QuarantineEntry`); release posts
+  `Loc/Quarantine −q ⇄ Loc/Available +q` (`QuarantineRelease`, approver
+  recorded, no reason); reject posts `Loc/Quarantine −q ⇄ EXT-SUPPLIER/External
+  +q` (`QuarantineReject`, approver + reason); write-off posts to
+  `EXT-WRITEOFF` under `QuarantineReject`. The supplier bucket carries negative
+  stock while goods are in quarantine and nets back to zero on reject.
+- **Errors:** `auth.permission_denied` (403), `quarantine.outside_scope` (403),
+  `quarantine.location_external`, `quarantine.empty`,
+  `quarantine.line_quantity_invalid`, `quarantine.line_unknown`,
+  `quarantine.barcode_not_owned`, `quarantine.batch_required`,
+  `quarantine.batch_mismatch`, `quarantine.line_already_identified`,
+  `quarantine.resolved`, `quarantine.write_off_reason_not_allowed`,
+  `quarantine.photo_data_invalid`, `quarantine.photo_too_large`,
+  `quarantine.photo_unknown` (all 400/404/409 as appropriate).
+- Incident numbers are `QRT-{yyyy}-{000000}`, allocated at creation (server-side
+  counter).
 
 ---
 

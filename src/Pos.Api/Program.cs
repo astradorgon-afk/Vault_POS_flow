@@ -210,6 +210,7 @@ try
     app.MapDirectDeliveryEndpoints();
     app.MapSupplierReturnEndpoints();
     app.MapTransferEndpoints();
+    app.MapQuarantineEndpoints();
 
     await app.RunAsync();
     return 0;

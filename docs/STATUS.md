@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-13 · **Milestone:** Phase 7 (Store to Store Transfers) — complete; phase 8 next
+**Last updated:** 2026-09-13 · **Milestone:** Phase 8 (Quarantine and Unauthorized Inventory) — complete; phase 9 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,10 +13,10 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **304 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
-| Migrations | 11, forward-only, applied cleanly against PostgreSQL 17 |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations) |
-| Phases remaining | 8–18 — see §5 |
+| Tests | **314 passing, 0 failing, 0 skipped** (local run, SQLite + PostgreSQL with Docker) |
+| Migrations | 13, forward-only, applied cleanly against PostgreSQL 17 |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
+| Phases remaining | 9–18 — see §5 |
 
 ```
 Pos.Domain.Tests            151 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers
@@ -24,7 +24,7 @@ Pos.Infrastructure.Tests     29 passing   ledger posting + concurrency + reconci
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           33 passing   authentication, tokens, permission matrix
 Pos.Application.Tests        12 passing   master-data commands and CQRS unit-of-work behaviours
-Pos.Api.IntegrationTests     56 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate + 8 transfer lifecycle tests)
+Pos.Api.IntegrationTests     66 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate + 8 transfer + 10 quarantine tests)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -270,6 +270,49 @@ costing, negative-stock policy, idempotency by event id.
   reversal with reason and approval, cashier refusal, location-scoped lists, and
   resolve-without-permission.
 
+### Phase 8 — quarantine and unauthorized inventory (this session)
+
+- **Aggregate:** `QuarantineIncident` (Open → UnderReview → Approved /
+  PartiallyApproved / Rejected / UnderInvestigation; Closed only when every
+  line's remaining quantity is zero). Lines carry the raw barcode, quantity,
+  unit cost, claimed product name, and identification state (product + optional
+  lot). Photos are stored in the database, capped at **5 MB** each
+  (`quarantine.photo_too_large` otherwise). Incident numbers are `QRT-{yyyy}-
+  {000000}` from a server-side counter.
+- **Raising:** `POST /api/v1/quarantine` (`quarantine.create`) posts a
+  `QuarantineEntry` ledger group (`EXT-SUPPLIER/External −q ⇄ Loc/Quarantine +q`)
+  for every line. Lines whose scanned barcode already resolves to a non-batch-
+  tracked product are identified at raise and post immediately; batch-tracked
+  and unknown barcodes wait for HQ identification. Raising at a system
+  counterparty or an unassigned store is refused (`quarantine.location_external`,
+  or 403 from the pipeline's second location-scope check before any business
+  rule runs).
+- **HQ review:** `investigate` (→ UnderReview), `link-product` and
+  `register-product` (identify lines against existing/new products — the barcode
+  must already belong to the product: identification never attaches barcodes,
+  `quarantine.barcode_not_owned`), `release` (→ `Available`, approver recorded,
+  no reason), `reject` (→ `EXT-SUPPLIER`, approver + reason required), and
+  `write-off` (→ `EXT-WRITEOFF`, `quarantine.reject` **and**
+  `inventory.adjust.approve`, reasons whitelisted). Quantities are capped per
+  line at what remains; a resolved incident refuses further disposition (409).
+  The supplier bucket nets to zero after a reject (entry −q, reject +q).
+- **Scope:** list and detail reads resolve against database authorizations, not
+  the token; a user assigned to several stores still sees exactly what the
+  assignments cover. Every command is re-scoped against the incident's own
+  location in the pipeline (`quarantine.outside_scope` → 403) — the transfer
+  pattern carried forward. Documents: `QRT` numbers, ledger movement groups
+  `QuarantineEntry`/`QuarantineRelease`/`QuarantineReject` in
+  INVENTORY_LEDGER.md, full route table with error codes in API.md §7, design
+  intent in QUARANTINE.md.
+- **Migrations:** `20260913081458_QuarantineIncidents` (incident, line, photo
+  tables + filtered `QRT-` document counter).
+- **Tests:** 10 endpoint tests through the real pipeline — raise at external
+  location refused, batch-tracked line requiring a lot, register-product and
+  link-product identification (barcode ownership, batch consistency,
+  already-identified), release to Available with approver recorded and caps,
+  reject netting the supplier bucket to zero, write-off gated by the second
+  permission and reason whitelist, cross-store 403s, and photo flows.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -390,7 +433,10 @@ Stated plainly so they are not mistaken for finished work:
 | `AutoPassInspection` per location/category not built | Phase 5 | Receipts always land in `PendingInspection`; the trusted-category fast path is a settings-driven follow-up. |
 | Cost-variance notification not raised | Phase 5 | The receipt flags `costVariancePendingApproval` and records the approver; the notification/queue item is not built. |
 | Supplier performance report not built | Phase 5 | Measurable after returns post; dashboard/analytics phase. |
-| Supplier-return dispatch does not yet quarantine unreported stock | Phase 5 | The PO-less unauthorized-delivery quarantine path needs `QuarantineIncident` (Phase 8). |
+| Supplier-return dispatch does not automatically raise a quarantine incident for unreported stock | Phase 5 | `QuarantineIncident` (Phase 8) exists; the automated bridge from dispatch is not built. |
+| Incident raising is manual — no automatic scan/POS triggers | Phase 8 | `POST /api/v1/quarantine` exists; the automated triggers in QUARANTINE.md §1 (unknown barcode at scan, over-receipt excess, unclear returns) are a future integration. ROADMAP §8 keeps that item unchecked. |
+| Register-product is two dispatches; a mid-flow failure could orphan a product | Phase 8 | The unidentified-line pre-check prevents it in the normal path; only a crash between the product creation and the line identification would leave the product in the master with its barcode reserved. |
+| No quarantine notifications or dashboard exception panel | Phase 8 | Raises and resolutions post through the API; age-based escalation and the Owner-dashboard exception panel are Phase 14. |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
 | Serilog sensitive-data scrubbing policy not implemented | Phase 1 | No secret is currently logged, but nothing enforces that. |
@@ -403,14 +449,20 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 7 shipped the store-to-store transfer pipeline: central review for
-emergency transfers, dual-manager authorization, single-use pre-approval tokens,
-and replenishment recommendations. Two strands remain:
+Phase 8 shipped quarantine and unauthorized inventory: the `QuarantineIncident`
+aggregate with lines and photos, quarantine ledger postings, HQ review outcomes
+(register/link/investigate/release/reject/write-off with per-line caps and
+approvers), and scope-exact list/detail reads. Three strands remain:
 
-1. **Phase 8 — quarantine and unauthorized inventory** (per ROADMAP): scan-while-
-   receiving unknown-barcode detection, the `QuarantineIncident` aggregate,
-   HQ review outcomes, release caps, and the dashboard exception panel.
-2. **Deferred groundwork stays on the table:** catalog curation (product edit,
+1. **Phase 9 — inventory control** (per ROADMAP): stock adjustments with reasons
+   and approval thresholds, damage/expiry/spoilage/loss/theft flows, and
+   inventory counts (full, cycle, category, product-specific) with snapshot,
+   variance calculation, approval, posting, and repeat-variance detection.
+2. **Phase 8 tail:** the automated quarantine triggers (unknown barcode at scan,
+   over-receipt excess, unclear returns) that would raise incidents without staff
+   action, plus notifications and the Owner-dashboard exception panel — both left
+   unchecked in ROADMAP §8.
+3. **Deferred groundwork stays on the table:** catalog curation (product edit,
    barcode management, pricing, `ProductLocationSetting`, unit conversions) and
    user-administration endpoints, so roles and location assignments stop being a
    database-only concern.
