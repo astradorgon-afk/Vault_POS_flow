@@ -520,13 +520,20 @@ sale start because it is printed on the receipt.
 
 | Role | Grants |
 |---|---|
-| `pos_migrator` | owner of all schemas; used only by the migration job |
-| `pos_app` | `SELECT, INSERT, UPDATE, DELETE` on operational tables; **only `SELECT, INSERT`** on `inventory.inventory_movement`, `audit.audit_log`, `sync.processed_event` |
-| `pos_readonly` | `SELECT` on reporting views only; used by the analytics connection |
+| `pos_migrator` | owner of all schemas; used only by the migration job and the grants step |
+| `pos_app` | `SELECT, INSERT, UPDATE, DELETE` on every table in `core`, `catalog`, `inventory`, `purchasing`, `transfers`, `quarantine`; **only `SELECT, INSERT`** on `inventory.inventory_movement`, `audit.audit_log`, `core.login_attempt`, `core.receipt` (and `sync.processed_event` when Phase 13 adds it) |
+| `pos_readonly` | `SELECT` on every table; used by the analytics connection |
 
 `pos_app` cannot `TRUNCATE`, cannot `ALTER`, and has no rights on `pg_catalog`
 functions that would let it drop the immutability triggers. This means even a
 successful SQL-injection or a compromised application cannot rewrite history.
+
+The grants live in `build/docker/initdb/02-grants.sql`. It runs as `pos_migrator`
+after every migration (the compose `grants` service), grants per schema only for
+schemas that exist, sets default privileges so tables added by later migrations
+inherit the same rights, and is safe to re-run. `PostgresRoleGrantsTests` applies
+the same file to the fully migrated schema and checks the privileges of every
+table, so a table added later is covered without being named.
 
 ---
 

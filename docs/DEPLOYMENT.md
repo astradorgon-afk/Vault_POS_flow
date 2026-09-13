@@ -29,9 +29,10 @@ Containers run as non-root with a read-only root filesystem and a writable
 
 | Service | Image | Notes |
 |---|---|---|
-| `postgres` | `postgres:17-alpine` | named volume, healthcheck, tuned `shared_buffers`/`work_mem` |
-| `pos-migrator` | built from `build/docker/Dockerfile.migrator` | runs `dotnet Pos.Api.dll --migrate-only` as `pos_migrator`, exits 0 |
-| `pos-api` | `build/docker/Dockerfile.api` | depends on migrator completing successfully |
+| `postgres` | `postgres:17-alpine` | named volume, healthcheck, tuned `shared_buffers`/`work_mem`; `01-roles.sql` creates `pos_app`/`pos_readonly` on first start |
+| `migrator` | built from `build/docker/Dockerfile.migrator` | an EF migrations bundle run as `pos_migrator`, exits 0 |
+| `grants` | `postgres:17-alpine` | runs `02-grants.sql` as `pos_migrator` after the migrator, exits 0; safe to repeat |
+| `api` | `build/docker/Dockerfile.api` | depends on `grants` completing; connects as `pos_app`; reads the token-signing key from the `jwt_signing_key` Docker secret |
 | `pos-web` | `build/docker/Dockerfile.web` | Blazor Web App |
 | `proxy` | `caddy:2-alpine` | TLS (ACME in production, local CA in dev) |
 | `redis` *(optional)* | `redis:7-alpine` | SignalR backplane + permission cache when `pos-api` is scaled |
@@ -66,6 +67,23 @@ is missing or equals a known development default.
 Secrets come from Docker secrets or the platform's secret store; they are never
 baked into images and never committed. `scripts/check-secrets.ps1` runs in CI and
 as a pre-commit hook.
+
+The API adds a key-per-file configuration source over `/run/secrets`: a secret
+mounted with the target name `Jwt__SigningKeyPem` supplies `Jwt:SigningKeyPem`,
+and any other setting can be supplied the same way. In development,
+`scripts/init-dev-secrets.ps1` (Windows PowerShell 5.1 or PowerShell 7) writes
+the signing key to `.secrets/jwt-signing-key.pem`, which compose mounts, and
+creates `.env` with the database passwords if it does not exist. Then:
+
+```bash
+docker compose up -d --build
+```
+
+The stack is served by Caddy at `https://localhost` with a locally trusted
+certificate; in Development the seeded staff accounts use `DevVaultFlow!2026`.
+Set `SITE_ADDRESS` in `.env` to serve other names or addresses too (for example
+`SITE_ADDRESS=localhost, pos.store.lan`), so tills on the store network reach the
+same certificate-backed site.
 
 ---
 

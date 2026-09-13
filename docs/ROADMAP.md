@@ -2,12 +2,13 @@
 
 Status legend: `[ ]` Pending · `[~]` In progress · `[x]` Complete
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
-> Phases 0, 1, 2, 3 and 4 are complete except where marked. Phase 4 was pulled
-> forward because the ledger is the foundation every other module posts through.
-> See [STATUS.md](STATUS.md) for where the build actually stands and what to do
-> next.
+> Phases 0–8 are complete except where marked. Phase 4 was pulled forward
+> because the ledger is the foundation every other module posts through.
+> See [STATUS.md](STATUS.md) for where the build actually stands and
+> [PROGRESS.md](PROGRESS.md) for the running log of the gap batches and the
+> remaining phases.
 
 ---
 
@@ -116,13 +117,15 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 5 — Purchasing
 
-- [ ] Purchase orders, lines, approval workflow with tiers
-- [ ] Goods receipts, lines, batch/expiry capture
-- [ ] Receiving discrepancies (shortage, overage, damaged, wrong item)
-- [ ] Direct supplier-to-store delivery authorization path
+- [x] Purchase orders, lines, approval workflow with tiers
+- [x] Goods receipts, lines, batch/expiry capture
+- [x] Receiving discrepancies (shortage, overage, damaged, wrong item)
+- [x] Direct supplier-to-store delivery authorization path
 - [ ] Unapproved direct delivery → quarantine + incident
-- [ ] Supplier returns
-- [ ] Purchasing tests incl. partial receiving
+      *(excess stock already posts to `Quarantine` on receipt; the automatic
+      `QuarantineIncident` for it is not raised — see Phase 8 automated triggers)*
+- [x] Supplier returns
+- [x] Purchasing tests incl. partial receiving
 
 ## Phase 6 — Main Warehouse to Store Transfers
 

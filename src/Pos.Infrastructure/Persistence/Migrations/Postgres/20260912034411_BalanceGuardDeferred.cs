@@ -18,7 +18,7 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
     /// now sees the transaction's final state. See the script for the full note.
     /// </remarks>
     [DbContext(typeof(PosDbContext))]
-    [Migration("202609120344092_BalanceGuardDeferred")]
+    [Migration("20260912034411_BalanceGuardDeferred")]
     public partial class BalanceGuardDeferred : Migration
     {
         /// <inheritdoc />

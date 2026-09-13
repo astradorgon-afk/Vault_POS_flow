@@ -42,6 +42,7 @@ appsettings.Local.json
 .env.*
 !.env.example
 secrets.json
+.secrets/
 *.pem
 *.key
 !build/docker/dev-ca.README.md

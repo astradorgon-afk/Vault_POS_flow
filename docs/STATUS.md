@@ -13,20 +13,20 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **329 passing, 0 failing, 0 skipped** (2026-09-14 local run, per project, SQLite + PostgreSQL with Docker) |
-| Migrations | 14, forward-only, applied cleanly against PostgreSQL 17 (Testcontainers suites and a live API host) |
-| API host on PostgreSQL | Smoke-run 2026-09-14: starts, migrates, seeds, signs in, issues/prints receipts, raises a quarantine incident that posts a balanced ledger group. See §3 for the two PostgreSQL-only bugs this found. |
+| Tests | **341 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
+| Migrations | 15, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
 | Phases remaining | 9–18 — see §5 |
 
 ```
 Pos.Domain.Tests            160 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
-Pos.Infrastructure.Tests     31 passing   ledger posting + concurrency + reconciler + real PostgreSQL triggers + document numbering + context registration (11 need Docker)
+Pos.Infrastructure.Tests     37 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, migration order (15 need Docker)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           33 passing   authentication, tokens, permission matrix
-Pos.Application.Tests        12 passing   master-data commands and CQRS unit-of-work behaviours
-Pos.Api.IntegrationTests     80 passing   endpoints through the real pipeline (SQLite, incl. maintenance gate, transfers, 10 quarantine + 4 receipt tests)
+Pos.Application.Tests        16 passing   master-data commands, CQRS unit-of-work behaviours, receipt rendering
+Pos.Api.IntegrationTests     82 passing   endpoints through the real pipeline (SQLite) plus one API host run on PostgreSQL (Docker)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -42,7 +42,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (26 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (27 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -365,6 +365,54 @@ The PostgreSQL statement now aliases the target (`AS c ... c.next_value + 1`),
 matching the SQL already in DATABASE.md §10, and
 `PostgresDocumentNumberGeneratorTests` allocates on a real engine.
 
+**The container images had never built.** Neither Dockerfile copied
+`.editorconfig`, so inside the image the analyzer rules the repository relaxes
+(CA1716 on `Error`, CA1000 on `Result<T>`) became warnings-as-errors and the build
+failed. The API image also needed no explicit `KeyPerFile` package (the SDK in the
+image rejects a reference the shared framework already provides). Both Dockerfiles
+now copy `.editorconfig`, and a `.dockerignore` keeps `.env`, `.secrets/`, `.git`
+and build output out of the build context.
+
+**The compose stack could not start the API, and the grants script was wrong.**
+The `api` service never received a token-signing key (start-up validation refuses
+to boot without one), and `02-grants.sql` was never applied. Had it been, it would
+have failed on a `sync` schema that does not exist yet and left `pos_app` without
+rights on the `catalog`, `purchasing`, `transfers` and `quarantine` schemas. The
+key now arrives as a Docker secret read through a key-per-file configuration
+source, a one-shot `grants` service applies a per-schema script after the
+migrator, and `PostgresRoleGrantsTests` checks the privileges of every table.
+
+**A fresh deployment applied two migrations out of order.** Two hand-written
+migrations had fifteen-digit identifiers (`202609120344091_AuditIntegrityGuards`,
+`202609120344092_BalanceGuardDeferred`). Entity Framework orders migrations by
+string comparison: culture-aware on a Windows host (the underscore sorts first,
+so every test passed) and ordinal in the Alpine migrations bundle (invariant
+globalization), where the audit trigger ran before the audit schema existed and
+the migrator failed with `schema "audit" does not exist`. Renamed to
+`20260912034410_…` and `20260912034411_…`; both scripts are idempotent, so a
+database that already applied the old names simply re-applies them.
+`MigrationOrderingTests` refuses any identifier whose ordinal and culture order
+could differ.
+
+**The reverse proxy could not complete a TLS handshake.** Its site block was a
+bare `:443`, which gives Caddy no name to issue a certificate for. The site
+address is now `{$SITE_ADDRESS:localhost}`. With that, the whole compose stack was
+verified end to end on 2026-09-14 from a clean volume: migrator and grants exit 0,
+the API connects as `pos_app`, and through `https://` it signs in, issues and prints
+a receipt, raises a quarantine incident that posts to the ledger, and reads the
+catalog, transfer and purchasing schemas — while `pos_app` is refused an `UPDATE`
+on `core.receipt`.
+
+**The integration-test factory ignored overrides of default settings.** Its
+environment loop skipped any key already set, so an override of, say, the database
+provider silently kept the SQLite default while its comment promised the opposite.
+Found while writing the PostgreSQL host test, which needs exactly that override.
+
+**Two request shapes still reached a `NullReferenceException`.** A quarantine line
+without a barcode, and a quarantine body without `lines`, both failed with `500`.
+They now return `400` (`quarantine.barcode_required`, `quarantine.empty`), and
+unreadable bodies in general return `400 request.malformed` in every environment.
+
 **The no-tracking default silently discarded writes.** `PosDbContext` defaults to
 `NoTracking` because reads dominate. Command paths that read an entity and then
 mutate it — sign-out, session revocation, token rotation, device suspension,
@@ -481,12 +529,7 @@ Stated plainly so they are not mistaken for finished work:
 | Supplier-return dispatch does not automatically raise a quarantine incident for unreported stock | Phase 5 | `QuarantineIncident` (Phase 8) exists; the automated bridge from dispatch is not built. |
 | Incident raising is manual — no automatic scan/POS triggers | Phase 8 | `POST /api/v1/quarantine` exists; the automated triggers in QUARANTINE.md §1 (unknown barcode at scan, over-receipt excess, unclear returns) are a future integration. ROADMAP §8 keeps that item unchecked. |
 | Register-product is two dispatches; a mid-flow failure could orphan a product | Phase 8 | The unidentified-line pre-check prevents it in the normal path; only a crash between the product creation and the line identification would leave the product in the master with its barcode reserved. |
-| The endpoint suite never hosts the API on PostgreSQL | Tests | The two §3 PostgreSQL-only bugs went unnoticed from the day each was written because of it. A Testcontainers-backed `WebApplicationFactory` smoke (start, sign in, one numbered command) would close the gap. |
-| A quarantine line with a null `barcode` returns 500 | Phase 8 | `CreateQuarantineIncidentCommandHandler` dereferences the barcode (line 57) before any validator refuses it; should be a 400. |
-| Malformed request bodies return 500 in Development | API | Minimal APIs throw `BadHttpRequestException` in Development and the global handler maps every exception to `server.unexpected`; production returns a bare 400. Map it to a 400 problem. |
-| `compose.yaml` never passes `Jwt__SigningKeyPem` to the `api` service | Deployment | `ValidateOnStart` refuses to boot without it, so `docker compose up` cannot start the API container as written; the API currently runs via `dotnet run` against the compose database. |
-| Receipts have issue/detail/print only — no list, void or email | ADR-0026 | `ix_receipt_location_time` is in place for a location/date list; a mistaken receipt cannot be voided or corrected through the API, and nothing sends email. |
-| Receipt rows carry no immutability guard | ADR-0026 | No update path exists in code, but unlike the ledger and audit log there is no interceptor, trigger or grant restriction stopping an edit. |
+| Receipts cannot be voided or emailed | ADR-0026 | Issue, list, detail and print exist and receipts are immutable; a mistaken receipt is corrected by issuing another. A void document and email delivery need their own decision. |
 | No quarantine notifications or dashboard exception panel | Phase 8 | Raises and resolutions post through the API; age-based escalation and the Owner-dashboard exception panel are Phase 14. |
 | Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
 | `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
@@ -552,9 +595,18 @@ same-origin Content-Security-Policy; Scalar's cloud features (Ask AI, registry,
 Deploy) are blocked by that policy on purpose. It is never mapped outside
 Development.
 
-`scripts/init-dev-secrets.ps1` does step 2 with PowerShell 7 (`pwsh`); it does
-not run under Windows PowerShell 5.1. The full `docker compose up -d` stack does
-not boot the API container yet — see the compose row in §4.
+**Or run the whole stack in Docker** (PostgreSQL, migrator, grants, API, Caddy),
+verified end to end on 2026-09-14:
+
+```bash
+./scripts/init-dev-secrets.ps1
+docker compose up -d --build
+```
+
+The script works in Windows PowerShell 5.1 and PowerShell 7. It writes the
+token-signing key to `.secrets/` (git-ignored, mounted as a Docker secret) and
+creates `.env` with database passwords when there is none. The API is then at
+`https://localhost` behind Caddy, connecting as the least-privilege `pos_app`.
 
 ```bash
 # Tests; the PostgreSQL suites self-skip when no Docker daemon is reachable

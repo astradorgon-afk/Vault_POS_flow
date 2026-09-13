@@ -134,6 +134,31 @@ public sealed class QuarantineEndpointTests(PosApiFactory factory)
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
             (await ReadErrorCodeAsync(response)).Should().Be("quarantine.line_quantity_invalid");
         }
+
+        // A body with no lines at all is the same validation failure as an empty list.
+        using (HttpResponseMessage response = await PostAsJsonAsync(
+            client,
+            "/api/v1/quarantine",
+            new { locationId = seed.Store.Value },
+            storeManager))
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+            (await ReadErrorCodeAsync(response)).Should().Be("quarantine.empty");
+        }
+
+        // A line without a barcode is refused before the catalogue lookup runs;
+        // it once reached that lookup and failed with a 500.
+        foreach (object line in new object[] { new { quantity = 1m }, new { barcode = "   ", quantity = 1m } })
+        {
+            using HttpResponseMessage response = await PostAsJsonAsync(
+                client,
+                "/api/v1/quarantine",
+                new { locationId = seed.Store.Value, lines = new[] { line } },
+                storeManager);
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+            (await ReadErrorCodeAsync(response)).Should().Be("quarantine.barcode_required");
+        }
     }
 
     [Fact]

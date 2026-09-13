@@ -41,6 +41,15 @@ Status mapping: validation → `400`; unauthenticated → `401`; permission or s
 → `403`; unknown id → `404`; state-machine or stock conflict → `409`; concurrency
 → `412`; rate limit → `429`; unexpected → `500` with no detail.
 
+A body that is not valid JSON, or whose values cannot bind to the route (a
+malformed id, an unknown enum name in a query string), is answered `400` with
+`errorCode` `request.malformed` in every environment — never a `500` and never an
+empty `400`.
+
+A `403` refused by the route's own permission check (the caller holds the
+permission nowhere) carries no body. A `403` refused inside the pipeline, such as
+a location outside the caller's scope, carries the problem document.
+
 ---
 
 ## 2. Authentication and devices
@@ -341,6 +350,7 @@ or an owner withdrawal. It posts nothing to the inventory ledger and tracks no
 money balance; there is no subscription, invoice or usage metering behind it.
 
 ```
+GET    /api/v1/receipts                  receipt.view     -> list, newest first, scoped to the caller's locations
 POST   /api/v1/receipts                  receipt.create   -> 201 { id }, Location header; RCT number allocated
 GET    /api/v1/receipts/{id}             receipt.view     -> detail, 403 receipt.outside_scope
 GET    /api/v1/receipts/{id}/print       receipt.view     -> text/plain rendering for print or email
@@ -364,10 +374,19 @@ Notes:
 - **Who holds it:** Owner, Administrator, Main Inventory Manager and Store Manager
   (scoped) issue and view; Auditor views business-wide; Cashier and Inventory
   Staff hold neither.
+- **Listing** takes optional `locationId`, `kind` (name or number), `from`
+  (inclusive) and `to` (exclusive) ISO-8601 instants, `offset` and `limit`
+  (1–200, default 100). A store-scoped caller only ever sees receipts at their
+  assigned locations; filtering on another location returns an empty list rather
+  than revealing it.
 - **Rendering:** `ReceiptRenderer` produces the plain-text form (number, issue
-  time in UTC, location, type, amount, optional counterparty/reference/note,
-  issuer). Emailing is out of scope; the rendering is the seam a thermal or PDF
-  layout replaces.
+  time in the branch's own time zone — `2026-09-14 10:52 (Asia/Manila)`, UTC only
+  when the zone is unknown — location, type, amount, optional
+  counterparty/reference/note, issuer). Emailing is out of scope; the rendering is
+  the seam a thermal or PDF layout replaces.
+- **Immutable:** a receipt is never edited or deleted — domain type, EF
+  interceptor, database triggers and `pos_app` grants all refuse it. A wrong
+  receipt is corrected by issuing another, not by changing the first.
 - **Errors:** `receipt.location_external`, `receipt.location_unknown`,
   `receipt.kind_unknown`, `receipt.amount_invalid`,
   `receipt.counterparty_too_long`, `receipt.note_too_long`,

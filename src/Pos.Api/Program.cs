@@ -32,6 +32,11 @@ try
 {
     WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+    // Docker secrets arrive as files under /run/secrets, one per setting, named
+    // with the double-underscore separator (a file called Jwt__SigningKeyPem
+    // supplies Jwt:SigningKeyPem). Absent outside a container.
+    builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
+
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
@@ -41,6 +46,12 @@ try
 
     builder.Services.AddProblemDetails();
     builder.Services.AddHttpContextAccessor();
+
+    // Binding failures throw in every environment, not only Development, so the
+    // exception handler answers them with a problem document instead of the
+    // framework's empty 400.
+    builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(
+        options => options.ThrowOnBadRequest = true);
     builder.Services.AddApiDocument();
 
     builder.Services.AddApplication();
@@ -158,12 +169,30 @@ try
     {
         IExceptionHandlerFeature? feature = context.Features.Get<IExceptionHandlerFeature>();
 
-        Log.Error(feature?.Error, "Unhandled exception while handling {Path}.", context.Request.Path);
-
         Guid correlationId =
             context.Items.TryGetValue(RequestContextMiddleware.CorrelationItemKey, out object? raw) && raw is Guid id
                 ? id
                 : Guid.Empty;
+
+        // A body that is not JSON, or does not bind to the route's shape, is the
+        // caller's mistake rather than a server fault: same problem document as
+        // every other validation failure, logged as information.
+        if (feature?.Error is BadHttpRequestException { StatusCode: StatusCodes.Status400BadRequest } badRequest)
+        {
+            Log.Information(
+                "Rejected an unreadable request to {Path}: {Reason}", context.Request.Path, badRequest.Message);
+
+            IResult rejected = ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.Validation(
+                    "request.malformed",
+                    "The request could not be read. Send valid JSON with the fields this route expects.")),
+                correlationId);
+
+            await rejected.ExecuteAsync(context).ConfigureAwait(false);
+            return;
+        }
+
+        Log.Error(feature?.Error, "Unhandled exception while handling {Path}.", context.Request.Path);
 
         IResult problem = ProblemDetailsMapping.ToProblem(
             Result.Failure(new Error(

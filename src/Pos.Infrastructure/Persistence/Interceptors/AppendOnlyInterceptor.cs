@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pos.Domain.Auditing;
 using Pos.Domain.Inventory;
+using Pos.Domain.Receipts;
 
 namespace Pos.Infrastructure.Persistence.Interceptors;
 
@@ -52,6 +53,7 @@ public sealed class AppendOnlyInterceptor : SaveChangesInterceptor
     [
         typeof(InventoryMovement),
         typeof(AuditLogEntry),
+        typeof(Receipt),
     ];
 
     /// <inheritdoc />

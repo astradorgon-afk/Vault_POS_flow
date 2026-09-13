@@ -9,7 +9,10 @@
 	admin off
 }
 
-:443 {
+# A site needs a name for Caddy to issue it a certificate: a bare :443 has none
+# to present and every TLS handshake fails. SITE_ADDRESS may list several names
+# or addresses, comma-separated (for example "localhost, pos.store.lan").
+{$SITE_ADDRESS:localhost} {
 	encode zstd gzip
 
 	header {

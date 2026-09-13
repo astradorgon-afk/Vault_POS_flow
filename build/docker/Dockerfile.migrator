@@ -6,7 +6,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /src
 
-COPY Directory.Build.props Directory.Packages.props global.json ./
+# .editorconfig carries the analyzer severities; without it warnings-as-errors
+# fails the container build on rules the repository deliberately relaxes.
+COPY .editorconfig Directory.Build.props Directory.Packages.props global.json ./
 COPY src/Pos.Domain/Pos.Domain.csproj                 src/Pos.Domain/
 COPY src/Pos.Shared/Pos.Shared.csproj                 src/Pos.Shared/
 COPY src/Pos.Application/Pos.Application.csproj       src/Pos.Application/

@@ -16,7 +16,7 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
     /// The script is an embedded resource so it can be reviewed like code.
     /// </remarks>
     [DbContext(typeof(PosDbContext))]
-    [Migration("202609120344091_AuditIntegrityGuards")]
+    [Migration("20260912034410_AuditIntegrityGuards")]
     public partial class AuditIntegrityGuards : Migration
     {
         /// <inheritdoc />

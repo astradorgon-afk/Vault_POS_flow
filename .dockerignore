@@ -1,0 +1,26 @@
+# Keep the image build context to what the Dockerfiles copy. Secrets and local
+# configuration must never reach a build context, even if nothing copies them.
+.git
+.github
+.vs
+.vscode
+.idea
+.claude
+.secrets
+.env
+.env.*
+**/*.pem
+**/*.key
+**/secrets.json
+
+# Build output and local artefacts
+**/bin
+**/obj
+artifacts
+TestResults
+**/*.user
+
+# Not part of any image
+tests
+docs
+scripts

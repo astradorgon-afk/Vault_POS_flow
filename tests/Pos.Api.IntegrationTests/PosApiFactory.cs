@@ -83,12 +83,14 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         // the factory's configuration callbacks are applied.
         foreach ((string key, string value) in TestConfiguration())
         {
-            if (_restoreValues.ContainsKey(key))
+            // Remember only the value this instance first displaced, but always
+            // apply the latest: an instance override repeats a default key and
+            // must win over it (a Postgres provider over the SQLite default).
+            if (!_restoreValues.ContainsKey(key))
             {
-                continue;
+                _restoreValues[key] = Environment.GetEnvironmentVariable(key);
             }
 
-            _restoreValues[key] = Environment.GetEnvironmentVariable(key);
             Environment.SetEnvironmentVariable(key, value);
         }
 

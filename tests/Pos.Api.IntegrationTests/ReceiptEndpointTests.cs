@@ -66,6 +66,7 @@ public sealed class ReceiptEndpointTests(PosApiFactory factory)
             text.Should().StartWith("PAYMENT RECEIPT");
             text.Should().Contain(number);
             text.Should().Contain("Location: Receipt Store r1");
+            text.Should().Contain("(Asia/Manila)");
             text.Should().Contain("Type: Walk-in sale");
             text.Should().Contain("Amount: 150.25");
             text.Should().Contain("Counterparty: Maria Santos");
@@ -199,6 +200,22 @@ public sealed class ReceiptEndpointTests(PosApiFactory factory)
             new { locationId = seed.Store.Value, kind = ReceiptKind.WalkInSale, amount = 10m, note = new string('x', Receipt.NoteMaxLength + 1) },
             "receipt.note_too_long");
 
+        // Bodies that cannot be bound get the same problem document as any other
+        // validation failure, rather than a 500 or an empty 400.
+        foreach (string raw in new[] { "{ not json", "{\"locationId\":\"not-a-guid\",\"kind\":1,\"amount\":10}" })
+        {
+            using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/api/v1/receipts", UriKind.Relative))
+            {
+                Content = new StringContent(raw, System.Text.Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", storeManager);
+
+            using HttpResponseMessage malformed = await client.SendAsync(request, CancellationToken.None);
+            malformed.StatusCode.Should().Be(HttpStatusCode.BadRequest, await malformed.Content.ReadAsStringAsync());
+            malformed.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+            (await ReadErrorCodeAsync(malformed)).Should().Be("request.malformed");
+        }
+
         using (HttpResponseMessage missing = await GetAsync(
             client, FormattableString.Invariant($"/api/v1/receipts/{Guid.NewGuid()}"), storeManager))
         {
@@ -211,6 +228,65 @@ public sealed class ReceiptEndpointTests(PosApiFactory factory)
             using HttpResponseMessage response = await PostAsJsonAsync(client, "/api/v1/receipts", body, accessToken);
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
             (await ReadErrorCodeAsync(response)).Should().Be(errorCode);
+        }
+    }
+
+    [Fact]
+    public async Task List_IsScopedToTheCallersLocations_AndFiltersByKindAndDate()
+    {
+        Seed storeA = await SeedAsync("r5");
+        Seed storeB = await SeedAsync("r5b");
+        await factory.CreateUserAsync("r5-audit", Roles.Auditor);
+        using HttpClient client = factory.CreateClient();
+        string managerA = await SignInAsync(client, storeA.StoreManagerUserName);
+        string managerB = await SignInAsync(client, storeB.StoreManagerUserName);
+        string auditor = await SignInAsync(client, "r5-audit");
+
+        await IssueAsync(client, managerA, new { locationId = storeA.Store.Value, kind = ReceiptKind.WalkInSale, amount = 10m });
+        await IssueAsync(client, managerA, new { locationId = storeA.Store.Value, kind = ReceiptKind.BranchExpense, amount = 20m });
+        await IssueAsync(client, managerB, new { locationId = storeB.Store.Value, kind = ReceiptKind.OwnerWithdrawal, amount = 30m });
+
+        // A store manager sees only their own store, whatever they filter on.
+        using (JsonDocument own = await ListAsync(client, managerA, ""))
+        {
+            own.RootElement.EnumerateArray().Should().NotBeEmpty()
+                .And.OnlyContain(r => r.GetProperty("locationId").GetGuid() == storeA.Store.Value);
+        }
+
+        using (JsonDocument elsewhere = await ListAsync(client, managerA, FormattableString.Invariant($"?locationId={storeB.Store.Value}")))
+        {
+            elsewhere.RootElement.GetArrayLength().Should().Be(0);
+        }
+
+        // The auditor reads business-wide.
+        using (JsonDocument storeBList = await ListAsync(client, auditor, FormattableString.Invariant($"?locationId={storeB.Store.Value}")))
+        {
+            storeBList.RootElement.GetArrayLength().Should().Be(1);
+            storeBList.RootElement[0].GetProperty("kind").GetString().Should().Be("OwnerWithdrawal");
+            storeBList.RootElement[0].GetProperty("amount").GetDecimal().Should().Be(30m);
+        }
+
+        using (JsonDocument expenses = await ListAsync(client, managerA, FormattableString.Invariant($"?locationId={storeA.Store.Value}&kind=BranchExpense")))
+        {
+            expenses.RootElement.GetArrayLength().Should().Be(1);
+            expenses.RootElement[0].GetProperty("amount").GetDecimal().Should().Be(20m);
+        }
+
+        using (JsonDocument newest = await ListAsync(client, managerA, FormattableString.Invariant($"?locationId={storeA.Store.Value}&limit=1")))
+        {
+            newest.RootElement.GetArrayLength().Should().Be(1);
+            newest.RootElement[0].GetProperty("kind").GetString().Should().Be("BranchExpense");
+        }
+
+        using (JsonDocument future = await ListAsync(client, managerA, "?from=2100-01-01T00:00:00Z"))
+        {
+            future.RootElement.GetArrayLength().Should().Be(0);
+        }
+
+        using (HttpResponseMessage badKind = await GetAsync(client, "/api/v1/receipts?kind=Refund", managerA))
+        {
+            badKind.StatusCode.Should().Be(HttpStatusCode.BadRequest, await badKind.Content.ReadAsStringAsync());
+            (await ReadErrorCodeAsync(badKind)).Should().Be("request.malformed");
         }
     }
 
@@ -238,6 +314,13 @@ public sealed class ReceiptEndpointTests(PosApiFactory factory)
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return document.RootElement.GetProperty("id").GetGuid();
+    }
+
+    private static async Task<JsonDocument> ListAsync(HttpClient client, string accessToken, string query)
+    {
+        using HttpResponseMessage response = await GetAsync(client, "/api/v1/receipts" + query, accessToken);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     }
 
     private static async Task<JsonDocument> GetDetailAsync(HttpClient client, string accessToken, Guid receiptId)

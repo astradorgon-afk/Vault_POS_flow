@@ -326,7 +326,7 @@ public static class QuarantineEndpoints
             .SendAsync(
                 new CreateQuarantineIncidentCommand(
                     new LocationId(body.LocationId),
-                    [.. body.Lines.Select(l => new QuarantineLineSpec(
+                    [.. (body.Lines ?? []).Select(l => new QuarantineLineSpec(
                         l.Barcode,
                         l.Quantity,
                         l.UnitCost,

@@ -688,3 +688,42 @@ reference.
   not carried into code.
 
 ---
+
+## ADR-0027 — No retrying execution strategy; transactions stay explicit
+
+**Date:** 2026-09-14 · **Status:** Accepted
+
+**Context.** The PostgreSQL provider was registered with `EnableRetryOnFailure`.
+A retrying execution strategy refuses user-initiated transactions unless every
+operation in the transaction runs inside `CreateExecutionStrategy().ExecuteAsync`.
+The unit-of-work behaviour, the inventory ledger, the balance reconciler and the
+development seeder all open their own transactions, so on PostgreSQL the API
+crashed at start-up and every command would have failed. No test noticed: the
+endpoint suite hosts the API on SQLite (no strategy) and the PostgreSQL suites
+build their own context without the option.
+
+**Decision.**
+
+- The PostgreSQL context is registered without a retrying execution strategy.
+- Contention is retried where replay is known to be safe: the ledger's
+  projection step (ADR-0024). A whole command is never re-run blindly, because a
+  handler that allocates a document number or posts a movement is not safe to
+  replay without its idempotency key.
+- `PersistenceRegistrationTests` asserts the registered context does not retry,
+  and `PostgresHostSmokeTests` runs the real host on PostgreSQL end to end.
+
+**Rationale.** Transparent retry is attractive for single-statement reads, but
+this system's writes are multi-statement transactions with invariants (zero-sum
+ledger groups, gap-free numbering). Replaying one after a transient failure is
+only correct when the operation is idempotent, which is an application decision,
+not a driver setting. Explicit transactions keep that decision visible.
+
+**Consequences.**
+- A transient connection failure surfaces as a failed request instead of being
+  retried silently. Clients already retry idempotent operations by event id
+  (ADR-0007), and the sync engine will do so by design (Phase 13).
+- If transient-failure retry is wanted later, it belongs in a pipeline behaviour
+  that wraps the whole unit of work in the execution strategy and requires the
+  command to carry an idempotency key; that is a new decision on top of this one.
+
+---

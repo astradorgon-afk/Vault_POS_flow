@@ -8,6 +8,7 @@ using Pos.Application.Identity;
 using Pos.Application.Receipts;
 using Pos.Domain.Common;
 using Pos.Domain.Receipts;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.Endpoints;
@@ -40,6 +41,17 @@ public sealed record ReceiptDetail(
     Guid IssuedByUserId,
     DateTimeOffset IssuedAtUtc);
 
+/// <summary>A payment receipt as returned by the list route.</summary>
+public sealed record ReceiptSummary(
+    Guid Id,
+    string Number,
+    string Kind,
+    Guid LocationId,
+    decimal Amount,
+    string? Counterparty,
+    Guid IssuedByUserId,
+    DateTimeOffset IssuedAtUtc);
+
 /// <summary>Payment receipt endpoints.</summary>
 public static class ReceiptEndpoints
 {
@@ -51,6 +63,14 @@ public static class ReceiptEndpoints
         ArgumentNullException.ThrowIfNull(app);
 
         RouteGroupBuilder group = app.MapGroup("/api/v1/receipts").WithTags("Receipts");
+
+        group.MapGet("/", ListReceiptsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Receipts.View)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ListReceipts")
+            .WithSummary("Lists payment receipts within the caller's scope, newest first.");
 
         group.MapPost("/", IssueReceiptAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Receipts.Create)
@@ -77,6 +97,73 @@ public static class ReceiptEndpoints
             .WithSummary("Renders a payment receipt as printable plain text.");
 
         return app;
+    }
+
+    private static async Task<IResult> ListReceiptsAsync(
+        [FromServices] PosDbContext context,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        [FromQuery] Guid? locationId,
+        [FromQuery] ReceiptKind? kind,
+        [FromQuery] DateTimeOffset? from,
+        [FromQuery] DateTimeOffset? to,
+        [FromQuery] int offset = 0,
+        [FromQuery] int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        IQueryable<Receipt> query = context.Receipts.AsNoTracking();
+
+        // Scoped to the caller's assigned locations unless they act business-wide,
+        // resolved from the database rather than the token. Filtering on a location
+        // outside that scope returns nothing rather than revealing it exists.
+        if (!authorization.HasAllLocations)
+        {
+            query = query.Where(r => authorization.Locations.Contains(r.LocationId));
+        }
+
+        if (locationId is { } requested)
+        {
+            LocationId filter = new(requested);
+            query = query.Where(r => r.LocationId == filter);
+        }
+
+        if (kind is { } requestedKind)
+        {
+            query = query.Where(r => r.Kind == requestedKind);
+        }
+
+        if (from is { } fromUtc)
+        {
+            query = query.Where(r => r.IssuedAtUtc >= fromUtc);
+        }
+
+        if (to is { } toUtc)
+        {
+            query = query.Where(r => r.IssuedAtUtc < toUtc);
+        }
+
+        List<ReceiptSummary> receipts = await query
+            .OrderByDescending(r => r.IssuedAtUtc)
+            .ThenByDescending(r => r.Number)
+            .Skip(Math.Max(0, offset))
+            .Take(Math.Clamp(limit, 1, 200))
+            .Select(r => new ReceiptSummary(
+                r.Id.Value,
+                r.Number,
+                r.Kind.ToString(),
+                r.LocationId.Value,
+                r.Amount,
+                r.Counterparty,
+                r.IssuedByUserId.Value,
+                r.IssuedAtUtc))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(receipts);
     }
 
     private static async Task<IResult> IssueReceiptAsync(
@@ -163,10 +250,10 @@ public static class ReceiptEndpoints
                 currentUser.CorrelationId.Value);
         }
 
-        string? locationName = await context.Locations
+        var location = await context.Locations
             .AsNoTracking()
             .Where(l => l.Id == receipt.LocationId)
-            .Select(l => l.Name)
+            .Select(l => new { l.Name, l.TimeZoneId })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -177,7 +264,8 @@ public static class ReceiptEndpoints
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        string text = ReceiptRenderer.RenderPlainText(receipt, locationName ?? string.Empty, issuedByName);
+        string text = ReceiptRenderer.RenderPlainText(
+            receipt, location?.Name ?? string.Empty, location?.TimeZoneId, issuedByName);
 
         return TypedResults.Text(text, "text/plain");
     }
