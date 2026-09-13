@@ -87,11 +87,12 @@ Last updated: 2026-09-14
 - [x] Location settings live-wired into `ILedgerPolicyProvider` (replaces the strict provider)
 - [x] Suppliers, categories, brands, units of measure — read and create endpoints
 - [x] Products and barcodes — read (list / by id / by barcode) and create endpoints
-- [ ] Product edit, barcode management, deactivate/activate endpoints (catalog curation phase)
-- [ ] `ProductLocationSetting` (min/reorder/target/max/preferred) endpoints
-- [ ] Effective-dated pricing endpoints (domain + exclusion constraint landed; API deferred)
-- [ ] Unit-conversion and product-supplier link endpoints
-- [ ] Development seed data — locations, counterparties, reference data, products, staff accounts
+- [x] Product edit, barcode management (attach, retire, primary), deactivate/activate endpoints
+- [x] `ProductLocationSetting` (min/reorder/target/max/preferred) endpoints
+- [x] Effective-dated pricing endpoints with supersession and temporary prices (ADR-0029)
+- [x] Unit-conversion and product-supplier link endpoints
+- [x] Cost visibility enforced on product reads (`product.cost.view`)
+- [x] Development seed data — locations, counterparties, reference data, products, staff accounts
 - [ ] Admin UI for master data (client application phase; the API surface this phase builds against is agreed above)
 
 ## Phase 4 — Inventory Core

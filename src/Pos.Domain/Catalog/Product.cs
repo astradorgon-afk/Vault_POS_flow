@@ -20,7 +20,7 @@ namespace Pos.Domain.Catalog;
 /// exists for a product; nothing in this aggregate changes it.
 /// </para>
 /// </remarks>
-public sealed class Product : AggregateRoot<ProductId>
+public sealed partial class Product : AggregateRoot<ProductId>
 {
     private readonly List<ProductBarcode> _barcodes = [];
     private readonly List<ProductPrice> _prices = [];
@@ -267,8 +267,9 @@ public sealed class Product : AggregateRoot<ProductId>
 
     /// <summary>
     /// Attaches a barcode. The code is validated and normalised by
-    /// <see cref="Barcode.Create"/>; a code already attached to the product is
-    /// rejected, and exactly one barcode per product stays primary.
+    /// <see cref="Barcode.Create"/>; a code already attached to the product,
+    /// retired or not, is rejected. Exactly one barcode per product stays
+    /// primary: the first code attached becomes primary even when not asked.
     /// </summary>
     /// <param name="value">The raw barcode value.</param>
     /// <param name="unitOfMeasureId">The unit this code scans as.</param>
@@ -293,9 +294,13 @@ public sealed class Product : AggregateRoot<ProductId>
 
         Barcode barcode = barcodeResult.Value;
 
-        if (_barcodes.Any(b => b.Barcode == barcode))
+        ProductBarcode? existing = _barcodes.FirstOrDefault(b => b.Barcode == barcode);
+
+        if (existing is not null)
         {
-            return Result.Failure(CatalogErrors.DuplicateBarcode(barcode.Value));
+            return Result.Failure(existing.IsRetired
+                ? CatalogErrors.BarcodeRetired(barcode.Value)
+                : CatalogErrors.DuplicateBarcode(barcode.Value));
         }
 
         if (unitOfMeasureId.IsEmpty)
@@ -310,7 +315,9 @@ public sealed class Product : AggregateRoot<ProductId>
                 "product.barcode_pack_quantity", "A barcode's pack quantity must be greater than zero."));
         }
 
-        if (isPrimary)
+        bool becomesPrimary = isPrimary || !_barcodes.Any(b => b.IsPrimary);
+
+        if (becomesPrimary)
         {
             _barcodes.ForEach(b => b.DemotePrimary());
         }
@@ -321,62 +328,8 @@ public sealed class Product : AggregateRoot<ProductId>
             barcode,
             unitOfMeasureId,
             packQuantity,
-            isPrimary,
+            becomesPrimary,
             createdByUserId));
-
-        Touch();
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// Adds an effective-dated price, refusing a period that overlaps an existing
-    /// price for the same product and location scope. The database exclusion
-    /// constraint is the backstop against concurrent inserts.
-    /// </summary>
-    /// <param name="locationId">The location scope, or null for every location.</param>
-    /// <param name="amount">The amount, in the organization's currency.</param>
-    /// <param name="effectiveFromUtc">When the price starts, inclusive.</param>
-    /// <param name="effectiveToUtc">When the price period ends, exclusive, or null.</param>
-    /// <param name="createdByUserId">Who set the price.</param>
-    /// <param name="reason">The recorded reason.</param>
-    /// <returns>A success result, or a conflict failure on overlap.</returns>
-    public Result AddPrice(
-        LocationId? locationId,
-        decimal amount,
-        DateTimeOffset effectiveFromUtc,
-        DateTimeOffset? effectiveToUtc,
-        UserId createdByUserId,
-        string? reason)
-    {
-        if (effectiveFromUtc < DateTimeOffset.UnixEpoch)
-        {
-            return Result.Failure(Error.Validation(
-                "product.price_effective_from", "The effective-from date is invalid."));
-        }
-
-        if (effectiveToUtc is { } to && to < effectiveFromUtc)
-        {
-            return Result.Failure(Error.Validation(
-                "product.price_effective_to", "The effective-to date must not precede the effective-from date."));
-        }
-
-        bool overlaps = _prices.Any(p =>
-            p.LocationId == locationId && p.Overlaps(effectiveFromUtc, effectiveToUtc));
-
-        if (overlaps)
-        {
-            return Result.Failure(CatalogErrors.OverlappingPrice(Id));
-        }
-
-        _prices.Add(new ProductPrice(
-            ProductPriceId.New(),
-            Id,
-            locationId,
-            new Money(amount, "PHP"),
-            effectiveFromUtc,
-            effectiveToUtc,
-            createdByUserId,
-            string.IsNullOrWhiteSpace(reason) ? null : reason.Trim()));
 
         Touch();
         return Result.Success();

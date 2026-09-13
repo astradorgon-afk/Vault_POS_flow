@@ -3,10 +3,10 @@ using Pos.Domain.Common;
 namespace Pos.Domain.Catalog;
 
 /// <summary>
-/// An effective-dated, location-scoped selling price. Prices never change in
-/// place; a new price row supersedes the old one on its effective date, and the
-/// database enforces that no two price rows for the same product and scope
-/// overlap in time.
+/// An effective-dated, location-scoped selling price. A price's amount and start
+/// never change; a new price row supersedes the old one on its effective date by
+/// closing the old row's open end (ADR-0029), and the database enforces that no
+/// two price rows for the same product and scope overlap in time.
 /// </summary>
 public sealed class ProductPrice
 {
@@ -54,7 +54,7 @@ public sealed class ProductPrice
     public DateTimeOffset EffectiveFromUtc { get; }
 
     /// <summary>Gets when the price period ends, exclusive, or null for no end.</summary>
-    public DateTimeOffset? EffectiveToUtc { get; }
+    public DateTimeOffset? EffectiveToUtc { get; private set; }
 
     /// <summary>Gets who set the price.</summary>
     public UserId CreatedByUserId { get; }
@@ -65,11 +65,24 @@ public sealed class ProductPrice
     /// <summary>Gets when the row was created.</summary>
     public DateTimeOffset CreatedAtUtc { get; }
 
-    /// <summary>Determines whether this price row overlaps a candidate period.</summary>
-    /// <param name="from">The candidate start.</param>
-    /// <param name="to">The candidate end, or null for no end.</param>
+    /// <summary>
+    /// Determines whether this price row overlaps a candidate period. Both periods
+    /// are half-open, <c>[from, to)</c>, exactly as the database exclusion
+    /// constraint compares them, so a price ending at T and one starting at T do
+    /// not overlap.
+    /// </summary>
+    /// <param name="from">The candidate start, inclusive.</param>
+    /// <param name="to">The candidate end, exclusive, or null for no end.</param>
     /// <returns><see langword="true"/> when the periods overlap.</returns>
     public bool Overlaps(DateTimeOffset from, DateTimeOffset? to)
-        => from <= (EffectiveToUtc ?? DateTimeOffset.MaxValue)
-           && (EffectiveFromUtc <= (to ?? DateTimeOffset.MaxValue));
+        => from < (EffectiveToUtc ?? DateTimeOffset.MaxValue)
+           && EffectiveFromUtc < (to ?? DateTimeOffset.MaxValue);
+
+    /// <summary>
+    /// Ends the period at a later instant. Only the scheduling rule on
+    /// <see cref="Product"/> calls this, and only to hand the period over to the
+    /// price that supersedes it; the amount and the start never change.
+    /// </summary>
+    /// <param name="endUtc">The new exclusive end; after the start.</param>
+    internal void Close(DateTimeOffset endUtc) => EffectiveToUtc = endUtc;
 }

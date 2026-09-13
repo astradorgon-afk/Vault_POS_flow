@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
+using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 
 namespace Pos.Infrastructure.Persistence;
@@ -194,5 +195,71 @@ public sealed class MasterDataRepository(PosDbContext context) : IMasterDataRepo
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return Result<ProductId>.Success(product.Id);
+    }
+
+    /// <inheritdoc />
+    public Task<Product?> GetProductForUpdateAsync(ProductId productId, CancellationToken cancellationToken)
+        => context.Products
+            .AsTracking()
+            .Include(p => p.Barcodes)
+            .Include(p => p.Prices)
+            .Include(p => p.UnitConversions)
+            .Include(p => p.LocationSettings)
+            .Include(p => p.Suppliers)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(p => p.Id == productId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> BarcodeInUseAsync(string value, CancellationToken cancellationToken)
+        => context.ProductBarcodes.AnyAsync(b => b.Value == value, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<Error?> FindMissingReferenceAsync(
+        ProductReferences references,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+
+        if (references.Category is { } categoryId
+            && !await context.Categories.AnyAsync(c => c.Id == categoryId, cancellationToken).ConfigureAwait(false))
+        {
+            return CatalogErrors.ReferenceMissing("catalog.category_unknown");
+        }
+
+        if (references.Brand is { } brandId
+            && !await context.Brands.AnyAsync(b => b.Id == brandId, cancellationToken).ConfigureAwait(false))
+        {
+            return CatalogErrors.ReferenceMissing("catalog.brand_unknown");
+        }
+
+        if (references.Supplier is { } supplierId
+            && !await context.Suppliers.AnyAsync(s => s.Id == supplierId, cancellationToken).ConfigureAwait(false))
+        {
+            return CatalogErrors.ReferenceMissing("catalog.supplier_unknown");
+        }
+
+        if (references.Location is { } locationId
+            && !await context.Locations
+                .AnyAsync(l => l.Id == locationId && l.Kind != LocationKind.External, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return CatalogErrors.ReferenceMissing("catalog.location_unknown");
+        }
+
+        if (references.Units is { Count: > 0 } units)
+        {
+            UnitOfMeasureId[] distinct = [.. units.Distinct()];
+
+            int found = await context.UnitsOfMeasure
+                .CountAsync(u => distinct.Contains(u.Id), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (found != distinct.Length)
+            {
+                return CatalogErrors.ReferenceMissing("catalog.uom_unknown");
+            }
+        }
+
+        return null;
     }
 }

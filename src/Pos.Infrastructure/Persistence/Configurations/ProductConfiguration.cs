@@ -24,19 +24,19 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(p => p.Id).HasColumnName("id").ValueGeneratedNever();
 
         builder.Property(p => p.Sku).HasColumnName("sku").HasConversion(skuConverter).HasMaxLength(Sku.MaxLength).IsRequired();
-        builder.Property(p => p.Name).HasColumnName("name").HasMaxLength(128).IsRequired();
-        builder.Property(p => p.Description).HasColumnName("description").HasMaxLength(1024);
+        builder.Property(p => p.Name).HasColumnName("name").HasMaxLength(Product.NameMaxLength).IsRequired();
+        builder.Property(p => p.Description).HasColumnName("description").HasMaxLength(Product.DescriptionMaxLength);
         builder.Property(p => p.CategoryId).HasColumnName("category_id").IsRequired();
         builder.Property(p => p.BrandId).HasColumnName("brand_id");
         builder.Property(p => p.PrimarySupplierId).HasColumnName("primary_supplier_id");
         builder.Property(p => p.BaseUnitOfMeasureId).HasColumnName("base_uom_id").IsRequired();
-        builder.Property(p => p.TaxCode).HasColumnName("tax_code").HasMaxLength(16);
+        builder.Property(p => p.TaxCode).HasColumnName("tax_code").HasMaxLength(Product.TaxCodeMaxLength);
         builder.Property(p => p.IsVatExempt).HasColumnName("is_vat_exempt").IsRequired();
         builder.Property(p => p.DefaultPurchaseCost).HasColumnName("default_purchase_cost").HasPrecision(19, Money.StorageScale).IsRequired();
         builder.Property(p => p.TracksBatches).HasColumnName("tracks_batches").IsRequired();
         builder.Property(p => p.TracksExpiry).HasColumnName("tracks_expiry").IsRequired();
         builder.Property(p => p.ShelfLifeDays).HasColumnName("shelf_life_days");
-        builder.Property(p => p.ImageRef).HasColumnName("image_ref").HasMaxLength(256);
+        builder.Property(p => p.ImageRef).HasColumnName("image_ref").HasMaxLength(Product.ImageRefMaxLength);
         builder.Property(p => p.IsActive).HasColumnName("is_active").IsRequired();
         builder.Property(p => p.DiscontinuedOn).HasColumnName("discontinued_on");
         builder.Property(p => p.CreatedByUserId).HasColumnName("created_by").IsRequired();
@@ -88,8 +88,11 @@ public sealed class ProductBarcodeConfiguration : IEntityTypeConfiguration<Produ
         builder.Property(b => b.IsPrimary).HasColumnName("is_primary").IsRequired();
         builder.Property(b => b.CreatedByUserId).HasColumnName("created_by").IsRequired();
         builder.Property(b => b.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+        builder.Property(b => b.RetiredAtUtc).HasColumnName("retired_at_utc");
+        builder.Property(b => b.RetiredByUserId).HasColumnName("retired_by");
 
         builder.Ignore(b => b.Barcode);
+        builder.Ignore(b => b.IsRetired);
 
         builder.HasIndex(b => b.Value).IsUnique().HasDatabaseName("ux_product_barcode_value");
 

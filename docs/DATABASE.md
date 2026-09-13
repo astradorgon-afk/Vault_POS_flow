@@ -127,9 +127,10 @@ catalog.product
 catalog.product_barcode
   id, product_id FK CASCADE-on-aggregate, barcode text, symbology smallint,
   uom_id FK, pack_quantity numeric(18,3), is_primary boolean,
-  created_at_utc, created_by
-  UNIQUE (barcode)                         -- globally unique across the catalog
-  UNIQUE (product_id) WHERE is_primary     -- exactly one primary
+  created_at_utc, created_by,
+  retired_at_utc NULL, retired_by NULL     -- retired codes stop scanning (ADR-0029)
+  UNIQUE (barcode)                         -- globally unique across the catalog, retired codes included
+  UNIQUE (product_id) WHERE is_primary     -- at most one primary; demotions are written first on a swap
 
 catalog.product_unit_conversion
   id, product_id FK, from_uom_id, to_uom_id, factor numeric(18,6) CHECK (factor > 0)
@@ -145,7 +146,8 @@ catalog.product_price
   created_by, created_at_utc, reason text
   EXCLUDE USING gist (product_id WITH =, coalesce(location_id, uuid_nil()) WITH =,
                       tstzrange(effective_from_utc, effective_to_utc) WITH &&)
-      -- no overlapping price periods for the same product+scope
+      -- no overlapping price periods for the same product+scope; a new price
+      -- closes its predecessor's end rather than overlapping it (ADR-0029)
 
 catalog.product_location_setting
   (product_id, location_id) PK,

@@ -86,37 +86,87 @@ already enrolled (`409 identity.two_factor_already_enabled`) and a wrong code
 | GET | `/api/v1/locations` | `product.view` (list reads are deliberately relaxed so POS devices can resolve location scope offline) |
 | POST | `/api/v1/locations` | `location.manage` |
 | PUT | `/api/v1/locations/{id}/settings` | `settings.manage` |
-| GET | `/api/v1/products` (search, filter, page) | `product.view` |
-| GET | `/api/v1/products/{id}` | `product.view` |
-| GET | `/api/v1/products/by-barcode/{barcode}` | `product.view` |
-| POST | `/api/v1/products` | `product.create` |
-| PUT | `/api/v1/products/{id}` | `product.edit` |
-| POST | `/api/v1/products/{id}/barcodes` | `product.barcode.manage` |
-| DELETE | `/api/v1/products/{id}/barcodes/{barcode}` | `product.barcode.manage` (retires, never deletes history) |
-| POST | `/api/v1/products/{id}/prices` | `product.price.manage` |
-| PUT | `/api/v1/products/{id}/location-settings/{locationId}` | `product.edit` |
-| POST | `/api/v1/products/{id}/deactivate` \| `/activate` | `product.disable` |
-| GET/POST | `/api/v1/categories` | read `product.view` / write `category.manage` |
-| GET/POST | `/api/v1/brands` | read `product.view` / write `brand.manage` |
-| GET/POST | `/api/v1/units` | read `product.view` / write `uom.manage` |
-| GET/POST | `/api/v1/suppliers` | read `supplier.view` / write `supplier.manage` |
-
-The product edit, barcode, price, location-settings and deactivate rows are
-contracts agreed but not yet implemented: Phase 3 delivers location create +
-settings, the catalogue reads, and the create commands for products, categories,
-brands and units + suppliers. The deferred rows arrive with the catalog curation
-phase.
+| GET | `/api/v1/catalog/products` (search, filter, page) | `product.view` |
+| GET | `/api/v1/catalog/products/{id}` | `product.view` |
+| GET | `/api/v1/catalog/products/by-barcode/{barcode}` | `product.view` |
+| POST | `/api/v1/catalog/products` | `product.create` |
+| PUT | `/api/v1/catalog/products/{id}` | `product.edit` |
+| POST | `/api/v1/catalog/products/{id}/deactivate` \| `/activate` | `product.disable` |
+| GET | `/api/v1/catalog/products/{id}/barcodes` | `product.view` (retired codes included) |
+| POST | `/api/v1/catalog/products/{id}/barcodes` | `product.barcode.manage` |
+| POST | `/api/v1/catalog/products/{id}/barcodes/{barcode}/retire` | `product.barcode.manage` (retires, never deletes) |
+| POST | `/api/v1/catalog/products/{id}/barcodes/{barcode}/primary` | `product.barcode.manage` |
+| GET | `/api/v1/catalog/products/{id}/prices?locationId` | `product.view` |
+| POST | `/api/v1/catalog/products/{id}/prices` | `product.price.manage` |
+| GET | `/api/v1/catalog/products/{id}/location-settings` | `product.view` |
+| PUT | `/api/v1/catalog/products/{id}/location-settings/{locationId}` | `product.edit` |
+| GET/POST | `/api/v1/catalog/products/{id}/unit-conversions` | read `product.view` / write `product.edit` |
+| DELETE | `/api/v1/catalog/products/{id}/unit-conversions/{conversionId}` | `product.edit` |
+| GET | `/api/v1/catalog/products/{id}/suppliers` | `product.cost.view` (links carry the last cost) |
+| PUT/DELETE | `/api/v1/catalog/products/{id}/suppliers/{supplierId}` | `product.edit` |
+| GET/POST | `/api/v1/catalog/categories` | read `product.view` / write `category.manage` |
+| GET/POST | `/api/v1/catalog/brands` | read `product.view` / write `brand.manage` |
+| GET/POST | `/api/v1/catalog/units` | read `product.view` / write `uom.manage` |
+| GET/POST | `/api/v1/catalog/suppliers` | read `supplier.view` / write `supplier.manage` |
 
 `GET /products/by-barcode/{barcode}` returns `404` with
 `errorCode: catalog.barcode_unknown` — the POS and receiving clients treat that
 specific code as the trigger for the quarantine workflow, never as "create it".
-`GET /products/{id}` returns `404` with `errorCode: catalog.product_unknown`.
+A **retired** barcode answers exactly the same way. `GET /products/{id}` returns
+`404` with `errorCode: catalog.product_unknown`, as does every
+`/products/{id}/...` route for an unknown product.
 
 `GET /products?q=...` matches the query against the product name (partial, via
 `LIKE`), an exact SKU (the SKU is a value-converted key, so partial string
-functions cannot translate through it), or any attached barcode (partial). The
+functions cannot translate through it), or any active barcode (partial). The
 `includeInactive`, `offset` and `limit` query parameters (`limit` is clamped to
-200) apply the same way on this route and on `GET /suppliers`.
+200) apply the same way on this route and on `GET /suppliers`. Product reads
+return `defaultPurchaseCost: null` to callers without `product.cost.view`, and
+list only active barcodes, primary first.
+
+### 3.1 Catalog curation
+
+Every change is audited in the same transaction (`product.updated`,
+`product.cost.changed`, `product.activation.changed`, `product.barcode.changed`,
+`product.price.changed`). Successful changes answer `204 No Content`; adding a
+barcode, a price or a unit conversion answers `201 Created` (`{ "id": ... }` is the
+product, the new price row and the new conversion respectively).
+
+- **Edit** (`PUT /products/{id}`) replaces name, description, category, brand,
+  primary supplier, tax code, VAT exemption, default cost and image. The base unit,
+  batch tracking, expiry tracking and shelf life are fixed at creation.
+- **Deactivate** needs `{ "reason" }` (at least 5 characters) and records the
+  discontinuation date; activating clears it.
+- **Barcodes** (ADR-0029): `{ "barcode", "unitOfMeasureId"?, "packQuantity" = 1,
+  "isPrimary" = false }`. The first code attached becomes primary. Retiring needs
+  `{ "reason" }`; a retired primary is replaced by the longest-attached active
+  code. A retired value stays reserved.
+- **Prices** (ADR-0029): `{ "amount", "reason", "locationId"?, "effectiveFromUtc"?
+  (default now), "effectiveToUtc"? }`. A new price closes the one in effect; a
+  temporary price resumes the old amount when it ends. `GET .../prices` marks the
+  row in effect now with `isCurrent`.
+- **Location settings**: `{ "isStocked", "minimumStock", "reorderPoint",
+  "targetStock", "maximumStock", "preferredReplenishmentQuantity" }`, with
+  `minimum <= reorder <= target <= maximum`. External counterparties are not
+  stocking locations.
+- **Supplier links**: `{ "supplierSku"?, "leadTimeDays", "minimumOrderQuantity"?,
+  "isPreferred" }`. Marking one preferred un-marks the others; the last cost is
+  recorded by goods receipts, never set here.
+
+| Status | `errorCode` | When |
+|---|---|---|
+| 400 | `catalog.reason_required` | deactivation, retirement or price without a reason |
+| 400 | `catalog.price_backdated` | price starting more than 5 minutes in the past |
+| 400 | `product.price_effective_to` | price ending at or before its start |
+| 400 | `product_location.thresholds_unordered` / `.quantity_negative` | inconsistent stocking thresholds |
+| 404 | `catalog.barcode_not_attached` | retire/primary for a code the product does not have |
+| 404 | `catalog.conversion_unknown` / `catalog.supplier_not_linked` | removing something not there |
+| 409 | `catalog.price_overlap` | price that would replace a scheduled price or span several |
+| 409 | `catalog.barcode_already_attached` | code held by this or another product |
+| 409 | `catalog.barcode_retired` | code was retired and stays reserved |
+| 409 | `catalog.product_already_active` / `_inactive` | activation state unchanged |
+| 409 | `catalog.conversion_exists` | second conversion between the same units |
+| 409 | `catalog.category_unknown` / `brand_unknown` / `supplier_unknown` / `uom_unknown` / `location_unknown` | reference does not exist (products carry no foreign keys to master data) |
 
 ---
 

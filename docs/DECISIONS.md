@@ -800,3 +800,64 @@ bootstrap problem of an owner who cannot obtain a token to enrol.
   run inside a `TrackingScope` (see STATUS.md §3).
 
 ---
+## ADR-0029 — Effective-dated price supersession and barcode retirement
+
+**Date:** 2026-09-14 · **Status:** Accepted
+
+**Context.** The catalogue could create products but not curate them. Two parts
+of curation touch history that other records depend on. A selling price is
+recorded against sales, and the database refuses two overlapping price periods
+for the same product and scope (`ex_product_price_no_overlap`), so "change the
+price" has to say what happens to the price already in effect. A barcode is how
+every scan finds a product, and barcodes are globally unique because a code
+pointing at the wrong product corrupts stock and revenue for two products at once.
+The existing overlap check also treated a period's end as inclusive, so a price
+ending at T and one starting at T were refused, although the database (which
+compares `[from, to)`) accepts them.
+
+**Decision.**
+
+- **Prices never start in the past.** A price may start up to five minutes before
+  the server clock (to absorb the delay between choosing "now" and applying it);
+  anything earlier is `catalog.price_backdated`. A price's amount and start are
+  never edited.
+- **Supersession closes the predecessor.** When a new period overlaps nothing it
+  is added. When it overlaps exactly one price that started earlier, that price's
+  end is closed at the new start. If the new price is temporary and ends before
+  the old one would have, a continuation row resumes the old amount from the new
+  end until the old end. Anything else — a period that starts with or before a
+  scheduled price, or spans several — is refused as `catalog.price_overlap`,
+  because it would silently cancel a price someone scheduled.
+- **Scopes are independent.** A store price does not close the organization-wide
+  price; the price in effect at a store is the store's own row when it has one,
+  otherwise the organization-wide row. Periods are half-open everywhere.
+- **Barcodes are retired, never deleted or re-pointed.** Retiring keeps the row
+  (`retired_at_utc`, `retired_by`), stops the code resolving in the by-barcode
+  lookup, catalogue search and quarantine identification, and keeps the value
+  reserved: it cannot be attached again, to this product or any other. Retiring
+  the primary code promotes the longest-attached active code. The first code
+  attached to a product becomes primary even when not asked.
+- **Base unit, batch tracking, expiry tracking and shelf life stay fixed** after
+  creation; they change how existing stock and ledger history are read.
+- **Cost is a permission, not a field.** Product reads return
+  `defaultPurchaseCost: null` to callers without `product.cost.view`, and supplier
+  links (which carry the last purchase cost) require it.
+
+**Rationale.** Closing the predecessor's open end is the only change to an
+existing price row, and it only ever affects time that has not happened yet, so
+a sale can always be explained by the price row in effect when it happened.
+Refusing ambiguous overlaps costs a manager one extra step in a rare case and
+never loses a scheduled price. Reserving retired codes follows the same rule as
+re-pointing: a code that once meant one product must never quietly mean another.
+
+**Consequences.**
+- A scheduled future price cannot be cancelled yet; a price that would replace it
+  is refused. A cancellation command for prices not yet in effect is left for the
+  POS pricing work (Phase 11).
+- A manufacturer that genuinely reuses a retired GTIN for a new product needs a
+  deliberate data correction, which is intended.
+- Saving a primary-barcode swap needs the demotion written before the promotion:
+  EF Core cannot order updates around a filtered unique index, so `PosDbContext`
+  writes demotions first inside the same transaction (see STATUS.md §3).
+
+---

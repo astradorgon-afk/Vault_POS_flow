@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-14 · **Milestone:** Phase 8 (Quarantine and Unauthorized Inventory) complete, plus interim payment receipts (ADR-0026); phase 9 next
+**Last updated:** 2026-09-14 · **Milestone:** Phase 8 complete, interim payment receipts (ADR-0026), gap batches G1–G4 closed; G5 then Phase 9 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,20 +13,20 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **367 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
-| Migrations | 16, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **398 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
+| Migrations | 17, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
 | Phases remaining | 9–18 — see §5 |
 
 ```
-Pos.Domain.Tests            160 passing   invariants, money, ledger rules, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
-Pos.Infrastructure.Tests     37 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, migration order (15 need Docker)
+Pos.Domain.Tests            182 passing   invariants, money, ledger rules, catalog curation and price supersession, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
+Pos.Infrastructure.Tests     39 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order (17 need Docker)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests        16 passing   master-data commands, CQRS unit-of-work behaviours, receipt rendering
-Pos.Api.IntegrationTests     89 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, one API host run on PostgreSQL (Docker)
+Pos.Api.IntegrationTests     96 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, one API host run on PostgreSQL (Docker)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -42,7 +42,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (28 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (29 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -162,6 +162,18 @@ costing, negative-stock policy, idempotency by event id.
   tests against SQLite, and endpoint integration tests through the real pipeline:
   authentication, authorization, validation, persistence, and the 404/409
   contracts the POS and quarantine clients depend on.
+
+- **Catalog curation (gap batch 4, ADR-0029):** product edit (tracking flags,
+  shelf life and base unit stay fixed), deactivate/activate with a reason and a
+  discontinuation date, barcode attach/retire/primary (retired codes stop
+  resolving in the by-barcode lookup, search and quarantine identification but
+  stay reserved; migration `20260914100000_ProductBarcodeRetirement`),
+  effective-dated prices that supersede their predecessor and resume after a
+  temporary price, per-location stocking settings, unit conversions and
+  product–supplier links (one preferred). Product reads hide the default cost
+  without `product.cost.view`. Every change is audited in its transaction.
+  Reference checks for category, brand, supplier, unit and location, because the
+  product tables carry no foreign keys to master data.
 
 ### Phase 5 — Purchasing (part 1: PO lifecycle, part 2: goods receipts)
 
@@ -399,6 +411,24 @@ would not have rotated the authenticator key. Identity operations that modify
 existing rows now run inside `TrackingScope`, with the sign-in's user instance
 attached first; the tests assert the code is consumed and the key is new.
 
+**Swapping a product's primary barcode could never be saved.** Retiring the
+primary code (or making another code primary) demotes one row and promotes
+another in the same save. EF Core cannot order updates around a filtered unique
+index, wrote the promotion first, and both SQLite and PostgreSQL refused it
+against `ux_product_barcode_one_primary` — a 500 on every swap. `PosDbContext`
+now writes demotions first, inside the same transaction as the rest of the save
+(`PostgresProductCurationTests` and the endpoint suite cover both engines).
+
+**The domain refused adjacent price periods the database accepts.** The price
+overlap check treated a period's end as inclusive, so a price ending at T blocked
+one starting at T, while the exclusion constraint (`tstzrange` is `[from, to)`)
+allows it. The check is now half-open, like the constraint.
+
+**Cashiers could read purchase cost.** `product.cost.view` existed in the
+catalogue and in the role grants, but no read enforced it: every product read
+returned `defaultPurchaseCost` to anyone holding `product.view`. Product reads now
+return it as null without the permission, and supplier links (last cost) require it.
+
 **The container images had never built.** Neither Dockerfile copied
 `.editorconfig`, so inside the image the analyzer rules the repository relaxes
 (CA1716 on `Error`, CA1000 on `Result<T>`) became warnings-as-errors and the build
@@ -565,8 +595,7 @@ Stated plainly so they are not mistaken for finished work:
 | Register-product is two dispatches; a mid-flow failure could orphan a product | Phase 8 | The unidentified-line pre-check prevents it in the normal path; only a crash between the product creation and the line identification would leave the product in the master with its barcode reserved. |
 | Receipts cannot be voided or emailed | ADR-0026 | Issue, list, detail and print exist and receipts are immutable; a mistaken receipt is corrected by issuing another. A void document and email delivery need their own decision. |
 | No quarantine notifications or dashboard exception panel | Phase 8 | Raises and resolutions post through the API; age-based escalation and the Owner-dashboard exception panel are Phase 14. |
-| Product edit, barcode, price, location-settings and deactivate endpoints not built | Phase 3 | Contracts agreed in `API.md`; land with the catalog curation phase. |
-| `ProductLocationSetting` and unit-conversion API not exposed | Phase 3 | Domain and persistence exist; endpoints deferred. |
+| A scheduled future price cannot be cancelled | Phase 3 | A price that would replace it is refused (`catalog.price_overlap`); cancellation of not-yet-effective prices is left for POS pricing (Phase 11, ADR-0029). |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
 
@@ -588,10 +617,10 @@ approvers), and scope-exact list/detail reads. Interim payment receipts
    over-receipt excess, unclear returns) that would raise incidents without staff
    action, plus notifications and the Owner-dashboard exception panel — both left
    unchecked in ROADMAP §8.
-3. **Deferred groundwork stays on the table:** catalog curation (product edit,
-   barcode management, pricing, `ProductLocationSetting`, unit conversions) and
-   user-administration endpoints, so roles and location assignments stop being a
-   database-only concern.
+3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): user and role
+   administration (G3) and catalog curation (G4) are done; G5 — the
+   `NegativeStockAttempt` record and report, and the partitioning decision for
+   `inventory_movement` — is next, then Phase 9.
 
 ---
 

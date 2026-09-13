@@ -61,9 +61,11 @@ public sealed class QuarantineRepository(PosDbContext context) : IQuarantineRepo
             return new Dictionary<string, Product>();
         }
 
+        // A retired code no longer identifies its product: goods arriving under
+        // it are unidentified, the same as an unknown code.
         List<ProductBarcode> matches = await context.ProductBarcodes
             .AsNoTracking()
-            .Where(b => barcodes.Contains(b.Value))
+            .Where(b => barcodes.Contains(b.Value) && b.RetiredAtUtc == null)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

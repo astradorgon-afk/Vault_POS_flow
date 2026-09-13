@@ -238,6 +238,7 @@ try
     app.MapDeviceEndpoints();
     app.MapLocationEndpoints();
     app.MapCatalogEndpoints();
+    app.MapProductCurationEndpoints();
     app.MapInventoryEndpoints();
     app.MapPurchaseEndpoints();
     app.MapDirectDeliveryEndpoints();

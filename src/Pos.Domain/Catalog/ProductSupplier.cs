@@ -43,7 +43,7 @@ public sealed class ProductSupplier
     public SupplierId SupplierId { get; }
 
     /// <summary>Gets the supplier's own code for this product, if any.</summary>
-    public string? SupplierSku { get; }
+    public string? SupplierSku { get; private set; }
 
     /// <summary>Gets the last recorded unit cost from this supplier, if any.</summary>
     public decimal? LastCost { get; private set; }
@@ -59,13 +59,13 @@ public sealed class ProductSupplier
     }
 
     /// <summary>Gets this supplier's typical lead time for the product.</summary>
-    public int LeadTimeDays { get; }
+    public int LeadTimeDays { get; private set; }
 
     /// <summary>Gets the supplier's minimum order quantity, if any.</summary>
-    public decimal? MinimumOrderQuantity { get; }
+    public decimal? MinimumOrderQuantity { get; private set; }
 
     /// <summary>Gets whether this is the preferred supplier for the product.</summary>
-    public bool IsPreferred { get; }
+    public bool IsPreferred { get; private set; }
 
     /// <summary>Creates a product-supplier link.</summary>
     /// <returns>The link, or a validation failure.</returns>
@@ -90,10 +90,11 @@ public sealed class ProductSupplier
                 Error.Validation("product_supplier.cost_negative", "Last cost cannot be negative."));
         }
 
-        if (minimumOrderQuantity is < 0m)
+        Result valid = ValidateTerms(leadTimeDays, minimumOrderQuantity);
+
+        if (valid.IsFailure)
         {
-            return Result<ProductSupplier>.Failure(
-                Error.Validation("product_supplier.minimum_order_negative", "Minimum order quantity cannot be negative."));
+            return Result<ProductSupplier>.Failure(valid.Errors);
         }
 
         return Result<ProductSupplier>.Success(new ProductSupplier(
@@ -102,8 +103,45 @@ public sealed class ProductSupplier
             supplierId,
             string.IsNullOrWhiteSpace(supplierSku) ? null : supplierSku.Trim(),
             lastCost,
-            Math.Max(0, leadTimeDays),
+            leadTimeDays,
             minimumOrderQuantity,
             isPreferred));
+    }
+
+    /// <summary>
+    /// Replaces the supplier's code and ordering terms in place. The last cost is
+    /// left alone: it is a fact recorded by goods receipts, not a setting.
+    /// </summary>
+    /// <returns>A success result, or a validation failure.</returns>
+    internal Result Update(string? supplierSku, int leadTimeDays, decimal? minimumOrderQuantity, bool isPreferred)
+    {
+        Result valid = ValidateTerms(leadTimeDays, minimumOrderQuantity);
+
+        if (valid.IsFailure)
+        {
+            return valid;
+        }
+
+        SupplierSku = string.IsNullOrWhiteSpace(supplierSku) ? null : supplierSku.Trim();
+        LeadTimeDays = leadTimeDays;
+        MinimumOrderQuantity = minimumOrderQuantity;
+        IsPreferred = isPreferred;
+        return Result.Success();
+    }
+
+    internal void DemotePreferred() => IsPreferred = false;
+
+    private static Result ValidateTerms(int leadTimeDays, decimal? minimumOrderQuantity)
+    {
+        if (leadTimeDays < 0)
+        {
+            return Result.Failure(
+                Error.Validation("product_supplier.lead_time_negative", "Lead time cannot be negative."));
+        }
+
+        return minimumOrderQuantity is < 0m
+            ? Result.Failure(
+                Error.Validation("product_supplier.minimum_order_negative", "Minimum order quantity cannot be negative."))
+            : Result.Success();
     }
 }

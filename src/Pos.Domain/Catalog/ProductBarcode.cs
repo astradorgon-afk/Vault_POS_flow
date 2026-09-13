@@ -8,6 +8,11 @@ namespace Pos.Domain.Catalog;
 /// both stock and revenue, so re-pointing an existing barcode is rejected in the
 /// aggregate and enforced by a database unique constraint.
 /// </summary>
+/// <remarks>
+/// A barcode is never deleted. Retiring it keeps the row, so history that
+/// scanned it still resolves, and keeps the value reserved: a retired code is
+/// never re-pointed at another product.
+/// </remarks>
 public sealed class ProductBarcode
 {
     internal ProductBarcode(
@@ -65,5 +70,23 @@ public sealed class ProductBarcode
     /// <summary>Gets when the code was attached.</summary>
     public DateTimeOffset CreatedAtUtc { get; }
 
+    /// <summary>Gets when the code was retired, or null while it is in use.</summary>
+    public DateTimeOffset? RetiredAtUtc { get; private set; }
+
+    /// <summary>Gets who retired the code, if it is retired.</summary>
+    public UserId? RetiredByUserId { get; private set; }
+
+    /// <summary>Gets whether the code has been retired and no longer scans.</summary>
+    public bool IsRetired => RetiredAtUtc is not null;
+
     internal void DemotePrimary() => IsPrimary = false;
+
+    internal void PromotePrimary() => IsPrimary = true;
+
+    internal void Retire(UserId retiredByUserId, DateTimeOffset retiredAtUtc)
+    {
+        RetiredAtUtc = retiredAtUtc;
+        RetiredByUserId = retiredByUserId;
+        IsPrimary = false;
+    }
 }

@@ -45,22 +45,22 @@ public sealed class ProductLocationSetting
     public LocationId LocationId { get; }
 
     /// <summary>Gets whether this product is sold at the location.</summary>
-    public bool IsStocked { get; }
+    public bool IsStocked { get; private set; }
 
     /// <summary>Gets the minimum stock threshold.</summary>
-    public decimal MinimumStock { get; }
+    public decimal MinimumStock { get; private set; }
 
     /// <summary>Gets the reorder point.</summary>
-    public decimal ReorderPoint { get; }
+    public decimal ReorderPoint { get; private set; }
 
     /// <summary>Gets the target stock level.</summary>
-    public decimal TargetStock { get; }
+    public decimal TargetStock { get; private set; }
 
     /// <summary>Gets the maximum stock level.</summary>
-    public decimal MaximumStock { get; }
+    public decimal MaximumStock { get; private set; }
 
     /// <summary>Gets the preferred replenishment quantity.</summary>
-    public decimal PreferredReplenishmentQuantity { get; }
+    public decimal PreferredReplenishmentQuantity { get; private set; }
 
     /// <summary>Creates a per-location setting row.</summary>
     /// <returns>The setting, or a validation failure if the thresholds are inconsistent.</returns>
@@ -80,11 +80,11 @@ public sealed class ProductLocationSetting
                 Error.Validation("product_location.location_required", "A location is required."));
         }
 
-        if (minimumStock <= reorderPoint
-            && reorderPoint <= targetStock
-            && targetStock <= maximumStock)
-        {
-            return Result<ProductLocationSetting>.Success(new ProductLocationSetting(
+        Result valid = Validate(minimumStock, reorderPoint, targetStock, maximumStock, preferredReplenishmentQuantity);
+
+        return valid.IsFailure
+            ? Result<ProductLocationSetting>.Failure(valid.Errors)
+            : Result<ProductLocationSetting>.Success(new ProductLocationSetting(
                 ProductLocationSettingId.New(),
                 productId,
                 locationId,
@@ -94,10 +94,57 @@ public sealed class ProductLocationSetting
                 targetStock,
                 maximumStock,
                 preferredReplenishmentQuantity));
+    }
+
+    /// <summary>
+    /// Replaces the stocking flag and thresholds in place, so the row keeps its
+    /// identity and the one-row-per-product-and-location rule is never at risk.
+    /// </summary>
+    /// <returns>A success result, or a validation failure.</returns>
+    internal Result Update(
+        bool isStocked,
+        decimal minimumStock,
+        decimal reorderPoint,
+        decimal targetStock,
+        decimal maximumStock,
+        decimal preferredReplenishmentQuantity)
+    {
+        Result valid = Validate(minimumStock, reorderPoint, targetStock, maximumStock, preferredReplenishmentQuantity);
+
+        if (valid.IsFailure)
+        {
+            return valid;
         }
 
-        return Result<ProductLocationSetting>.Failure(Error.Validation(
-            "product_location.thresholds_unordered",
-            "Stock thresholds must satisfy minimum <= reorder <= target <= maximum."));
+        IsStocked = isStocked;
+        MinimumStock = minimumStock;
+        ReorderPoint = reorderPoint;
+        TargetStock = targetStock;
+        MaximumStock = maximumStock;
+        PreferredReplenishmentQuantity = preferredReplenishmentQuantity;
+        return Result.Success();
+    }
+
+    private static Result Validate(
+        decimal minimumStock,
+        decimal reorderPoint,
+        decimal targetStock,
+        decimal maximumStock,
+        decimal preferredReplenishmentQuantity)
+    {
+        if (minimumStock < 0m || preferredReplenishmentQuantity < 0m)
+        {
+            return Result.Failure(Error.Validation(
+                "product_location.quantity_negative",
+                "Stock thresholds and the replenishment quantity cannot be negative."));
+        }
+
+        return minimumStock <= reorderPoint
+               && reorderPoint <= targetStock
+               && targetStock <= maximumStock
+            ? Result.Success()
+            : Result.Failure(Error.Validation(
+                "product_location.thresholds_unordered",
+                "Stock thresholds must satisfy minimum <= reorder <= target <= maximum."));
     }
 }

@@ -39,7 +39,7 @@ public interface IQuarantineRepository
 
     /// <summary>
     /// Loads the products reached through the given barcodes: one product per
-    /// barcode value when the barcode is attached in the catalogue.
+    /// barcode value when the barcode is attached in the catalogue and not retired.
     /// </summary>
     /// <param name="barcodes">The scanned barcode values.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

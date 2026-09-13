@@ -15,8 +15,8 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Gap batch 4 — catalog curation (product edit, barcodes, activation, pricing, location settings, unit conversions, supplier links).
-**Last commit:** G3 — identity administration, two-factor enforcement, log scrubbing (see log).
+**Now:** Gap batch 5 — `NegativeStockAttempt` record and report; partitioning decision for `inventory_movement`.
+**Last commit:** G4 — catalog curation (see log).
 
 ---
 
@@ -50,7 +50,16 @@ and the test suites pass. Nothing is pushed.
   - [x] Identity token writes were discarded under the no-tracking default (recovery codes reusable, reset did not rotate the key) → `TrackingScope`
   - [x] Serilog `SensitiveDataScrubber`
   - [x] Full test run (367 passed) and commit
-- [ ] **G4 — Phase 3 leftovers (catalog curation):** product edit, barcode management, activate/deactivate, effective-dated pricing, `ProductLocationSetting`, unit conversions, product–supplier links
+- [x] **G4 — Phase 3 leftovers (catalog curation)**
+  - [x] Product edit (tracking flags, shelf life and base unit stay fixed), deactivate/activate with reason
+  - [x] Barcodes: attach, retire (stops scanning, stays reserved), set primary; migration `20260914100000_ProductBarcodeRetirement`
+  - [x] Effective-dated prices: supersession, temporary prices that resume, no backdating (ADR-0029)
+  - [x] `ProductLocationSetting`, unit conversions, product–supplier links (one preferred)
+  - [x] Reference checks (products have no foreign keys to master data)
+  - [x] Primary-barcode swap failed on both engines (500) → demotions written first in `PosDbContext`
+  - [x] Price overlap check treated the end as inclusive → half-open like the database
+  - [x] Cashiers could read purchase cost → `product.cost.view` enforced on product reads
+  - [x] Full test run (398 passed) and commit
 - [ ] **G5 — Phase 4 leftovers:** `NegativeStockAttempt` record and report; decision on monthly partitioning of `inventory_movement`
 
 ### Phases
@@ -93,6 +102,18 @@ and the test suites pass. Nothing is pushed.
   (recovery codes reusable, two-factor reset not rotating the key). Verification:
   full solution **367 passed, 0 failed, 0 skipped** (Domain 160, Application 16,
   Infrastructure 37, Security 52, Architecture 13, API 89); no pending model changes.
+- **G3 committed** as `58a3085`.
+- **G4 finished.** Catalog curation: product edit, activation, barcode lifecycle,
+  effective-dated pricing (ADR-0029), location settings, unit conversions and
+  supplier links, all audited. Its tests found three defects: a primary-barcode
+  swap could never be saved (EF Core wrote the promotion before the demotion and
+  both engines refused it — proven on PostgreSQL by disabling the fix: `23505`),
+  the domain refused adjacent price periods the database accepts, and every
+  product read returned purchase cost to cashiers. Verification: full solution
+  **398 passed, 0 failed, 0 skipped** (Domain 182, Application 16, Infrastructure
+  39, Security 52, Architecture 13, API 96) with Docker running; no pending model
+  changes. Docker Desktop hit the stale-socket start-up crash again and was
+  recovered by renaming `%LOCALAPPDATA%\Docker\run` aside.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

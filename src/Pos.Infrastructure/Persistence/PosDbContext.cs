@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Pos.Domain.Auditing;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
@@ -211,6 +212,84 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets a value indicating whether this context is running on SQLite.</summary>
     public bool IsSqlite => Database.ProviderName?.Contains("Sqlite", StringComparison.Ordinal) == true;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A product has at most one primary barcode, enforced by a filtered unique
+    /// index that both engines check row by row. When one save demotes a primary
+    /// and promotes another, EF Core may write the promotion first, which the index
+    /// refuses; it cannot order around a filtered index. The demotions are
+    /// therefore written first, inside the same transaction as the rest of the
+    /// save, so the swap commits whole or not at all.
+    /// </remarks>
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ProductBarcodeId[] released = ReleasedPrimaryBarcodes();
+
+        if (released.Length == 0)
+        {
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken).ConfigureAwait(false);
+        }
+
+        IDbContextTransaction? owned = Database.CurrentTransaction is null
+            ? await Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false)
+            : null;
+
+        try
+        {
+            await ProductBarcodes
+                .Where(b => released.Contains(b.Id))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(b => b.IsPrimary, false), cancellationToken)
+                .ConfigureAwait(false);
+
+            int saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken).ConfigureAwait(false);
+
+            if (owned is not null)
+            {
+                await owned.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return saved;
+        }
+        finally
+        {
+            if (owned is not null)
+            {
+                await owned.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>See <see cref="SaveChangesAsync(bool, CancellationToken)"/> for why demotions are written first.</remarks>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ProductBarcodeId[] released = ReleasedPrimaryBarcodes();
+
+        if (released.Length == 0)
+        {
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+
+        using IDbContextTransaction? owned = Database.CurrentTransaction is null ? Database.BeginTransaction() : null;
+
+        ProductBarcodes
+            .Where(b => released.Contains(b.Id))
+            .ExecuteUpdate(setters => setters.SetProperty(b => b.IsPrimary, false));
+
+        int saved = base.SaveChanges(acceptAllChangesOnSuccess);
+        owned?.Commit();
+        return saved;
+    }
+
+    private ProductBarcodeId[] ReleasedPrimaryBarcodes()
+        => [.. ChangeTracker.Entries<ProductBarcode>()
+            .Where(e => e.State == EntityState.Modified
+                        && e.Property(b => b.IsPrimary).OriginalValue
+                        && !e.Property(b => b.IsPrimary).CurrentValue)
+            .Select(e => e.Entity.Id)];
 
     /// <inheritdoc />
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

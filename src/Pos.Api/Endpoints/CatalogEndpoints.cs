@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Pos.Api.Authorization;
@@ -11,113 +12,6 @@ using Pos.Domain.Common;
 using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.Endpoints;
-
-/// <summary>The body of a product creation.</summary>
-/// <param name="Sku">The stock-keeping unit code.</param>
-/// <param name="Name">The display name.</param>
-/// <param name="CategoryId">The category.</param>
-/// <param name="BaseUnitOfMeasureId">The unit the ledger counts in.</param>
-/// <param name="Description">Free-text description, or null.</param>
-/// <param name="BrandId">The brand, or null.</param>
-/// <param name="PrimarySupplierId">The primary supplier, or null.</param>
-/// <param name="TaxCode">The VAT/tax code, or null.</param>
-/// <param name="IsVatExempt">Whether the product is VAT-exempt.</param>
-/// <param name="DefaultPurchaseCost">The default purchase cost per base unit.</param>
-/// <param name="TracksBatches">Whether the product is batch-tracked.</param>
-/// <param name="TracksExpiry">Whether the product carries an expiry date.</param>
-/// <param name="ShelfLifeDays">Shelf life in days, where expiry is tracked.</param>
-/// <param name="InitialBarcode">A barcode to attach at creation, or null.</param>
-public sealed record CreateProductBody(
-    string Sku,
-    string Name,
-    Guid CategoryId,
-    Guid BaseUnitOfMeasureId,
-    string? Description = null,
-    Guid? BrandId = null,
-    Guid? PrimarySupplierId = null,
-    string? TaxCode = null,
-    bool IsVatExempt = false,
-    decimal DefaultPurchaseCost = 0m,
-    bool TracksBatches = false,
-    bool TracksExpiry = false,
-    int? ShelfLifeDays = null,
-    string? InitialBarcode = null);
-
-/// <summary>The body of a category creation.</summary>
-/// <param name="Code">The short unique code.</param>
-/// <param name="Name">The display name.</param>
-/// <param name="ParentId">The parent category, or null for a top-level category.</param>
-/// <param name="SortOrder">Ordering within the parent.</param>
-public sealed record CreateCategoryBody(string Code, string Name, Guid? ParentId = null, int SortOrder = 0);
-
-/// <summary>The body of a brand creation.</summary>
-/// <param name="Name">The display name.</param>
-public sealed record CreateBrandBody(string Name);
-
-/// <summary>The body of a unit-of-measure creation.</summary>
-/// <param name="Code">The short unique code.</param>
-/// <param name="Name">The display name.</param>
-/// <param name="Kind">The measurement kind.</param>
-/// <param name="DecimalPlaces">How many decimal places a quantity in this unit may carry.</param>
-public sealed record CreateUnitOfMeasureBody(string Code, string Name, UnitKind Kind, int DecimalPlaces = 0);
-
-/// <summary>The body of a supplier creation.</summary>
-/// <param name="Code">The short unique code.</param>
-/// <param name="Name">The display name.</param>
-/// <param name="TaxId">Tax registration number, or null.</param>
-/// <param name="PaymentTermsDays">Payment terms in days.</param>
-/// <param name="LeadTimeDays">Typical lead time in days.</param>
-public sealed record CreateSupplierBody(
-    string Code,
-    string Name,
-    string? TaxId = null,
-    int PaymentTermsDays = 30,
-    int LeadTimeDays = 7);
-
-/// <summary>A product as listed for the catalogue.</summary>
-public sealed record ProductSummary(
-    Guid Id,
-    string Sku,
-    string Name,
-    Guid CategoryId,
-    Guid? BrandId,
-    Guid? PrimarySupplierId,
-    Guid BaseUnitOfMeasureId,
-    string? TaxCode,
-    bool IsVatExempt,
-    decimal DefaultPurchaseCost,
-    bool TracksBatches,
-    bool TracksExpiry,
-    int? ShelfLifeDays,
-    bool IsActive,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc,
-    IReadOnlyCollection<string> Barcodes);
-
-/// <summary>A category as listed for the catalogue.</summary>
-public sealed record CategorySummary(
-    Guid Id,
-    Guid? ParentId,
-    string Code,
-    string Name,
-    int SortOrder,
-    bool IsActive);
-
-/// <summary>A brand as listed for the catalogue.</summary>
-public sealed record BrandSummary(Guid Id, string Name, bool IsActive);
-
-/// <summary>A unit of measure as listed for the catalogue.</summary>
-public sealed record UnitOfMeasureSummary(Guid Id, string Code, string Name, UnitKind Kind, int DecimalPlaces);
-
-/// <summary>A supplier as listed for purchasing.</summary>
-public sealed record SupplierSummary(
-    Guid Id,
-    string Code,
-    string Name,
-    string? TaxId,
-    int PaymentTermsDays,
-    int LeadTimeDays,
-    bool IsActive);
 
 /// <summary>Catalog and purchasing master-data endpoints.</summary>
 public static class CatalogEndpoints
@@ -232,6 +126,8 @@ public static class CatalogEndpoints
 
     private static async Task<IResult> ListProductsAsync(
         PosDbContext context,
+        IPermissionEvaluator evaluator,
+        ICurrentUser currentUser,
         [FromQuery] string? q,
         [FromQuery] bool includeInactive = false,
         [FromQuery] int offset = 0,
@@ -255,42 +151,27 @@ public static class CatalogEndpoints
             // Name matches run through LIKE (case-insensitive on SQLite, which is
             // the offline store's embedded database); SKU matches are exact after
             // normalization, because the SKU is a value-converted key and partial
-            // string functions do not translate through the converter.
+            // string functions do not translate through the converter. Retired
+            // barcodes no longer find their product.
             query = query.Where(p =>
                 EF.Functions.Like(p.Name, $"%{term}%")
                 || p.Sku == Sku.FromTrustedSource(term.ToUpperInvariant())
-                || context.ProductBarcodes.Any(b => b.ProductId == p.Id && b.Value.Contains(term)));
+                || context.ProductBarcodes.Any(b =>
+                    b.ProductId == p.Id && b.RetiredAtUtc == null && b.Value.Contains(term)));
         }
 
         List<ProductSummary> products = await query
             .OrderBy(p => p.Name)
             .Skip(boundedOffset)
             .Take(boundedLimit)
-            .Select(p => new ProductSummary(
-                p.Id.Value,
-                p.Sku.Value,
-                p.Name,
-                p.CategoryId.Value,
-                p.BrandId != null ? p.BrandId.Value.Value : null,
-                p.PrimarySupplierId != null ? p.PrimarySupplierId.Value.Value : null,
-                p.BaseUnitOfMeasureId.Value,
-                p.TaxCode,
-                p.IsVatExempt,
-                p.DefaultPurchaseCost,
-                p.TracksBatches,
-                p.TracksExpiry,
-                p.ShelfLifeDays,
-                p.IsActive,
-                p.CreatedAtUtc,
-                p.UpdatedAtUtc,
-                context.ProductBarcodes
-                    .Where(b => b.ProductId == p.Id)
-                    .OrderBy(b => b.IsPrimary ? 0 : 1)
-                    .ThenBy(b => b.Value)
-                    .Select(b => b.Value)
-                    .ToList()))
+            .Select(ToSummary(context))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        if (!await CanViewCostAsync(evaluator, currentUser, cancellationToken).ConfigureAwait(false))
+        {
+            products = [.. products.Select(p => p with { DefaultPurchaseCost = null })];
+        }
 
         return TypedResults.Ok(products);
     }
@@ -298,56 +179,43 @@ public static class CatalogEndpoints
     private static async Task<IResult> GetProductAsync(
         Guid id,
         PosDbContext context,
+        IPermissionEvaluator evaluator,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
         ProductSummary? product = await context.Products
             .AsNoTracking()
             .Where(p => p.Id == new ProductId(id))
-            .Select(p => new ProductSummary(
-                p.Id.Value,
-                p.Sku.Value,
-                p.Name,
-                p.CategoryId.Value,
-                p.BrandId != null ? p.BrandId.Value.Value : null,
-                p.PrimarySupplierId != null ? p.PrimarySupplierId.Value.Value : null,
-                p.BaseUnitOfMeasureId.Value,
-                p.TaxCode,
-                p.IsVatExempt,
-                p.DefaultPurchaseCost,
-                p.TracksBatches,
-                p.TracksExpiry,
-                p.ShelfLifeDays,
-                p.IsActive,
-                p.CreatedAtUtc,
-                p.UpdatedAtUtc,
-                context.ProductBarcodes
-                    .Where(b => b.ProductId == p.Id)
-                    .OrderBy(b => b.IsPrimary ? 0 : 1)
-                    .ThenBy(b => b.Value)
-                    .Select(b => b.Value)
-                    .ToList()))
+            .Select(ToSummary(context))
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return product is null
-            ? ProblemDetailsMapping.ToProblem(
+        if (product is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
                 Result<ProductSummary>.Failure(CatalogErrors.ProductUnknown(new ProductId(id))),
-                currentUser.CorrelationId.Value)
-            : TypedResults.Ok(product);
+                currentUser.CorrelationId.Value);
+        }
+
+        return await CanViewCostAsync(evaluator, currentUser, cancellationToken).ConfigureAwait(false)
+            ? TypedResults.Ok(product)
+            : TypedResults.Ok(product with { DefaultPurchaseCost = null });
     }
 
     private static async Task<IResult> GetProductByBarcodeAsync(
         string barcode,
         PosDbContext context,
+        IPermissionEvaluator evaluator,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
-        string normalisedBarcode = barcode.Trim();
+        string normalisedBarcode = barcode.Trim().ToUpperInvariant();
 
+        // A retired code answers exactly like an unknown one, so the POS and
+        // receiving clients route it to the quarantine workflow.
         Guid? productId = await context.ProductBarcodes
             .AsNoTracking()
-            .Where(b => b.Value == normalisedBarcode)
+            .Where(b => b.Value == normalisedBarcode && b.RetiredAtUtc == null)
             .Select(b => (Guid?)b.ProductId.Value)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -356,8 +224,47 @@ public static class CatalogEndpoints
             ? ProblemDetailsMapping.ToProblem(
                 Result<ProductSummary>.Failure(CatalogErrors.BarcodeUnknown(normalisedBarcode)),
                 currentUser.CorrelationId.Value)
-            : await GetProductAsync(productId.Value, context, currentUser, cancellationToken).ConfigureAwait(false);
+            : await GetProductAsync(productId.Value, context, evaluator, currentUser, cancellationToken)
+                .ConfigureAwait(false);
     }
+
+    private static Expression<Func<Product, ProductSummary>> ToSummary(PosDbContext context)
+        => p => new ProductSummary(
+            p.Id.Value,
+            p.Sku.Value,
+            p.Name,
+            p.Description,
+            p.CategoryId.Value,
+            p.BrandId != null ? p.BrandId.Value.Value : null,
+            p.PrimarySupplierId != null ? p.PrimarySupplierId.Value.Value : null,
+            p.BaseUnitOfMeasureId.Value,
+            p.TaxCode,
+            p.IsVatExempt,
+            p.DefaultPurchaseCost,
+            p.TracksBatches,
+            p.TracksExpiry,
+            p.ShelfLifeDays,
+            p.ImageRef,
+            p.IsActive,
+            p.DiscontinuedOn,
+            p.CreatedAtUtc,
+            p.UpdatedAtUtc,
+            context.ProductBarcodes
+                .Where(b => b.ProductId == p.Id && b.RetiredAtUtc == null)
+                .OrderBy(b => b.IsPrimary ? 0 : 1)
+                .ThenBy(b => b.Value)
+                .Select(b => b.Value)
+                .ToList());
+
+    private static Task<bool> CanViewCostAsync(
+        IPermissionEvaluator evaluator,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+        => evaluator.HasPermissionAsync(
+            currentUser.UserId ?? UserId.Empty,
+            Permissions.Catalog.ViewCost,
+            locationId: null,
+            cancellationToken);
 
     private static async Task<IResult> CreateProductAsync(
         [FromBody] CreateProductBody body,
