@@ -69,11 +69,16 @@ public sealed class StrictLedgerPolicyProvider : ILedgerPolicyProvider
 /// <param name="clock">The authoritative clock.</param>
 /// <param name="policies">Per-location inventory policies.</param>
 /// <param name="logger">Logger, supplied by the container; tests may pass none.</param>
+/// <param name="attempts">
+/// Collects refused draws for the pipeline to record after the transaction ends;
+/// supplied by the container, tests may pass none.
+/// </param>
 public sealed class InventoryLedger(
     PosDbContext context,
     ISystemClock clock,
     ILedgerPolicyProvider policies,
-    ILogger<InventoryLedger>? logger = null) : IInventoryLedger
+    ILogger<InventoryLedger>? logger = null,
+    INegativeStockAttemptRecorder? attempts = null) : IInventoryLedger
 {
     // With N concurrent writers each reading the same empty bucket and racing to
     // insert, the worst case needs N attempts: every other writer may commit once
@@ -359,6 +364,17 @@ public sealed class InventoryLedger(
             {
                 errors.Add(InventoryErrors.InsufficientStock(
                     draw.Key.ProductId, draw.Key.LocationId, available, requested));
+
+                attempts?.Record(NegativeStockAttempt.Record(
+                    group.Spec,
+                    draw.Key.LocationId,
+                    draw.Key.ProductId,
+                    draw.Key.BatchKey,
+                    draw.Key.State,
+                    requested,
+                    available,
+                    policy,
+                    clock.UtcNow));
             }
         }
 

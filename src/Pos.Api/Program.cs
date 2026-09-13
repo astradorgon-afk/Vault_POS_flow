@@ -240,6 +240,7 @@ try
     app.MapCatalogEndpoints();
     app.MapProductCurationEndpoints();
     app.MapInventoryEndpoints();
+    app.MapInventoryExceptionEndpoints();
     app.MapPurchaseEndpoints();
     app.MapDirectDeliveryEndpoints();
     app.MapSupplierReturnEndpoints();

@@ -107,8 +107,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Weighted-average costing on the projection
 - [x] Negative-stock policy enforcement (default: prohibit)
 - [x] Ledger unit tests and provider-level integration tests
-- [ ] Table partitioning by month on `inventory_movement`
-- [ ] `NegativeStockAttempt` record and its exception report
+- [x] Table partitioning by month on `inventory_movement` — decided against for v1 (ADR-0030)
+- [x] `NegativeStockAttempt` record and its exception report
 - [x] Optimistic concurrency retry on balance contention (`Version` token, in-ledger
       projection retry, `max_standalone_attempts` 10)
 - [x] Reconciliation worker and `rebuild-balances` command (`IBalanceReconciler`,

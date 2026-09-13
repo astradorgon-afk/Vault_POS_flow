@@ -381,9 +381,14 @@ Configured per location, defaulting to the strictest option:
 | `AllowWithPermission` | Permitted only when the actor holds `inventory.negative_stock` and supplies a reason; raises a high-priority exception. |
 | `AllowOfflineWithReview` | Offline POS sales only, capped by `MaxNegativeUnitsOffline`; the movement is flagged `RequiresReview` and appears on the exception dashboard. |
 
-Every rejection writes a `NegativeStockAttempt` audit entry (product, location,
-requested quantity, available quantity, user, device) so repeated attempts are
-visible even though nothing was posted. This is an important shrinkage signal.
+Every rejection writes a `NegativeStockAttempt` record and an
+`inventory.negative_stock.attempted` audit entry (product, location, bucket,
+requested and available quantity, policy, reference document, user, device) so
+repeated attempts are visible even though nothing was posted. This is an important
+shrinkage signal. The refusal rolls the command back, so the record is written
+after the transaction ends, through a separate context (ADR-0030); the table is
+append-only. `GET /api/v1/inventory/exceptions/negative-attempts` and its
+`/summary` report them.
 
 ---
 

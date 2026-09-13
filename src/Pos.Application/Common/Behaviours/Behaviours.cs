@@ -237,3 +237,57 @@ public sealed class UnitOfWorkBehaviour<TCommand, TResult>(IUnitOfWork unitOfWor
         return result;
     }
 }
+
+/// <summary>
+/// Persists the draws the ledger refused for lack of stock once the unit of work
+/// has finished, so the record survives the rollback of the command that caused
+/// it.
+/// </summary>
+/// <remarks>
+/// Registered just outside <see cref="UnitOfWorkBehaviour{TCommand, TResult}"/>.
+/// A message dispatched inside an existing transaction (a synchronization batch)
+/// leaves its attempts for the outermost message to write. Failing to write them
+/// is logged and never changes the outcome the caller sees: the command already
+/// succeeded or failed on its own terms.
+/// </remarks>
+/// <typeparam name="TMessage">The message type.</typeparam>
+/// <typeparam name="TResult">The result type.</typeparam>
+/// <param name="attempts">The request's refused draws.</param>
+/// <param name="unitOfWork">The unit of work.</param>
+/// <param name="logger">Logger.</param>
+public sealed class NegativeStockAttemptBehaviour<TMessage, TResult>(
+    INegativeStockAttemptRecorder attempts,
+    IUnitOfWork unitOfWork,
+    ILogger<NegativeStockAttemptBehaviour<TMessage, TResult>> logger)
+    : IPipelineBehaviour<TMessage, TResult>
+{
+    /// <inheritdoc />
+    public async Task<Result<TResult>> HandleAsync(
+        TMessage message,
+        Func<Task<Result<TResult>>> next,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        if (unitOfWork.HasActiveTransaction)
+        {
+            return await next().ConfigureAwait(false);
+        }
+
+        Result<TResult> result = await next().ConfigureAwait(false);
+
+        if (attempts.HasPending)
+        {
+            try
+            {
+                await attempts.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                BehaviourLog.NegativeStockAttemptsNotRecorded(logger, ex, typeof(TMessage).Name);
+            }
+        }
+
+        return result;
+    }
+}

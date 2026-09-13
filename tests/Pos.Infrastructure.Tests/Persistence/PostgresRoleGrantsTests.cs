@@ -30,6 +30,7 @@ public sealed class PostgresRoleGrantsTests : IAsyncLifetime
         "audit.audit_log",
         "core.login_attempt",
         "core.receipt",
+        "inventory.negative_stock_attempt",
     ];
 
     private PostgreSqlContainer? _container;
@@ -146,6 +147,32 @@ public sealed class PostgresRoleGrantsTests : IAsyncLifetime
         Func<Task> edit = () => ExecuteAsync("UPDATE core.receipt SET amount = 1 WHERE number = 'RCT-2026-000001';");
         Func<Task> delete = () => ExecuteAsync("DELETE FROM core.receipt WHERE number = 'RCT-2026-000001';");
         Func<Task> truncate = () => ExecuteAsync("TRUNCATE core.receipt;");
+
+        await edit.Should().ThrowAsync<PostgresException>();
+        await delete.Should().ThrowAsync<PostgresException>();
+        await truncate.Should().ThrowAsync<PostgresException>();
+    }
+
+    [SkippableFact]
+    public async Task NegativeStockAttempt_CannotBeEditedOrDeleted_EvenByTheOwner()
+    {
+        Skip.IfNot(DockerAvailable, "Docker is not available on this machine.");
+
+        await ExecuteAsync(
+            """
+            INSERT INTO inventory.negative_stock_attempt
+                (id, event_id, movement_type, location_id, product_id, batch_key, state,
+                 requested_quantity, available_quantity, policy, reference_document_type,
+                 reference_number, user_id, correlation_id, attempted_at_utc)
+            VALUES ('01a09c10-0000-7000-8000-000000000101', '01a09c10-0000-7000-8000-000000000102', 1,
+                    '01a09c10-0000-7000-8000-0000000000aa', '01a09c10-0000-7000-8000-0000000000cc',
+                    '00000000-0000-0000-0000-000000000000', 0, 6, 1, 0, 1, 'SHP-2026-000001',
+                    '01a09c10-0000-7000-8000-0000000000bb', '01a09c10-0000-7000-8000-0000000000dd', now());
+            """);
+
+        Func<Task> edit = () => ExecuteAsync("UPDATE inventory.negative_stock_attempt SET available_quantity = 6;");
+        Func<Task> delete = () => ExecuteAsync("DELETE FROM inventory.negative_stock_attempt;");
+        Func<Task> truncate = () => ExecuteAsync("TRUNCATE inventory.negative_stock_attempt;");
 
         await edit.Should().ThrowAsync<PostgresException>();
         await delete.Should().ThrowAsync<PostgresException>();

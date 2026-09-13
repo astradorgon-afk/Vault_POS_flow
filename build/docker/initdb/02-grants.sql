@@ -59,3 +59,8 @@ GRANT  SELECT, INSERT           ON core.login_attempt           TO   pos_app;
 -- A payment receipt is the printed proof of a cash event (ADR-0026).
 REVOKE UPDATE, DELETE, TRUNCATE ON core.receipt                 FROM pos_app;
 GRANT  SELECT, INSERT           ON core.receipt                 TO   pos_app;
+
+-- A refused stock draw is the only trace of stock sold or shipped that the
+-- counters say is not there; a shrinkage signal must not be erasable.
+REVOKE UPDATE, DELETE, TRUNCATE ON inventory.negative_stock_attempt FROM pos_app;
+GRANT  SELECT, INSERT           ON inventory.negative_stock_attempt TO   pos_app;

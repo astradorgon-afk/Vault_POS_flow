@@ -216,9 +216,10 @@ Constraints and indexes
 - `idx_movement_group (movement_group_id)`
 - `idx_movement_event (event_id)`
 - `idx_movement_change_seq (change_sequence)`
-- **Partitioning**: `PARTITION BY RANGE (recorded_at_utc)` monthly. The ledger is
-  the highest-growth table; monthly partitions keep index maintenance and
-  reporting scans bounded. Partitions are created a year ahead by a maintenance job.
+- **Partitioning**: none in v1 (ADR-0030). The ledger is never pruned, so
+  partitions would buy no detach/drop, while PostgreSQL would force the partition
+  key into the primary key and the leg-number unique index. Revisit at about 50
+  million rows or with an archive policy that snapshots opening balances.
 
 Triggers
 ```sql
@@ -258,8 +259,12 @@ inventory.inventory_count        + inventory_count_line
 inventory.stock_adjustment       + stock_adjustment_line
 inventory.quarantine_incident    + _line + _photo
 inventory.integrity_incident     (id, kind, detected_at_utc, details_json, status)
-inventory.negative_stock_attempt (id, product_id, location_id, requested, available,
-                                  user_id, device_id, at_utc, reference)
+inventory.negative_stock_attempt (id, event_id, movement_type, location_id, product_id,
+                                  batch_key, state, requested_quantity, available_quantity,
+                                  policy, reference_document_type/id, reference_number,
+                                  user_id, device_id, correlation_id, attempted_at_utc)
+                                 -- append-only; written after the refused command
+                                 -- rolls back (ADR-0030)
 ```
 
 ---

@@ -54,6 +54,7 @@ public sealed class AppendOnlyInterceptor : SaveChangesInterceptor
         typeof(InventoryMovement),
         typeof(AuditLogEntry),
         typeof(Receipt),
+        typeof(NegativeStockAttempt),
     ];
 
     /// <inheritdoc />

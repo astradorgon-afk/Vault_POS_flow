@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-14 · **Milestone:** Phase 8 complete, interim payment receipts (ADR-0026), gap batches G1–G4 closed; G5 then Phase 9 next
+**Last updated:** 2026-09-14 · **Milestone:** Phase 8 complete, interim payment receipts (ADR-0026), gap batches G1–G5 closed; Phase 9 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,8 +13,8 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **398 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
-| Migrations | 17, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **404 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
+| Migrations | 18, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
@@ -22,11 +22,11 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            182 passing   invariants, money, ledger rules, catalog curation and price supersession, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
-Pos.Infrastructure.Tests     39 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order (17 need Docker)
+Pos.Infrastructure.Tests     40 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order (18 need Docker)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
-Pos.Application.Tests        16 passing   master-data commands, CQRS unit-of-work behaviours, receipt rendering
-Pos.Api.IntegrationTests     96 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, one API host run on PostgreSQL (Docker)
+Pos.Application.Tests        20 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering
+Pos.Api.IntegrationTests     97 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, one API host run on PostgreSQL (Docker)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -42,7 +42,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (29 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (30 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -91,6 +91,18 @@ costing, negative-stock policy, idempotency by event id.
   interleaved writes, idempotent-projection repair under contention, and a
   reconciler suite that also proves the rebuilt projection and the deleted-row
   case. Migration `20260912122753_BalanceConcurrencyToken`.
+
+**Completed in gap batch 5 (ADR-0030):**
+- Refused draws are recorded: the ledger collects each bucket it refuses, and a
+  pipeline behaviour writes them after the unit of work has committed or rolled
+  back, through a separate context, as `inventory.negative_stock_attempt` rows
+  (append-only: interceptor, triggers, grants) with an
+  `inventory.negative_stock.attempted` audit entry. Migration
+  `20260914110000_NegativeStockAttempts`.
+- Report: `GET /api/v1/inventory/exceptions/negative-attempts` and `/summary`
+  (attempts and total shortfall per product and location), `inventory.view.all`.
+- Partitioning of `inventory_movement` and `audit_log` decided against for v1,
+  with revisit thresholds (ADR-0030).
 
 ### Phase 2 — Identity and authorization
 - ASP.NET Core Identity with Guid keys, PBKDF2 at 600,000 iterations,
@@ -429,6 +441,13 @@ catalogue and in the role grants, but no read enforced it: every product read
 returned `defaultPurchaseCost` to anyone holding `product.view`. Product reads now
 return it as null without the permission, and supplier links (last cost) require it.
 
+**The negative-stock shrinkage signal did not exist.** INVENTORY_LEDGER.md
+promised a record of every draw the ledger refused, and nothing wrote one. It could
+not simply be added to the ledger: the refusal rolls the whole command back, so a
+record staged in its transaction would vanish with it. The attempts are now
+written after the transaction ends (ADR-0030), and the endpoint test proves a
+refused dispatch leaves two records and two audit entries while posting nothing.
+
 **The container images had never built.** Neither Dockerfile copied
 `.editorconfig`, so inside the image the analyzer rules the repository relaxes
 (CA1716 on `Error`, CA1000 on `Result<T>`) became warnings-as-errors and the build
@@ -585,8 +604,7 @@ Stated plainly so they are not mistaken for finished work:
 
 | Gap | Where | Impact |
 |---|---|---|
-| `inventory_movement` and `audit_log` not yet partitioned | Phase 4 | Fine at current volume; the maintenance job is designed, not built. |
-| `NegativeStockAttempt` record and exception report not built | Phase 4 | Guard blocks the attempt today; the diagnostic record for the dashboard awaits. |
+| `inventory_movement` and `audit_log` not partitioned | Phase 4 | By decision (ADR-0030): revisit at about 50 million ledger rows, or with audit archiving (2033). |
 | `AutoPassInspection` per location/category not built | Phase 5 | Receipts always land in `PendingInspection`; the trusted-category fast path is a settings-driven follow-up. |
 | Cost-variance notification not raised | Phase 5 | The receipt flags `costVariancePendingApproval` and records the approver; the notification/queue item is not built. |
 | Supplier performance report not built | Phase 5 | Measurable after returns post; dashboard/analytics phase. |
@@ -617,10 +635,10 @@ approvers), and scope-exact list/detail reads. Interim payment receipts
    over-receipt excess, unclear returns) that would raise incidents without staff
    action, plus notifications and the Owner-dashboard exception panel — both left
    unchecked in ROADMAP §8.
-3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): user and role
-   administration (G3) and catalog curation (G4) are done; G5 — the
-   `NegativeStockAttempt` record and report, and the partitioning decision for
-   `inventory_movement` — is next, then Phase 9.
+3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
+   correctness and deployment, receipts, identity administration, catalog
+   curation, and the negative-stock record with the partitioning decision.
+   Phase 9 is next.
 
 ---
 

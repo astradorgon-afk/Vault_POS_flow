@@ -195,6 +195,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets payment receipts.</summary>
     public DbSet<Receipt> Receipts => Set<Receipt>();
 
+    /// <summary>Gets the stock draws the ledger refused, append-only.</summary>
+    public DbSet<NegativeStockAttempt> NegativeStockAttempts => Set<NegativeStockAttempt>();
+
     /// <summary>Gets the per-location product settings.</summary>
     public DbSet<ProductLocationSetting> ProductLocationSettings => Set<ProductLocationSetting>();
 

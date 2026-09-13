@@ -190,10 +190,22 @@ product, the new price row and the new conversion respectively).
 | POST | `/api/v1/inventory/counts/{id}/approve` | `inventory.count.approve` + tier |
 | POST | `/api/v1/inventory/rebuild-balances` | `inventory.rebuild_balances` |
 | POST | `/api/v1/inventory/reconcile` | `inventory.rebuild_balances` |
-| GET | `/api/v1/inventory/exceptions/negative-attempts` | `inventory.view.all` |
+| GET | `/api/v1/inventory/exceptions/negative-attempts?locationId&productId&from&to&offset&limit` | `inventory.view.all` |
+| GET | `/api/v1/inventory/exceptions/negative-attempts/summary?locationId&from&to` | `inventory.view.all` |
 
 There is **no** endpoint that sets a quantity. The only inventory-affecting
 routes are document-driven.
+
+### Negative-stock attempts
+
+Every draw the ledger refuses is recorded, even though the refused command rolls
+back (ADR-0030). The list returns attempts newest first, with the location code,
+SKU, product name, bucket (`state`, `batchId`), `movementType`,
+`requestedQuantity`, `availableQuantity`, `shortfall`, `policy`, the reference
+document and number, the user, device and correlation id. The summary ranks
+product and location pairs by `attempts`, then `totalShortfall`, with the first
+and last attempt times. Both default to the last 30 days; `from` must precede `to`
+(`400 inventory.report_range_invalid`).
 
 ### Reconciliation
 

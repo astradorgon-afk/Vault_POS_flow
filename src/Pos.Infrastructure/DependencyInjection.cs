@@ -60,6 +60,7 @@ public static class DependencyInjection
         // Real policies now come from each location's own settings. The strict
         // provider remains for tests that need the conservative baseline.
         services.TryAddScoped<ILedgerPolicyProvider, LocationSettingsLedgerPolicyProvider>();
+        services.TryAddScoped<INegativeStockAttemptRecorder, NegativeStockAttemptRecorder>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
         services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
         services.TryAddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();

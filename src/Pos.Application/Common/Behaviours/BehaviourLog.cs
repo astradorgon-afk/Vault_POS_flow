@@ -37,4 +37,10 @@ internal static partial class BehaviourLog
         Guid userId,
         Guid? locationId,
         string message);
+
+    [LoggerMessage(
+        EventId = 1004,
+        Level = LogLevel.Error,
+        Message = "Refused stock draws from {Message} could not be recorded.")]
+    public static partial void NegativeStockAttemptsNotRecorded(ILogger logger, Exception exception, string message);
 }

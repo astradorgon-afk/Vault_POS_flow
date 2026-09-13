@@ -184,6 +184,31 @@ public interface IInventoryLedger
         CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Collects the draws the ledger refused for lack of stock during one request,
+/// and persists them once the request's transaction has ended.
+/// </summary>
+/// <remarks>
+/// The refusal rolls the command back, so a record staged inside its transaction
+/// would vanish with it. The ledger only collects; the pipeline flushes after the
+/// unit of work has committed or rolled back (see
+/// <c>NegativeStockAttemptBehaviour</c>), through a separate context.
+/// </remarks>
+public interface INegativeStockAttemptRecorder
+{
+    /// <summary>Gets a value indicating whether refused draws are waiting to be written.</summary>
+    bool HasPending { get; }
+
+    /// <summary>Collects one refused draw. The same event and bucket are recorded once.</summary>
+    /// <param name="attempt">The refused draw.</param>
+    void Record(NegativeStockAttempt attempt);
+
+    /// <summary>Writes the collected attempts, with their audit entries, and clears them.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the attempts are written.</returns>
+    Task FlushAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>The outcome of a successful ledger post.</summary>
 /// <param name="MovementGroupId">The identifier shared by the posted legs.</param>
 /// <param name="EventId">The business event identifier.</param>

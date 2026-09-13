@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(LoggingBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(ValidationBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(AuthorizationBehaviour<,>));
+        services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(NegativeStockAttemptBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(UnitOfWorkBehaviour<,>));
 
         Assembly assembly = typeof(DependencyInjection).Assembly;

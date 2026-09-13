@@ -255,8 +255,9 @@ Each entry: user, role snapshot, device, location, IP, user agent, action,
 entity type/id, previous value, new value, reason, reference document,
 UTC timestamp, correlation id.
 
-Retention: 7 years, partitioned monthly, older partitions moved to cold storage
-but never deleted while the business operates.
+Retention: 7 years, older entries moved to cold storage but never deleted while
+the business operates. The table is not partitioned yet; the archiving work that
+first needs it (2033) brings monthly partitions (ADR-0030).
 
 ---
 

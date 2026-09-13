@@ -30,8 +30,9 @@ keeping the bucket semantics unambiguous.
 - Balance = `SUM(quantity_delta) GROUP BY bucket`. One query, no branches.
 - A single global integrity assertion: `SUM(quantity_delta) = 0` over the table.
 - Supplier → warehouse → store → customer chains are walkable.
-- Roughly 2× the row count of a single-row model. Accepted: the table is
-  partitioned monthly and the integrity guarantee is worth the storage.
+- Roughly 2× the row count of a single-row model. Accepted: the integrity
+  guarantee is worth the storage. (Monthly partitioning was planned here and
+  deferred by ADR-0030.)
 
 ---
 
@@ -859,5 +860,64 @@ re-pointing: a code that once meant one product must never quietly mean another.
 - Saving a primary-barcode swap needs the demotion written before the promotion:
   EF Core cannot order updates around a filtered unique index, so `PosDbContext`
   writes demotions first inside the same transaction (see STATUS.md §3).
+
+---
+
+## ADR-0030 — The ledger and audit log are not partitioned in v1; refused draws are recorded after rollback
+
+**Date:** 2026-09-14 · **Status:** Accepted
+
+**Context.** The design documents assumed monthly range partitioning of
+`inventory.inventory_movement` and `audit.audit_log`, created a year ahead by a
+maintenance job. Neither table is partitioned, and no job exists. Separately,
+INVENTORY_LEDGER.md §7 promised that every draw refused under the negative-stock
+policy is recorded, but the refusal rolls back the command's transaction, so a
+record written inside it disappears with it — nothing was recorded.
+
+**Decision.**
+
+- **No partitioning in v1** for either table.
+  - The ledger is never pruned: a balance is the sum of every leg and the global
+    `SUM(quantity_delta) = 0` assertion runs over the whole table (ADR-0001). The
+    main operational benefit of partitions — detaching or dropping old ones — is
+    therefore unavailable to it.
+  - PostgreSQL requires every primary key and unique index on a partitioned table
+    to include the partition key, so `PK (id)` and
+    `UNIQUE (movement_group_id, leg_number)` would widen to include
+    `recorded_at_utc`, and the database would no longer enforce them on their own.
+  - EF Core cannot model partitioned tables; the DDL would be hand-written outside
+    the model the migration drift check compares.
+  - Scale does not call for it. Three stores initially; as a planning figure,
+    3 stores × 2,000 sale lines a day × 2 legs, plus receiving and transfers, is
+    about 15,000 legs a day, some 5–6 million a year — comfortably one table with
+    the bucket and product/time indexes it already has.
+  - Because both tables are append-only, partitioning later is a copy-forward
+    migration with no update logic to preserve.
+  - **Revisit** when the ledger passes about 50 million rows, when its bucket
+    index no longer fits in memory, or when an archive policy with opening-balance
+    snapshots is adopted. The audit log's seven-year cold-storage retention
+    (SECURITY.md) is the first requirement that needs partitions; it bites in 2033,
+    and the archiving work brings them.
+- **Refused draws are recorded after the transaction ends.** The ledger collects
+  each refused bucket (`INegativeStockAttemptRecorder`); a pipeline behaviour just
+  outside the unit of work writes them once it has committed or rolled back,
+  through a separate scope and context so nothing the failed command staged can
+  be saved with them. Each becomes a row in `inventory.negative_stock_attempt`
+  and an `inventory.negative_stock.attempted` audit entry. The table is
+  append-only under the same four guards as the audit log. A message dispatched
+  inside an outer transaction leaves its attempts to the outermost message.
+  Failing to write them is logged and never changes the command's outcome.
+- **Report:** `GET /api/v1/inventory/exceptions/negative-attempts` (newest first,
+  filters) and `/summary` (attempts and total shortfall per product and location),
+  under `inventory.view.all`.
+
+**Consequences.**
+- DATABASE.md, DEPLOYMENT.md and SECURITY.md no longer describe partitions or a
+  partition maintenance job.
+- Draws refused by code that calls the ledger outside the dispatcher (tests,
+  maintenance utilities) are collected but not written; every production path
+  goes through the dispatcher.
+- Offline sales refused under `AllowOfflineWithReview` are recorded when the
+  synchronization processor (Phase 13) posts them through the same pipeline.
 
 ---

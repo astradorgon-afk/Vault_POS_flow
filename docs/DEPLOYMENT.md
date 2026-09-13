@@ -116,8 +116,8 @@ same certificate-backed site.
 - `pos-migrator` runs to completion before any API container starts.
 - Forward-only. Rollback is restore-plus-replay, because the ledger cannot be
   un-inserted (ADR-0014).
-- Partition maintenance (`inventory_movement`, `audit_log`) creates the next
-  12 months of partitions on each run and is idempotent.
+- No partition maintenance: the ledger and audit log are not partitioned in v1
+  (ADR-0030).
 
 **Roles** — created by the migrator, not by the app: `pos_migrator` (owner),
 `pos_app` (least privilege, `SELECT, INSERT` only on ledger/audit/processed_event),

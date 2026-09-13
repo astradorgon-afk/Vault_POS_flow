@@ -15,8 +15,8 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Gap batch 5 — `NegativeStockAttempt` record and report; partitioning decision for `inventory_movement`.
-**Last commit:** G4 — catalog curation (see log).
+**Now:** Phase 9 — inventory control (adjustments, counts, repeat-variance detection).
+**Last commit:** G5 — negative-stock attempts and the partitioning decision (see log).
 
 ---
 
@@ -60,7 +60,11 @@ and the test suites pass. Nothing is pushed.
   - [x] Price overlap check treated the end as inclusive → half-open like the database
   - [x] Cashiers could read purchase cost → `product.cost.view` enforced on product reads
   - [x] Full test run (398 passed) and commit
-- [ ] **G5 — Phase 4 leftovers:** `NegativeStockAttempt` record and report; decision on monthly partitioning of `inventory_movement`
+- [x] **G5 — Phase 4 leftovers**
+  - [x] Refused draws recorded after the command's rollback, append-only, with audit entries (ADR-0030); migration `20260914110000_NegativeStockAttempts`
+  - [x] Exception report: list and per-product/location summary (`inventory.view.all`)
+  - [x] Partitioning of `inventory_movement` and `audit_log` decided against for v1, with revisit thresholds (ADR-0030); DATABASE, DEPLOYMENT, SECURITY corrected
+  - [x] Full test run (404 passed) and commit
 
 ### Phases
 
@@ -114,6 +118,16 @@ and the test suites pass. Nothing is pushed.
   39, Security 52, Architecture 13, API 96) with Docker running; no pending model
   changes. Docker Desktop hit the stale-socket start-up crash again and was
   recovered by renaming `%LOCALAPPDATA%\Docker\run` aside.
+- **G4 committed** as `f5585c8`.
+- **G5 finished.** Refused stock draws are now recorded — the documented
+  shrinkage signal had never been written, and could not be written inside the
+  refused command because its rollback would erase it; a pipeline behaviour writes
+  the attempts after the unit of work ends, through a separate context. Report
+  endpoints added; PostgreSQL triggers and grants verified. Partitioning decided
+  against for v1 (ADR-0030) and the docs that described partitions corrected.
+  Verification: full solution **404 passed, 0 failed, 0 skipped** (Domain 182,
+  Application 20, Infrastructure 40, Security 52, Architecture 13, API 97) with
+  Docker running; no pending model changes.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each
