@@ -89,3 +89,4 @@ dotnet ef migrations add <Name> --project src/Pos.Infrastructure --startup-proje
 - Financial and inventory records are append-only. Corrections are reversals.
 - Warnings are errors, and a package with a published advisory fails the build.
 - No secrets in the repository; `scripts/check-secrets.ps1` runs in CI.
+# Vault_POS_flow
