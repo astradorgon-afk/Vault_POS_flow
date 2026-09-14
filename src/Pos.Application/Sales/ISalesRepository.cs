@@ -22,6 +22,24 @@ public interface ISalesRepository
     Task<Result<SaleId>> AddAsync(Sale sale, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Loads a sale with its lines and payments, for review before an update
+    /// such as a void.
+    /// </summary>
+    /// <param name="saleId">The sale.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The sale, or <see langword="null"/> when it does not exist.</returns>
+    Task<Sale?> GetByIdAsync(SaleId saleId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Persists a changed sale. The lines and payments are frozen once
+    /// completed, so only the scalar state — such as a void — ever changes.
+    /// </summary>
+    /// <param name="sale">The sale to save.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The sale identifier.</returns>
+    Task<Result<SaleId>> UpdateAsync(Sale sale, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Loads the facts a sale depends on for a location.
     /// </summary>
     /// <param name="locationId">The location.</param>

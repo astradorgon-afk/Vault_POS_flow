@@ -72,6 +72,9 @@ public class Sale : AggregateRoot<SaleId>
     /// <summary>Default cash rounding increment when the location has none configured.</summary>
     public const decimal DefaultCashRoundingIncrement = 0.01m;
 
+    /// <summary>Maximum length of the free-text reason recorded when a sale is voided.</summary>
+    public const int VoidReasonMaxLength = 200;
+
     private readonly List<SaleItem> _items = [];
     private readonly List<Payment> _payments = [];
 
@@ -153,6 +156,15 @@ public class Sale : AggregateRoot<SaleId>
 
     /// <summary>Gets the cashier who completed the sale.</summary>
     public UserId CompletedByUserId { get; private set; }
+
+    /// <summary>Gets when the sale was voided, when it was.</summary>
+    public DateTimeOffset? VoidedAtUtc { get; private set; }
+
+    /// <summary>Gets the user who voided the sale, when it was.</summary>
+    public UserId? VoidedByUserId { get; private set; }
+
+    /// <summary>Gets the reason recorded for the void, when one was given.</summary>
+    public string? VoidReason { get; private set; }
 
     /// <summary>Gets the sum of all line gross amounts.</summary>
     public decimal GrossTotal { get; private set; }
@@ -314,6 +326,64 @@ public class Sale : AggregateRoot<SaleId>
 
         candidate._items.AddRange(createdItems);
         return Result<Sale>.Success(candidate);
+    }
+
+    /// <summary>
+    /// Voids a completed sale. Google-site rule POS.md §4: only a completed sale
+    /// can be voided, it belongs to the shift and business date that complete it,
+    /// and the void is stamped with who did it and why. Reversing the stock legs
+    /// is the application layer's job — this aggregate only flips its own state.
+    /// </summary>
+    /// <param name="shiftId">The cashier shift the sale belongs to; the current shift must match.</param>
+    /// <param name="businessDate">The business date checked against the sale's.</param>
+    /// <param name="voidedAtUtc">When the void happened.</param>
+    /// <param name="voidedByUserId">The user who authorised the void.</param>
+    /// <param name="reason">Why the sale was voided.</param>
+    /// <returns>The voided sale, or a validation failure.</returns>
+    public Result Void(
+        CashierShiftId shiftId,
+        DateOnly businessDate,
+        DateTimeOffset voidedAtUtc,
+        UserId voidedByUserId,
+        string reason)
+    {
+        if (Status != SaleStatus.Completed)
+        {
+            return Result.Failure(SaleErrors.VoidOnlyCompleted);
+        }
+
+        if (shiftId != CashierShiftId)
+        {
+            return Result.Failure(SaleErrors.VoidShiftMismatch);
+        }
+
+        if (businessDate != BusinessDate)
+        {
+            return Result.Failure(SaleErrors.VoidBusinessDateMismatch);
+        }
+
+        if (voidedAtUtc == default)
+        {
+            return Result.Failure(SaleErrors.VoidStampRequired);
+        }
+
+        if (voidedByUserId.IsEmpty)
+        {
+            return Result.Failure(SaleErrors.VoidByRequired);
+        }
+
+        string trimmedReason = reason?.Trim() ?? string.Empty;
+
+        if (trimmedReason.Length == 0 || trimmedReason.Length > VoidReasonMaxLength)
+        {
+            return Result.Failure(SaleErrors.VoidReasonInvalid(VoidReasonMaxLength));
+        }
+
+        Status = SaleStatus.Voided;
+        VoidedAtUtc = voidedAtUtc;
+        VoidedByUserId = voidedByUserId;
+        VoidReason = trimmedReason;
+        return Result.Success();
     }
 
     private static Error? ValidateHeader(

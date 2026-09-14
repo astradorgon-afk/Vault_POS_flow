@@ -29,6 +29,29 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
     }
 
     /// <inheritdoc />
+    public Task<Sale?> GetByIdAsync(SaleId saleId, CancellationToken cancellationToken)
+        => context.Sales
+            .AsNoTracking()
+            .Include(s => s.Items)
+            .Include(s => s.Payments)
+            .FirstOrDefaultAsync(s => s.Id == saleId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<Result<SaleId>> UpdateAsync(Sale sale, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sale);
+
+        // The sale was read untracked; attaching the root as modified stages
+        // exactly the scalar update a void performs. Its lines and payments are
+        // frozen, so they are left untouched.
+        context.Sales.Attach(sale);
+        context.Entry(sale).State = EntityState.Modified;
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<SaleId>.Success(sale.Id);
+    }
+
+    /// <inheritdoc />
     public async Task<SaleLocationFacts?> GetLocationAsync(LocationId locationId, CancellationToken cancellationToken)
     {
         Location? location = await context.Locations

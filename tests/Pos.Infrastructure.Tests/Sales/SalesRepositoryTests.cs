@@ -273,6 +273,100 @@ public sealed class SalesRepositoryTests : IAsyncLifetime
         expired[1].BatchId.Should().Be(later.Id);
     }
 
+    [Fact]
+    public async Task GetByIdAsync_ReturnsTheSaleWithItsLinesAndPayments()
+    {
+        Sale sale = NewSale(amount: 200m, unitCount: 2, unitPrice: 100m);
+        await _repository.AddAsync(sale, CancellationToken.None);
+
+        Sale? loaded = await _repository.GetByIdAsync(sale.Id, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.Number.Should().Be(sale.Number);
+        loaded.Status.Should().Be(SaleStatus.Completed);
+        loaded.NetTotal.Should().Be(200m);
+        loaded.Items.Should().HaveCount(1);
+        loaded.Payments.Should().HaveCount(1);
+        loaded.Payments[0].Method.Should().Be(PaymentMethod.Cash);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_MissingSale_ReturnsNull()
+    {
+        Sale? loaded = await _repository.GetByIdAsync(SaleId.New(), CancellationToken.None);
+
+        loaded.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsTheVoidedState_AndLeavesChildrenFrozen()
+    {
+        Sale sale = NewSale(amount: 200m, unitCount: 2, unitPrice: 100m);
+        await _repository.AddAsync(sale, CancellationToken.None);
+        _context.ChangeTracker.Clear();
+
+        Guid itemId = sale.Items[0].Id.Value;
+        Guid paymentId = sale.Payments[0].Id.Value;
+        Sale loaded = (await _repository.GetByIdAsync(sale.Id, CancellationToken.None))!;
+        Result voided = loaded.Void(
+            loaded.CashierShiftId,
+            loaded.BusinessDate,
+            new DateTimeOffset(2026, 9, 14, 12, 0, 0, TimeSpan.Zero),
+            Cashier,
+            "Wrong item scanned");
+
+        Result<SaleId> saved = await _repository.UpdateAsync(loaded, CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+        saved.Value.Should().Be(loaded.Id);
+
+        Sale stored = await _context.Sales
+            .AsNoTracking()
+            .Include(s => s.Items)
+            .Include(s => s.Payments)
+            .SingleAsync(s => s.Id == loaded.Id, CancellationToken.None);
+
+        stored.Status.Should().Be(SaleStatus.Voided);
+        stored.VoidedAtUtc.Should().Be(new DateTimeOffset(2026, 9, 14, 12, 0, 0, TimeSpan.Zero));
+        stored.VoidedByUserId.Should().Be(Cashier);
+        stored.VoidReason.Should().Be("Wrong item scanned");
+
+        // The void mutates scalars only; the frozen children are untouched.
+        stored.Items.Should().HaveCount(1);
+        stored.Items[0].Id.Value.Should().Be(itemId);
+        stored.Items[0].Quantity.Should().Be(2m);
+        stored.Payments.Should().HaveCount(1);
+        stored.Payments[0].Id.Value.Should().Be(paymentId);
+        stored.Payments[0].Amount.Should().Be(200m);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_AttachesDirty_SoUntrackedChangesAreNotLost()
+    {
+        Sale sale = NewSale(amount: 200m, unitCount: 2, unitPrice: 100m);
+        await _repository.AddAsync(sale, CancellationToken.None);
+        _context.ChangeTracker.Clear();
+
+        // Read untracked (the repository default), mutate, then persist.
+        Sale loaded = (await _repository.GetByIdAsync(sale.Id, CancellationToken.None))!;
+        loaded.Void(
+            loaded.CashierShiftId,
+            loaded.BusinessDate,
+            new DateTimeOffset(2026, 9, 14, 12, 0, 0, TimeSpan.Zero),
+            Cashier,
+            "Duplicate sale");
+
+        Result<SaleId> saved = await _repository.UpdateAsync(loaded, CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+        (await _context.Sales
+                .AsNoTracking()
+                .Where(s => s.Id == sale.Id)
+                .Select(s => s.Status)
+                .SingleAsync(CancellationToken.None))
+            .Should().Be(SaleStatus.Voided);
+    }
+
     private static Sale NewSale(decimal amount, int unitCount, decimal unitPrice)
     {
         ItemSpec item = new(

@@ -87,7 +87,7 @@ public sealed class SaleTests
             Now,
             Cashier,
             items ?? [Item()],
-            payments ?? [Cash(112m, 112m)],
+            payments ?? [Cash(100m, 100m)],
             cashIncrement);
 
     [Fact]
@@ -547,5 +547,121 @@ public sealed class SaleTests
             NewNumber(), EventId.New(), Store, Shift, Device, null, BusinessDate, Now, Cashier,
             [Item(batchId: Batch)], [Cash(112m, 112m)])
             .Error.Code.Should().Be("sale.item.batch_unexpected");
+    }
+
+    // ------------------------------------------------------------------
+    // Voids (POS.md §4.1)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Void_CompletedSale_FlipsStatusAndStampsTheVoid()
+    {
+        UserId manager = UserId.New();
+        DateTimeOffset voidedAt = new(2026, 9, 14, 12, 30, 0, TimeSpan.Zero);
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(Shift, BusinessDate, voidedAt, manager, "Wrong item scanned");
+
+        voided.IsSuccess.Should().BeTrue();
+        created.Value.Status.Should().Be(SaleStatus.Voided);
+        created.Value.VoidedAtUtc.Should().Be(voidedAt);
+        created.Value.VoidedByUserId.Should().Be(manager);
+        created.Value.VoidReason.Should().Be("Wrong item scanned");
+    }
+
+    [Fact]
+    public void Void_TrimsTheReason()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(Shift, BusinessDate, Now, UserId.New(), "  wrong item  ");
+
+        voided.IsSuccess.Should().BeTrue();
+        created.Value.VoidReason.Should().Be("wrong item");
+    }
+
+    [Fact]
+    public void Void_AlreadyVoided_ReturnsConflict()
+    {
+        UserId manager = UserId.New();
+        Result<Sale> created = Create();
+        created.Value.Void(Shift, BusinessDate, Now, manager, "First void");
+
+        Result second = created.Value.Void(Shift, BusinessDate, Now, manager, "Second void");
+
+        second.IsFailure.Should().BeTrue();
+        second.Error.Code.Should().Be("sale.void.only_completed");
+    }
+
+    [Fact]
+    public void Void_DifferentShift_ReturnsConflict()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(CashierShiftId.New(), BusinessDate, Now, UserId.New(), "Why");
+
+        voided.IsFailure.Should().BeTrue();
+        voided.Error.Code.Should().Be("sale.void.shift_mismatch");
+    }
+
+    [Fact]
+    public void Void_DifferentBusinessDate_ReturnsConflict()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(
+            Shift, BusinessDate.AddDays(1), Now, UserId.New(), "Why");
+
+        voided.IsFailure.Should().BeTrue();
+        voided.Error.Code.Should().Be("sale.void.business_date_mismatch");
+    }
+
+    [Fact]
+    public void Void_DefaultStamp_ReturnsValidation()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(Shift, BusinessDate, default, UserId.New(), "Why");
+
+        voided.IsFailure.Should().BeTrue();
+        voided.Error.Code.Should().Be("sale.void.stamp_required");
+    }
+
+    [Fact]
+    public void Void_EmptyUser_ReturnsValidation()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(Shift, BusinessDate, Now, UserId.Empty, "Why");
+
+        voided.IsFailure.Should().BeTrue();
+        voided.Error.Code.Should().Be("sale.void.by_required");
+    }
+
+    [Fact]
+    public void Void_BlankReason_ReturnsValidation()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(Shift, BusinessDate, Now, UserId.New(), "   ");
+
+        voided.IsFailure.Should().BeTrue();
+        voided.Error.Code.Should().Be(SaleErrors.VoidReasonInvalid(Sale.VoidReasonMaxLength).Code);
+    }
+
+    [Fact]
+    public void Void_TooLongReason_ReturnsValidation()
+    {
+        Result<Sale> created = Create();
+
+        Result voided = created.Value.Void(
+            Shift,
+            BusinessDate,
+            Now,
+            UserId.New(),
+            new string('x', Sale.VoidReasonMaxLength + 1));
+
+        voided.IsFailure.Should().BeTrue();
+        voided.Error.Code.Should().Be(SaleErrors.VoidReasonInvalid(Sale.VoidReasonMaxLength).Code);
     }
 }

@@ -163,6 +163,38 @@ public static class SaleErrors
         "sale.payment.reference_too_long",
         FormattableString.Invariant($"A provider reference may be at most {maxLength} characters."));
 
+    /// <summary>Only a completed sale can be voided.</summary>
+    public static Error VoidOnlyCompleted { get; } = Error.Conflict(
+        "sale.void.only_completed",
+        "Only a completed sale can be voided.");
+
+    /// <summary>The void references a different cashier shift than the sale belongs to.</summary>
+    public static Error VoidShiftMismatch { get; } = Error.Conflict(
+        "sale.void.shift_mismatch",
+        "A sale can only be voided against the shift it was completed in.");
+
+    /// <summary>The void references a business date different from the sale's.</summary>
+    public static Error VoidBusinessDateMismatch { get; } = Error.Conflict(
+        "sale.void.business_date_mismatch",
+        "A sale can only be voided against the business date it was completed on.");
+
+    /// <summary>The void has no timestamp.</summary>
+    public static Error VoidStampRequired { get; } = Error.Validation(
+        "sale.void.stamp_required",
+        "A void must record when it happened.");
+
+    /// <summary>The void has no authorising user.</summary>
+    public static Error VoidByRequired { get; } = Error.Validation(
+        "sale.void.by_required",
+        "A void must record the user who authorised it.");
+
+    /// <summary>The void reason is missing or too long.</summary>
+    /// <param name="maxLength">The reason limit.</param>
+    /// <returns>The error.</returns>
+    public static Error VoidReasonInvalid(int maxLength) => Error.Validation(
+        "sale.void.reason_invalid",
+        FormattableString.Invariant($"A void reason is required and may be at most {maxLength} characters."));
+
     /// <summary>The available stock at the location cannot cover the request.</summary>
     /// <param name="productId">The product.</param>
     /// <param name="locationId">The location.</param>

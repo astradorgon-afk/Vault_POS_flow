@@ -37,6 +37,10 @@ public sealed class SaleConfiguration : IEntityTypeConfiguration<Sale>
         builder.Property(s => s.CompletedAtUtc).HasColumnName("completed_at_utc").IsRequired();
         builder.Property(s => s.CompletedByUserId).HasColumnName("completed_by_user_id").IsRequired();
 
+        builder.Property(s => s.VoidedAtUtc).HasColumnName("voided_at_utc");
+        builder.Property(s => s.VoidedByUserId).HasColumnName("voided_by_user_id");
+        builder.Property(s => s.VoidReason).HasColumnName("void_reason").HasMaxLength(Sale.VoidReasonMaxLength);
+
         // All totals are money at the storage scale; the convention-wide decimal
         // precision below is the backstop, the explicit declarations document it.
         builder.Property(s => s.GrossTotal)
