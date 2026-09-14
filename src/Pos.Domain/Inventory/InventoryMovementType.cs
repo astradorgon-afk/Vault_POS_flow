@@ -145,6 +145,9 @@ public enum ReferenceDocumentType
 
     /// <summary>An inventory reservation.</summary>
     InventoryReservation = 12,
+
+    /// <summary>An expiry quarantine run: past-expiry stock moved out of available.</summary>
+    ExpiryRun = 13,
 }
 
 /// <summary>

@@ -8,7 +8,7 @@ namespace Pos.Domain.Inventory;
 /// </summary>
 /// <param name="AllowedSourceStates">States a negative leg may be posted against.</param>
 /// <param name="AllowedDestinationStates">States a positive leg may be posted against.</param>
-/// <param name="RequiredReferenceDocument">
+/// <param name="RequiredReferenceDocuments">
 /// The document type that must justify the movement, or <see langword="null"/>
 /// when several are acceptable.
 /// </param>
@@ -18,7 +18,7 @@ namespace Pos.Domain.Inventory;
 public sealed record MovementTypeRule(
     IReadOnlySet<InventoryState> AllowedSourceStates,
     IReadOnlySet<InventoryState> AllowedDestinationStates,
-    ReferenceDocumentType? RequiredReferenceDocument,
+    IReadOnlySet<ReferenceDocumentType>? RequiredReferenceDocuments,
     bool RequiresApprover,
     bool RequiresReasonCode,
     string PermissionCode);
@@ -56,7 +56,7 @@ public static class MovementTypeRules
         [InventoryMovementType.OpeningBalance] = new(
             External,
             Set(InventoryState.Available, InventoryState.Quarantine),
-            ReferenceDocumentType.None,
+            Set(ReferenceDocumentType.None),
             RequiresApprover: true,
             RequiresReasonCode: false,
             PermInventoryAdjustApprove),
@@ -64,7 +64,7 @@ public static class MovementTypeRules
         [InventoryMovementType.SupplierReceipt] = new(
             External,
             Set(InventoryState.Available, InventoryState.PendingInspection, InventoryState.Quarantine, InventoryState.Damaged),
-            ReferenceDocumentType.GoodsReceipt,
+            Set(ReferenceDocumentType.GoodsReceipt),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermInventoryReceive),
@@ -72,7 +72,7 @@ public static class MovementTypeRules
         [InventoryMovementType.SupplierReturn] = new(
             Set(InventoryState.Damaged, InventoryState.Expired, InventoryState.Quarantine),
             External,
-            ReferenceDocumentType.SupplierReturn,
+            Set(ReferenceDocumentType.SupplierReturn),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermPurchaseReturn),
@@ -80,7 +80,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransferDispatch] = new(
             Available,
             Set(InventoryState.InTransit),
-            ReferenceDocumentType.TransferShipment,
+            Set(ReferenceDocumentType.TransferShipment),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermTransferDispatch),
@@ -88,7 +88,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransferReceipt] = new(
             Set(InventoryState.InTransit),
             Set(InventoryState.Available, InventoryState.Damaged, InventoryState.PendingInspection, InventoryState.TransitVariance),
-            ReferenceDocumentType.TransferReceipt,
+            Set(ReferenceDocumentType.TransferReceipt),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermTransferReceive),
@@ -96,7 +96,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransferCancelDispatch] = new(
             Set(InventoryState.InTransit),
             Available,
-            ReferenceDocumentType.TransferShipment,
+            Set(ReferenceDocumentType.TransferShipment),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermTransferDispatch),
@@ -104,7 +104,7 @@ public static class MovementTypeRules
         [InventoryMovementType.PosSale] = new(
             Available,
             External,
-            ReferenceDocumentType.Sale,
+            Set(ReferenceDocumentType.Sale),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermSaleCreate),
@@ -112,7 +112,7 @@ public static class MovementTypeRules
         [InventoryMovementType.PosSaleVoid] = new(
             External,
             Available,
-            ReferenceDocumentType.Sale,
+            Set(ReferenceDocumentType.Sale),
             RequiresApprover: true,
             RequiresReasonCode: false,
             PermSaleVoid),
@@ -120,7 +120,7 @@ public static class MovementTypeRules
         [InventoryMovementType.CustomerReturn] = new(
             External,
             Set(InventoryState.ReturnPending),
-            ReferenceDocumentType.SalesReturn,
+            Set(ReferenceDocumentType.SalesReturn),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermSaleReturn),
@@ -128,7 +128,7 @@ public static class MovementTypeRules
         [InventoryMovementType.ReturnDisposition] = new(
             Set(InventoryState.ReturnPending),
             Set(InventoryState.Available, InventoryState.Quarantine, InventoryState.Damaged, InventoryState.External),
-            ReferenceDocumentType.SalesReturn,
+            Set(ReferenceDocumentType.SalesReturn),
             RequiresApprover: false,
             RequiresReasonCode: true,
             PermInventoryAdjust),
@@ -136,7 +136,7 @@ public static class MovementTypeRules
         [InventoryMovementType.Reservation] = new(
             Available,
             Set(InventoryState.Reserved),
-            ReferenceDocumentType.InventoryReservation,
+            Set(ReferenceDocumentType.InventoryReservation),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermInventoryReserve),
@@ -144,7 +144,7 @@ public static class MovementTypeRules
         [InventoryMovementType.ReservationRelease] = new(
             Set(InventoryState.Reserved),
             Available,
-            ReferenceDocumentType.InventoryReservation,
+            Set(ReferenceDocumentType.InventoryReservation),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermInventoryReserve),
@@ -152,7 +152,7 @@ public static class MovementTypeRules
         [InventoryMovementType.QuarantineEntry] = new(
             Set(InventoryState.External, InventoryState.Available, InventoryState.PendingInspection, InventoryState.ReturnPending),
             Set(InventoryState.Quarantine),
-            ReferenceDocumentType.QuarantineIncident,
+            Set(ReferenceDocumentType.QuarantineIncident),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermQuarantineCreate),
@@ -160,7 +160,7 @@ public static class MovementTypeRules
         [InventoryMovementType.QuarantineRelease] = new(
             Set(InventoryState.Quarantine),
             Available,
-            ReferenceDocumentType.QuarantineIncident,
+            Set(ReferenceDocumentType.QuarantineIncident),
             RequiresApprover: true,
             RequiresReasonCode: false,
             PermQuarantineRelease),
@@ -168,7 +168,7 @@ public static class MovementTypeRules
         [InventoryMovementType.QuarantineReject] = new(
             Set(InventoryState.Quarantine),
             External,
-            ReferenceDocumentType.QuarantineIncident,
+            Set(ReferenceDocumentType.QuarantineIncident),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermQuarantineReject),
@@ -176,7 +176,7 @@ public static class MovementTypeRules
         [InventoryMovementType.InspectionPass] = new(
             Set(InventoryState.PendingInspection),
             Available,
-            ReferenceDocumentType.GoodsReceipt,
+            Set(ReferenceDocumentType.GoodsReceipt),
             RequiresApprover: false,
             RequiresReasonCode: false,
             PermInventoryReceive),
@@ -184,7 +184,7 @@ public static class MovementTypeRules
         [InventoryMovementType.InspectionFail] = new(
             Set(InventoryState.PendingInspection),
             Set(InventoryState.Damaged, InventoryState.Quarantine),
-            ReferenceDocumentType.GoodsReceipt,
+            Set(ReferenceDocumentType.GoodsReceipt),
             RequiresApprover: false,
             RequiresReasonCode: true,
             PermInventoryReceive),
@@ -197,7 +197,7 @@ public static class MovementTypeRules
         [InventoryMovementType.ExpiryQuarantine] = new(
             Available,
             Set(InventoryState.Expired),
-            ReferenceDocumentType.StockAdjustment,
+            Set(ReferenceDocumentType.StockAdjustment, ReferenceDocumentType.ExpiryRun),
             RequiresApprover: false,
             RequiresReasonCode: true,
             PermInventoryAdjust),
@@ -205,7 +205,7 @@ public static class MovementTypeRules
         [InventoryMovementType.ExpiryWriteOff] = new(
             Set(InventoryState.Expired),
             External,
-            ReferenceDocumentType.StockAdjustment,
+            Set(ReferenceDocumentType.StockAdjustment),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermInventoryAdjustApprove),
@@ -213,7 +213,7 @@ public static class MovementTypeRules
         [InventoryMovementType.CountAdjustmentIncrease] = new(
             External,
             Set(InventoryState.Available, InventoryState.Damaged, InventoryState.Quarantine),
-            ReferenceDocumentType.InventoryCount,
+            Set(ReferenceDocumentType.InventoryCount),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermInventoryCount),
@@ -221,7 +221,7 @@ public static class MovementTypeRules
         [InventoryMovementType.CountAdjustmentDecrease] = new(
             Set(InventoryState.Available, InventoryState.Damaged, InventoryState.Quarantine, InventoryState.Expired),
             External,
-            ReferenceDocumentType.InventoryCount,
+            Set(ReferenceDocumentType.InventoryCount),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermInventoryCount),
@@ -229,7 +229,7 @@ public static class MovementTypeRules
         [InventoryMovementType.ApprovedStockAdjustment] = new(
             Set(InventoryState.Available, InventoryState.Damaged, InventoryState.Expired, InventoryState.Quarantine, InventoryState.External),
             Set(InventoryState.Available, InventoryState.Damaged, InventoryState.Expired, InventoryState.Quarantine, InventoryState.External),
-            ReferenceDocumentType.StockAdjustment,
+            Set(ReferenceDocumentType.StockAdjustment),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermInventoryAdjustApprove),
@@ -237,7 +237,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransitVarianceResolveFound] = new(
             Set(InventoryState.TransitVariance),
             Available,
-            ReferenceDocumentType.TransferOrder,
+            Set(ReferenceDocumentType.TransferOrder),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermTransferReconcile),
@@ -245,7 +245,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransitVarianceWriteOff] = new(
             Set(InventoryState.TransitVariance),
             External,
-            ReferenceDocumentType.TransferOrder,
+            Set(ReferenceDocumentType.TransferOrder),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermTransferReconcile),
@@ -261,7 +261,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransferEmergency] = new(
             Available,
             Available,
-            ReferenceDocumentType.TransferOrder,
+            Set(ReferenceDocumentType.TransferOrder),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermTransferEmergency),
@@ -269,7 +269,7 @@ public static class MovementTypeRules
         [InventoryMovementType.TransferEmergencyReversal] = new(
             Available,
             Available,
-            ReferenceDocumentType.TransferOrder,
+            Set(ReferenceDocumentType.TransferOrder),
             RequiresApprover: true,
             RequiresReasonCode: true,
             PermTransferApprove),
@@ -310,12 +310,14 @@ public static class MovementTypeRules
         Set(InventoryState.Available, InventoryState.Damaged, InventoryState.Quarantine,
             InventoryState.PendingInspection, InventoryState.ReturnPending, InventoryState.Expired),
         External,
-        ReferenceDocumentType.StockAdjustment,
+        Set(ReferenceDocumentType.StockAdjustment),
         RequiresApprover: true,
         RequiresReasonCode: true,
         permission);
 
     private static HashSet<InventoryState> Set(params InventoryState[] states) => [.. states];
+
+    private static HashSet<ReferenceDocumentType> Set(params ReferenceDocumentType[] docs) => [.. docs];
 
     private static HashSet<InventoryState> AllStates() => [.. Enum.GetValues<InventoryState>()];
 }

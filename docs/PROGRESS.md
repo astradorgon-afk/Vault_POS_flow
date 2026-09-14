@@ -15,7 +15,15 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** stopped after Phase 9, as asked. Phase 10 — batch and expiration — is next when resumed.
+**Now:** stopped after Phase 9, as asked. **Phase 10 groundwork is done but not yet
+committed:** movement rules now require a *set* of reference document types
+(`RequiredReferenceDocuments`, `IReadOnlySet<ReferenceDocumentType>?`), each rule
+wraps its justification in `Set(...)`, `ExpiryQuarantine` is justifiable by both
+`StockAdjustment` and `ExpiryRun`, and the `ExpiryRun` enum values were added
+(`DocumentType.ExpiryRun = 15` / `EXP`, `ReferenceDocumentType.ExpiryRun = 13`).
+Build green, full suite **445 passed, 0 failed** (215 domain, 20 app, 40 infra,
+13 architecture, 52 security, 105 API integration). Phase 10 — batch and
+expiration — uses this groundwork next when resumed.
 **Last commit:** Phase 9 — inventory control (see log).
 
 ---
@@ -141,6 +149,18 @@ and the test suites pass. Nothing is pushed.
   215, Application 20, Infrastructure 40, Security 52,
   Architecture 13, API 105) with Docker running; no pending model changes.
   Work stops here until resumed.
+- **G6 (groundwork for Phase 10 �?" batch and expiration).** Movement-type rules
+  now accept a **set** of reference document types per movement, not a single one:
+  record is `RequiredReferenceDocuments` (`IReadOnlySet<ReferenceDocumentType>?`),
+  a `Set(params ReferenceDocumentType[])` helper overload was added, every rule is
+  set-wrapped, and `ExpiryQuarantine` is justifiable by both `StockAdjustment` and
+  `ExpiryRun`. Reports/exports remain single-typed for now. Also adds the
+  `ExpiryRun` groundwork in `DocumentNumber.cs` (`DocumentType.ExpiryRun = 15` /
+  `EXP`) and `InventoryMovementGroup.cs` / `InventoryMovementType.cs`
+  (`ReferenceDocumentType.ExpiryRun = 13`), uncommitted. Verification: full
+  solution **445 passed, 0 failed, 0 skipped** (Domain 215, Application 20,
+  Infrastructure 40, Security 52, Architecture 13, API 105); build 0 warnings
+  0 errors; no pending model changes.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

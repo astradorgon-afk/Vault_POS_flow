@@ -284,10 +284,10 @@ public sealed class InventoryMovementGroup
             errors.Add(InventoryErrors.ReversalMissingOriginal);
         }
 
-        if (rule.RequiredReferenceDocument is { } required)
+        if (rule.RequiredReferenceDocuments is { Count: > 0 } required)
         {
-            bool typeMatches = spec.ReferenceDocumentType == required;
-            bool needsIdentity = required != ReferenceDocumentType.None;
+            bool typeMatches = spec.ReferenceDocumentType is { } docType && required.Contains(docType);
+            bool needsIdentity = required.Any(doc => doc != ReferenceDocumentType.None);
 
             if (!typeMatches || (needsIdentity && spec.ReferenceDocumentId is null))
             {
