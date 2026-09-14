@@ -69,6 +69,8 @@ public static class DependencyInjection
         services.TryAddScoped<IQuarantineRepository, QuarantineRepository>();
         services.TryAddScoped<IReceiptRepository, ReceiptRepository>();
         services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();
+        services.TryAddScoped<IExpiryService, ExpiryService>();
+        services.TryAddScoped<IExpiryRepository, ExpiryRepository>();
 
         // The reconciliation tripwire is optional so a host can run without it
         // (tests, short-lived tools); when enabled it only reads.
@@ -79,6 +81,15 @@ public static class DependencyInjection
         if (reconciliation.Enabled)
         {
             services.AddHostedService<BalanceReconcilerWorker>();
+        }
+
+        ExpiryOptions expiry = configuration
+            .GetSection(ExpiryOptions.SectionName)
+            .Get<ExpiryOptions>() ?? new ExpiryOptions();
+
+        if (expiry.Enabled)
+        {
+            services.AddHostedService<ExpiryWorker>();
         }
 
         return services;
@@ -140,6 +151,11 @@ public static class DependencyInjection
 
         services.AddOptions<ReconciliationOptions>()
             .Bind(configuration.GetSection(ReconciliationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<ExpiryOptions>()
+            .Bind(configuration.GetSection(ExpiryOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

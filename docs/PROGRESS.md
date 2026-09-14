@@ -15,16 +15,21 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** stopped after Phase 9, as asked. **Phase 10 groundwork is done but not yet
-committed:** movement rules now require a *set* of reference document types
-(`RequiredReferenceDocuments`, `IReadOnlySet<ReferenceDocumentType>?`), each rule
-wraps its justification in `Set(...)`, `ExpiryQuarantine` is justifiable by both
-`StockAdjustment` and `ExpiryRun`, and the `ExpiryRun` enum values were added
+**Now:** Phase 10 — batch and expiration — is **complete and ready to commit**. The
+groundwork commit `77e1e3d` made `ExpiryQuarantine` justifiable by either
+`StockAdjustment` or `ExpiryRun` and added the `ExpiryRun` document type
 (`DocumentType.ExpiryRun = 15` / `EXP`, `ReferenceDocumentType.ExpiryRun = 13`).
-Build green, full suite **445 passed, 0 failed** (215 domain, 20 app, 40 infra,
-13 architecture, 52 security, 105 API integration). Phase 10 — batch and
-expiration — uses this groundwork next when resumed.
-**Last commit:** Phase 9 — inventory control (see log).
+This session built the expiry run on top of it (details in the log below):
+`LocationSettings.ExpiryWarningDays`, `ExpiryErrors`, `ExpiryRunResult`,
+`ExpiryRunRecordId`, `AuditActions.Expiry`, the `inventory.expiry.run` permission,
+`RunExpiryCommand` + thin handler, the `IExpiryService` / `IExpiryRepository`
+ports, the infra `ExpiryService`, `ExpiryRepository`, `ExpiryWorker`
+(`Expiry:Enabled`, 6-hour interval, system actor) and the `ExpiryOptions` binding,
+plus the docs update. Build green (0 warnings, 0 errors); full solution
+**445 passed, 0 failed** (Domain 215, Application 20, Infrastructure 40,
+Security 52, Architecture 13, API 105) with Docker running — the batch has
+cleared the commit gate.
+**Last commit:** `77e1e3d` Phase 10 groundwork (see log).
 
 ---
 
@@ -83,7 +88,14 @@ expiration — uses this groundwork next when resumed.
   - [x] Migration `20260914120000_InventoryControl`; full flow verified on PostgreSQL
   - [x] Removed six empty junk files from the repository root (three created by the local hook, three committed in Phase 1)
   - [x] Full test run (445 passed) and commit
-- [ ] **Phase 10 — Batch and expiration:** FEFO allocation service, expiry thresholds, expiry worker, sale blocking with authorized override
+- [~] **Phase 10 — Batch and expiration** (code complete, 445 tests passing, ready to commit)
+  - [x] Groundwork: `RequiredReferenceDocuments` set, `ExpiryQuarantine` justifiable by `StockAdjustment` or `ExpiryRun` (`G6`)
+  - [x] Configurable expiry warning threshold (`LocationSettings.ExpiryWarningDays`, default 90)
+  - [x] Expiry scan: expired, expiring-soon (threshold), FEFO-ordered sellable batches (`IExpiryService`)
+  - [x] Expiry run: worker- or command-driven quarantine of past-expiry stock → `Expired`, EXP-numbered `ExpiryQuarantine` groups, system-actor audit
+  - [ ] FEFO transfer picking service (pick logic already FEFO-ordered; service extraction deferred)
+  - [ ] Sale blocking for expired batches: POS consumers of the sellable-batch query + the authorized override path (Phase 11)
+  - [ ] Expiring-soon / expired alerts (Phase 14 notifications)
 - [ ] **Phase 11 — POS:** shifts with cash reconciliation, sale lifecycle, pricing/discount/VAT, payments, atomic completion, receipts and reprint, void/return/refund, customers, daily summary
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -161,6 +173,27 @@ expiration — uses this groundwork next when resumed.
   solution **445 passed, 0 failed, 0 skipped** (Domain 215, Application 20,
   Infrastructure 40, Security 52, Architecture 13, API 105); build 0 warnings
   0 errors; no pending model changes.
+- **Phase 10 batch (expiry run, in progress, uncommitted).** The expiry worker and
+  command built on the G6 groundwork: `LocationSettings.ExpiryWarningDays`
+  (default 90, location JSON now carries the threshold); `ExpiryErrors`,
+  `ExpiryRunResult` (`ExpiredBatchItem`, `ExpiringBatchSummary`, `SellableBatchItem`),
+  `ExpiryRunRecordId`, `AuditActions.Expiry`, and the `inventory.expiry.run`
+  permission (catalogue + privileged set); `RunExpiryCommand` with a thin handler
+  (authorized, location-scoped, delegates to the service, writes an audit entry on
+  success); `IExpiryService` / `IExpiryRepository` ports; the infrastructure
+  `ExpiryService` (validates location + timezone, allocates one EXP document number
+  per run, posts one two-leg `ExpiryQuarantine` group per expired batch
+  `Available → Expired` with `AdjustmentReasonCode.Expired`, a shared `ExpiryRunRecordId`
+  as the reference-document id, value summed at `Money.StorageScale` with
+  `Money.IntermediateRounding`), `ExpiryRepository` (reads location settings,
+  external-write-off location, stocking locations, warning days), `ExpiryWorker`
+  (`BackgroundService`, `Expiry:Enabled` / `IntervalHours` [1–24] default 6 /
+  `RunOnStartup`, per-scope sweep over stocking locations with a system actor
+  `UserId.Empty`, skips locations without a timezone and `NoExpiredBatches`,
+  tolerates per-batch failure), and   `ExpiryOptions` bound + data-validated in DI.
+  Verification: build 0 warnings 0 errors; full solution **445 passed, 0 failed**
+  (Domain 215, Application 20, Infrastructure 40, Security 52, Architecture 13,
+  API 105) with Docker running. Batch cleared the commit gate.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

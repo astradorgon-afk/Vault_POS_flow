@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-14 · **Milestone:** Phase 9 (Inventory Control) complete, gap batches G1–G5 closed; Phase 10 next
+**Last updated:** 2026-09-14 · **Milestone:** Phase 9 (Inventory Control) complete, gap batches G1–G5 closed; Phase 10 (batch and expiration) **code complete, 445 tests passing, ready to commit**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **445 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
+| Tests | **445 passing, 0 failing, 0 skipped** (2026-09-14 full solution run with Docker: Domain 215, Application 20, Infrastructure 40, Security 52, Architecture 13, API 105 — includes the Phase 10 expiry batch) |
 | Migrations | 19, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection) |
@@ -649,10 +649,19 @@ aggregate with lines and photos, quarantine ledger postings, HQ review outcomes
 approvers), and scope-exact list/detail reads. Interim payment receipts
 (ADR-0026) landed alongside it. Three strands remain:
 
-1. **Phase 10 — batch and expiration** (per ROADMAP): FEFO allocation, expiry
-   warning thresholds, the expiry worker (which will raise the `ExpiryQuarantine`
-   moves Phase 9 adjustments can already post by hand), and sale blocking with an
-   authorized exception path.
+1. **Phase 10 — batch and expiration** (per ROADMAP): **code complete, 445 tests
+   passing, ready to commit.** The groundwork is in (movement rules accept a set
+   of reference documents, so `ExpiryQuarantine` is now justifiable by either a
+   stock adjustment or an expiry run — `EXP`, `ReferenceDocumentType.ExpiryRun = 13`),
+   and the expiry run itself is implemented: `LocationSettings.ExpiryWarningDays`
+   (default 90), the `IExpiryService` scans (expired, expiring-soon, FEFO-ordered
+   sellable batches), `RunExpiryCommand` behind the `inventory.expiry.run`
+   permission, the `ExpiryWorker` background service (`Expiry:Enabled`, default
+   6-hour interval) quarantining past-expiry stock `Available → Expired` through
+   EXP-numbered `ExpiryQuarantine` groups with a system actor, and the
+   `ExpiryOptions` binding. Full-suite re-run confirms the gate. Up next after the
+   commit: the FEFO allocation service extraction, the POS sale-blocking override
+   path (Phase 11), and expiring-soon/expired alerts (Phase 14 notifications).
 2. **Phase 8 tail:** the automated quarantine triggers (unknown barcode at scan,
    over-receipt excess, unclear returns) that would raise incidents without staff
    action, plus notifications and the Owner-dashboard exception panel — both left

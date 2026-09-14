@@ -129,6 +129,9 @@ public static class Permissions
 
         /// <summary>Rebuild the balance projection from the ledger.</summary>
         public const string RebuildBalances = "inventory.rebuild_balances";
+
+        /// <summary>Run the expiry quarantine sweep, or sell from an expired batch via override.</summary>
+        public const string RunExpiry = "inventory.expiry.run";
     }
 
     /// <summary>Transfer permissions.</summary>
@@ -314,6 +317,7 @@ public static class Permissions
         Def(Inventory.NegativeStock, "Inventory", "Post a movement that drives stock negative.", offline: false, readOnly: false),
         Def(Inventory.ViewMovements, "Inventory", "Read the ledger and document timelines.", offline: true, readOnly: true),
         Def(Inventory.RebuildBalances, "Inventory", "Rebuild the balance projection.", offline: false, readOnly: false),
+        Def(Inventory.RunExpiry, "Inventory", "Run the expiry quarantine sweep.", offline: false, readOnly: false),
 
         Def(Transfer.View, "Transfers", "See transfers touching assigned locations.", offline: true, readOnly: true),
         Def(Transfer.Request, "Transfers", "Create and submit a transfer request.", offline: true, readOnly: false),
@@ -398,6 +402,7 @@ public static class Permissions
         Inventory.RebuildBalances,
         Inventory.ApproveAdjustment,
         Inventory.ApproveCount,
+        Inventory.RunExpiry,
         Purchasing.Approve,
         Purchasing.AuthorizeDirectToStore,
         Transfer.Approve,

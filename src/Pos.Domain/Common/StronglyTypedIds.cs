@@ -1247,3 +1247,26 @@ public readonly record struct ReceiptId(Guid Value) : IStronglyTypedId, ICompara
     /// <inheritdoc />
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
+
+/// <summary>Strongly typed identifier for an expiry run record.</summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ExpiryRunRecordId(Guid Value) : IStronglyTypedId, IComparable<ExpiryRunRecordId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ExpiryRunRecordId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ExpiryRunRecordId"/>.</returns>
+    public static ExpiryRunRecordId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ExpiryRunRecordId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}

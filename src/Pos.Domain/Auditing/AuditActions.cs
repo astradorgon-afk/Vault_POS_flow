@@ -238,6 +238,19 @@ public static class AuditActions
         public const string Rejected = "quarantine.rejected";
     }
 
+    /// <summary>Expiry run actions.</summary>
+    public static class Expiry
+    {
+        /// <summary>An expiry run quarantined past-expiry batches at a location.</summary>
+        public const string ExpiryRunPosted = "expiry.run.posted";
+
+        /// <summary>An expiry run found nothing to process.</summary>
+        public const string ExpiryRunClean = "expiry.run.clean";
+
+        /// <summary>A sale was blocked because the batch was expired.</summary>
+        public const string SaleBlockedExpired = "sale.blocked.expired";
+    }
+
     /// <summary>Point-of-sale actions.</summary>
     public static class Sales
     {

@@ -289,6 +289,26 @@ public sealed class ReconciliationOptions
     public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
 }
 
+/// <summary>Expiry quarantine worker settings.</summary>
+public sealed class ExpiryOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "Expiry";
+
+    /// <summary>Gets or sets whether the background expiry worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets how many hours between expiry sweeps.</summary>
+    [Range(1, 24)]
+    public int IntervalHours { get; set; } = 6;
+
+    /// <summary>Gets or sets whether an expiry sweep runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
+}
+
 /// <summary>Maintenance-gated operations such as balance rebuilding.</summary>
 public sealed class MaintenanceOptions
 {

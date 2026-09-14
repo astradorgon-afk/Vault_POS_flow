@@ -42,6 +42,18 @@ public sealed record LocationSettings
     /// <summary>Gets or sets the receipt footer text.</summary>
     public string ReceiptFooter { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the number of days before expiry at which a batch is
+    /// considered "expiring soon" for warnings and alerts. The default of
+    /// 90 days matches common pharmaceutical and perishable-goods thresholds.
+    /// </summary>
+    /// <remarks>
+    /// The worker moves past-expiry batches regardless of this setting. This
+    /// threshold controls the warning band used by alerts and, eventually, the
+    /// sale-blocking logic in POS.
+    /// </remarks>
+    public int ExpiryWarningDays { get; init; } = 90;
+
     /// <summary>Serializes to JSON for storage.</summary>
     public string ToJson()
         => JsonSerializer.Serialize(this, _serializerOptions);
