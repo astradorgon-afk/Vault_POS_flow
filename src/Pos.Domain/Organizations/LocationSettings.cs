@@ -5,8 +5,9 @@ using Pos.Domain.Inventory;
 namespace Pos.Domain.Organizations;
 
 /// <summary>
-/// Operational settings for a location, including the negative-stock policy the
-/// ledger must honour.
+/// Operational settings for a location: the negative-stock policy the ledger
+/// must honour, the VAT rate and cash rounding for sales, and the cash-shift
+/// policies that govern opening and closing the drawer.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +30,8 @@ public sealed record LocationSettings
 
     /// <summary>
     /// The conservative defaults: negative stock prohibited, direct supplier
-    /// delivery disallowed, a 72-hour offline grace period and empty receipt text.
+    /// delivery disallowed, a 72-hour offline grace period, empty receipt text
+    /// and zero cash-variance tolerance.
     /// </summary>
     public static LocationSettings Default { get; } = new();
 
@@ -73,6 +75,21 @@ public sealed record LocationSettings
     /// sale-blocking logic in POS.
     /// </remarks>
     public int ExpiryWarningDays { get; init; } = 90;
+
+    /// <summary>
+    /// Gets or sets the cash-variance tolerance for shift closure, in the
+    /// settlement currency. A closed shift whose variance exceeds this amount
+    /// requires manager review (and a reason) before it can be reconciled
+    /// (POS.md §1). The strictest configuration tolerates no variance at all.
+    /// </summary>
+    public decimal CashVarianceThreshold { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long a cashier shift may stay open before a worker
+    /// force-closes it and flags the shift for review (POS.md §1). The default
+    /// of sixteen hours covers a double shift.
+    /// </summary>
+    public TimeSpan MaxShiftHours { get; init; } = TimeSpan.FromHours(16);
 
     /// <summary>Serializes to JSON for storage.</summary>
     public string ToJson()
