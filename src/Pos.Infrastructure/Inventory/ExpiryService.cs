@@ -44,7 +44,7 @@ public sealed class ExpiryService(
             .AsNoTracking()
             .Where(b => b.LocationId == locationId
                 && b.State == InventoryState.Available
-                && !b.BatchKey.IsEmpty
+                && b.BatchKey != BatchId.Empty
                 && b.Quantity > 0m)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -99,7 +99,7 @@ public sealed class ExpiryService(
             .AsNoTracking()
             .Where(b => b.LocationId == locationId
                 && b.State == InventoryState.Available
-                && !b.BatchKey.IsEmpty
+                && b.BatchKey != BatchId.Empty
                 && b.Quantity > 0m)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
