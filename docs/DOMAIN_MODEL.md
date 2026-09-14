@@ -314,22 +314,20 @@ See [QUARANTINE.md](QUARANTINE.md).
 ## 10. Counting and Adjustments
 
 ```
-InventoryCount ◄── aggregate root
+InventoryCount ◄── aggregate root                    (ADR-0031)
  ├── kind: FullPhysical | Cycle | Category | ProductSpecific
- ├── status: Draft | Counting | Submitted | PendingApproval | Approved | Rejected | Posted
- ├── scope (locations, categories, products)
- ├── SnapshotTakenAtUtc              system quantities frozen here
+ ├── status: Counting | PendingApproval | Posted | Cancelled   (reject → Counting)
+ ├── SnapshotTakenAtUtc              sheet taken from the ledger here
  └── InventoryCountLine (N)
-      ├── SystemQuantity, PhysicalQuantity, Variance (derived)
-      ├── VarianceValue (Money, derived)
-      └── LineStatus: Counted | Recount | Accepted | Rejected
+      ├── SystemQuantity             refreshed each time the line is counted
+      ├── PhysicalQuantity, Variance (derived), VarianceValue (derived)
+      └── IsRepeatVariance           set on submission
 
-StockAdjustment ◄── aggregate root
- ├── status: Draft | PendingApproval | Approved | Rejected | Posted | Reversed
- ├── reason: Damaged | Expired | Spoilage | Loss | Theft | CountCorrection
- │         | SupplierReturn | Broken | Contaminated | Other
- ├── RequiresApprovalAboveValue  (resolved from LocationSettings at creation)
- └── StockAdjustmentLine (N)
+StockAdjustment ◄── aggregate root                   (ADR-0031)
+ ├── status: Draft | PendingApproval | Rejected | Posted | Reversed
+ ├── reason: Damaged | Broken | Contaminated | Spoilage | Loss | Theft | Expired | Other
+ └── StockAdjustmentLine (N)        state, signed quantity, captured unit cost,
+                                    movement type decided by the reason
 ```
 
 **Invariants**

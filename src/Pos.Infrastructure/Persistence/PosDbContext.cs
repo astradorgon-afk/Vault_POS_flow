@@ -195,6 +195,12 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets payment receipts.</summary>
     public DbSet<Receipt> Receipts => Set<Receipt>();
 
+    /// <summary>Gets stock adjustments.</summary>
+    public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
+
+    /// <summary>Gets inventory counts.</summary>
+    public DbSet<InventoryCount> InventoryCounts => Set<InventoryCount>();
+
     /// <summary>Gets the stock draws the ledger refused, append-only.</summary>
     public DbSet<NegativeStockAttempt> NegativeStockAttempts => Set<NegativeStockAttempt>();
 

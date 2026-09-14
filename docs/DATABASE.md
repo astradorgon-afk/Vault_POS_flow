@@ -255,8 +255,23 @@ inventory.batch                  (see DOMAIN_MODEL §6.1)
 
 inventory.inventory_reservation  (id, sale_id/transfer_id, product_id, batch_id,
                                   location_id, quantity, expires_at_utc, status)
-inventory.inventory_count        + inventory_count_line
-inventory.stock_adjustment       + stock_adjustment_line
+inventory.inventory_count        (id, number CNT UNIQUE, location_id, kind, status, note,
+                                  snapshot_taken_at_utc, created_by/at, submitted_by/at,
+                                  approved_by, posted_at_utc, last_rejection_reason,
+                                  cancellation_reason)
+  inventory_count_line            (id, inventory_count_id FK CASCADE, line_no, product_id,
+                                  batch_id, system_quantity, physical_quantity NULL,
+                                  unit_cost, counted_by/at, is_repeat_variance)
+                                  UNIQUE (inventory_count_id, line_no)
+inventory.stock_adjustment       (id, number ADJ UNIQUE WHERE number <> '', location_id,
+                                  reason, notes, status, created_by/at, submitted_at,
+                                  decided_by/at, rejection_reason, reversed_by/at,
+                                  reversal_reason)
+  stock_adjustment_line           (id, stock_adjustment_id FK CASCADE, line_no, product_id,
+                                  batch_id, state, quantity_delta, unit_cost, movement_type)
+                                  UNIQUE (stock_adjustment_id, line_no)
+                                 -- documents only; stock changes solely through the
+                                 -- movements they post on approval (ADR-0031)
 inventory.quarantine_incident    + _line + _photo
 inventory.integrity_incident     (id, kind, detected_at_utc, details_json, status)
 inventory.negative_stock_attempt (id, event_id, movement_type, location_id, product_id,

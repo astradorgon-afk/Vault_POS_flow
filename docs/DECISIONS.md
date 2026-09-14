@@ -921,3 +921,71 @@ record written inside it disappears with it — nothing was recorded.
   synchronization processor (Phase 13) posts them through the same pipeline.
 
 ---
+
+## ADR-0031 — Stock adjustments and inventory counts post only after approval
+
+**Date:** 2026-09-14 · **Status:** Accepted
+
+**Context.** Phase 9 adds the two ways stock changes outside the normal document
+flows: a stock adjustment (damage, spoilage, loss, theft, expiry, a correction)
+and a physical count. Both remove or add stock with no supplier, customer or
+transfer on the other side, which makes them the easiest routes for stock to
+leave a business unnoticed. The ledger rules already required an approver and a
+reason for every such movement; the documents had to decide who approves, what
+the approval is measured against, and how a count stays correct while the store
+keeps trading.
+
+**Decision.**
+
+- **Approval is posting.** An adjustment goes Draft → PendingApproval → Posted
+  (or Rejected); a count goes Counting → PendingApproval → Posted (or back to
+  Counting when rejected, or Cancelled). Nothing reaches the ledger before
+  approval, and approving posts in the same transaction — there is no approved
+  but unposted state to leave stock in limbo.
+- **Value tiers and segregation of duties.** Approval runs through the approval
+  gate on the document's absolute value: the sum of |quantity × unit cost| for an
+  adjustment, of |variance × unit cost| for a count. The approver must hold
+  `inventory.adjust.approve` or `inventory.count.approve` at the location, stay
+  within their tier, and not be the author (the adjustment's creator, the count's
+  submitter). Reversing a posted adjustment passes the same gate.
+- **The reason decides the movement.** Damaged, Broken and Contaminated post as
+  `Damage`; Spoilage, Loss and Theft as themselves; Expired moves available stock
+  to the Expired state (`ExpiryQuarantine`) or writes off stock already there
+  (`ExpiryWriteOff`). These only remove stock, balanced against EXT-WRITEOFF.
+  Only `Other`, with notes of at least 10 characters, may add stock
+  (`ApprovedStockAdjustment`). Reasons owned by other documents — count
+  correction, supplier return, transit variance, emergency transfers — are refused.
+- **Unit cost is captured when the document is raised** (the bucket's average
+  cost, else the batch cost, else the product's default cost), so the value an
+  approver is measured against cannot move while it waits.
+- **Numbers.** ADJ is allocated when an adjustment posts, so rejected drafts do
+  not consume numbers; CNT is allocated when a count opens, because staff quote
+  it on the count sheet.
+- **Counts compare the shelf with the system at the same moment.** Opening a count
+  takes a sheet of available buckets in scope. Recording a line reads the bucket
+  again and stores that system quantity with the counted one, so a sale between
+  opening and counting is not mistaken for shrinkage. Approval refuses any line
+  whose bucket moved after it was counted (`count.stock_moved_since_counted`);
+  the approver rejects the count and the line is counted again. Only the variance
+  posts, as `CountAdjustmentIncrease`/`Decrease` with reason `CountCorrection`.
+  Counts cover the Available state.
+- **Scope.** A full count may record products found that were not on its sheet;
+  category, product and cycle counts accept only products on their sheet (a
+  batch-tracked product can gain a line for a newly found batch).
+- **Repeat variance.** On submission a varying line is flagged when the same
+  product varied on another count posted at the location within 90 days, and an
+  `inventory.count.repeat_variance` audit entry is written. The repeat-variance
+  report ranks product-location pairs by the number of varying counts.
+- **Reversal** posts, for each group the adjustment posted, a `Reversal` group with
+  every leg negated at its original cost, referencing the original group.
+
+**Consequences.**
+- A busy store counting during trading may need to count some lines twice; the
+  alternative, posting a variance that includes sales made mid-count, would
+  record theft that never happened.
+- Damaged, quarantined and expired stock is adjusted but not yet counted; a count
+  of those states arrives when a flow needs it.
+- `RequiresApprovalAboveValue` per location (DOMAIN_MODEL.md) is not built: every
+  adjustment needs approval, and the tiers bound who may give it.
+
+---

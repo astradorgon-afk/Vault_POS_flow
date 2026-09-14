@@ -162,11 +162,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 9 — Inventory Control
 
-- [ ] Stock adjustments with reasons and approval thresholds
-- [ ] Damage, expiry, spoilage, loss, theft flows
-- [ ] Inventory counts: full, cycle, category, product-specific
-- [ ] Snapshot, variance calculation, approval, posting
-- [ ] Variance reporting and repeat-variance detection
+- [x] Stock adjustments with reasons and approval thresholds (value tiers, no self-approval, reversal)
+- [x] Damage, expiry, spoilage, loss, theft flows
+- [x] Inventory counts: full, cycle, category, product-specific
+- [x] Snapshot, variance calculation, approval, posting (stale lines refused)
+- [x] Variance reporting and repeat-variance detection
 
 ## Phase 10 — Batch and Expiration
 

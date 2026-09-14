@@ -68,6 +68,7 @@ public static class DependencyInjection
         services.TryAddScoped<ITransferRepository, TransferRepository>();
         services.TryAddScoped<IQuarantineRepository, QuarantineRepository>();
         services.TryAddScoped<IReceiptRepository, ReceiptRepository>();
+        services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();
 
         // The reconciliation tripwire is optional so a host can run without it
         // (tests, short-lived tools); when enabled it only reads.

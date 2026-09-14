@@ -180,14 +180,20 @@ product, the new price row and the new conversion respectively).
 | GET | `/api/v1/inventory/movements/group/{movementGroupId}` | `inventory.movement.view` |
 | GET | `/api/v1/inventory/products/{id}/history` | `inventory.movement.view` |
 | GET | `/api/v1/inventory/documents/{type}/{id}/timeline` | `inventory.movement.view` |
-| POST | `/api/v1/inventory/adjustments` | `inventory.adjust` |
-| POST | `/api/v1/inventory/adjustments/{id}/submit` | `inventory.adjust` |
-| POST | `/api/v1/inventory/adjustments/{id}/approve` \| `/reject` | `inventory.adjust.approve` + tier |
-| POST | `/api/v1/inventory/adjustments/{id}/reverse` | `inventory.adjust.approve` |
-| POST | `/api/v1/inventory/counts` | `inventory.count` |
-| POST | `/api/v1/inventory/counts/{id}/lines` | `inventory.count` |
-| POST | `/api/v1/inventory/counts/{id}/submit` | `inventory.count` |
-| POST | `/api/v1/inventory/counts/{id}/approve` | `inventory.count.approve` + tier |
+| GET | `/api/v1/inventory/adjustments?locationId&status&offset&limit` | `inventory.view` (caller's locations) |
+| GET | `/api/v1/inventory/adjustments/{id}` | `inventory.view` (+ scope) |
+| POST | `/api/v1/inventory/adjustments` | `inventory.adjust` (+ scope) |
+| POST | `/api/v1/inventory/adjustments/{id}/submit` | `inventory.adjust` (+ scope) |
+| POST | `/api/v1/inventory/adjustments/{id}/approve` \| `/reject` | `inventory.adjust.approve` + tier (+ scope) |
+| POST | `/api/v1/inventory/adjustments/{id}/reverse` | `inventory.adjust.approve` + tier |
+| GET | `/api/v1/inventory/counts?locationId&status&offset&limit` | `inventory.view` (caller's locations) |
+| GET | `/api/v1/inventory/counts/{id}` | `inventory.view` (+ scope) |
+| POST | `/api/v1/inventory/counts` | `inventory.count` (+ scope) |
+| POST | `/api/v1/inventory/counts/{id}/lines` | `inventory.count` (+ scope) |
+| POST | `/api/v1/inventory/counts/{id}/submit` \| `/cancel` | `inventory.count` (+ scope) |
+| POST | `/api/v1/inventory/counts/{id}/approve` \| `/reject` | `inventory.count.approve` + tier (+ scope) |
+| GET | `/api/v1/inventory/counts/variances?locationId&productId&from&to&offset&limit` | `inventory.view` (caller's locations) |
+| GET | `/api/v1/inventory/counts/repeat-variances?locationId&from&to&minOccurrences` | `inventory.view` (caller's locations) |
 | POST | `/api/v1/inventory/rebuild-balances` | `inventory.rebuild_balances` |
 | POST | `/api/v1/inventory/reconcile` | `inventory.rebuild_balances` |
 | GET | `/api/v1/inventory/exceptions/negative-attempts?locationId&productId&from&to&offset&limit` | `inventory.view.all` |
@@ -195,6 +201,49 @@ product, the new price row and the new conversion respectively).
 
 There is **no** endpoint that sets a quantity. The only inventory-affecting
 routes are document-driven.
+
+### Stock adjustments (ADR-0031)
+
+`POST /adjustments` takes `{ "locationId", "reason", "notes"?, "lines": [{ "productId",
+"batchId"?, "state", "quantityDelta" }] }` (enums as numbers) and answers `201 { id }`.
+Each line's unit cost is captured from the bucket; the detail shows it with the
+line's `absoluteValue` and the `movementType` it will post as. The reason decides
+the movement: `Damaged`/`Broken`/`Contaminated` → `Damage`, `Spoilage`, `Loss`,
+`Theft`, `Expired` → `ExpiryQuarantine` from Available or `ExpiryWriteOff` from
+Expired; all of these only remove stock. `Other` (notes ≥ 10 characters) may add
+or remove. Approval posts in the same transaction, allocates the `ADJ-…` number and
+refuses the author (`approval.self_approval_refused`), an approver out of tier
+(`approval.tier_exceeded`) or out of scope (`approval.approver_out_of_scope`); a
+post that would go negative answers `409 inventory.insufficient_stock` and leaves
+the adjustment pending. Reject and reverse take `{ "reason" }` (≥ 5 characters);
+reversal posts opposite `Reversal` movements.
+
+| Status | `errorCode` | When |
+|---|---|---|
+| 400 | `adjustment.must_remove_stock` / `.state_not_allowed` / `.reason_not_allowed` / `.notes_required` | the reason cannot do what the line asks |
+| 400 | `inventory_control.batch_required` / `.batch_not_allowed` / `.batch_mismatch` | batch does not fit the product |
+| 403 | `inventory_control.outside_scope` | the document's location is outside the caller's scope |
+| 409 | `adjustment.invalid_state` | wrong lifecycle state |
+
+### Inventory counts (ADR-0031)
+
+`POST /counts` takes `{ "locationId", "kind", "categoryIds"?, "productIds"?, "note"? }`:
+`FullPhysical` takes no scope, `Category` needs categories, `ProductSpecific` needs
+products, `Cycle` needs either (`400 count.scope_invalid`). The sheet lists the
+available buckets in scope with their system quantity; products in scope without
+stock appear with zero. `POST /counts/{id}/lines` takes `{ "lines": [{ "productId",
+"batchId"?, "physicalQuantity" }] }`, may be called repeatedly, and re-reads each
+bucket's system quantity at that moment. Submit needs every line counted
+(`400 count.incomplete`) and flags repeat variances. Approval posts only the
+variance under the `CNT-…` number and answers `409 count.stock_moved_since_counted`
+with `staleLines` when stock moved after counting; reject returns the count to
+counting, cancel ends it. Detail lines carry `systemQuantity`, `physicalQuantity`,
+`variance`, `varianceValue` and `isRepeatVariance`.
+
+The variance report lists varying lines of posted counts (default: last 90 days);
+the repeat-variance report ranks product-location pairs that varied on at least
+`minOccurrences` (≥ 2) posted counts, with `netVariance` and
+`totalAbsoluteVarianceValue`.
 
 ### Negative-stock attempts
 

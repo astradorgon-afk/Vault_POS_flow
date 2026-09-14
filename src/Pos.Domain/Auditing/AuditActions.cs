@@ -144,11 +144,26 @@ public static class AuditActions
         /// <summary>An adjustment was rejected.</summary>
         public const string AdjustmentRejected = "inventory.adjustment.rejected";
 
+        /// <summary>A posted adjustment was reversed.</summary>
+        public const string AdjustmentReversed = "inventory.adjustment.reversed";
+
+        /// <summary>A count was opened and its sheet taken from the ledger.</summary>
+        public const string CountOpened = "inventory.count.opened";
+
         /// <summary>A count was submitted for approval.</summary>
         public const string CountSubmitted = "inventory.count.submitted";
 
         /// <summary>A count variance was approved and posted.</summary>
         public const string CountApproved = "inventory.count.approved";
+
+        /// <summary>A submitted count was sent back for recounting.</summary>
+        public const string CountRejected = "inventory.count.rejected";
+
+        /// <summary>A count was abandoned without posting.</summary>
+        public const string CountCancelled = "inventory.count.cancelled";
+
+        /// <summary>A product varied again on a count at the same location within the look-back window.</summary>
+        public const string RepeatVarianceDetected = "inventory.count.repeat_variance";
 
         /// <summary>The balance projection was rebuilt from the ledger.</summary>
         public const string BalancesRebuilt = "inventory.balances.rebuilt";

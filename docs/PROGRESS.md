@@ -15,8 +15,8 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Phase 9 — inventory control (adjustments, counts, repeat-variance detection).
-**Last commit:** G5 — negative-stock attempts and the partitioning decision (see log).
+**Now:** stopped after Phase 9, as asked. Phase 10 — batch and expiration — is next when resumed.
+**Last commit:** Phase 9 — inventory control (see log).
 
 ---
 
@@ -68,7 +68,13 @@ and the test suites pass. Nothing is pushed.
 
 ### Phases
 
-- [ ] **Phase 9 — Inventory control:** adjustments with reasons and approval thresholds; damage/expiry/spoilage/loss/theft; counts (full, cycle, category, product) with snapshot, variance, approval, posting; repeat-variance detection
+- [x] **Phase 9 — Inventory control** (ADR-0031)
+  - [x] Stock adjustments: reasons mapped to write-off, expiry and correction movements; value-tiered approval by someone other than the author; reject; reversal
+  - [x] Counts: full, cycle, category, product; sheet from the ledger; per-line re-read of system quantity; stale lines refused at approval; variance-only posting; reject to recount; cancel
+  - [x] Variance and repeat-variance reports; repeat variance flagged on submission (90 days)
+  - [x] Migration `20260914120000_InventoryControl`; full flow verified on PostgreSQL
+  - [x] Removed six empty junk files from the repository root (three created by the local hook, three committed in Phase 1)
+  - [x] Full test run (445 passed) and commit
 - [ ] **Phase 10 — Batch and expiration:** FEFO allocation service, expiry thresholds, expiry worker, sale blocking with authorized override
 - [ ] **Phase 11 — POS:** shifts with cash reconciliation, sale lifecycle, pricing/discount/VAT, payments, atomic completion, receipts and reprint, void/return/refund, customers, daily summary
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
@@ -128,6 +134,13 @@ and the test suites pass. Nothing is pushed.
   Verification: full solution **404 passed, 0 failed, 0 skipped** (Domain 182,
   Application 20, Infrastructure 40, Security 52, Architecture 13, API 97) with
   Docker running; no pending model changes.
+- **G5 committed** as `7642a18`.
+- **Phase 9 finished.** Stock adjustments and inventory counts with approval,
+  posting, reversal, variance and repeat-variance reports (ADR-0031).
+  Verification: full solution **445 passed, 0 failed, 0 skipped** (Domain
+  215, Application 20, Infrastructure 40, Security 52,
+  Architecture 13, API 105) with Docker running; no pending model changes.
+  Work stops here until resumed.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

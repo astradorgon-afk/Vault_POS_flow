@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-14 · **Milestone:** Phase 8 complete, interim payment receipts (ADR-0026), gap batches G1–G5 closed; Phase 9 next
+**Last updated:** 2026-09-14 · **Milestone:** Phase 9 (Inventory Control) complete, gap batches G1–G5 closed; Phase 10 next
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,20 +13,20 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **404 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
-| Migrations | 18, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **445 passing, 0 failing, 0 skipped** (2026-09-14 full solution run, SQLite + PostgreSQL with Docker) |
+| Migrations | 19, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps) |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
-| Phases remaining | 9–18 — see §5 |
+| Phases remaining | 10–18 — see §5 |
 
 ```
-Pos.Domain.Tests            182 passing   invariants, money, ledger rules, catalog curation and price supersession, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
+Pos.Domain.Tests            215 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
 Pos.Infrastructure.Tests     40 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order (18 need Docker)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests        20 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering
-Pos.Api.IntegrationTests     97 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, one API host run on PostgreSQL (Docker)
+Pos.Api.IntegrationTests    105 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, API host runs on PostgreSQL (Docker)
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -42,7 +42,7 @@ developer with no Docker still gets a green local run; CI always has one.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (30 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (31 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with
@@ -354,6 +354,27 @@ costing, negative-stock policy, idempotency by event id.
   reject netting the supplier bucket to zero, write-off gated by the second
   permission and reason whitelist, cross-store 403s, and photo flows.
 
+### Phase 9 — inventory control (ADR-0031)
+- **Stock adjustments** (`StockAdjustment`, ADJ): Draft → PendingApproval →
+  Posted, Rejected or Reversed. The reason decides the ledger movement — damage,
+  spoilage, loss and theft write off to EXT-WRITEOFF, Expired moves stock to the
+  Expired state or writes it off, only `Other` (with notes) may add stock. Unit
+  costs are captured when raised. Approval posts in the same transaction through
+  the approval gate: value tier, location scope, never the author. Reversal posts
+  opposite `Reversal` groups at the original costs.
+- **Inventory counts** (`InventoryCount`, CNT): full, cycle, category and product
+  counts of available stock. The sheet comes from the ledger; recording a line
+  re-reads its bucket so mid-count sales are not shrinkage; submission needs
+  every line counted and flags products that varied on another posted count in
+  the last 90 days; approval refuses lines whose stock moved after counting and
+  posts only the variance as count adjustments. Reject returns to counting;
+  cancel ends it.
+- **Reports:** variance lines of posted counts, and repeat variances ranked by
+  occurrences and value. Lists and reports are confined to the caller's locations.
+- Migration `20260914120000_InventoryControl`. Tests: domain rules for both
+  aggregates; endpoint tests for approval tiers, scope, self-approval, reversal,
+  stale counts and repeat variance; the whole flow on PostgreSQL.
+
 ### Interim payment receipts (ADR-0026)
 
 ADR-0025 weighed an organisation-level subscription billing module and was
@@ -604,6 +625,7 @@ Stated plainly so they are not mistaken for finished work:
 
 | Gap | Where | Impact |
 |---|---|---|
+| Counts cover the Available state only; no per-location auto-approval threshold | Phase 9 | Damaged, quarantined and expired stock is adjusted, not counted; every adjustment needs an approver (ADR-0031). |
 | `inventory_movement` and `audit_log` not partitioned | Phase 4 | By decision (ADR-0030): revisit at about 50 million ledger rows, or with audit archiving (2033). |
 | `AutoPassInspection` per location/category not built | Phase 5 | Receipts always land in `PendingInspection`; the trusted-category fast path is a settings-driven follow-up. |
 | Cost-variance notification not raised | Phase 5 | The receipt flags `costVariancePendingApproval` and records the approver; the notification/queue item is not built. |
@@ -627,10 +649,10 @@ aggregate with lines and photos, quarantine ledger postings, HQ review outcomes
 approvers), and scope-exact list/detail reads. Interim payment receipts
 (ADR-0026) landed alongside it. Three strands remain:
 
-1. **Phase 9 — inventory control** (per ROADMAP): stock adjustments with reasons
-   and approval thresholds, damage/expiry/spoilage/loss/theft flows, and
-   inventory counts (full, cycle, category, product-specific) with snapshot,
-   variance calculation, approval, posting, and repeat-variance detection.
+1. **Phase 10 — batch and expiration** (per ROADMAP): FEFO allocation, expiry
+   warning thresholds, the expiry worker (which will raise the `ExpiryQuarantine`
+   moves Phase 9 adjustments can already post by hand), and sale blocking with an
+   authorized exception path.
 2. **Phase 8 tail:** the automated quarantine triggers (unknown barcode at scan,
    over-receipt excess, unclear returns) that would raise incidents without staff
    action, plus notifications and the Owner-dashboard exception panel — both left
@@ -638,7 +660,7 @@ approvers), and scope-exact list/detail reads. Interim payment receipts
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
    correctness and deployment, receipts, identity administration, catalog
    curation, and the negative-stock record with the partitioning decision.
-   Phase 9 is next.
+   Phase 9 followed them.
 
 ---
 

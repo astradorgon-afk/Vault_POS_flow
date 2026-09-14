@@ -241,6 +241,8 @@ try
     app.MapProductCurationEndpoints();
     app.MapInventoryEndpoints();
     app.MapInventoryExceptionEndpoints();
+    app.MapStockAdjustmentEndpoints();
+    app.MapInventoryCountEndpoints();
     app.MapPurchaseEndpoints();
     app.MapDirectDeliveryEndpoints();
     app.MapSupplierReturnEndpoints();
