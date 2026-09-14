@@ -10,6 +10,7 @@ using Pos.Application.Inventory;
 using Pos.Application.Purchasing;
 using Pos.Application.Quarantine;
 using Pos.Application.Receipts;
+using Pos.Application.Sales;
 using Pos.Application.Transfers;
 using Pos.Infrastructure.Auditing;
 using Pos.Infrastructure.Common;
@@ -68,6 +69,7 @@ public static class DependencyInjection
         services.TryAddScoped<ITransferRepository, TransferRepository>();
         services.TryAddScoped<IQuarantineRepository, QuarantineRepository>();
         services.TryAddScoped<IReceiptRepository, ReceiptRepository>();
+        services.TryAddScoped<ISalesRepository, SalesRepository>();
         services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();
         services.TryAddScoped<IExpiryService, ExpiryService>();
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();

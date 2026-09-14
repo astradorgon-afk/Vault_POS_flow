@@ -14,7 +14,7 @@ DECLARE
     schema_name text;
 BEGIN
     FOREACH schema_name IN ARRAY ARRAY[
-        'core', 'catalog', 'inventory', 'purchasing', 'transfers', 'quarantine', 'audit', 'sync']
+        'core', 'catalog', 'inventory', 'purchasing', 'transfers', 'quarantine', 'audit', 'sync', 'sales']
     LOOP
         IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = schema_name) THEN
             CONTINUE;

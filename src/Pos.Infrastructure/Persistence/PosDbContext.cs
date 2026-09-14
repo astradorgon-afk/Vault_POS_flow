@@ -11,6 +11,7 @@ using Pos.Domain.Organizations;
 using Pos.Domain.Purchasing;
 using Pos.Domain.Quarantine;
 using Pos.Domain.Receipts;
+using Pos.Domain.Sales;
 using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
@@ -49,6 +50,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Schema holding quarantine incidents, lines, photographs and timelines.</summary>
     public const string QuarantineSchema = "quarantine";
+
+    /// <summary>Schema holding POS documents: sales, items, payments and the cashier shift ledger.</summary>
+    public const string SalesSchema = "sales";
 
     /// <summary>
     /// Gets the append-only inventory ledger. Insert only: the interceptor and
@@ -194,6 +198,15 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets payment receipts.</summary>
     public DbSet<Receipt> Receipts => Set<Receipt>();
+
+    /// <summary>Gets completed sales and their lines and payments.</summary>
+    public DbSet<Sale> Sales => Set<Sale>();
+
+    /// <summary>Gets the lines of completed sales.</summary>
+    public DbSet<SaleItem> SaleItems => Set<SaleItem>();
+
+    /// <summary>Gets the payments recorded against completed sales.</summary>
+    public DbSet<Payment> Payments => Set<Payment>();
 
     /// <summary>Gets stock adjustments.</summary>
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();

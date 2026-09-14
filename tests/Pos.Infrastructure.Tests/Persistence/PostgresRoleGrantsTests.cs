@@ -22,7 +22,7 @@ namespace Pos.Infrastructure.Tests.Persistence;
 public sealed class PostgresRoleGrantsTests : IAsyncLifetime
 {
     private const string BusinessSchemas =
-        "'core', 'catalog', 'inventory', 'purchasing', 'transfers', 'quarantine', 'audit'";
+        "'core', 'catalog', 'inventory', 'purchasing', 'transfers', 'quarantine', 'audit', 'sales'";
 
     private static readonly string[] AppendOnlyTables =
     [
