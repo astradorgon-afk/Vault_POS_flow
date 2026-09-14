@@ -21,6 +21,12 @@ public sealed record LocationSettings
     /// <summary>Maximum length of a receipt header or footer line.</summary>
     public const int ReceiptTextMaxLength = 120;
 
+    /// <summary>Default value-added tax rate as a fraction (12% under current Philippine rules).</summary>
+    public const decimal DefaultVatRate = 0.12m;
+
+    /// <summary>Default cash-rounding increment for change.</summary>
+    public const decimal DefaultCashRoundingIncrement = 0.01m;
+
     /// <summary>
     /// The conservative defaults: negative stock prohibited, direct supplier
     /// delivery disallowed, a 72-hour offline grace period and empty receipt text.
@@ -41,6 +47,20 @@ public sealed record LocationSettings
 
     /// <summary>Gets or sets the receipt footer text.</summary>
     public string ReceiptFooter { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the value-added tax rate as a fraction of the gross price
+    /// (0.12 for twelve percent). The server deducts VAT from the tax-inclusive
+    /// sale price using this rate (POS.md §2.6).
+    /// </summary>
+    public decimal VatRate { get; init; } = DefaultVatRate;
+
+    /// <summary>
+    /// Gets or sets the increment cash change is rounded to, for example 0.05
+    /// rounds change to the nearest five centavos (POS.md §2.7). A positive
+    /// amount; the strictest configuration does not round at all.
+    /// </summary>
+    public decimal CashRoundingIncrement { get; init; } = DefaultCashRoundingIncrement;
 
     /// <summary>
     /// Gets or sets the number of days before expiry at which a batch is

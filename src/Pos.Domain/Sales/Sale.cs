@@ -423,7 +423,7 @@ public class Sale : AggregateRoot<SaleId>
             return SaleErrors.ItemPriceOverrideAuthorizerRequired;
         }
 
-        if (spec.PriceVersion.IsEmpty)
+        if (spec.PriceVersion.IsEmpty && !spec.PriceWasOverridden)
         {
             return SaleErrors.ItemPriceVersionRequired;
         }

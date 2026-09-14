@@ -1,0 +1,918 @@
+using FluentAssertions;
+using NSubstitute;
+using Pos.Application.Common.Abstractions;
+using Pos.Application.Identity;
+using Pos.Application.Inventory;
+using Pos.Application.Sales;
+using Pos.Domain.Auditing;
+using Pos.Domain.Catalog;
+using Pos.Domain.Common;
+using Pos.Domain.Inventory;
+using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
+using Pos.Domain.Sales;
+
+namespace Pos.Application.Tests.Sales;
+
+/// <summary>Tests <see cref="CompleteSaleCommandHandler"/>.</summary>
+public sealed class CompleteSaleCommandHandlerTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 9, 14, 10, 0, 0, TimeSpan.Zero);
+    private static readonly DateOnly BusinessDate = new(2026, 9, 14);
+    private static readonly UserId Manager = UserId.New();
+
+    private readonly ISalesRepository _repository = Substitute.For<ISalesRepository>();
+    private readonly IExpiryService _expiry = Substitute.For<IExpiryService>();
+    private readonly IInventoryLedger _ledger = Substitute.For<IInventoryLedger>();
+    private readonly IDocumentNumberGenerator _numbers = Substitute.For<IDocumentNumberGenerator>();
+    private readonly IPermissionEvaluator _permissions = Substitute.For<IPermissionEvaluator>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
+
+    private readonly CompleteSaleCommandHandler _handler;
+
+    public CompleteSaleCommandHandlerTests()
+    {
+        _currentUser.DeviceId.Returns(DeviceId.New());
+        _currentUser.CorrelationId.Returns(new CorrelationId(Guid.NewGuid()));
+
+        _numbers.NextAsync(DocumentType.Sale, Arg.Any<CancellationToken>())
+            .Returns(DocumentNumber.Create(DocumentType.Sale, 2026, 1));
+
+        _ledger.PostAsync(Arg.Any<MovementGroupSpec>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PostedMovementGroup>.Success(new PostedMovementGroup(
+                MovementGroupId.New(),
+                EventId.New(),
+                2,
+                false,
+                Now)));
+
+        _handler = new CompleteSaleCommandHandler(
+            _repository,
+            _expiry,
+            _ledger,
+            _numbers,
+            _permissions,
+            _audit,
+            _currentUser);
+    }
+
+    // ------------------------------------------------------------------
+    // Happy path
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task HappyPath_ReturnsSuccess()
+    {
+        (CompleteSaleCommand command, Product product) = SetupHappyPath(sellableQuantity: 10m);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBe(SaleId.Empty);
+    }
+
+    [Fact]
+    public async Task HappyPath_PersistsSale()
+    {
+        (CompleteSaleCommand command, Product product) = SetupHappyPath(sellableQuantity: 10m);
+        SaleId expectedId = SaleId.New();
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(expectedId));
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.Value.Should().Be(expectedId);
+        await _repository.Received(1).AddAsync(
+            Arg.Any<Sale>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HappyPath_PostsLedgerWithTwoLegsPerItem()
+    {
+        (CompleteSaleCommand command, Product product) = SetupHappyPath(sellableQuantity: 10m);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        await _ledger.Received(1).PostAsync(
+            Arg.Is<MovementGroupSpec>(g =>
+                g.MovementType == InventoryMovementType.PosSale
+                && g.ReferenceDocumentType == ReferenceDocumentType.Sale
+                && g.EventId == command.EventId
+                && g.Legs.Count == 2),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HappyPath_NegativeLegIsAtStoreAvailable()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        LocationSettings settings = LocationSettings.Default;
+        (CompleteSaleCommand command, _) = BuildCommand(
+            locationId,
+            new SaleLocationFacts(LocationKind.Store, settings),
+            product);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        await _ledger.Received(1).PostAsync(
+            Arg.Is<MovementGroupSpec>(g =>
+                g.Legs[0].QuantityDelta < 0m
+                && g.Legs[0].LocationId == locationId
+                && g.Legs[0].State == InventoryState.Available),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HappyPath_PositiveLegIsAtExternalCustomer()
+    {
+        LocationId externalId = LocationId.New();
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(externalId);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        await _ledger.Received(1).PostAsync(
+            Arg.Is<MovementGroupSpec>(g =>
+                g.Legs[1].QuantityDelta > 0m
+                && g.Legs[1].LocationId == externalId
+                && g.Legs[1].State == InventoryState.External),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HappyPath_SetsCorrectSaleNumber()
+    {
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+        DocumentNumber number = DocumentNumber.Create(DocumentType.Sale, 2026, 42);
+        _numbers.NextAsync(DocumentType.Sale, Arg.Any<CancellationToken>())
+            .Returns(number);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        await _numbers.Received(1).NextAsync(DocumentType.Sale, Arg.Any<CancellationToken>());
+        await _repository.Received(1).AddAsync(
+            Arg.Is<Sale>(s => s.Number == number.Value),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HappyPath_WritesSaleCompletedAudit()
+    {
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e =>
+                e.Action == AuditActions.Sales.SaleCompleted
+                && e.EntityType == "sale"
+                && e.ReferenceDocumentType == ReferenceDocumentType.Sale),
+            Arg.Any<CancellationToken>());
+    }
+
+    // ------------------------------------------------------------------
+    // Location validation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task UnknownLocation_ReturnsNotFound()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns((SaleLocationFacts?)null);
+
+        var command = CommandWithLocation(locationId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.LocationUnknown(locationId));
+    }
+
+    [Fact]
+    public async Task ExternalLocation_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.External, LocationSettings.Default));
+
+        var command = CommandWithLocation(locationId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.LocationExternal);
+    }
+
+    [Fact]
+    public async Task ZeroVatRateLocation_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(
+                LocationKind.Store,
+                LocationSettings.Default with { VatRate = 0m }));
+
+        var command = CommandWithLocation(locationId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.VatRateInvalid(locationId));
+    }
+
+    // ------------------------------------------------------------------
+    // Product validation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task UnknownProduct_ReturnsNotFound()
+    {
+        ProductId productId = ProductId.New();
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product>());
+
+        var command = CommandWithLines(locationId, productId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.ProductUnknown(productId));
+    }
+
+    // ------------------------------------------------------------------
+    // Price resolution
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task NoPriceForProduct_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewProduct(); // No price scheduled
+        ProductId productId = product.Id;
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+
+        var command = CommandWithLines(locationId, productId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(SaleCommandErrors.PriceMissing(productId, locationId).Code);
+    }
+
+    [Fact]
+    public async Task PriceOverride_AllowsSaleWithoutEffectivePrice()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewProduct(); // No price scheduled
+        ProductId productId = product.Id;
+        UserId authorizer = UserId.New();
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+        _permissions.HasPermissionAsync(
+                Arg.Any<UserId>(), Permissions.Sales.PriceOverride, Arg.Any<LocationId?>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", 10m, null, 10m),
+            });
+
+        var command = new CompleteSaleCommand(
+            EventId.New(),
+            locationId,
+            CashierShiftId.New(),
+            DeviceId.New(),
+            UserId.New(),
+            null,
+            BusinessDate,
+            Now,
+            [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, 85m, authorizer, 0m, null, false)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 85m, 85m, null)]);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // Permissions
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task DiscountWithoutPermission_ReturnsForbidden()
+    {
+        LocationId locationId = LocationId.New();
+        UserId authorizer = UserId.New();
+        (CompleteSaleCommand command, _) = BuildCommandWithDiscount(
+            locationId, discount: 10m, authorizer);
+
+        _permissions.HasPermissionAsync(
+                authorizer, Permissions.Sales.Discount, locationId, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.DiscountNotAuthorized);
+    }
+
+    [Fact]
+    public async Task DiscountWithPermission_Succeeds()
+    {
+        LocationId locationId = LocationId.New();
+        UserId authorizer = UserId.New();
+        (CompleteSaleCommand command, _) = BuildCommandWithDiscount(
+            locationId, discount: 10m, authorizer);
+
+        _permissions.HasPermissionAsync(
+                authorizer, Permissions.Sales.Discount, locationId, Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PriceOverrideWithoutPermission_ReturnsForbidden()
+    {
+        LocationId locationId = LocationId.New();
+        UserId authorizer = UserId.New();
+        (CompleteSaleCommand command, _) = BuildCommandWithPriceOverride(
+            locationId, overridePrice: 80m, authorizer);
+
+        _permissions.HasPermissionAsync(
+                authorizer, Permissions.Sales.PriceOverride, locationId, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.PriceOverrideNotAuthorized);
+    }
+
+    [Fact]
+    public async Task PriceOverrideWithPermission_Succeeds()
+    {
+        LocationId locationId = LocationId.New();
+        UserId authorizer = UserId.New();
+        (CompleteSaleCommand command, _) = BuildCommandWithPriceOverride(
+            locationId, overridePrice: 80m, authorizer);
+
+        _permissions.HasPermissionAsync(
+                authorizer, Permissions.Sales.PriceOverride, locationId, Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // FEFO allocation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task InsufficientStock_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        (CompleteSaleCommand command, _) = BuildCommandWithQuantity(
+            locationId, quantity: 5m);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("inventory.insufficient_stock");
+    }
+
+    [Fact]
+    public async Task Fefo_AllocatesEarliestExpiryFirst()
+    {
+        LocationId locationId = LocationId.New();
+        LocationSettings settings = LocationSettings.Default;
+        Product product = NewBatchTrackedPricedProduct();
+        ProductId productId = product.Id;
+        UnitOfMeasureId uomId = UnitOfMeasureId.New();
+        BatchId earlyBatch = BatchId.New();
+        BatchId lateBatch = BatchId.New();
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, settings));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, lateBatch, "LOT-LATE", 10m, new DateOnly(2026, 12, 31), 10m),
+                new(productId, earlyBatch, "LOT-EARLY", 10m, new DateOnly(2026, 10, 1), 10m),
+            });
+
+        var command = new CompleteSaleCommand(
+            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
+            UserId.New(), null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 3m, uomId, null, null, null, 0m, null, false)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 300m, 300m, null)]);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+
+        // Verify the first slice is from the early-expiry batch.
+        await _repository.Received(1).AddAsync(
+            Arg.Is<Sale>(s =>
+                s.Items[0].BatchId == earlyBatch
+                && s.Items[0].Quantity == 3m),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MultiSliceAllocation_LineIsSplitAcrossSlices()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewBatchTrackedPricedProduct();
+        ProductId productId = product.Id;
+        UnitOfMeasureId uomId = UnitOfMeasureId.New();
+        BatchId batchA = BatchId.New();
+        BatchId batchB = BatchId.New();
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, batchA, "LOT-A", 2m, new DateOnly(2026, 10, 1), 10m),
+                new(productId, batchB, "LOT-B", 3m, new DateOnly(2026, 11, 1), 10m),
+            });
+
+        var command = new CompleteSaleCommand(
+            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
+            UserId.New(), null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 5m, uomId, null, null, null, 0m, null, false)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        await _repository.Received(1).AddAsync(
+            Arg.Is<Sale>(s =>
+                s.Items.Count == 2
+                && s.Items[0].BatchId == batchA && s.Items[0].Quantity == 2m
+                && s.Items[1].BatchId == batchB && s.Items[1].Quantity == 3m),
+            Arg.Any<CancellationToken>());
+    }
+
+    // ------------------------------------------------------------------
+    // Expired override
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ExpiredOverride_WhenSellableInsufficient_UsesExpiredBatches()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewBatchTrackedPricedProduct();
+        ProductId productId = product.Id;
+        UnitOfMeasureId uomId = UnitOfMeasureId.New();
+        BatchId expiredBatch = BatchId.New();
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.New(), "SELLABLE", 1m, new DateOnly(2026, 10, 1), 10m),
+            });
+
+        _repository.GetExpiredAvailableBatchesAsync(
+                locationId, productId, BusinessDate, Arg.Any<CancellationToken>())
+            .Returns(new List<ExpiredSaleBatch>
+            {
+                new(expiredBatch, "EXPIRED", 3m, new DateOnly(2026, 9, 1), 10m),
+            });
+
+        UserId cashierId = UserId.New();
+        _permissions.HasPermissionAsync(
+                cashierId, Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var command = new CompleteSaleCommand(
+            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
+            cashierId, null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 4m, uomId, null, null, null, 0m, null, true)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+
+        // Verify the last item was drawn from the expired batch.
+        await _repository.Received(1).AddAsync(
+            Arg.Is<Sale>(s =>
+                s.Items.Count == 2
+                && s.Items[0].Quantity == 1m  // sellable
+                && s.Items[1].BatchId == expiredBatch && s.Items[1].Quantity == 3m),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExpiredOverride_DeniedWithoutPermission()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+        UserId cashierId = UserId.New();
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.New(), "", 1m, null, 10m),
+            });
+        _repository.GetExpiredAvailableBatchesAsync(
+                locationId, productId, BusinessDate, Arg.Any<CancellationToken>())
+            .Returns(new List<ExpiredSaleBatch>
+            {
+                new(BatchId.New(), "EXP", 5m, new DateOnly(2026, 9, 1), 10m),
+            });
+
+        _permissions.HasPermissionAsync(
+                cashierId, Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var command = new CompleteSaleCommand(
+            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
+            cashierId, null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, true)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("inventory.insufficient_stock");
+    }
+
+    [Fact]
+    public async Task ExpiredOverride_WritesExpiredOverrideAudit()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewBatchTrackedPricedProduct();
+        ProductId productId = product.Id;
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.New(), "", 1m, null, 10m),
+            });
+        _repository.GetExpiredAvailableBatchesAsync(
+                locationId, productId, BusinessDate, Arg.Any<CancellationToken>())
+            .Returns(new List<ExpiredSaleBatch>
+            {
+                new(BatchId.New(), "EXP", 3m, new DateOnly(2026, 9, 1), 10m),
+            });
+        _permissions.HasPermissionAsync(
+                Arg.Any<UserId>(), Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var command = new CompleteSaleCommand(
+            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
+            UserId.New(), null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 4m, UnitOfMeasureId.New(), null, null, null, 0m, null, true)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        // Two audit writes: expired override, then sale.completed.
+        await _audit.Received(2).WriteAsync(
+            Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditActions.Sales.ExpiredOverride),
+            Arg.Any<CancellationToken>());
+
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditActions.Sales.SaleCompleted),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AllowExpiredOverrideFalse_DoesNotQueryExpiredBatches()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.New(), "", 1m, null, 10m),
+            });
+
+        var command = new CompleteSaleCommand(
+            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
+            UserId.New(), null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
+
+        await _handler.HandleAsync(command, CancellationToken.None);
+
+        // Should never call expired batches because AllowExpiredOverride = false.
+        await _repository.DidNotReceive().GetExpiredAvailableBatchesAsync(
+            Arg.Any<LocationId>(), Arg.Any<ProductId>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>());
+    }
+
+    // ------------------------------------------------------------------
+    // External customer location
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ExternalCustomerLocationMissing_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns((LocationId?)null);
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", 10m, null, 10m),
+            });
+
+        var command = CommandWithLines(locationId, productId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.ExternalCustomerLocationMissing);
+    }
+
+    // ------------------------------------------------------------------
+    // Ledger failure
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task LedgerFailure_ReturnsErrors()
+    {
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+        Error ledgerError = Error.Conflict("test.ledger", "Ledger refused.");
+        _ledger.PostAsync(Arg.Any<MovementGroupSpec>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PostedMovementGroup>.Failure(ledgerError));
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(ledgerError);
+    }
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+
+    private (CompleteSaleCommand Command, Product Product) SetupHappyPath(decimal sellableQuantity)
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", sellableQuantity, null, 10m),
+            });
+
+        CompleteSaleCommand command = CommandWithLines(locationId, productId);
+        return (command, product);
+    }
+
+    private static Product NewProduct()
+    {
+        return Product.Create(
+            $"CODE-{Guid.NewGuid():N}"[..8],
+            "Widget",
+            CategoryId.New(),
+            UnitOfMeasureId.New(),
+            Manager).Value;
+    }
+
+    /// <summary>Creates a product with an open-ended 100m price in effect now.</summary>
+    private static Product NewPricedProduct()
+    {
+        Product product = NewProduct();
+        product.SchedulePrice(null, 100m, Now, null, Manager, "Launch", Now);
+        return product;
+    }
+
+    /// <summary>
+    /// Creates a batch-tracked, expiry-tracked product with an open-ended
+    /// 100m price in effect now.
+    /// </summary>
+    private static Product NewBatchTrackedPricedProduct()
+    {
+        Product product = Product.Create(
+            $"CODE-{Guid.NewGuid():N}"[..8],
+            "Widget",
+            CategoryId.New(),
+            UnitOfMeasureId.New(),
+            Manager,
+            tracksBatches: true,
+            tracksExpiry: true,
+            shelfLifeDays: 30).Value;
+        product.SchedulePrice(null, 100m, Now, null, Manager, "Launch", Now);
+        return product;
+    }
+
+    private static CompleteSaleCommand CommandWithLocation(LocationId locationId) =>
+        new(
+            EventId.New(),
+            locationId,
+            CashierShiftId.New(),
+            DeviceId.New(),
+            UserId.New(),
+            null,
+            BusinessDate,
+            Now,
+            [new CompleteSaleLine(ProductId.New(), 1m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 100m, 100m, null)]);
+
+    private static CompleteSaleCommand CommandWithLines(LocationId locationId, ProductId productId) =>
+        new(
+            EventId.New(),
+            locationId,
+            CashierShiftId.New(),
+            DeviceId.New(),
+            UserId.New(),
+            null,
+            BusinessDate,
+            Now,
+            [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 100m, 100m, null)]);
+
+    private (CompleteSaleCommand Command, Product Product) BuildCommand(
+        LocationId locationId,
+        SaleLocationFacts locationFacts,
+        Product product)
+    {
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(locationFacts);
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+        _expiry.GetSellableBatchesAsync(locationId, product.Id, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(product.Id, BatchId.Empty, "", 10m, null, 10m),
+            });
+
+        CompleteSaleCommand command = CommandWithLines(locationId, product.Id);
+        return (command, product);
+    }
+
+    private (CompleteSaleCommand Command, Product Product) BuildCommandWithQuantity(
+        LocationId locationId,
+        decimal quantity)
+    {
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", 2m, null, 10m),
+            });
+
+        CompleteSaleCommand command = CommandWithLines(locationId, productId) with
+        {
+            Lines = [new CompleteSaleLine(productId, quantity, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+        };
+        return (command, product);
+    }
+
+    private (CompleteSaleCommand Command, Product Product) BuildCommandWithDiscount(
+        LocationId locationId,
+        decimal discount,
+        UserId authorizer)
+    {
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", 10m, null, 10m),
+            });
+
+        decimal paymentAmount = 100m - discount;
+        CompleteSaleCommand command = CommandWithLines(locationId, productId) with
+        {
+            Lines = [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, null, null, discount, authorizer, false)],
+            Payments = [new CompleteSalePayment(PaymentMethod.Cash, paymentAmount, paymentAmount, null)],
+        };
+        return (command, product);
+    }
+
+    private (CompleteSaleCommand Command, Product Product) BuildCommandWithPriceOverride(
+        LocationId locationId,
+        decimal overridePrice,
+        UserId authorizer)
+    {
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
+            .Returns(LocationId.New());
+        _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
+            .Returns(Result<SaleId>.Success(SaleId.New()));
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", 10m, null, 10m),
+            });
+
+        CompleteSaleCommand command = CommandWithLines(locationId, productId) with
+        {
+            Lines = [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, overridePrice, authorizer, 0m, null, false)],
+            Payments = [new CompleteSalePayment(PaymentMethod.Cash, overridePrice, overridePrice, null)],
+        };
+        return (command, product);
+    }
+}
