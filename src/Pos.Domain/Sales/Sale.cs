@@ -386,6 +386,50 @@ public class Sale : AggregateRoot<SaleId>
         return Result.Success();
     }
 
+    /// <summary>
+    /// Records that a customer return accepted back part of one line (POS.md §4).
+    /// The sale's state is the server-side cap every return is checked against:
+    /// each line may be returned up to the quantity originally sold, no more.
+    /// Returns of voided sales are rejected here as well as by the application
+    /// layer, so a return can never leak stock off a dead document.
+    /// </summary>
+    /// <param name="itemId">The sale line being returned against.</param>
+    /// <param name="returnedQuantity">The quantity the return accepted back.</param>
+    /// <returns>A success, or a validation failure.</returns>
+    public Result RecordReturn(SaleItemId itemId, decimal returnedQuantity)
+    {
+        if (Status != SaleStatus.Completed)
+        {
+            return Result.Failure(SaleErrors.ReturnOnlyCompleted);
+        }
+
+        SaleItem? item = _items.FirstOrDefault(i => i.Id == itemId);
+
+        if (item is null)
+        {
+            return Result.Failure(SaleErrors.ReturnItemUnknown(itemId));
+        }
+
+        if (returnedQuantity <= 0m)
+        {
+            return Result.Failure(SaleErrors.ReturnQuantityInvalid);
+        }
+
+        decimal remaining = decimal.Round(
+            item.Quantity - item.ReturnedQuantity,
+            Quantity.Scale,
+            MidpointRounding.ToEven);
+
+        if (returnedQuantity > remaining)
+        {
+            return Result.Failure(
+                SaleErrors.ReturnQuantityExceedsRemaining(itemId, remaining, returnedQuantity));
+        }
+
+        item.AccumulateReturnedQuantity(returnedQuantity);
+        return Result.Success();
+    }
+
     private static Error? ValidateHeader(
         EventId eventId,
         LocationId locationId,

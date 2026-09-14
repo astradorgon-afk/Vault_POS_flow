@@ -85,8 +85,9 @@ public sealed class ShiftRepository(PosDbContext context) : IShiftRepository
     /// <inheritdoc />
     /// <remarks>
     /// Cash sales are the cash payments against sales posted inside the shift,
-    /// joined through the sale's payment shadow key. Refunds and payouts are
-    /// zero until Batch C adds those documents to the shift total.
+    /// joined through the sale's payment shadow key. Cash refunds are the cash
+    /// refunds issued inside the shift. Payouts are zero until Batch C adds
+    /// petty-cash documents.
     /// </remarks>
     public async Task<ShiftCashTotals> GetShiftCashTotalsAsync(CashierShiftId shiftId, CancellationToken cancellationToken)
     {
@@ -99,6 +100,35 @@ public sealed class ShiftRepository(PosDbContext context) : IShiftRepository
             .SumAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return new ShiftCashTotals(cashSales, CashRefunds: 0m, Payouts: 0m);
+        decimal cashRefunds = await context.Refunds
+            .AsNoTracking()
+            .Where(f => f.CashierShiftId == shiftId && f.Method == PaymentMethod.Cash)
+            .Select(f => f.Amount)
+            .SumAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new ShiftCashTotals(cashSales, CashRefunds: cashRefunds, Payouts: 0m);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
+        SaleId saleId,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<PaymentMethod, decimal> refunded = await (
+            from r in context.Refunds.AsNoTracking()
+            join sr in context.SalesReturns.AsNoTracking()
+                on r.SalesReturnId equals sr.Id
+            where sr.SaleId == saleId
+            group r by r.Method into g
+            select new
+            {
+                Method = g.Key,
+                Total = g.Sum(f => f.Amount),
+            })
+            .ToDictionaryAsync(x => x.Method, x => x.Total, cancellationToken)
+            .ConfigureAwait(false);
+
+        return refunded;
     }
 }

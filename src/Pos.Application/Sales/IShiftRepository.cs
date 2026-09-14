@@ -50,8 +50,20 @@ public interface IShiftRepository
     /// <summary>Aggregates the cash totals a shift closure reconciles against.</summary>
     /// <param name="shiftId">The shift.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The totals; refunds and payouts are zero until Batch C adds them.</returns>
+    /// <returns>The totals; payouts are zero until a later batch adds them.</returns>
     Task<ShiftCashTotals> GetShiftCashTotalsAsync(CashierShiftId shiftId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Aggregates, per payment method, everything already refunded against a
+    /// sale across every return of it. A refund may never push the sum past
+    /// what the sale was originally paid by that method.
+    /// </summary>
+    /// <param name="saleId">The sale.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The per-method refunded amounts, keyed by method.</returns>
+    Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
+        SaleId saleId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>What a shift handler needs to know about one location.</summary>

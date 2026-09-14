@@ -195,6 +195,41 @@ public static class SaleErrors
         "sale.void.reason_invalid",
         FormattableString.Invariant($"A void reason is required and may be at most {maxLength} characters."));
 
+    /// <summary>Only a completed sale can record a return against it.</summary>
+    public static Error ReturnOnlyCompleted { get; } = Error.Conflict(
+        "sale.return.only_completed",
+        "Only a completed sale can be returned against.");
+
+    /// <summary>A return references a sale line that does not exist.</summary>
+    /// <param name="itemId">The unknown sale line.</param>
+    /// <returns>The error.</returns>
+    public static Error ReturnItemUnknown(SaleItemId itemId) => Error.Validation(
+        "sale.item.return_unknown",
+        FormattableString.Invariant($"Sale line {itemId} does not exist on this sale."));
+
+    /// <summary>A return quantity is not positive.</summary>
+    public static Error ReturnQuantityInvalid { get; } = Error.Validation(
+        "sale.item.return_quantity_invalid",
+        "A return must accept back more than zero units of a line.");
+
+    /// <summary>A return accepts back more than the line still holds unreturned.</summary>
+    /// <param name="itemId">The sale line.</param>
+    /// <param name="remaining">The units still available to return on the line.</param>
+    /// <param name="requested">The quantity the return asks for.</param>
+    /// <returns>The error.</returns>
+    public static Error ReturnQuantityExceedsRemaining(
+        SaleItemId itemId,
+        decimal remaining,
+        decimal requested) => Error.Conflict(
+        "sale.item.return_exceeds_remaining",
+        FormattableString.Invariant($"Sale line {itemId} still has {remaining} units available to return; {requested} were requested."),
+        new Dictionary<string, object?>
+        {
+            ["saleItemId"] = itemId.Value,
+            ["remaining"] = remaining,
+            ["requested"] = requested,
+        });
+
     /// <summary>The available stock at the location cannot cover the request.</summary>
     /// <param name="productId">The product.</param>
     /// <param name="locationId">The location.</param>

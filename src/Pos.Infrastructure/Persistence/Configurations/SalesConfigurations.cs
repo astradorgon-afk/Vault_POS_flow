@@ -191,6 +191,13 @@ public sealed class SaleItemConfiguration : IEntityTypeConfiguration<SaleItem>
             .HasPrecision(19, Money.StorageScale)
             .IsRequired();
 
+        // The quantity accepted back across accepted returns, capped by the
+        // line's own quantity. Zero until a return records against the sale.
+        builder.Property(i => i.ReturnedQuantity)
+            .HasColumnName("returned_quantity")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+
         builder.HasIndex(i => new { i.SaleId, i.LineNumber })
             .IsUnique()
             .HasDatabaseName("ux_sale_item_line_no");

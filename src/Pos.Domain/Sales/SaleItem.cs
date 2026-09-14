@@ -154,6 +154,26 @@ public sealed class SaleItem : Entity<SaleItemId>
     public decimal NetAmount { get; private set; }
 
     /// <summary>
+    /// Gets the quantity already returned against this line across accepted
+    /// returns. The parent sale keeps it current when a return records itself;
+    /// a return may accept back at most <see cref="Quantity"/> minus this.
+    /// </summary>
+    public decimal ReturnedQuantity { get; private set; }
+
+    /// <summary>
+    /// Adds an accepted-back quantity to <see cref="ReturnedQuantity"/>. The
+    /// parent sale validated the cap before calling; this only accumulates.
+    /// </summary>
+    /// <param name="quantity">The quantity accepted back by a return line.</param>
+    internal void AccumulateReturnedQuantity(decimal quantity)
+    {
+        ReturnedQuantity = decimal.Round(
+            ReturnedQuantity + quantity,
+            Pos.Domain.Common.Quantity.Scale,
+            MidpointRounding.ToEven);
+    }
+
+    /// <summary>
     /// Creates a line from a validated specification, computing the tax legs and
     /// totals. The parent aggregate validates the specification's shape first;
     /// this factory only performs arithmetic that cannot fail.

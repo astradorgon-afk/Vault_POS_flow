@@ -41,11 +41,19 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
     {
         ArgumentNullException.ThrowIfNull(sale);
 
-        // The sale was read untracked; attaching the root as modified stages
-        // exactly the scalar update a void performs. Its lines and payments are
-        // frozen, so they are left untouched.
+        // The sale was read untracked; attaching the graph and marking the root
+        // modified stages the scalar update a void performs. The lines are also
+        // marked modified because a return accumulates ReturnedQuantity on them
+        // before the sale is saved; payments stay untouched because they never
+        // change after completion.
         context.Sales.Attach(sale);
         context.Entry(sale).State = EntityState.Modified;
+
+        foreach (SaleItem item in sale.Items)
+        {
+            context.Entry(item).State = EntityState.Modified;
+        }
+
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return Result<SaleId>.Success(sale.Id);
@@ -157,4 +165,47 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
             .OrderBy(i => i.ExpiresOn ?? DateOnly.MaxValue)
             .ThenBy(i => i.BatchId?.Value ?? Guid.Empty)];
     }
+
+    /// <inheritdoc />
+    public async Task<Result<SalesReturnId>> AddReturnAsync(
+        SalesReturn salesReturn,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(salesReturn);
+
+        context.SalesReturns.Add(salesReturn);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<SalesReturnId>.Success(salesReturn.Id);
+    }
+
+    /// <inheritdoc />
+    public Task<SalesReturn?> GetReturnByIdAsync(SalesReturnId salesReturnId, CancellationToken cancellationToken)
+        => context.SalesReturns
+            .AsNoTracking()
+            .Include(r => r.Items)
+            .Include(r => r.Refunds)
+            .FirstOrDefaultAsync(r => r.Id == salesReturnId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<Result<RefundId>> AddRefundAsync(
+        SalesReturnId salesReturnId,
+        Refund refund,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(refund);
+
+        // The refund was produced by the aggregate loaded untracked; adding it
+        // stages only its row, which carries the foreign key to the return.
+        context.Refunds.Add(refund);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<RefundId>.Success(refund.Id);
+    }
+
+    /// <inheritdoc />
+    public Task<Refund?> GetRefundByEventAsync(EventId eventId, CancellationToken cancellationToken)
+        => context.Refunds
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.EventId == eventId, cancellationToken);
 }

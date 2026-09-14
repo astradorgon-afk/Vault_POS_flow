@@ -260,6 +260,9 @@ public static class AuditActions
         /// <summary>A sale was voided.</summary>
         public const string SaleVoided = "sale.voided";
 
+        /// <summary>A customer return accepted goods back.</summary>
+        public const string ReturnCreated = "sale.return.created";
+
         /// <summary>A refund was issued.</summary>
         public const string RefundIssued = "sale.refund.issued";
 

@@ -30,6 +30,7 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
     private SqliteConnection _connection = null!;
     private PosDbContext _context = null!;
     private ShiftRepository _repository = null!;
+    private SalesRepository _salesRepository = null!;
 
     /// <inheritdoc />
     public async Task InitializeAsync()
@@ -45,6 +46,7 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
         await _context.Database.EnsureCreatedAsync();
 
         _repository = new ShiftRepository(_context);
+        _salesRepository = new SalesRepository(_context);
 
         if (Location.Create(Organization.DefaultId, "MAIN", "Main Warehouse", LocationKind.MainWarehouse, "Asia/Manila")
                 is { IsSuccess: true } main
@@ -277,6 +279,258 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
         totals.CashSales.Should().Be(0m);
         totals.CashRefunds.Should().Be(0m);
         totals.Payouts.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GetShiftCashTotalsAsync_WithCashRefunds_CountsThem()
+    {
+        CashierShift shift = NewShift();
+        LocationId locationId = await GetStoreIdAsync();
+
+        await _repository.AddAsync(shift, CancellationToken.None);
+
+        Sale sale = NewSale(shift, locationId, quantity: 2m, unitPrice: 100m);
+        await _salesRepository.AddAsync(sale, CancellationToken.None);
+
+        SalesReturn salesReturn = NewReturn(sale, quantity: 1m);
+        await _salesRepository.AddReturnAsync(salesReturn, CancellationToken.None);
+
+        Refund refund = IssueCashRefund(salesReturn, amount: 40m);
+        await _salesRepository.AddRefundAsync(salesReturn.Id, refund, CancellationToken.None);
+
+        ShiftCashTotals totals = await _repository.GetShiftCashTotalsAsync(shift.Id, CancellationToken.None);
+
+        totals.CashSales.Should().Be(200m);
+        totals.CashRefunds.Should().Be(40m);
+        totals.Payouts.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GetRefundedAmountsByMethodAsync_AcrossReturns_SumsPerMethod()
+    {
+        CashierShift shift = NewShift();
+        LocationId locationId = await GetStoreIdAsync();
+
+        await _repository.AddAsync(shift, CancellationToken.None);
+
+        // 2 lines of 200 each, paid half by cash and half by card: each returned
+        // line is refundable for 200, and each method may be refunded up to 200.
+        Sale sale = NewTwoLineSale(shift, locationId, unitPrice: 200m);
+        await _salesRepository.AddAsync(sale, CancellationToken.None);
+
+        SalesReturn firstReturn = NewReturn(sale, quantity: 1m, lineIndex: 0);
+        await _salesRepository.AddReturnAsync(firstReturn, CancellationToken.None);
+
+        Refund firstRefund = IssueCashRefund(firstReturn, amount: 80m);
+        await _salesRepository.AddRefundAsync(firstReturn.Id, firstRefund, CancellationToken.None);
+
+        SalesReturn secondReturn = NewReturn(sale, quantity: 1m, lineIndex: 1);
+        await _salesRepository.AddReturnAsync(secondReturn, CancellationToken.None);
+
+        // The handler would supply prior refunds from this query; the aggregate
+        // enforces the caps, so mirror them here to keep the test inside the rules.
+        IReadOnlyDictionary<PaymentMethod, decimal> prior = new Dictionary<PaymentMethod, decimal>
+        {
+            [PaymentMethod.Cash] = 80m,
+        };
+
+        Result<Refund> cash = secondReturn.IssueRefund(
+            EventId.New(),
+            secondReturn.CashierShiftId,
+            secondReturn.DeviceId,
+            PaymentMethod.Cash,
+            amount: 60m,
+            tendered: 60m,
+            providerReference: null,
+            new DateTimeOffset(2026, 9, 15, 9, 45, 0, TimeSpan.Zero),
+            Cashier,
+            OriginalPaidByMethod(200m, 200m),
+            prior,
+            cashRoundingIncrement: 0.01m);
+        cash.IsSuccess.Should().BeTrue(because: string.Join("; ", cash.Errors.Select(e => e.Code)));
+        await _salesRepository.AddRefundAsync(secondReturn.Id, cash.Value, CancellationToken.None);
+
+        Result<Refund> card = secondReturn.IssueRefund(
+            EventId.New(),
+            secondReturn.CashierShiftId,
+            secondReturn.DeviceId,
+            PaymentMethod.Card,
+            amount: 100m,
+            tendered: null,
+            providerReference: "REF-2001",
+            new DateTimeOffset(2026, 9, 15, 9, 46, 0, TimeSpan.Zero),
+            Cashier,
+            OriginalPaidByMethod(200m, 200m),
+            prior,
+            cashRoundingIncrement: 0.01m);
+        card.IsSuccess.Should().BeTrue(because: string.Join("; ", card.Errors.Select(e => e.Code)));
+        await _salesRepository.AddRefundAsync(secondReturn.Id, card.Value, CancellationToken.None);
+
+        IReadOnlyDictionary<PaymentMethod, decimal> refunded =
+            await _repository.GetRefundedAmountsByMethodAsync(sale.Id, CancellationToken.None);
+
+        refunded.Should().HaveCount(2);
+        refunded[PaymentMethod.Cash].Should().Be(140m);
+        refunded[PaymentMethod.Card].Should().Be(100m);
+    }
+
+    [Fact]
+    public async Task GetRefundedAmountsByMethodAsync_NoRefunds_ReturnsEmpty()
+    {
+        Sale sale = NewSale(NewShift(), await GetStoreIdAsync(), quantity: 1m, unitPrice: 100m);
+        await _salesRepository.AddAsync(sale, CancellationToken.None);
+
+        IReadOnlyDictionary<PaymentMethod, decimal> refunded =
+            await _repository.GetRefundedAmountsByMethodAsync(sale.Id, CancellationToken.None);
+
+        refunded.Should().BeEmpty();
+    }
+
+    private static Dictionary<PaymentMethod, decimal> OriginalPaidByMethod(
+        decimal cash,
+        decimal card)
+        => new Dictionary<PaymentMethod, decimal>
+        {
+            [PaymentMethod.Cash] = cash,
+            [PaymentMethod.Card] = card,
+        };
+
+    private static Sale NewSale(CashierShift shift, LocationId locationId, decimal quantity, decimal unitPrice)
+    {
+        ItemSpec item = new(
+            ProductId.New(),
+            "Widget",
+            Barcode: null,
+            Quantity: quantity,
+            Unit,
+            unitPrice,
+            PriceVersion: ProductPriceId.New(),
+            PriceWasOverridden: false,
+            PriceOverrideAuthorizedByUserId: null,
+            Discount: 0m,
+            DiscountAuthorizedByUserId: null,
+            VatRate: null,
+            IsVatExempt: false,
+            IsZeroRated: true,
+            BatchId: null,
+            BatchCode: null,
+            BatchExpiresOn: null,
+            UnitCost: 0m,
+            TracksBatches: false);
+
+        decimal total = unitPrice * quantity;
+        PaymentSpec payment = new(PaymentMethod.Cash, total, total, ProviderReference: null);
+
+        return Sale.Create(
+                DocumentNumber.FromTrustedSource("SAL-2026-000002"),
+                EventId.New(),
+                locationId,
+                shift.Id,
+                Device,
+                customerId: null,
+                shift.BusinessDate,
+                shift.OpenedAtUtc,
+                Cashier,
+                [item],
+                [payment])
+            .Value;
+    }
+
+    private static Sale NewTwoLineSale(CashierShift shift, LocationId locationId, decimal unitPrice)
+    {
+        ItemSpec item = new(
+            ProductId.New(),
+            "Widget",
+            Barcode: null,
+            Quantity: 1m,
+            Unit,
+            unitPrice,
+            PriceVersion: ProductPriceId.New(),
+            PriceWasOverridden: false,
+            PriceOverrideAuthorizedByUserId: null,
+            Discount: 0m,
+            DiscountAuthorizedByUserId: null,
+            VatRate: null,
+            IsVatExempt: false,
+            IsZeroRated: true,
+            BatchId: null,
+            BatchCode: null,
+            BatchExpiresOn: null,
+            UnitCost: 0m,
+            TracksBatches: false);
+
+        PaymentSpec cash = new(PaymentMethod.Cash, unitPrice, unitPrice, ProviderReference: null);
+        PaymentSpec card = new(PaymentMethod.Card, unitPrice, unitPrice, ProviderReference: "REF-0001");
+
+        return Sale.Create(
+                DocumentNumber.FromTrustedSource("SAL-2026-000002"),
+                EventId.New(),
+                locationId,
+                shift.Id,
+                Device,
+                customerId: null,
+                shift.BusinessDate,
+                shift.OpenedAtUtc,
+                Cashier,
+                [item, item],
+                [cash, card])
+            .Value;
+    }
+
+    private static SalesReturn NewReturn(Sale sale, decimal quantity, int lineIndex = 0)
+    {
+        DateOnly businessDate = sale.BusinessDate;
+        DateTimeOffset now = new DateTimeOffset(2026, 9, 15, 9, 30, 0, TimeSpan.Zero);
+
+        IReadOnlyDictionary<SaleItemId, decimal> alreadyReturned =
+            sale.Items.ToDictionary(i => i.Id, _ => 0m);
+
+        Result<SalesReturn> result = SalesReturn.Create(
+            DocumentNumber.FromTrustedSource($"RET-2026-STORE01-{lineIndex + 1:D4}"),
+            EventId.New(),
+            sale.Id,
+            sale.LocationId,
+            sale.CashierShiftId,
+            sale.DeviceId,
+            customerId: null,
+            businessDate,
+            now,
+            sale.CompletedByUserId,
+            [new ReturnItemSpec(sale.Items[lineIndex], quantity)],
+            alreadyReturned);
+
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException(
+                $"Could not create test return: {string.Join("; ", result.Errors.Select(e => e.Code))}");
+        }
+
+        return result.Value;
+    }
+
+    private static Refund IssueCashRefund(SalesReturn salesReturn, decimal amount)
+    {
+        Result<Refund> result = salesReturn.IssueRefund(
+            EventId.New(),
+            salesReturn.CashierShiftId,
+            salesReturn.DeviceId,
+            PaymentMethod.Cash,
+            amount,
+            tendered: amount,
+            providerReference: null,
+            new DateTimeOffset(2026, 9, 15, 9, 45, 0, TimeSpan.Zero),
+            Cashier,
+            OriginalPaidByMethod(amount, 0m),
+            priorRefundedByMethod: new Dictionary<PaymentMethod, decimal>(),
+            cashRoundingIncrement: 0.01m);
+
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException(
+                $"Could not create test refund: {string.Join("; ", result.Errors.Select(e => e.Code))}");
+        }
+
+        return result.Value;
     }
 
     private static CashierShift NewShift(ShiftStatus status = ShiftStatus.Open)

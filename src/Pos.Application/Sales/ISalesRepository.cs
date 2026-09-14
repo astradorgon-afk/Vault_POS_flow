@@ -31,8 +31,9 @@ public interface ISalesRepository
     Task<Sale?> GetByIdAsync(SaleId saleId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Persists a changed sale. The lines and payments are frozen once
-    /// completed, so only the scalar state — such as a void — ever changes.
+    /// Persists a changed sale. A returned-quantity accumulation updates a line
+    /// and a void updates the scalar state; nothing else changes once a sale is
+    /// completed.
     /// </summary>
     /// <param name="sale">The sale to save.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -81,6 +82,41 @@ public interface ISalesRepository
         ProductId productId,
         DateOnly businessDate,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Persists a customer return with its return lines.
+    /// </summary>
+    /// <param name="salesReturn">The return to save.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The return identifier.</returns>
+    Task<Result<SalesReturnId>> AddReturnAsync(SalesReturn salesReturn, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Loads a customer return with its lines and refunds, for review before a
+    /// refund is issued against it.
+    /// </summary>
+    /// <param name="salesReturnId">The return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The return, or <see langword="null"/> when it does not exist.</returns>
+    Task<SalesReturn?> GetReturnByIdAsync(SalesReturnId salesReturnId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Persists a refund issued against a return.
+    /// </summary>
+    /// <param name="salesReturnId">The return the refund is issued against.</param>
+    /// <param name="refund">The refund to save.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The refund identifier.</returns>
+    Task<Result<RefundId>> AddRefundAsync(SalesReturnId salesReturnId, Refund refund, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Loads the refund recorded for an event, so a retried refund replays its
+    /// outcome instead of issuing twice.
+    /// </summary>
+    /// <param name="eventId">The refund's event identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The refund, or <see langword="null"/> when the event has not been refunded.</returns>
+    Task<Refund?> GetRefundByEventAsync(EventId eventId, CancellationToken cancellationToken);
 }
 
 /// <summary>The facts a completed sale depends on.</summary>
