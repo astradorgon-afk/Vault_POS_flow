@@ -10,6 +10,10 @@ public sealed class CompleteSaleCommandValidator : AbstractValidator<CompleteSal
     /// <summary>Initializes the validator.</summary>
     public CompleteSaleCommandValidator()
     {
+        RuleFor(c => c.Number)
+            .Must(n => n.DeviceShortCode is not null)
+            .WithErrorCode(SaleCommandErrors.NumberInvalid.Code);
+
         RuleFor(c => c.EventId)
             .NotEqual(EventId.Empty)
             .WithErrorCode(SaleErrors.EventRequired.Code);

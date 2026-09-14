@@ -1,4 +1,5 @@
 using Pos.Domain.Common;
+using Pos.Domain.Sales;
 
 namespace Pos.Application.Sales;
 
@@ -66,4 +67,40 @@ internal static class SaleCommandErrors
     public static Error ExternalCustomerLocationMissing => Error.Conflict(
         "sale.external_customer_missing",
         "The EXT-CUSTOMER counterparty location has not been provisioned; a sale cannot be posted without it.");
+
+    /// <summary>The sale carries no device-scoped SAL number.</summary>
+    public static Error NumberInvalid => Error.Validation(
+        "sale.number_invalid",
+        "A sale must carry the device-allocated SAL number it was rung up under.");
+
+    /// <summary>The number's device code does not match the device posting it.</summary>
+    public static Error NumberDeviceMismatch => Error.Conflict(
+        "sale.number_device_mismatch",
+        "The device code in the SAL number does not match the device that completed the sale.");
+
+    /// <summary>The device named by the command does not exist.</summary>
+    public static Error DeviceUnknown(DeviceId deviceId) => Error.NotFound(
+        "sale.device_unknown",
+        FormattableString.Invariant($"Unknown device {deviceId.Value}."));
+
+    /// <summary>The shift named by the command does not exist.</summary>
+    public static Error ShiftUnknown(CashierShiftId shiftId) => Error.NotFound(
+        "sale.shift_unknown",
+        FormattableString.Invariant($"No shift has the identifier {shiftId}."));
+
+    /// <summary>The shift is no longer open and cannot accept sales.</summary>
+    public static Error ShiftNotOpen(ShiftStatus status) => Error.Conflict(
+        "sale.shift_not_open",
+        FormattableString.Invariant($"The shift must be open to accept sales; it is {status}."),
+        new Dictionary<string, object?> { ["status"] = status.ToString() });
+
+    /// <summary>The cashier does not own the shift the sale is attached to.</summary>
+    public static Error ShiftCashierMismatch => Error.Conflict(
+        "sale.shift_cashier_mismatch",
+        "A sale can only be completed into a shift opened by the same cashier.");
+
+    /// <summary>The device does not own the shift the sale is attached to.</summary>
+    public static Error ShiftDeviceMismatch => Error.Conflict(
+        "sale.shift_device_mismatch",
+        "A sale can only be completed on the device the shift was opened on.");
 }

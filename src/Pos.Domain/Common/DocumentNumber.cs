@@ -75,6 +75,26 @@ public readonly partial record struct DocumentNumber
     /// <summary>Gets the formatted number.</summary>
     public string Value { get; }
 
+    /// <summary>
+    /// Gets the device short code embedded in a device-scoped number, or
+    /// <see langword="null"/> for a centrally numbered document type. Used by
+    /// the server to verify that a posted number was issued by the device that
+    /// claims it.
+    /// </summary>
+    public string? DeviceShortCode
+    {
+        get
+        {
+            if (Value is null)
+            {
+                return null;
+            }
+
+            string[] parts = Value.Split('-');
+            return parts.Length == 4 ? parts[2] : null;
+        }
+    }
+
     /// <summary>Returns the three-letter prefix used for a document type.</summary>
     /// <param name="type">The document type.</param>
     /// <returns>The prefix.</returns>

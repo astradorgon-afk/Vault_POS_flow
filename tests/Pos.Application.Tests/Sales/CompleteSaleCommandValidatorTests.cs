@@ -273,7 +273,29 @@ public sealed class CompleteSaleCommandValidatorTests
             .Errors.Should().ContainSingle(e => e.ErrorCode == SaleErrors.PaymentReferenceTooLong(Payment.ProviderReferenceMaxLength).Code);
     }
 
+    [Fact]
+    public void EmptyNumber_IsRejected()
+    {
+        var command = ValidCommand() with { Number = default };
+
+        _validator.Validate(command)
+            .Errors.Should().ContainSingle(e => e.ErrorCode == SaleCommandErrors.NumberInvalid.Code);
+    }
+
+    [Fact]
+    public void CentralNumberedSale_IsRejected()
+    {
+        var command = ValidCommand() with
+        {
+            Number = DocumentNumber.Create(DocumentType.Sale, 2026, 1),
+        };
+
+        _validator.Validate(command)
+            .Errors.Should().ContainSingle(e => e.ErrorCode == SaleCommandErrors.NumberInvalid.Code);
+    }
+
     private static CompleteSaleCommand ValidCommand() => new(
+        DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, "D01", 1),
         EventId.New(),
         LocationId.New(),
         CashierShiftId.New(),

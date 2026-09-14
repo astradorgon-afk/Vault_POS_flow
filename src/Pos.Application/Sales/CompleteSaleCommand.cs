@@ -12,13 +12,22 @@ namespace Pos.Application.Sales;
 /// movements and writes the audit entry.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The device already resolved prices, discounts and batches when the sale was
 /// rung up; the server re-derives every fact authoritatively — the price rows,
 /// VAT classification, FEFO allocation and cash rounding — so the recorded
-/// sale never trusts the client for its numbers. The event identifier makes a
-/// retried completion harmless: the ledger deduplicates the event and the sale
-/// is written once.
+/// sale never trusts the client for its numbers.
+/// </para>
+/// <para>
+/// The SAL number is device-scoped and allocated on the device when the sale
+/// starts (DocumentNumber.CreateForDevice), so a sale rung up offline keeps
+/// the number printed on its receipt when it syncs. The server verifies the
+/// number's device code against the authenticated device instead of allocating
+/// one itself. The event identifier makes a retried completion harmless: the
+/// ledger deduplicates the event and the sale is written once.
+/// </para>
 /// </remarks>
+/// <param name="Number">The device-allocated SAL number, for example <c>SAL-2026-D03-000812</c>.</param>
 /// <param name="EventId">The business event, generated on the device.</param>
 /// <param name="LocationId">The location the sale happened at.</param>
 /// <param name="CashierShiftId">The shift the sale belongs to.</param>
@@ -30,6 +39,7 @@ namespace Pos.Application.Sales;
 /// <param name="Lines">The lines to sell.</param>
 /// <param name="Payments">The payments that settle the sale.</param>
 public sealed record CompleteSaleCommand(
+    DocumentNumber Number,
     EventId EventId,
     LocationId LocationId,
     CashierShiftId CashierShiftId,

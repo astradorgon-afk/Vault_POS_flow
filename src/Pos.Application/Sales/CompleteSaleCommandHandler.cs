@@ -15,9 +15,11 @@ namespace Pos.Application.Sales;
 /// <summary>
 /// Handles <see cref="CompleteSaleCommand"/>. The handler re-derives every
 /// business fact — the effective price, the VAT classification, the FEFO
-/// allocation and the cash rounding — from server-authoritative data, allocates
-/// the SAL number, creates the sale, posts the inventory movements and writes
-/// the audit entry, all inside the unit-of-work transaction.
+/// allocation and the cash rounding — from server-authoritative data, verifies
+/// the shift is open and owned by the posting device and cashier, and creates
+/// the sale under the device-allocated SAL number, then posts the inventory
+/// movements and writes the audit entry, all inside the unit-of-work
+/// transaction.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,16 +29,17 @@ namespace Pos.Application.Sales;
 /// written.
 /// </para>
 /// <para>
-/// Shift-state validation is deferred to Batch B: the CashierShift aggregate
-/// and table do not exist yet, so the handler stores the CashierShiftId but
-/// does not enforce that the shift is open.
+/// The SAL number is device-scoped (POS.md §11): the device allocates it when
+/// the sale is rung up, so an offline sale keeps the number printed on its
+/// receipt. The server only verifies that the number's device code matches the
+/// device posting it — it never allocates a device-scoped number itself.
 /// </para>
 /// </remarks>
 public sealed class CompleteSaleCommandHandler(
     ISalesRepository repository,
     IExpiryService expiry,
     IInventoryLedger ledger,
-    IDocumentNumberGenerator numbers,
+    IShiftRepository shifts,
     IPermissionEvaluator permissions,
     IAuditWriter audit,
     ICurrentUser currentUser) : ICommandHandler<CompleteSaleCommand, SaleId>
@@ -74,6 +77,52 @@ public sealed class CompleteSaleCommandHandler(
         if (location.Settings.VatRate <= 0m)
         {
             return Result<SaleId>.Failure(SaleCommandErrors.VatRateInvalid(command.LocationId));
+        }
+
+        // ------------------------------------------------------------------
+        // 1b. Verify the device-allocated SAL number and the shift state.
+        // ------------------------------------------------------------------
+        if (command.Number.DeviceShortCode is null)
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.NumberInvalid);
+        }
+
+        ShiftDeviceFacts? device = await shifts
+            .GetDeviceFactsAsync(command.DeviceId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (device is null)
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.DeviceUnknown(command.DeviceId));
+        }
+
+        if (!string.Equals(command.Number.DeviceShortCode, device.ShortCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.NumberDeviceMismatch);
+        }
+
+        CashierShift? shift = await shifts
+            .GetShiftAsync(command.CashierShiftId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (shift is null)
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.ShiftUnknown(command.CashierShiftId));
+        }
+
+        if (shift.Status != ShiftStatus.Open)
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.ShiftNotOpen(shift.Status));
+        }
+
+        if (shift.CashierUserId != command.CashierId)
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.ShiftCashierMismatch);
+        }
+
+        if (shift.DeviceId != command.DeviceId)
+        {
+            return Result<SaleId>.Failure(SaleCommandErrors.ShiftDeviceMismatch);
         }
 
         // ------------------------------------------------------------------
@@ -342,17 +391,11 @@ public sealed class CompleteSaleCommandHandler(
         }
 
         // ------------------------------------------------------------------
-        // 5. Allocate the SAL number after every domain check has passed.
-        // ------------------------------------------------------------------
-        DocumentNumber number = await numbers
-            .NextAsync(DocumentType.Sale, cancellationToken)
-            .ConfigureAwait(false);
-
-        // ------------------------------------------------------------------
-        // 6. Create the sale via the domain factory.
+        // 5. Create the sale via the domain factory, under the device-allocated
+        //    SAL number verified in step 1b.
         // ------------------------------------------------------------------
         Result<Sale> created = Sale.Create(
-            number,
+            command.Number,
             command.EventId,
             command.LocationId,
             command.CashierShiftId,
@@ -373,7 +416,7 @@ public sealed class CompleteSaleCommandHandler(
         Sale sale = created.Value;
 
         // ------------------------------------------------------------------
-        // 7. Post the PosSale ledger movement (store Available ↔ EXT-CUSTOMER).
+        // 6. Post the PosSale ledger movement (store Available ↔ EXT-CUSTOMER).
         // ------------------------------------------------------------------
         LocationId? externalCustomerLocationId = await repository
             .GetExternalCustomerLocationIdAsync(cancellationToken)
@@ -438,7 +481,7 @@ public sealed class CompleteSaleCommandHandler(
         }
 
         // ------------------------------------------------------------------
-        // 8. Audit the sale completion.
+        // 7. Audit the sale completion.
         // ------------------------------------------------------------------
         string auditJson = JsonSerializer.Serialize(new
         {
@@ -464,7 +507,7 @@ public sealed class CompleteSaleCommandHandler(
             cancellationToken).ConfigureAwait(false);
 
         // ------------------------------------------------------------------
-        // 9. Persist the sale.
+        // 8. Persist the sale.
         // ------------------------------------------------------------------
         return await repository
             .AddAsync(sale, cancellationToken)

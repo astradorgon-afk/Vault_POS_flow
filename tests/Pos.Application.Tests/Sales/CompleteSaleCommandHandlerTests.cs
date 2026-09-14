@@ -21,14 +21,22 @@ public sealed class CompleteSaleCommandHandlerTests
     private static readonly DateOnly BusinessDate = new(2026, 9, 14);
     private static readonly UserId Manager = UserId.New();
 
+    private static readonly LocationId TestShiftLocation = LocationId.New();
+    private static readonly DeviceId TestDevice = DeviceId.New();
+    private static readonly UserId TestCashier = UserId.New();
+    private static readonly CashierShiftId TestShiftId = CashierShiftId.New();
+    private static readonly DocumentNumber TestSaleNumber =
+        DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, "D01", 1);
+
     private readonly ISalesRepository _repository = Substitute.For<ISalesRepository>();
     private readonly IExpiryService _expiry = Substitute.For<IExpiryService>();
     private readonly IInventoryLedger _ledger = Substitute.For<IInventoryLedger>();
-    private readonly IDocumentNumberGenerator _numbers = Substitute.For<IDocumentNumberGenerator>();
+    private readonly IShiftRepository _shifts = Substitute.For<IShiftRepository>();
     private readonly IPermissionEvaluator _permissions = Substitute.For<IPermissionEvaluator>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
 
+    private readonly CashierShift _openShift;
     private readonly CompleteSaleCommandHandler _handler;
 
     public CompleteSaleCommandHandlerTests()
@@ -36,8 +44,23 @@ public sealed class CompleteSaleCommandHandlerTests
         _currentUser.DeviceId.Returns(DeviceId.New());
         _currentUser.CorrelationId.Returns(new CorrelationId(Guid.NewGuid()));
 
-        _numbers.NextAsync(DocumentType.Sale, Arg.Any<CancellationToken>())
-            .Returns(DocumentNumber.Create(DocumentType.Sale, 2026, 1));
+        // A shift opened by the test cashier on the test device. Every command
+        // built by the helpers below carries TestShiftId / TestDevice /
+        // TestCashier and the test's own location, so the shift validation the
+        // handler performs passes before any business rule is evaluated.
+        _openShift = CashierShift.Open(
+            DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, "D01", 1),
+            TestShiftLocation,
+            TestDevice,
+            TestCashier,
+            0m,
+            BusinessDate,
+            Now).Value;
+
+        _shifts.GetDeviceFactsAsync(TestDevice, Arg.Any<CancellationToken>())
+            .Returns(new ShiftDeviceFacts("D01"));
+        _shifts.GetShiftAsync(Arg.Any<CashierShiftId>(), Arg.Any<CancellationToken>())
+            .Returns(_openShift);
 
         _ledger.PostAsync(Arg.Any<MovementGroupSpec>(), Arg.Any<CancellationToken>())
             .Returns(Result<PostedMovementGroup>.Success(new PostedMovementGroup(
@@ -51,7 +74,7 @@ public sealed class CompleteSaleCommandHandlerTests
             _repository,
             _expiry,
             _ledger,
-            _numbers,
+            _shifts,
             _permissions,
             _audit,
             _currentUser);
@@ -143,18 +166,14 @@ public sealed class CompleteSaleCommandHandlerTests
     }
 
     [Fact]
-    public async Task HappyPath_SetsCorrectSaleNumber()
+    public async Task HappyPath_PersistsCallerSuppliedNumber()
     {
         (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
-        DocumentNumber number = DocumentNumber.Create(DocumentType.Sale, 2026, 42);
-        _numbers.NextAsync(DocumentType.Sale, Arg.Any<CancellationToken>())
-            .Returns(number);
 
         await _handler.HandleAsync(command, CancellationToken.None);
 
-        await _numbers.Received(1).NextAsync(DocumentType.Sale, Arg.Any<CancellationToken>());
         await _repository.Received(1).AddAsync(
-            Arg.Is<Sale>(s => s.Number == number.Value),
+            Arg.Is<Sale>(s => s.Number == command.Number.Value),
             Arg.Any<CancellationToken>());
     }
 
@@ -222,6 +241,139 @@ public sealed class CompleteSaleCommandHandlerTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Should().Be(SaleCommandErrors.VatRateInvalid(locationId));
+    }
+
+    // ------------------------------------------------------------------
+    // Shift and number validation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task MissingNumber_ReturnsValidation()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+
+        var command = CommandWithLocation(locationId) with { Number = default };
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.NumberInvalid);
+    }
+
+    [Fact]
+    public async Task UnknownDevice_ReturnsNotFound()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _shifts.GetDeviceFactsAsync(TestDevice, Arg.Any<CancellationToken>())
+            .Returns((ShiftDeviceFacts?)null);
+
+        var command = CommandWithLocation(locationId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.DeviceUnknown(TestDevice));
+    }
+
+    [Fact]
+    public async Task NumberFromAnotherDevice_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _shifts.GetDeviceFactsAsync(TestDevice, Arg.Any<CancellationToken>())
+            .Returns(new ShiftDeviceFacts("D99"));
+
+        var command = CommandWithLocation(locationId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.NumberDeviceMismatch);
+    }
+
+    [Fact]
+    public async Task UnknownShift_ReturnsNotFound()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _shifts.GetShiftAsync(Arg.Any<CashierShiftId>(), Arg.Any<CancellationToken>())
+            .Returns((CashierShift?)null);
+
+        var command = CommandWithLocation(locationId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.ShiftUnknown(command.CashierShiftId));
+    }
+
+    [Fact]
+    public async Task SuspendedShift_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.Empty, "", 10m, null, 10m),
+            });
+
+        _openShift.Suspend();
+        _shifts.GetShiftAsync(Arg.Any<CashierShiftId>(), Arg.Any<CancellationToken>())
+            .Returns(_openShift);
+
+        var command = CommandWithLines(locationId, productId);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(SaleCommandErrors.ShiftNotOpen(ShiftStatus.Suspended).Code);
+    }
+
+    [Fact]
+    public async Task SaleFromAnotherCashier_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+
+        var command = CommandWithLocation(locationId) with { CashierId = UserId.New() };
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.ShiftCashierMismatch);
+    }
+
+    [Fact]
+    public async Task SaleFromAnotherDevice_ReturnsConflict()
+    {
+        LocationId locationId = LocationId.New();
+        DeviceId otherDevice = DeviceId.New();
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        // Another real device exists for the same short code, but only the
+        // shift owner may post into the shift.
+        _shifts.GetDeviceFactsAsync(otherDevice, Arg.Any<CancellationToken>())
+            .Returns(new ShiftDeviceFacts("D01"));
+
+        var command = CommandWithLocation(locationId) with { DeviceId = otherDevice };
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Be(SaleCommandErrors.ShiftDeviceMismatch);
     }
 
     // ------------------------------------------------------------------
@@ -296,11 +448,12 @@ public sealed class CompleteSaleCommandHandlerTests
             });
 
         var command = new CompleteSaleCommand(
+            TestSaleNumber,
             EventId.New(),
             locationId,
-            CashierShiftId.New(),
-            DeviceId.New(),
-            UserId.New(),
+            TestShiftId,
+            TestDevice,
+            TestCashier,
             null,
             BusinessDate,
             Now,
@@ -431,8 +584,8 @@ public sealed class CompleteSaleCommandHandlerTests
             });
 
         var command = new CompleteSaleCommand(
-            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
-            UserId.New(), null, BusinessDate, Now,
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
             [new CompleteSaleLine(productId, 3m, uomId, null, null, null, 0m, null, false)],
             [new CompleteSalePayment(PaymentMethod.Cash, 300m, 300m, null)]);
 
@@ -475,8 +628,8 @@ public sealed class CompleteSaleCommandHandlerTests
             });
 
         var command = new CompleteSaleCommand(
-            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
-            UserId.New(), null, BusinessDate, Now,
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
             [new CompleteSaleLine(productId, 5m, uomId, null, null, null, 0m, null, false)],
             [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
 
@@ -526,14 +679,13 @@ public sealed class CompleteSaleCommandHandlerTests
                 new(expiredBatch, "EXPIRED", 3m, new DateOnly(2026, 9, 1), 10m),
             });
 
-        UserId cashierId = UserId.New();
         _permissions.HasPermissionAsync(
-                cashierId, Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
+                TestCashier, Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
             .Returns(true);
 
         var command = new CompleteSaleCommand(
-            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
-            cashierId, null, BusinessDate, Now,
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
             [new CompleteSaleLine(productId, 4m, uomId, null, null, null, 0m, null, true)],
             [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
 
@@ -556,7 +708,6 @@ public sealed class CompleteSaleCommandHandlerTests
         LocationId locationId = LocationId.New();
         Product product = NewPricedProduct();
         ProductId productId = product.Id;
-        UserId cashierId = UserId.New();
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
@@ -575,12 +726,12 @@ public sealed class CompleteSaleCommandHandlerTests
             });
 
         _permissions.HasPermissionAsync(
-                cashierId, Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
+                TestCashier, Permissions.Sales.ExpiredOverride, locationId, Arg.Any<CancellationToken>())
             .Returns(false);
 
         var command = new CompleteSaleCommand(
-            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
-            cashierId, null, BusinessDate, Now,
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
             [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, true)],
             [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
 
@@ -621,8 +772,8 @@ public sealed class CompleteSaleCommandHandlerTests
             .Returns(true);
 
         var command = new CompleteSaleCommand(
-            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
-            UserId.New(), null, BusinessDate, Now,
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
             [new CompleteSaleLine(productId, 4m, UnitOfMeasureId.New(), null, null, null, 0m, null, true)],
             [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
 
@@ -659,8 +810,8 @@ public sealed class CompleteSaleCommandHandlerTests
             });
 
         var command = new CompleteSaleCommand(
-            EventId.New(), locationId, CashierShiftId.New(), DeviceId.New(),
-            UserId.New(), null, BusinessDate, Now,
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
             [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
             [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
 
@@ -787,11 +938,12 @@ public sealed class CompleteSaleCommandHandlerTests
 
     private static CompleteSaleCommand CommandWithLocation(LocationId locationId) =>
         new(
+            TestSaleNumber,
             EventId.New(),
             locationId,
-            CashierShiftId.New(),
-            DeviceId.New(),
-            UserId.New(),
+            TestShiftId,
+            TestDevice,
+            TestCashier,
             null,
             BusinessDate,
             Now,
@@ -800,11 +952,12 @@ public sealed class CompleteSaleCommandHandlerTests
 
     private static CompleteSaleCommand CommandWithLines(LocationId locationId, ProductId productId) =>
         new(
+            TestSaleNumber,
             EventId.New(),
             locationId,
-            CashierShiftId.New(),
-            DeviceId.New(),
-            UserId.New(),
+            TestShiftId,
+            TestDevice,
+            TestCashier,
             null,
             BusinessDate,
             Now,
