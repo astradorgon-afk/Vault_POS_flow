@@ -249,6 +249,7 @@ try
     app.MapTransferEndpoints();
     app.MapQuarantineEndpoints();
     app.MapReceiptEndpoints();
+    app.MapShiftEndpoints();
     app.MapAdministrationEndpoints();
 
     await app.RunAsync();

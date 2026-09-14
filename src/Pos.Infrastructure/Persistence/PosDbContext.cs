@@ -208,6 +208,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the payments recorded against completed sales.</summary>
     public DbSet<Payment> Payments => Set<Payment>();
 
+    /// <summary>Gets the cashier shift ledger.</summary>
+    public DbSet<CashierShift> CashierShifts => Set<CashierShift>();
+
     /// <summary>Gets stock adjustments.</summary>
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
 

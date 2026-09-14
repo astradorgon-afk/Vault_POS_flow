@@ -62,6 +62,13 @@ public static class ShiftErrors
         "shift.unknown",
         FormattableString.Invariant($"No shift has the identifier {id}."));
 
+    /// <summary>The shift belongs to a location outside the caller's scope.</summary>
+    /// <param name="id">The shift identifier.</param>
+    /// <returns>The error.</returns>
+    public static Error OutsideScope(CashierShiftId id) => Error.Forbidden(
+        "shift.outside_scope",
+        FormattableString.Invariant($"The shift {id} belongs to a location outside your scope."));
+
     /// <summary>The shift is not in the state the operation needs.</summary>
     /// <param name="expected">The required state.</param>
     /// <param name="actual">The current state.</param>

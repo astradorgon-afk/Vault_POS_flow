@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
+using Pos.Domain.Devices;
 using Pos.Domain.Identity;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
@@ -47,6 +48,9 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
 
     /// <summary>Gets the password used for every seeded test account.</summary>
     public const string TestPassword = "correct-horse-battery-staple";
+
+    /// <summary>Gets the PIN used for every seeded test account with a PIN.</summary>
+    public const string TestPin = "481516";
 
     /// <summary>Creates a factory with the standard test environment.</summary>
     public PosApiFactory()
@@ -189,12 +193,14 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
     /// <param name="role">The role to assign.</param>
     /// <param name="locations">The locations to assign the user to.</param>
     /// <param name="tier">The approval tier.</param>
+    /// <param name="employeeCode">An employee code, when the user signs in by PIN.</param>
     /// <returns>The created user's identifier.</returns>
     public async Task<UserId> CreateUserAsync(
         string userName,
         string role,
         IReadOnlyList<LocationId>? locations = null,
-        ApprovalTier tier = ApprovalTier.None)
+        ApprovalTier tier = ApprovalTier.None,
+        string? employeeCode = null)
     {
         using IServiceScope scope = Services.CreateScope();
 
@@ -210,6 +216,7 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
             Email = userName + "@tests.local",
             EmailConfirmed = true,
             DisplayName = userName,
+            EmployeeCode = employeeCode,
             ApprovalTier = tier,
             IsActive = true,
             CreatedAtUtc = DateTimeOffset.UtcNow,
@@ -222,6 +229,12 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         {
             throw new InvalidOperationException(
                 "Could not create test user: " + string.Join("; ", created.Errors.Select(e => e.Description)));
+        }
+
+        if (employeeCode is not null)
+        {
+            user.PinHash = users.PasswordHasher.HashPassword(user, TestPin);
+            await users.UpdateAsync(user);
         }
 
         await users.AddToRoleAsync(user, role);
@@ -244,7 +257,8 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         return id;
     }
 
-    /// <summary>Creates a physical location directly in the database, or returns
+    /// <summary>
+    /// Creates a physical location directly in the database, or returns
     /// the one already bearing the code. The database is shared by every test in
     /// a class, so seeds are idempotent by code.</summary>
     /// <param name="code">The short unique code.</param>
@@ -301,6 +315,59 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
             await context.SaveChangesAsync();
             return created.Value.Id;
         });
+
+    /// <summary>Registers and enrols a device at a location, or returns the one
+    /// already bearing the short code. The database is shared by every test in
+    /// a class, so seeds are idempotent by code.</summary>
+    /// <param name="shortCode">The document-number short code.</param>
+    /// <param name="locationId">The location.</param>
+    /// <param name="status">The status to leave the device in.</param>
+    /// <returns>The enrolled device's identifier.</returns>
+    public async Task<DeviceId> CreateDeviceAsync(
+        string shortCode,
+        LocationId locationId,
+        DeviceStatus status = DeviceStatus.Active)
+    {
+        using IServiceScope scope = Services.CreateScope();
+        PosDbContext context = scope.ServiceProvider.GetRequiredService<PosDbContext>();
+
+        Device? existing = await context.Devices.FirstOrDefaultAsync(d => d.ShortCode == shortCode, CancellationToken.None);
+
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
+
+        UserId systemUser = new(Guid.CreateVersion7());
+
+        Result<Device> device = Device.Register(
+            shortCode, "Test " + shortCode, locationId, DevicePlatform.Windows, DateTimeOffset.UtcNow, systemUser);
+
+        if (device.IsFailure)
+        {
+            throw new InvalidOperationException(
+                "Could not register test device: " + string.Join("; ", device.Errors.Select(e => e.Code)));
+        }
+
+        if (status != DeviceStatus.PendingEnrolment)
+        {
+            device.Value.CompleteEnrolment("test-thumbprint-" + shortCode, "1.0.0", "test", DateTimeOffset.UtcNow);
+        }
+
+        if (status == DeviceStatus.Suspended)
+        {
+            device.Value.Suspend("suspended by a test", DateTimeOffset.UtcNow, systemUser);
+        }
+        else if (status == DeviceStatus.Revoked)
+        {
+            device.Value.Revoke("revoked by a test", DateTimeOffset.UtcNow, systemUser);
+        }
+
+        context.Devices.Add(device.Value);
+        await context.SaveChangesAsync();
+
+        return device.Value.Id;
+    }
 
     /// <summary>Creates a category directly in the database, or returns the one
     /// already bearing the code.</summary>
