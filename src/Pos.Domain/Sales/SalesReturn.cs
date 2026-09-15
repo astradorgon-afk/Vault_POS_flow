@@ -515,6 +515,130 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
         return Result<Refund>.Success(refund);
     }
 
+    /// <summary>
+    /// Issues a refund against a blind return (POS.md §4). A blind return
+    /// accepted goods back with no original sale, so there is no per-method cap
+    /// drawn from a sale's payment mix — the only cap is the return's own
+    /// <see cref="RefundableTotal"/>. Because no original payment record exists
+    /// to reverse, the refund is returned as cash from the drawer; cash
+    /// round-trip and tendered rules still apply.
+    /// </summary>
+    /// <param name="eventId">The event identifier that makes the refund idempotent.</param>
+    /// <param name="cashierShiftId">The cashier shift the refund was issued in.</param>
+    /// <param name="deviceId">The device the refund was issued on.</param>
+    /// <param name="method">The payment method the refund is returned through.</param>
+    /// <param name="amount">The amount refunded.</param>
+    /// <param name="tendered">The amount handed back for cash refunds.</param>
+    /// <param name="providerReference">The provider reference for card and wallet refunds.</param>
+    /// <param name="refundedAtUtc">When the refund was issued.</param>
+    /// <param name="refundedByUserId">The user who issued the refund.</param>
+    /// <param name="cashRoundingIncrement">The cash rounding increment, for cash refunds.</param>
+    /// <returns>The new refund, or a validation failure.</returns>
+    public Result<Refund> IssueBlindRefund(
+        EventId eventId,
+        CashierShiftId cashierShiftId,
+        DeviceId deviceId,
+        PaymentMethod method,
+        decimal amount,
+        decimal? tendered,
+        string? providerReference,
+        DateTimeOffset refundedAtUtc,
+        UserId refundedByUserId,
+        decimal cashRoundingIncrement)
+    {
+        if (!IsBlind)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundBlindOnly);
+        }
+
+        if (eventId.IsEmpty)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundEventRequired);
+        }
+
+        if (cashierShiftId.IsEmpty)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundShiftRequired);
+        }
+
+        if (deviceId.IsEmpty)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundDeviceRequired);
+        }
+
+        if (refundedAtUtc == default)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundStampRequired);
+        }
+
+        if (refundedByUserId.IsEmpty)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundByRequired);
+        }
+
+        if (!Enum.IsDefined(method))
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundMethodUnknown);
+        }
+
+        if (amount <= 0m)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundAmountInvalid);
+        }
+
+        if (providerReference is { Length: > Refund.ProviderReferenceMaxLength })
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundReferenceTooLong(Refund.ProviderReferenceMaxLength));
+        }
+
+        decimal scaledAmount = decimal.Round(amount, Money.StorageScale, Money.IntermediateRounding);
+
+        // A blind return has no original sale, so its refund cannot reverse an
+        // original payment; it is handed back as cash from the drawer.
+        if (method != PaymentMethod.Cash)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundBlindCashOnly);
+        }
+
+        if (tendered is null)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundTenderedRequired);
+        }
+
+        if (cashRoundingIncrement <= 0m)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundIncrementInvalid);
+        }
+
+        if (tendered.Value < scaledAmount)
+        {
+            return Result<Refund>.Failure(SalesReturnErrors.RefundTenderedInsufficient);
+        }
+
+        decimal refundedTotal = decimal.Round(RefundedTotal + scaledAmount, Money.StorageScale, Money.IntermediateRounding);
+
+        if (refundedTotal > RefundableTotal)
+        {
+            return Result<Refund>.Failure(
+                SalesReturnErrors.RefundExceedsRefundable(RefundableTotal, refundedTotal));
+        }
+
+        Refund refund = Refund.Create(
+            Id,
+            eventId,
+            cashierShiftId,
+            deviceId,
+            method,
+            scaledAmount,
+            method == PaymentMethod.Cash ? tendered : null,
+            providerReference?.Trim(),
+            refundedAtUtc,
+            refundedByUserId);
+
+        _refunds.Add(refund);
+        return Result<Refund>.Success(refund);
+    }
+
     private static Error? ValidateHeader(
         EventId eventId,
         SaleId? saleId,

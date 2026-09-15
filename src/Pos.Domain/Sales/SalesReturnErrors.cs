@@ -139,6 +139,19 @@ public static class SalesReturnErrors
         "sale.refund.reference_too_long",
         FormattableString.Invariant($"A provider reference may be at most {maxLength} characters."));
 
+    /// <summary>A blind refund was issued against a referenced return.</summary>
+    public static Error RefundBlindOnly { get; } = Error.Validation(
+        "sale.refund.blind_only",
+        "Only a blind return may be refunded through the blind refund path.");
+
+    /// <summary>
+    /// A blind return has no original sale, so there is no original payment
+    /// record to reverse; its refund is handed back as cash.
+    /// </summary>
+    public static Error RefundBlindCashOnly { get; } = Error.Conflict(
+        "sale.refund.blind.cash_only",
+        "A blind return is refunded in cash; there is no original payment record to reverse.");
+
     /// <summary>A cash refund has no tendered amount.</summary>
     public static Error RefundTenderedRequired { get; } = Error.Validation(
         "sale.refund.tendered_required",

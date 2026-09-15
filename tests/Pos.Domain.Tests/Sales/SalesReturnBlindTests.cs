@@ -224,4 +224,220 @@ public sealed class SalesReturnBlindTests
         created.IsFailure.Should().BeTrue();
         created.Error.Code.Should().Be("sale.return.item.quantity_invalid");
     }
+
+    // ------------------------------------------------------------------
+    // IssueBlindRefund: the refund a later return of accepted goods hands
+    // back. A blind return has no original sale, so its refund is cash-only
+    // and capped only by the return's own refundable total.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void IssueBlindRefund_CashRefund_AppliesAgainstRefundableTotal()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, amount: 50m, tendered: 50m);
+
+        issued.IsSuccess.Should().BeTrue();
+        issued.Value.Method.Should().Be(PaymentMethod.Cash);
+        issued.Value.Amount.Should().Be(50m);
+        issued.Value.Tendered.Should().Be(50m);
+        issued.Value.SalesReturnId.Should().Be(salesReturn.Id);
+        issued.Value.CashierShiftId.Should().Be(Shift);
+        issued.Value.DeviceId.Should().Be(Device);
+        salesReturn.Refunds.Should().ContainSingle();
+        salesReturn.RefundedTotal.Should().Be(50m);
+    }
+
+    [Fact]
+    public void IssueBlindRefund_CardMethod_RejectsAsCashOnly()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, method: PaymentMethod.Card, amount: 50m, tendered: null);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.blind.cash_only");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_EWalletMethod_RejectsAsCashOnly()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, method: PaymentMethod.EWallet, amount: 50m, tendered: null);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.blind.cash_only");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_OnReferencedReturn_RejectsAsBlindOnly()
+    {
+        SalesReturn referenced = NewReferencedReturn();
+
+        Result<Refund> issued = BlindRefund(referenced, amount: 50m, tendered: 50m);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.blind_only");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_CashWithoutTendered_Rejects()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, tendered: null);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.tendered_required");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_TenderedShort_Rejects()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, amount: 50m, tendered: 40m);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.tendered_insufficient");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_NonPositiveIncrement_Rejects()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, increment: 0m);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.increment_invalid");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_ExceedingRefundableTotal_Rejects()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = BlindRefund(salesReturn, amount: 112m, tendered: 112m);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.exceeds_refundable");
+        salesReturn.Refunds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void IssueBlindRefund_MultipleRefunds_AccumulateToRefundableTotal()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> first = BlindRefund(salesReturn, amount: 60m, tendered: 60m);
+        Result<Refund> second = BlindRefund(salesReturn, amount: 40m, tendered: 40m);
+
+        first.IsSuccess.Should().BeTrue();
+        second.IsSuccess.Should().BeTrue();
+        salesReturn.RefundedTotal.Should().Be(100m);
+
+        Result<Refund> over = BlindRefund(salesReturn, amount: 1m, tendered: 1m);
+
+        over.IsFailure.Should().BeTrue();
+        over.Error.Code.Should().Be("sale.refund.exceeds_refundable");
+    }
+
+    [Fact]
+    public void IssueBlindRefund_EmptyEvent_Rejects()
+    {
+        SalesReturn salesReturn = CreateBlind().Value;
+
+        Result<Refund> issued = salesReturn.IssueBlindRefund(
+            EventId.Empty,
+            Shift,
+            Device,
+            PaymentMethod.Cash,
+            50m,
+            tendered: 50m,
+            providerReference: null,
+            Now.AddHours(1),
+            ReturnedBy,
+            0.05m);
+
+        issued.IsFailure.Should().BeTrue();
+        issued.Error.Code.Should().Be("sale.refund.event_required");
+    }
+
+    private static Result<Refund> BlindRefund(
+        SalesReturn salesReturn,
+        PaymentMethod method = PaymentMethod.Cash,
+        decimal amount = 50m,
+        decimal? tendered = 50m,
+        decimal increment = 0.05m)
+        => salesReturn.IssueBlindRefund(
+            EventId.New(),
+            Shift,
+            Device,
+            method,
+            amount,
+            tendered,
+            providerReference: null,
+            Now.AddHours(1),
+            ReturnedBy,
+            increment);
+
+    private static SalesReturn NewReferencedReturn()
+    {
+        DateOnly businessDate = new(2026, 9, 15);
+        DateTimeOffset now = new DateTimeOffset(2026, 9, 15, 10, 0, 0, TimeSpan.Zero);
+        UserId cashier = UserId.New();
+
+        ItemSpec item = new(
+            Product,
+            "Sample SKU",
+            Barcode: null,
+            Quantity: 1m,
+            Each,
+            100m,
+            PriceVersion: ProductPriceId.New(),
+            PriceWasOverridden: false,
+            PriceOverrideAuthorizedByUserId: null,
+            Discount: 0m,
+            DiscountAuthorizedByUserId: null,
+            VatRate: 0.12m,
+            IsVatExempt: false,
+            IsZeroRated: false,
+            BatchId: null,
+            BatchCode: null,
+            BatchExpiresOn: null,
+            UnitCost: 50m,
+            TracksBatches: false);
+
+        Sale sale = Sale.Create(
+            DocumentNumber.FromTrustedSource("SAL-2026-000001"),
+            EventId.New(),
+            Store,
+            Shift,
+            Device,
+            customerId: null,
+            businessDate,
+            now,
+            cashier,
+            [item],
+            [new PaymentSpec(PaymentMethod.Cash, 100m, 100m, ProviderReference: null)])
+            .Value;
+
+        return SalesReturn.Create(
+            DocumentNumber.FromTrustedSource("RET-2026-STORE01-0001"),
+            EventId.New(),
+            sale.Id,
+            sale.LocationId,
+            sale.CashierShiftId,
+            sale.DeviceId,
+            customerId: null,
+            sale.BusinessDate,
+            now.AddMinutes(30),
+            ReturnedBy,
+            [new ReturnItemSpec(sale.Items[0], 1m)],
+            sale.Items.ToDictionary(i => i.Id, _ => 0m))
+            .Value;
+    }
 }

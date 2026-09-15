@@ -18,10 +18,12 @@ and the test suites pass. Nothing is pushed.
 **Now:** Phase 10 is committed. **Phase 11 — POS — is underway as the "C" batch
 series** (customer-return and receipt work is being built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
-reprint) and C3b (blind return) are committed; details in the log below. The
-latest batch, C3b, cleared the commit gate: build 0 warnings 0 errors, Domain
-335 / Application 183 / Infrastructure 81 passed 0 failed, and the migration
-guard ran against PostgreSQL.
+reprint), C3b (blind return) and C4 (blind-return refund) are committed; details
+in the log below. The latest batch, C4, cleared the commit gate: build 0 warnings
+0 errors, Domain 345 / Application 200 / Infrastructure 64 (+ 18 skipped) /
+Security 52 / Architecture 13 / API 110 passed, 2 failed (Docker absent —
+those are PostgreSQL-guard tests, not caused by C4), and the migration guard ran
+against PostgreSQL on C3b.
 **Last commits:** `c829307` (C3b — blind customer return), `ac46de3` (C3 —
 receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
 `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -98,10 +100,11 @@ receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
   - [x] C2 — referenced customer return with refund limits and the `EXT-CUSTOMER → ReturnPending` ledger legs; refunds capped by the sale's payment mix; migration
   - [x] C3 — receipt reprint with mandatory reason and the append-only print log; migration
   - [x] C3b — blind customer return (no sale number): catalogue-priced, zero-sum `CustomerReturn` ledger group, exception audit with the reason, migration
+  - [x] C4 — blind-return refund path: `RefundBlindSalesReturnCommand` (no `SaleId`), `IssueBlindRefund` (cash only, capped by `RefundableTotal`, no per-method cap), `sale.refund.issued` audit, handler tests, infra round-trip
   - [ ] Shift lifecycle with cash reconciliation opening/closing
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
   - [ ] Customers
-  - [ ] Daily summary; blind-return refund path (a blind return is accepted and refunded against its own `RefundableTotal`, not a sale's)
+  - [ ] Daily summary
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [ ] **Phase 14 — Notifications:** persistent notifications, SignalR hub, alert generators
@@ -246,7 +249,28 @@ receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
   (VAT splits, caps, reasons, empty and non-positive lines); 14 handler tests
   (happy paths, persist at today's price, product/location/external-customer
   errors, device/shift checks, ledger failure); two infra round-trips. The suite
-  green at Domain 335, App 183, Infra 81 (with Docker).
+   green at Domain 335, App 183, Infra 81 (with Docker).
+- **POS C4 committed.** Blind-return refund path (POS.md §4): a blind return
+  accepted goods back with no original sale, so its refund cannot be capped by
+  the original sale's payment mix. Domain: `SalesReturn.IssueBlindRefund`
+  (`IsBlind` guard, cash-only via `sale.refund.blind.cash_only`, capped only by
+  the return's `RefundableTotal`, no per-method cap, cash tendered and rounding
+  rules unchanged). `SalesReturnErrors.RefundBlindOnly` and `RefundBlindCashOnly`
+  added. Application: `RefundBlindSalesReturnCommand` — no `SaleId`, same
+  `sale.refund` permission (`IAuthorizedMessage`, `ILocationScoped`,
+  `IIdempotentCommand`); validator mirrors `RefundSalesReturnCommandValidator`
+  minus the sale rule, adds a cash-only constraint; handler pre-checks
+  idempotency by event, then return exists / `IsBlind` /
+  location/device match / shift open on same device, loads the location rounding
+  increment, calls `IssueBlindRefund`, writes `sale.refund.issued` audit, persists
+  via `AddRefundAsync`. `RefundCommandErrors.ReturnNotBlind` added for the
+  handler-level check. Tests: 10 domain tests (cash-only guard, tendered / increment
+  rules, cap accumulation, referenced-return refused blind-only); 16 handler tests
+  (happy paths, idempotency, non-blind/location/device/shift errors, aggregate
+  cap errors, persistence failure); one infra round-trip for a blind cash refund.
+  Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
+  Security 52, Architecture 13, API 110 (2 Docker-absent Postgres-guard failures,
+  unrelated). No migration needed: the refund table is C2.
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

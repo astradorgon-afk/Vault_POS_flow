@@ -270,6 +270,51 @@ public sealed class SalesReturnRepositoryTests : IAsyncLifetime
         stored.Items[0].SaleItemId.Should().BeNull();
     }
 
+    [Fact]
+    public async Task AddRefundAsync_PersistsBlindRefund_AndReadsItBack()
+    {
+        SalesReturn salesReturn = NewBlindReturn();
+        await _repository.AddReturnAsync(salesReturn, CancellationToken.None);
+
+        EventId refundEvent = EventId.New();
+        Result<Refund> issued = salesReturn.IssueBlindRefund(
+            refundEvent,
+            salesReturn.CashierShiftId,
+            salesReturn.DeviceId,
+            PaymentMethod.Cash,
+            100m,
+            tendered: 100m,
+            providerReference: null,
+            new DateTimeOffset(2026, 9, 15, 9, 30, 0, TimeSpan.Zero),
+            Cashier,
+            cashRoundingIncrement: 0.05m);
+
+        issued.IsSuccess.Should().BeTrue();
+
+        Result<RefundId> saved = await _repository.AddRefundAsync(salesReturn.Id, issued.Value, CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+        saved.Value.Should().Be(issued.Value.Id);
+
+        SalesReturn? stored = await _repository.GetReturnByIdAsync(salesReturn.Id, CancellationToken.None);
+
+        stored.Should().NotBeNull();
+        stored!.Refunds.Should().ContainSingle();
+        stored.Refunds[0].Id.Should().Be(issued.Value.Id);
+        stored.Refunds[0].EventId.Should().Be(refundEvent);
+        stored.Refunds[0].Method.Should().Be(PaymentMethod.Cash);
+        stored.Refunds[0].Amount.Should().Be(100m);
+        stored.Refunds[0].Tendered.Should().Be(100m);
+        stored.Refunds[0].CashierShiftId.Should().Be(salesReturn.CashierShiftId);
+        stored.Refunds[0].DeviceId.Should().Be(salesReturn.DeviceId);
+
+        Refund? byEvent = await _repository.GetRefundByEventAsync(refundEvent, CancellationToken.None);
+
+        byEvent.Should().NotBeNull();
+        byEvent!.Id.Should().Be(issued.Value.Id);
+        byEvent.SalesReturnId.Should().Be(salesReturn.Id);
+    }
+
     private async Task<Sale> NewSaleAsync(decimal quantity, decimal unitPrice)
     {
         CashierShift shift = NewShift();

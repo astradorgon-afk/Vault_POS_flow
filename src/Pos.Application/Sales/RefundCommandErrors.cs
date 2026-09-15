@@ -40,6 +40,13 @@ internal static class RefundCommandErrors
         "sale.refund.return_not_found",
         FormattableString.Invariant($"No return has the identifier {salesReturnId}."));
 
+    /// <summary>The blind refund path was used for a return that is not blind.</summary>
+    /// <param name="salesReturnId">The return.</param>
+    /// <returns>The error.</returns>
+    public static Error ReturnNotBlind(SalesReturnId salesReturnId) => Error.Conflict(
+        "sale.refund.return_not_blind",
+        FormattableString.Invariant($"Return {salesReturnId} is not a blind return; a blind refund requires a return accepted without a sale."));
+
     /// <summary>The refund acts on a return that does not belong to the location.</summary>
     /// <param name="salesReturnId">The return.</param>
     /// <param name="locationId">The location the refund was requested at.</param>
