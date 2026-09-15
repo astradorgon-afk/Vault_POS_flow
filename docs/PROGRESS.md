@@ -20,12 +20,12 @@ series** (customer-return and receipt work is being built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
 with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
-(daily sales summary report) and C8 (sale pipeline tests + void route) are
-committed; details in the log below. The latest
-batch, C8, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
+(daily sales summary report), C8 (sale pipeline tests + void route) and C9
+(returns HTTP surface) are committed; details in the log below. The latest
+batch, C9, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
 Application 237 / Infrastructure 71 (+ 18 skipped) / Security 52 / Architecture
-13 / API 123 passed (2 Docker-absent PostgreSQL-guard tests aside).
-**Last commits:** C8 (sale pipeline tests + void route), C7 (daily sales summary), C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
+13 / API 127 passed (2 Docker-absent PostgreSQL-guard tests aside).
+**Last commits:** C9 (returns/refunds endpoints), C8 (sale pipeline tests + void route), C7 (daily sales summary), C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -106,6 +106,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C6 — sale endpoint surface and receipt render: `POST /api/v1/sales` (atomic full-sale payload through the `CompleteSaleCommand` pipeline), `GET /api/v1/sales/{id}` and `GET /api/v1/sales/{id}/receipt` behind the new `sale.view` permission re-checked against the sale's own location; `SaleReceiptRenderer` plain-text first print logged to `ReceiptPrints`; `SaleErrors.Unknown`/`OutsideScope`; endpoint tests through the real pipeline
   - [x] C7 — daily sales summary report: `GET /api/v1/reports/daily-sales` under the existing `report.view` permission re-checked against the report's location; completed sales + per-method payments + per-shift rows + refund amounts for a location/business date; `DailySalesReportRepository` aggregates via the `Refunds → CashierShift` join (referenced and blind refunds both count); `ReportErrors.LocationUnknown`/`OutsideScope`; endpoint tests (aggregation, refunds vs returns, 403 other-store, 404 unknown location)
   - [x] C8 — sale pipeline tests and the void route: `POST /api/v1/sales/{id}/void` dispatching the C1 `VoidSaleCommand` under `sale.void` (idempotent by `eventId`); integration tests through the real pipeline — insufficient stock 409 before payments, payment mismatch 409, VAT classification at the location rate, void restores the exact shelf quantity
+  - [x] C9 — returns HTTP surface: `POST /api/v1/returns` (referenced, `sale.return`), `POST /api/v1/returns/blind` (blind, `sale.return_blind`), `POST /api/v1/returns/{id}/refund` (`sale.refund`, branches on body `saleId` → referenced vs blind); full-command payloads with `DocumentNumber.Parse`, RET-prefixed numbers, `eventId` replay safety, `201`/`200`; integration tests through the real pipeline — return+cash-refund E2E with the second-full-refund cap 409, over-quantity return 409, blind return with cash refund `200` and card refund refused `400`, refund naming a different sale `409 sale.refund.sale_mismatch`. Disposition route (`POST /api/v1/returns/{id}/disposition`) stays pending — no aggregate/command yet
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
   - [ ] Customers
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
@@ -361,6 +362,34 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   registered device code string is refused with 400 `auth.device_header_required`.
   Full suite: Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards),
   Security 52, Architecture 13, API 123 (2 Docker-absent Postgres-guard
+   failures, unrelated).
+- **POS C9 committed — returns HTTP surface.**
+  Wires the C2/C3b/C4 returns and refunds up as endpoints through the real
+  pipeline. `POST /api/v1/returns` (`sale.return`) dispatches the referenced
+  `CreateSalesReturnCommand`, `POST /api/v1/returns/blind` (`sale.return_blind`)
+  the blind `CreateBlindSalesReturnCommand`, and `POST /api/v1/returns/{id}/refund`
+  (`sale.refund`) branches on the body's optional `saleId` — present dispatches
+  `RefundSalesReturnCommand`; absent dispatches `RefundBlindSalesReturnCommand`.
+  All three take the full command as one payload including a
+  `DocumentNumber.Parse`-validated `number` (`RET-{yyyy}-…`), an `eventId` for
+  replay safety, identity fields resolved from the authenticated request, and
+  respond `201 Created` (returns) or `200` (refunds). `RequirePermission` is
+  `Scope = ScopeSource.None` on all three. No migration, no new permission.
+  **Not in C9:** the `POST /api/v1/returns/{id}/disposition` route from the
+  plan stays pending — `SalesReturn` has no disposition aggregate method or
+  application command yet (only the `InventoryMovementType.ReturnDisposition`
+  code and its `MovementTypeRules` entry exist).
+  Tests: 4 integration tests through the real pipeline — a referenced return
+  `201` then a full cash refund `200`, with a second full refund of the same
+  value refused `409 sale.refund.exceeds_paid_for_method` (the per-method
+  running total from the sale-wide query plus the return's in-memory refunds
+  double-counts the same payment method); returning more than the sale sold
+  refused `409 sale.return.quantity_exceeds_available`; a blind return `201`
+  with its cash refund `200` and the card refund refused up-front `400
+  sale.refund.blind.cash_only` (command validator); and a refund naming a
+  *different* sale refused `409 sale.refund.sale_mismatch`. Full suite:
+  Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards),
+  Security 52, Architecture 13, API 127 (2 Docker-absent Postgres-guard
   failures, unrelated).
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository

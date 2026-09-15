@@ -530,8 +530,9 @@ GET    /api/v1/sales/{id}/receipt                    sale.view     -> text/plain
 POST   /api/v1/sales/{id}/void                       sale.void     -> LEDGER (reversal)
 POST   /api/v1/sales/{id}/reprint                    sale.reprint
 POST   /api/v1/returns                               sale.return   -> LEDGER (to ReturnPending)
-POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER
-POST   /api/v1/returns/{id}/refund                   sale.refund
+POST   /api/v1/returns/blind                         sale.return_blind -> LEDGER (to ReturnPending) + exception audit
+POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER     (planned — pending, no aggregate/command yet)
+POST   /api/v1/returns/{id}/refund                   sale.refund   (branches on body `saleId`: referenced vs blind)
 GET    /api/v1/customers?query=                      customer.manage | sale.create
 POST   /api/v1/cash-drawer/open                      cashdrawer.open_without_sale
 GET    /api/v1/reports/daily-sales                   report.view   (re-checked against the location)
@@ -570,6 +571,39 @@ Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invali
 `sale.shift_unknown`, `sale.shift_not_open`, `sale.shift_cashier_mismatch`,
 `sale.shift_device_mismatch`, `sale.payment_mismatch` (409); `sale.outside_scope`
 (403); `sale.unknown` (404).
+
+### Returns and refunds
+
+Returns and refunds are complete-in-one-request like the sale. `POST /api/v1/returns`
+takes the referenced command as one payload: a `DocumentNumber.Parse`-validated
+`number` (`RET-{yyyy}-{000000}`, device-scoped), `eventId` (replaying the same
+event idempotently), `saleId`, `locationId`, `shiftId`, `deviceId`, optional
+`customerId`, `businessDate`, `returnedAtUtc`, and `lines[{productId, quantity}]`
+— FIFO-allocated against what each sale line still holds unreturned, refusing
+`409 sale.return.quantity_exceeds_available` on overshoot and `404
+sale.return.no_returnable_lines` for a product not on the sale. `POST
+/api/v1/returns/blind` is the same without `saleId` and with a required `reason`
+(≤ 200 chars); goods are priced at the catalogue at the returned instant and an
+exception audit records the reason. Both return `201 Created` and post the
+zero-sum `CustomerReturn` LEDGER group store `ReturnPending` ← EXT-CUSTOMER.
+
+`POST /api/v1/returns/{id}/refund` refunds money against the return under
+`sale.refund`. The body's `saleId` selects the path: present (and matching the
+return's own sale) it is a **referenced** refund, capped per payment method by
+what the original sale actually paid (`409 sale.refund.exceeds_paid_for_method`,
+`409 sale.refund.method_not_original` when the sale was never paid that way)
+and by the return's `RefundableTotal` (`409 sale.refund.exceeds_refundable`);
+absent or mismatched it routes to the **blind** refund, cash-only and capped by
+the return's own total with no per-method cap. A refund naming a different sale
+than the return's is refused `409 sale.refund.sale_mismatch`. Cash refunds
+carry `tendered` (refused if short, `sale.refund.tendered_insufficient`) and
+respect the location's cash-rounding increment. Responds `200 { id }`.
+
+Errors: `sale.return.quantity_exceeds_available` (409),
+`sale.return.no_returnable_lines` (404), `sale.return.price_missing` (409),
+`sale.refund.exceeds_paid_for_method`, `sale.refund.exceeds_refundable`,
+`sale.refund.method_not_original`, `sale.refund.sale_mismatch` (409),
+`sale.refund.blind.cash_only` (400, command validator).
 
 ### Daily sales summary
 
