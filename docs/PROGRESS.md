@@ -19,13 +19,13 @@ and the test suites pass. Nothing is pushed.
 series** (customer-return and receipt work is being built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
-with cash reconciliation) and C6 (sale endpoint surface + receipt render) are
-committed; details in the log below. The latest
-batch, C6, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
+with cash reconciliation), C6 (sale endpoint surface + receipt render) and C7
+(daily sales summary report) are committed; details in the log below. The latest
+batch, C7, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
 Application 237 / Infrastructure 71 (+ 18 skipped) / Security 52 / Architecture
-13 / API 115 passed, 2 failed (Docker absent — those are PostgreSQL-guard tests,
-not caused by C6), and the migration guard ran against PostgreSQL on C3b.
-**Last commits:** C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
+13 / API 119 passed (2 Docker-absent PostgreSQL-guard tests aside), and the
+migration guard ran against PostgreSQL on C3b.
+**Last commits:** C7 (daily sales summary), C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -104,9 +104,9 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C4 — blind-return refund path: `RefundBlindSalesReturnCommand` (no `SaleId`), `IssueBlindRefund` (cash only, capped by `RefundableTotal`, no per-method cap), `sale.refund.issued` audit, handler tests, infra round-trip
   - [x] C5 — shift lifecycle with cash reconciliation: `ForceClose`, `Reconcile(varianceThreshold, reason)` with `IsForceClosed` flag; `Suspend`/`Resume`/`Reconcile` handlers, `ShiftCommandAccess` gate, `ShiftForceCloseWorker`, `GetForceCloseCandidatesAsync`, `AddShiftForceClose` migration; domain/handler/validator/infra tests
   - [x] C6 — sale endpoint surface and receipt render: `POST /api/v1/sales` (atomic full-sale payload through the `CompleteSaleCommand` pipeline), `GET /api/v1/sales/{id}` and `GET /api/v1/sales/{id}/receipt` behind the new `sale.view` permission re-checked against the sale's own location; `SaleReceiptRenderer` plain-text first print logged to `ReceiptPrints`; `SaleErrors.Unknown`/`OutsideScope`; endpoint tests through the real pipeline
+  - [x] C7 — daily sales summary report: `GET /api/v1/reports/daily-sales` under the existing `report.view` permission re-checked against the report's location; completed sales + per-method payments + per-shift rows + refund amounts for a location/business date; `DailySalesReportRepository` aggregates via the `Refunds → CashierShift` join (referenced and blind refunds both count); `ReportErrors.LocationUnknown`/`OutsideScope`; endpoint tests (aggregation, refunds vs returns, 403 other-store, 404 unknown location)
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
   - [ ] Customers
-  - [ ] Daily summary
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [ ] **Phase 14 — Notifications:** persistent notifications, SignalR hub, alert generators
@@ -316,6 +316,30 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   detail and receipt while the Auditor reads; unknown sale 404). Full suite:
   Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards), Security 52,
   Architecture 13, API 115 (2 Docker-absent Postgres-guard failures, unrelated).
+- **POS C7 committed — daily sales summary report** (POS.md §2-3).
+  `GET /api/v1/reports/daily-sales?locationId={id}&date={yyyy-MM-dd}` under the
+  existing `report.view` permission (`Administration.ViewReports`) — no new
+  permission, no migration. The route uses `Scope = ScopeSource.None` with a
+  manual `IPermissionEvaluator` re-check against the location, so an
+  other-store manager gets 403 `report.outside_scope`, while the Auditor (grants
+  include `Administration.AllLocations`) reaches an unknown location to get 404
+  `report.location_unknown`. Domain: `DailySalesReport` + summary/refund/payment
+  shift records and `ReportErrors` (404 `report.location_unknown`, 403
+  `report.outside_scope`). Infrastructure: `DailySalesReportRepository` in one
+  AsNoTracking pass — only `Completed` sales for the location/business date;
+  refunds attributed through `Refunds.CashierShiftId → CashierShift` so both
+  referenced and blind refunds count toward the day even when the return is
+  blind; payments grouped by method through the `SaleId` shadow key with
+  change; per-shift cash sales/refunds for cash reconciliation. The wire model
+  maps strong IDs to plain GUIDs. Tests: 4 endpoint tests through the real
+  pipeline — two-sale aggregation (cash + cash/card split, per-method amounts
+  and change, shift row) and the refund-vs-report leg (a referenced return with
+  a 45 cash refund seeded through the public `SalesReturn.Create`/`IssueRefund`
+  surface shows up in `refundTotal` and the shift's `cashRefundsTotal`), 403
+  for another store's manager but OK for the Auditor, 404 unknown location.
+  Full suite: Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards),
+  Security 52, Architecture 13, API 119 (2 Docker-absent Postgres-guard
+  failures, unrelated).
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

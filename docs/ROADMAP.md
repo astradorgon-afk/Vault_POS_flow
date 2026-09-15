@@ -190,7 +190,7 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(plain-text render + first print landed in C6; thermal/PDF layout deferred)*
 - [ ] Void, return, refund with disposition
 - [ ] Customer lookup and optional accounts
-- [ ] Daily sales summary
+- [x] Daily sales summary (C7)
 - [ ] POS tests: inventory effects, insufficient stock, tax, discount, refund
 
 ## Phase 12 — Offline Storage

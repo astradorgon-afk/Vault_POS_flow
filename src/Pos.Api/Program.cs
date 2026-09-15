@@ -251,6 +251,7 @@ try
     app.MapReceiptEndpoints();
     app.MapShiftEndpoints();
     app.MapSaleEndpoints();
+    app.MapReportEndpoints();
     app.MapAdministrationEndpoints();
 
     await app.RunAsync();

@@ -534,6 +534,7 @@ POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER
 POST   /api/v1/returns/{id}/refund                   sale.refund
 GET    /api/v1/customers?query=                      customer.manage | sale.create
 POST   /api/v1/cash-drawer/open                      cashdrawer.open_without_sale
+GET    /api/v1/reports/daily-sales                   report.view   (re-checked against the location)
 ```
 
 `POST /sales` accepts the full sale as one payload and completes it atomically.
@@ -570,6 +571,19 @@ Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invali
 `sale.shift_device_mismatch`, `sale.payment_mismatch` (409); `sale.outside_scope`
 (403); `sale.unknown` (404).
 
+### Daily sales summary
+
+`GET /api/v1/reports/daily-sales?locationId={id}&date={yyyy-MM-dd}` returns the
+aggregated day for a location/business date: `salesSummary` (count, gross,
+discount, net, VAT/exempt/zero-rated/taxable splits, `refundTotal`),
+`paymentsByMethod` (method, amount, change given), and per-`shifts` rows (status,
+opening float, sales count/net, `cashSalesTotal`, `cashRefundsTotal`). Only
+`Completed` sales count; refunds are attributed through the shift that issued
+them, so referenced and blind refunds both land on the day. `report.view` is
+re-checked against the requested location: another store's manager gets
+403 `report.outside_scope`, an unknown location gets 404
+`report.location_unknown`.
+
 ---
 
 ## 10. Synchronization
@@ -593,6 +607,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ```
 GET /api/v1/reports/sales                     report.view
+GET /api/v1/reports/daily-sales              report.view   (POS day summary, C7)
 GET /api/v1/reports/sales/by-product          report.view
 GET /api/v1/reports/sales/by-category         report.view
 GET /api/v1/reports/sales/by-store            report.view

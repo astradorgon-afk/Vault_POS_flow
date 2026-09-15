@@ -72,6 +72,7 @@ public static class DependencyInjection
         services.TryAddScoped<IReceiptRepository, ReceiptRepository>();
         services.TryAddScoped<ISalesRepository, SalesRepository>();
         services.TryAddScoped<IShiftRepository, ShiftRepository>();
+        services.TryAddScoped<IDailySalesReportRepository, DailySalesReportRepository>();
         services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();
         services.TryAddScoped<IExpiryService, ExpiryService>();
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();

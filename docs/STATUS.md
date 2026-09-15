@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-15 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5/C6 committed**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5/C6/C7 committed**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 115** in the latest full-suite run (2026-09-15, after C6). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
+| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 119** in the latest full-suite run (2026-09-16, after C7). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
 | Migrations | 22, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests     71 passing   ledger posting + concurrency + reconci
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       237 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return, blind refund, shift suspend/resume/reconcile)
-Pos.Api.IntegrationTests    115 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, shift lifecycle, sale complete/read/receipt, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
+Pos.Api.IntegrationTests    119 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, shift lifecycle, sale complete/read/receipt, daily-sales report, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -513,6 +513,35 @@ need a Docker daemon).
   detail and the receipt while the Auditor still sees it; an unknown sale is
   404. Suite at C6: Domain 358, Application 237, Infrastructure 71 (+18 skipped
   PostgreSQL guards), Security 52, Architecture 13, API 115 (the two 
+  PostgreSQL-guard members need a Docker daemon).
+
+- **C7 — daily sales summary report.** One read route for a location's day:
+  `GET /api/v1/reports/daily-sales?locationId={id}&date={yyyy-MM-dd}` under the
+  existing `report.view` permission (`Administration.ViewReports`) — no new
+  permission and no migration. The route is `Scope = ScopeSource.None` and
+  re-checks the permission manually against the requested location, so an
+  other-store Store Manager gets 403 `report.outside_scope`, while only
+  `AllLocations` holders (Auditor/Owner/Administrator) can reach an unknown
+  location to get 404 `report.location_unknown`. Domain: `DailySalesReport`
+  (with `DailySalesReportSalesSummary`, `DailySalesReportPaymentMethodSummary`,
+  `DailySalesReportShiftSummary`) and `ReportErrors` (404
+  `report.location_unknown`, 403 `report.outside_scope`). Infrastructure:
+  `DailySalesReportRepository.GetDailySalesReportAsync` in one AsNoTracking
+  pass — counts/totals over `Completed` sales at
+  location + business date; `RefundTotal` joins `Refunds → CashierShift` on the
+  shift's location + business date so **referenced and blind refunds both count**
+  toward the day; per-method amounts over the `Payments` shadow key `SaleId`
+  with change; per-shift stats (status, opening float, sales count/net,
+  `CashSalesTotal`, `CashRefundsTotal`) feeding the cash reconciliation view.
+  The wire model maps strong IDs to plain GUIDs. Tests: 4 endpoint tests through
+  the real pipeline — a two-sale day (cash at £200-tendered and a cash/card
+  split) aggregated into summary, per-method amounts/change and one shift row;
+  a referenced return with a £45 cash refund (seeded via the public
+  `SalesReturn.Create`/`IssueRefund` surface against the HTTP-completed sale)
+  appearing in `refundTotal` and the shift's `cashRefundsTotal`; another store's
+  Store Manager refused 403 while the Auditor reads; an unknown location 404.
+  Suite at C7: Domain 358, Application 237, Infrastructure 71 (+18 skipped
+  PostgreSQL guards), Security 52, Architecture 13, API 119 (the two 
   PostgreSQL-guard members need a Docker daemon).
 
 Tests: 11 domain tests for the blind-return rules (VAT splits, quantity and
