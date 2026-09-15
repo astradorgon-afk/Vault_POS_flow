@@ -64,7 +64,21 @@ public interface IShiftRepository
     Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
         SaleId saleId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Loads every shift still open or suspended, paired with the maximum hours
+    /// its location allows a shift to remain open. The force-close worker uses
+    /// this to find shifts past their <c>MaxShiftHours</c> (POS.md §1).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The candidates, with each shift's own location cap.</returns>
+    Task<IReadOnlyList<ShiftForceCloseCandidate>> GetForceCloseCandidatesAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>A shift the force-close worker may need to close.</summary>
+/// <param name="Shift">The shift, still open or suspended.</param>
+/// <param name="MaxShiftHours">The maximum hours the shift's location allows it to stay open.</param>
+public sealed record ShiftForceCloseCandidate(CashierShift Shift, TimeSpan MaxShiftHours);
 
 /// <summary>What a shift handler needs to know about one location.</summary>
 /// <param name="Kind">The location kind, used to refuse external locations.</param>

@@ -53,5 +53,12 @@ internal static class ShiftCommandErrors
     /// <summary>The actor does not hold <c>shift.close.other</c>.</summary>
     public static Error CloseOtherShiftDenied => Error.Forbidden(
         "shift.close_other_denied",
-        "Closing another cashier's shift requires the shift.close.other permission.");
+        "Operating another cashier's shift requires the shift.close.other permission.");
+
+    /// <summary>The review reason is longer than the tolerated maximum.</summary>
+    /// <param name="maxLength">The maximum length.</param>
+    /// <returns>The error.</returns>
+    public static Error ReconcileReasonTooLong(int maxLength) => Error.Validation(
+        "shift.reconcile_reason_too_long",
+        FormattableString.Invariant($"The review reason cannot exceed {maxLength} characters."));
 }

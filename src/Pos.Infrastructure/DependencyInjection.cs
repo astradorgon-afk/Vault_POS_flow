@@ -20,6 +20,7 @@ using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Inventory;
 using Pos.Infrastructure.Persistence;
 using Pos.Infrastructure.Persistence.Interceptors;
+using Pos.Infrastructure.Sales;
 
 namespace Pos.Infrastructure;
 
@@ -95,6 +96,15 @@ public static class DependencyInjection
             services.AddHostedService<ExpiryWorker>();
         }
 
+        ShiftForceCloseOptions shiftForceClose = configuration
+            .GetSection(ShiftForceCloseOptions.SectionName)
+            .Get<ShiftForceCloseOptions>() ?? new ShiftForceCloseOptions();
+
+        if (shiftForceClose.Enabled)
+        {
+            services.AddHostedService<ShiftForceCloseWorker>();
+        }
+
         return services;
     }
 
@@ -159,6 +169,11 @@ public static class DependencyInjection
 
         services.AddOptions<ExpiryOptions>()
             .Bind(configuration.GetSection(ExpiryOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<ShiftForceCloseOptions>()
+            .Bind(configuration.GetSection(ShiftForceCloseOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

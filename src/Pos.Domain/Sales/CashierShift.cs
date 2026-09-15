@@ -76,6 +76,14 @@ public class CashierShift : AggregateRoot<CashierShiftId>
     public decimal? CashVariance { get; private set; }
 
     /// <summary>
+    /// Gets whether the worker force-closed this shift because it stayed open
+    /// past its location's <c>MaxShiftHours</c> (POS.md §1). A force-closed
+    /// shift never had its drawer counted, so <see cref="CashVariance"/> is null
+    /// and it requires a review reason before it may be reconciled.
+    /// </summary>
+    public bool IsForceClosed { get; private set; }
+
+    /// <summary>
     /// Opens a new cashier shift. The caller (device) allocates the SHF number
     /// and the opening instant so the counter advances exactly once.
     /// </summary>
@@ -223,15 +231,58 @@ public class CashierShift : AggregateRoot<CashierShiftId>
     }
 
     /// <summary>
-    /// Manager review completes the lifecycle by marking the shift reconciled.
-    /// The caller is responsible for ensuring the variance is within tolerance
-    /// or that a reason has been recorded in the audit log.
+    /// Worker closes a shift that stayed open past its location's
+    /// <c>MaxShiftHours</c> (POS.md §1): the shift is closed with no count and
+    /// flagged so it cannot silently absorb the next day's sales. The closure
+    /// records no variance; a manager must still reconcile it with a reason.
     /// </summary>
-    public Result Reconcile()
+    /// <param name="closedAtUtc">The instant of closure.</param>
+    public Result ForceClose(DateTimeOffset closedAtUtc)
+    {
+        if (Status is not (ShiftStatus.Open or ShiftStatus.Suspended))
+        {
+            return Result.Failure(ShiftErrors.ShiftInvalidState(ShiftStatus.Open, Status));
+        }
+
+        if (closedAtUtc == default)
+        {
+            return Result.Failure(ShiftErrors.ClosedAtRequired);
+        }
+
+        ClosedAtUtc = closedAtUtc;
+        IsForceClosed = true;
+        Status = ShiftStatus.Closed;
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Manager review completes the lifecycle by marking the shift reconciled
+    /// (POS.md §1). A shift is only reconciled when its cash variance lies
+    /// within the location's tolerance, or a reason recording the manager's
+    /// review has been provided. A force-closed shift has no variance to accept,
+    /// so it always requires a reason; the strictest configuration tolerates no
+    /// variance at all.
+    /// </summary>
+    /// <param name="varianceThreshold">
+    /// The location's <c>CashVarianceThreshold</c>: the absolute variance a
+    /// closed shift may carry without a review reason. Negative values are
+    /// treated as zero.
+    /// </param>
+    /// <param name="reason">The manager's reason, when one is required.</param>
+    public Result Reconcile(decimal varianceThreshold, string? reason)
     {
         if (Status != ShiftStatus.Closed)
         {
             return Result.Failure(ShiftErrors.ShiftInvalidState(ShiftStatus.Closed, Status));
+        }
+
+        decimal threshold = Math.Max(0m, varianceThreshold);
+        bool varianceAccepted = CashVariance is not null && Math.Abs(CashVariance.Value) <= threshold;
+        bool hasReason = !string.IsNullOrWhiteSpace(reason);
+
+        if (!varianceAccepted && !hasReason)
+        {
+            return Result.Failure(ShiftErrors.ReconcileReasonRequired);
         }
 
         Status = ShiftStatus.Reconciled;

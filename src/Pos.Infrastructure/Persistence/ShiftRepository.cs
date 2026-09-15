@@ -111,6 +111,21 @@ public sealed class ShiftRepository(PosDbContext context) : IShiftRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ShiftForceCloseCandidate>> GetForceCloseCandidatesAsync(CancellationToken cancellationToken)
+    {
+        List<ShiftForceCloseCandidate> candidates = await (
+            from s in context.CashierShifts.AsNoTracking()
+            join l in context.Locations.AsNoTracking()
+                on s.LocationId equals l.Id
+            where s.Status == ShiftStatus.Open || s.Status == ShiftStatus.Suspended
+            select new ShiftForceCloseCandidate(s, l.Settings.MaxShiftHours))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return candidates;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
         SaleId saleId,
         CancellationToken cancellationToken)

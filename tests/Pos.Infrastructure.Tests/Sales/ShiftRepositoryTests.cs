@@ -24,8 +24,6 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
     private static readonly UserId Cashier = UserId.New();
     private static readonly DeviceId Device = DeviceId.New();
     private static readonly UnitOfMeasureId Unit = UnitOfMeasureId.New();
-    private static readonly DocumentNumber Number =
-        DocumentNumber.FromTrustedSource("SHF-2026-D01-0001");
 
     private SqliteConnection _connection = null!;
     private PosDbContext _context = null!;
@@ -386,6 +384,147 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
         refunded.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task UpdateAsync_ForceClose_PersistsFlag()
+    {
+        CashierShift shift = NewShift();
+        await _repository.AddAsync(shift, CancellationToken.None);
+        DateTimeOffset now = new(2026, 9, 15, 18, 0, 0, TimeSpan.Zero);
+
+        shift.ForceClose(now);
+
+        await _repository.UpdateAsync(shift, CancellationToken.None);
+
+        CashierShift stored = await _context.CashierShifts.SingleAsync(s => s.Id == shift.Id, CancellationToken.None);
+        stored.Status.Should().Be(ShiftStatus.Closed);
+        stored.IsForceClosed.Should().BeTrue();
+        stored.ClosedAtUtc.Should().Be(now);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ForceCloseWithoutReconcile_SurvivesRoundTrip()
+    {
+        CashierShift shift = NewShift();
+        await _repository.AddAsync(shift, CancellationToken.None);
+        shift.ForceClose(new DateTimeOffset(2026, 9, 15, 18, 0, 0, TimeSpan.Zero));
+        await _repository.UpdateAsync(shift, CancellationToken.None);
+
+        CashierShift? loaded = await _context.CashierShifts.AsNoTracking()
+            .SingleAsync(s => s.Id == shift.Id, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.IsForceClosed.Should().BeTrue();
+        loaded.Status.Should().Be(ShiftStatus.Closed);
+        loaded.CashVariance.Should().BeNull();
+
+        shift.Reconcile(varianceThreshold: 0m, reason: "Abandoned past MaxShiftHours");
+        await _repository.UpdateAsync(shift, CancellationToken.None);
+
+        CashierShift? reconciled = await _context.CashierShifts.AsNoTracking()
+            .SingleAsync(s => s.Id == shift.Id, CancellationToken.None);
+        reconciled!.Status.Should().Be(ShiftStatus.Reconciled);
+        reconciled.IsForceClosed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateAsync_SuspendResume_RoundTrips()
+    {
+        CashierShift shift = NewShift();
+        await _repository.AddAsync(shift, CancellationToken.None);
+
+        shift.Suspend();
+        await _repository.UpdateAsync(shift, CancellationToken.None);
+
+        CashierShift? suspended = await _context.CashierShifts.AsNoTracking()
+            .SingleAsync(s => s.Id == shift.Id, CancellationToken.None);
+        suspended!.Status.Should().Be(ShiftStatus.Suspended);
+
+        shift.Resume();
+        await _repository.UpdateAsync(shift, CancellationToken.None);
+
+        CashierShift? resumed = await _context.CashierShifts.AsNoTracking()
+            .SingleAsync(s => s.Id == shift.Id, CancellationToken.None);
+        resumed!.Status.Should().Be(ShiftStatus.Open);
+    }
+
+    [Fact]
+    public async Task GetForceCloseCandidatesAsync_ReturnsOpenAndSuspended_WithDefaultMaxHours()
+    {
+        LocationId store = await GetStoreIdAsync();
+        CashierShift open = NewShift(status: ShiftStatus.Open, sequence: 1, locationId: store);
+        CashierShift suspended = NewShift(status: ShiftStatus.Suspended, sequence: 2, locationId: store);
+        await _repository.AddAsync(open, CancellationToken.None);
+        await _repository.AddAsync(suspended, CancellationToken.None);
+
+        IReadOnlyList<ShiftForceCloseCandidate> candidates =
+            await _repository.GetForceCloseCandidatesAsync(CancellationToken.None);
+
+        candidates.Should().HaveCount(2);
+        candidates.Select(c => c.Shift.Id).Should().Contain(open.Id).And.Contain(suspended.Id);
+        candidates.Should().OnlyContain(c => c.MaxShiftHours == LocationSettings.Default.MaxShiftHours);
+    }
+
+    [Fact]
+    public async Task GetForceCloseCandidatesAsync_ExcludesClosedAndReconciledShifts()
+    {
+        LocationId store = await GetStoreIdAsync();
+        CashierShift open = NewShift(status: ShiftStatus.Open, sequence: 1, locationId: store);
+        CashierShift closed = NewShift(status: ShiftStatus.Closed, sequence: 2, locationId: store);
+        await _repository.AddAsync(open, CancellationToken.None);
+        await _repository.AddAsync(closed, CancellationToken.None);
+
+        IReadOnlyList<ShiftForceCloseCandidate> candidates =
+            await _repository.GetForceCloseCandidatesAsync(CancellationToken.None);
+
+        candidates.Should().ContainSingle(c => c.Shift.Id == open.Id);
+    }
+
+    [Fact]
+    public async Task GetForceCloseCandidatesAsync_UsesLocationSpecificMaxShiftHours()
+    {
+        Result<Location> created = Location.Create(
+            Organization.DefaultId,
+            "STORE02",
+            "Store Two",
+            LocationKind.Store,
+            "Asia/Manila",
+            new LocationSettings { CashVarianceThreshold = 10m, MaxShiftHours = TimeSpan.FromHours(8) });
+
+        if (created.IsFailure)
+        {
+            throw new InvalidOperationException("Could not create test location.");
+        }
+
+        Location storeTwo = created.Value;
+        _context.Locations.Add(storeTwo);
+        await _context.SaveChangesAsync();
+
+        CashierShift host = CashierShift.Open(
+            DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, "D02", 1),
+            storeTwo.Id,
+            DeviceId.New(),
+            UserId.New(),
+            1000m,
+            new DateOnly(2026, 9, 15),
+            new DateTimeOffset(2026, 9, 15, 8, 0, 0, TimeSpan.Zero)).Value;
+        await _repository.AddAsync(host, CancellationToken.None);
+
+        IReadOnlyList<ShiftForceCloseCandidate> candidates =
+            await _repository.GetForceCloseCandidatesAsync(CancellationToken.None);
+
+        ShiftForceCloseCandidate candidate = candidates.Single(c => c.Shift.Id == host.Id);
+        candidate.MaxShiftHours.Should().Be(TimeSpan.FromHours(8));
+    }
+
+    [Fact]
+    public async Task GetForceCloseCandidatesAsync_NoShifts_ReturnsEmpty()
+    {
+        IReadOnlyList<ShiftForceCloseCandidate> candidates =
+            await _repository.GetForceCloseCandidatesAsync(CancellationToken.None);
+
+        candidates.Should().BeEmpty();
+    }
+
     private static Dictionary<PaymentMethod, decimal> OriginalPaidByMethod(
         decimal cash,
         decimal card)
@@ -533,13 +672,13 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
         return result.Value;
     }
 
-    private static CashierShift NewShift(ShiftStatus status = ShiftStatus.Open)
+    private static CashierShift NewShift(ShiftStatus status = ShiftStatus.Open, int sequence = 1, LocationId? locationId = null)
     {
         DateTimeOffset now = new(2026, 9, 15, 8, 0, 0, TimeSpan.Zero);
 
         Result<CashierShift> result = CashierShift.Open(
-            Number,
-            Store,
+            DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, "D01", sequence),
+            locationId ?? Store,
             Device,
             Cashier,
             openingFloat: 1000m,

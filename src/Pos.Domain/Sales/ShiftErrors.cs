@@ -55,6 +55,15 @@ public static class ShiftErrors
         "shift.closed_at_required",
         "A shift must record when it was closed.");
 
+    /// <summary>
+    /// A closed shift carries a cash variance beyond the location's tolerance,
+    /// or was force-closed with no count, so it needs a review reason before it
+    /// can be reconciled (POS.md §1).
+    /// </summary>
+    public static Error ReconcileReasonRequired { get; } = Error.Conflict(
+        "shift.reconcile_reason_required",
+        "A shift with an unresolved cash variance cannot be reconciled without a manager's reason.");
+
     /// <summary>No shift has the identifier.</summary>
     /// <param name="id">The identifier.</param>
     /// <returns>The error.</returns>

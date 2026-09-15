@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-15 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4 committed**
+**Last updated:** 2026-09-15 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5 committed**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,19 +13,19 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **Domain 345, Application 200, Infrastructure 64 (+ 18 skipped), Security 52, Architecture 13, API 110** in the latest full-suite run (2026-09-15, after C4). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
-| Migrations | 21, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 110** in the latest full-suite run (2026-09-15, after C5). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
+| Migrations | 22, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
 | Phases remaining | 11–18 — see §5 |
 
 ```
-Pos.Domain.Tests            345 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS void/customer-return/blind-return/blind-refund rules
-Pos.Infrastructure.Tests     64 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order, sales-return/refund/receipt-print round-trips (18 skipped — the PostgreSQL guards, without Docker; the SQLite blind-refund round-trip is included)
+Pos.Domain.Tests            358 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS void/customer-return/blind-return/blind-refund rules, shift lifecycle (suspend/resume/reconcile/force-close)
+Pos.Infrastructure.Tests     71 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order, sales-return/refund/receipt-print/shift round-trips (18 skipped — the PostgreSQL guards, without Docker; the SQLite blind-refund round-trip is included)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
-Pos.Application.Tests       200 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return, blind refund)
+Pos.Application.Tests       237 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return, blind refund, shift suspend/resume/reconcile)
 Pos.Api.IntegrationTests    110 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
 ```
 
@@ -442,7 +442,7 @@ the original payment method; reprints are read-side but never silent.
   shift on the same device, and reuses the referenced refund's
   `sale.refund.issued` audit and persistence. Referenced refunds stay capped per
   method plus per return; the blind refund skips the per-method cap and clears
-  the same `sale.refund` permission. No migration: the refund table is C2.
+   the same `sale.refund` permission. No migration: the refund table is C2.
 
 Tests: 10 domain tests for the blind-refund contract (cash-only methods, tendered
 and increment rules, cap accumulation, a referenced return refused
@@ -454,6 +454,37 @@ persists and reads back from the return and by event. The full suite ran after
 C4: Domain 345, Application 200, Infrastructure 64 (+18 skipped PostgreSQL
 guards), Security 52, Architecture 13, API 110 (the two PostgreSQL-guard members
 need a Docker daemon).
+
+- **C5 — shift lifecycle with cash reconciliation.** `CashierShift` gains
+  `IsForceClosed` (bool, private-set, default false), `ForceClose(DateTimeOffset)`
+  (allowed from `Open` or `Suspended` → `Closed`, sets the flag), and
+  `Reconcile(decimal varianceThreshold, string? reason)`: the variance is only
+  accepted when `CashVariance` is within threshold; a force-closed shift (no
+  count, so `CashVariance` is null) always requires a reason. Threshold is clamped
+  at zero (`Math.Max(0m, ...)`). New audit actions: `ShiftSuspended`,
+  `ShiftResumed`, `ShiftReconciled`, `ShiftForceClosed`.
+  Application: `SuspendShiftCommand`, `ResumeShiftCommand`,
+  `ReconcileShiftCommand` (with `Reason?`, `ReasonMaxLength = 200`),
+  `SuspendShiftCommandValidator`, `ResumeShiftCommandValidator`,
+  `ReconcileShiftCommandValidator` (reason required when variance exceeds
+  threshold, capped at 200 chars), and three handlers behind a shared
+  `ShiftCommandAccess` gate (owner match OR `sales.close_other_shift` permission).
+  Reconcile handler loads `LocationFacts` for `CashVarianceThreshold`; falls back
+  to `LocationSettings.Default` when the location has no threshold.
+  Repository: `GetForceCloseCandidatesAsync` (open/suspended shifts inner-joined
+  to their location for `MaxShiftHours`). Infrastructure: `ShiftForceCloseWorker`
+  (`BackgroundService`, `ShiftForceCloseOptions`, `IntervalHours` default 1,
+  `RunOnStartup` default false), `IsForceClosed` column mapped to
+  `is_force_closed`. Migration `20260915125042_AddShiftForceClose`.
+  Tests: 13 domain tests (opening happy path, suspend/resume transitions,
+  `ShiftInvalidState` for each transition, `ReconcileReasonRequired`,
+  `ReconcileReasonTooLong`, force-close from Open and Suspended, force-close from
+  Closed refused); 25 handler tests (8 Suspend, 7 Resume, 10 Reconcile happy
+  paths, owner and `sales.close_other_shift` permission paths, location mismatch,
+  shift unknown, wrong state); 12 validator tests (required fields, reason
+  length); 7 infra round-trips (force-close persists the flag, force-close
+  survives round-trip, suspend-resume round-trips, force-close candidates by
+  age).
 
 Tests: 11 domain tests for the blind-return rules (VAT splits, quantity and
 reason caps, empty and non-positive lines); 14 handler tests for the
@@ -713,11 +744,11 @@ Stated plainly so they are not mistaken for finished work:
 Phase 10 (batch and expiration) is committed, and Phase 11 POS has started: the
 returns side of the "C" batch series — void (`4a81731`), referenced customer
 return and refund (`adf1a65`), receipt reprint (`ac46de3`), the blind return
-(`c829307`), and the **blind-return refund** — is done. Two strands are open:
+(`c829307`), and the **blind-return refund** — and the shift lifecycle with cash
+reconciliation (C5) are done. Two strands are open:
 
 1. **Phase 11 — POS:** the rest of the C batch series, then the main flow.
-   Immediate items under the batch pattern: the **shift lifecycle with cash
-   reconciliation** (opening/closing counts), the **sale flow** (cart,
+   Immediate items under the batch pattern: the **sale flow** (cart,
    pricing/discount/VAT against the catalogue, payments, atomic completion), then
    customers and the daily summary. Live endpoints and the API surface are not
    wired for these commands yet — the domain, handlers, and repositories are the

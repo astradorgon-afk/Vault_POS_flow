@@ -42,6 +42,7 @@ public sealed class CashierShiftConfiguration : IEntityTypeConfiguration<Cashier
         builder.Property(s => s.DeclaredCash).HasColumnName("declared_cash").HasPrecision(19, Money.StorageScale);
         builder.Property(s => s.CountedCash).HasColumnName("counted_cash").HasPrecision(19, Money.StorageScale);
         builder.Property(s => s.CashVariance).HasColumnName("cash_variance").HasPrecision(19, Money.StorageScale);
+        builder.Property(s => s.IsForceClosed).HasColumnName("is_force_closed").IsRequired();
 
         builder.HasIndex(s => s.Number)
             .IsUnique()

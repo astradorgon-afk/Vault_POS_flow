@@ -18,15 +18,15 @@ and the test suites pass. Nothing is pushed.
 **Now:** Phase 10 is committed. **Phase 11 — POS — is underway as the "C" batch
 series** (customer-return and receipt work is being built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
-reprint), C3b (blind return) and C4 (blind-return refund) are committed; details
-in the log below. The latest batch, C4, cleared the commit gate: build 0 warnings
-0 errors, Domain 345 / Application 200 / Infrastructure 64 (+ 18 skipped) /
-Security 52 / Architecture 13 / API 110 passed, 2 failed (Docker absent —
-those are PostgreSQL-guard tests, not caused by C4), and the migration guard ran
-against PostgreSQL on C3b.
-**Last commits:** `c829307` (C3b — blind customer return), `ac46de3` (C3 —
-receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
-`4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
+reprint), C3b (blind return), C4 (blind-return refund) and C5 (shift lifecycle
+with cash reconciliation) are committed; details in the log below. The latest
+batch, C5, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
+Application 237 / Infrastructure 71 (+ 18 skipped) / Security 52 / Architecture
+13 / API 110 passed, 2 failed (Docker absent — those are PostgreSQL-guard tests,
+not caused by C5), and the migration guard ran against PostgreSQL on C3b.
+**Last commits:** C5 (shift lifecycle), `c829307` (C3b — blind customer return),
+`ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
+and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
 ---
 
@@ -101,7 +101,7 @@ receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
   - [x] C3 — receipt reprint with mandatory reason and the append-only print log; migration
   - [x] C3b — blind customer return (no sale number): catalogue-priced, zero-sum `CustomerReturn` ledger group, exception audit with the reason, migration
   - [x] C4 — blind-return refund path: `RefundBlindSalesReturnCommand` (no `SaleId`), `IssueBlindRefund` (cash only, capped by `RefundableTotal`, no per-method cap), `sale.refund.issued` audit, handler tests, infra round-trip
-  - [ ] Shift lifecycle with cash reconciliation opening/closing
+  - [x] C5 — shift lifecycle with cash reconciliation: `ForceClose`, `Reconcile(varianceThreshold, reason)` with `IsForceClosed` flag; `Suspend`/`Resume`/`Reconcile` handlers, `ShiftCommandAccess` gate, `ShiftForceCloseWorker`, `GetForceCloseCandidatesAsync`, `AddShiftForceClose` migration; domain/handler/validator/infra tests
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
   - [ ] Customers
   - [ ] Daily summary
@@ -268,9 +268,29 @@ receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
   rules, cap accumulation, referenced-return refused blind-only); 16 handler tests
   (happy paths, idempotency, non-blind/location/device/shift errors, aggregate
   cap errors, persistence failure); one infra round-trip for a blind cash refund.
-  Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
-  Security 52, Architecture 13, API 110 (2 Docker-absent Postgres-guard failures,
-  unrelated). No migration needed: the refund table is C2.
+Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
+   Security 52, Architecture 13, API 110 (2 Docker-absent Postgres-guard failures,
+   unrelated). No migration needed: the refund table is C2.
+- **POS C5 committed — shift lifecycle with cash reconciliation** (POS.md §1).
+  Domain: `CashierShift.ForceClose(closedAtUtc)` closes from `Open`/`Suspended`
+  and sets `IsForceClosed` (so a worker-closed shift cannot silently absorb the
+  next day's sales); `Reconcile(decimal varianceThreshold, string? reason)`
+  accepts a variance only when it is within the location's threshold, and a
+  force-closed shift (whose `CashVariance` is null — the drawer was never counted)
+  always requires a manager reason (`ShiftErrors.ReconcileReasonRequired`).
+  `ShiftSuspended`/`ShiftResumed`/`ShiftReconciled`/`ShiftForceClosed` audit
+  actions added. Application: `SuspendShiftCommand`, `ResumeShiftCommand`,
+  `ReconcileShiftCommand` and their validators; three handlers sharing
+  `ShiftCommandAccess` (owner check or `sales.close_other_shift` permission,
+  location-scoped, audit + `UpdateAsync`); the reconcile handler resolves the
+  location's `CashVarianceThreshold` through `LocationFacts`. Infrastructure:
+  `ShiftForceCloseWorker` (`ShiftForceCloseOptions`, `IntervalHours` default 1,
+  `RunOnStartup` default false) closing over-age open/suspended shifts via
+  `IShiftRepository.GetForceCloseCandidatesAsync`; `is_force_closed` column;
+  migration `20260915125042_AddShiftForceClose`. Tests: 13 domain, 25 handler, 12
+  validator, 7 infra round-trips/candidates. Full suite: Domain 358, App 237,
+  Infra 71 (+ 18 skipped PostgreSQL guards), Security 52, Architecture 13,
+  API 110 (2 Docker-absent Postgres-guard failures, unrelated).
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

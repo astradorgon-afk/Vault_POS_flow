@@ -287,6 +287,18 @@ public static class AuditActions
         /// <summary>A shift was closed.</summary>
         public const string ShiftClosed = "shift.closed";
 
+        /// <summary>A shift was suspended while the cashier stepped away.</summary>
+        public const string ShiftSuspended = "shift.suspended";
+
+        /// <summary>A suspended shift was resumed.</summary>
+        public const string ShiftResumed = "shift.resumed";
+
+        /// <summary>A closed shift was reconciled by a manager.</summary>
+        public const string ShiftReconciled = "shift.reconciled";
+
+        /// <summary>A worker force-closed a shift left open past its maximum hours.</summary>
+        public const string ShiftForceClosed = "shift.force_closed";
+
         /// <summary>The cash drawer was opened without a sale.</summary>
         public const string CashDrawerOpened = "cashdrawer.opened";
     }

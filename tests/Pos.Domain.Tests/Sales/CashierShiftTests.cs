@@ -41,6 +41,7 @@ public sealed class CashierShiftTests
         shift.DeclaredCash.Should().BeNull();
         shift.CountedCash.Should().BeNull();
         shift.CashVariance.Should().BeNull();
+        shift.IsForceClosed.Should().BeFalse();
     }
 
     [Fact]
@@ -451,6 +452,87 @@ public sealed class CashierShiftTests
 
     #endregion
 
+    #region ForceClose
+
+    [Fact]
+    public void ForceClose_FromOpen_SetsClosedAndFlags()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        DateTimeOffset closedAt = Now.AddHours(18);
+
+        Result result = shift.ForceClose(closedAt);
+
+        result.IsSuccess.Should().BeTrue();
+        shift.Status.Should().Be(ShiftStatus.Closed);
+        shift.IsForceClosed.Should().BeTrue();
+        shift.ClosedAtUtc.Should().Be(closedAt);
+    }
+
+    [Fact]
+    public void ForceClose_FromSuspended_SetsClosedAndFlags()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.Suspend();
+
+        Result result = shift.ForceClose(Now.AddHours(18));
+
+        result.IsSuccess.Should().BeTrue();
+        shift.Status.Should().Be(ShiftStatus.Closed);
+        shift.IsForceClosed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ForceClose_FromPendingClose_ReturnsInvalidState()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+
+        Result result = shift.ForceClose(Now.AddHours(18));
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.invalid_state");
+    }
+
+    [Fact]
+    public void ForceClose_FromClosed_ReturnsInvalidState()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+        shift.Close(200m, 0m, 0m, 0m, Now.AddHours(8));
+
+        Result result = shift.ForceClose(Now.AddHours(18));
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.invalid_state");
+    }
+
+    [Fact]
+    public void ForceClose_DefaultClosedAt_ReturnsClosedAtRequired()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+
+        Result result = shift.ForceClose(default);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.closed_at_required");
+    }
+
+    [Fact]
+    public void ForceClose_DoesNotComputeVariance()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+
+        Result result = shift.ForceClose(Now.AddHours(18));
+
+        result.IsSuccess.Should().BeTrue();
+        shift.IsForceClosed.Should().BeTrue();
+        shift.DeclaredCash.Should().BeNull();
+        shift.CountedCash.Should().BeNull();
+        shift.CashVariance.Should().BeNull();
+    }
+
+    #endregion
+
     #region Reconcile
 
     [Fact]
@@ -460,7 +542,7 @@ public sealed class CashierShiftTests
         shift.DeclareCash(300m);
         shift.Close(300m, 100m, 0m, 0m, Now.AddHours(8));
 
-        Result result = shift.Reconcile();
+        Result result = shift.Reconcile(varianceThreshold: 0m, reason: null);
 
         result.IsSuccess.Should().BeTrue();
         shift.Status.Should().Be(ShiftStatus.Reconciled);
@@ -471,7 +553,7 @@ public sealed class CashierShiftTests
     {
         CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
 
-        Result result = shift.Reconcile();
+        Result result = shift.Reconcile(varianceThreshold: 0m, reason: null);
 
         result.IsFailure.Should().BeTrue();
         result.Errors.Should().Contain(e => e.Code == "shift.invalid_state");
@@ -483,9 +565,101 @@ public sealed class CashierShiftTests
         CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
         shift.DeclareCash(200m);
 
-        Result result = shift.Reconcile();
+        Result result = shift.Reconcile(varianceThreshold: 0m, reason: null);
 
         result.IsFailure.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Reconcile_VarianceBeyondThreshold_WithoutReason_Fails()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+        shift.Close(250m, 100m, 0m, 0m, Now.AddHours(8));
+
+        Result result = shift.Reconcile(varianceThreshold: 5m, reason: null);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.reconcile_reason_required");
+        shift.Status.Should().Be(ShiftStatus.Closed);
+    }
+
+    [Fact]
+    public void Reconcile_VarianceBeyondThreshold_WithReason_Succeeds()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+        shift.Close(250m, 100m, 0m, 0m, Now.AddHours(8));
+
+        Result result = shift.Reconcile(varianceThreshold: 5m, reason: "Petty cash out for taxi fare");
+
+        result.IsSuccess.Should().BeTrue();
+        shift.Status.Should().Be(ShiftStatus.Reconciled);
+    }
+
+    [Fact]
+    public void Reconcile_NegativeVarianceBeyondThreshold_WithoutReason_Fails()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+        shift.Close(150m, 100m, 0m, 0m, Now.AddHours(8));
+
+        Result result = shift.Reconcile(varianceThreshold: 5m, reason: null);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.reconcile_reason_required");
+    }
+
+    [Fact]
+    public void Reconcile_VarianceWithinThreshold_DoesNotRequireReason()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+        shift.Close(302m, 100m, 0m, 0m, Now.AddHours(8));
+
+        Result result = shift.Reconcile(varianceThreshold: 5m, reason: null);
+
+        result.IsSuccess.Should().BeTrue();
+        shift.Status.Should().Be(ShiftStatus.Reconciled);
+    }
+
+    [Fact]
+    public void Reconcile_ForceClosed_WithoutReason_Fails()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.ForceClose(Now.AddHours(18));
+
+        Result result = shift.Reconcile(varianceThreshold: 1000m, reason: null);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.reconcile_reason_required");
+        shift.Status.Should().Be(ShiftStatus.Closed);
+    }
+
+    [Fact]
+    public void Reconcile_ForceClosed_WithReason_Succeeds()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.ForceClose(Now.AddHours(18));
+
+        Result result = shift.Reconcile(varianceThreshold: 1000m, reason: "Shift was abandoned past MaxShiftHours");
+
+        result.IsSuccess.Should().BeTrue();
+        shift.Status.Should().Be(ShiftStatus.Reconciled);
+        shift.IsForceClosed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Reconcile_NegativeThreshold_TreatedAsZero()
+    {
+        CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 200m, BusinessDate, Now).Value;
+        shift.DeclareCash(200m);
+        shift.Close(200.01m, 100m, 0m, 0m, Now.AddHours(8));
+
+        Result result = shift.Reconcile(varianceThreshold: -1m, reason: null);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors.Should().Contain(e => e.Code == "shift.reconcile_reason_required");
     }
 
     #endregion
@@ -509,7 +683,7 @@ public sealed class CashierShiftTests
         CashierShift shift = CashierShift.Open(NewNumber(), Store, Device, Cashier, 100m, BusinessDate, Now).Value;
         shift.DeclareCash(100m);
 
-        Result result = shift.Reconcile();
+        Result result = shift.Reconcile(varianceThreshold: 0m, reason: null);
 
         result.IsFailure.Should().BeTrue();
     }

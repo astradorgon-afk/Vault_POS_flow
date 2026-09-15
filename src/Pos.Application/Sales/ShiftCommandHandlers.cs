@@ -5,6 +5,7 @@ using Pos.Application.Identity;
 using Pos.Domain.Auditing;
 using Pos.Domain.Common;
 using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
 using Pos.Domain.Sales;
 
 namespace Pos.Application.Sales;
@@ -230,6 +231,218 @@ public sealed class CloseShiftCommandHandler(
 
         return await shifts
             .UpdateAsync(shift, cancellationToken)
+            .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Handles <see cref="SuspendShiftCommand"/>. Suspends an open shift; the
+/// shift is retained for resumption while the device is locked (POS.md §1).
+/// Suspending another cashier's shift requires the <c>shift.close.other</c>
+/// permission, verified here because the message can only declare one static
+/// permission.
+/// </summary>
+public sealed class SuspendShiftCommandHandler(
+    IShiftRepository shifts,
+    IPermissionEvaluator permissions,
+    IAuditWriter audit,
+    ICurrentUser currentUser) : ICommandHandler<SuspendShiftCommand, CashierShiftId>
+{
+    /// <inheritdoc />
+    public async Task<Result<CashierShiftId>> HandleAsync(
+        SuspendShiftCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        CashierShift? shift = await shifts
+            .GetShiftAsync(command.ShiftId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (shift is null)
+        {
+            return Result<CashierShiftId>.Failure(ShiftErrors.ShiftUnknown(command.ShiftId));
+        }
+
+        if (shift.LocationId != command.LocationId)
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.LocationMismatch);
+        }
+
+        if (!await ShiftCommandAccess.CanOperate(shift, currentUser, permissions, cancellationToken))
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.CloseOtherShiftDenied);
+        }
+
+        Result suspended = shift.Suspend();
+
+        if (suspended.IsFailure)
+        {
+            return Result<CashierShiftId>.Failure(suspended.Errors);
+        }
+
+        await audit.WriteAsync(new AuditEntry(
+            AuditActions.Sales.ShiftSuspended,
+            "cashier_shift",
+            shift.Id.Value,
+            LocationId: command.LocationId),
+            cancellationToken).ConfigureAwait(false);
+
+        return await shifts
+            .UpdateAsync(shift, cancellationToken)
+            .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Handles <see cref="ResumeShiftCommand"/>. Returns a suspended shift to
+/// <see cref="ShiftStatus.Open"/> so it can keep accepting sales (POS.md §1).
+/// The ownership rule mirrors <see cref="SuspendShiftCommandHandler"/>.
+/// </summary>
+public sealed class ResumeShiftCommandHandler(
+    IShiftRepository shifts,
+    IPermissionEvaluator permissions,
+    IAuditWriter audit,
+    ICurrentUser currentUser) : ICommandHandler<ResumeShiftCommand, CashierShiftId>
+{
+    /// <inheritdoc />
+    public async Task<Result<CashierShiftId>> HandleAsync(
+        ResumeShiftCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        CashierShift? shift = await shifts
+            .GetShiftAsync(command.ShiftId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (shift is null)
+        {
+            return Result<CashierShiftId>.Failure(ShiftErrors.ShiftUnknown(command.ShiftId));
+        }
+
+        if (shift.LocationId != command.LocationId)
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.LocationMismatch);
+        }
+
+        if (!await ShiftCommandAccess.CanOperate(shift, currentUser, permissions, cancellationToken))
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.CloseOtherShiftDenied);
+        }
+
+        Result resumed = shift.Resume();
+
+        if (resumed.IsFailure)
+        {
+            return Result<CashierShiftId>.Failure(resumed.Errors);
+        }
+
+        await audit.WriteAsync(new AuditEntry(
+            AuditActions.Sales.ShiftResumed,
+            "cashier_shift",
+            shift.Id.Value,
+            LocationId: command.LocationId),
+            cancellationToken).ConfigureAwait(false);
+
+        return await shifts
+            .UpdateAsync(shift, cancellationToken)
+            .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Handles <see cref="ReconcileShiftCommand"/>. Marks a closed shift reconciled
+/// (POS.md §1): the shift's variance is checked against the location's
+/// <c>CashVarianceThreshold</c>, and a manager's reason is recorded when the
+/// variance (or a force-close) requires one. Reconciling another cashier's
+/// shift requires the <c>shift.close.other</c> permission, verified here.
+/// </summary>
+public sealed class ReconcileShiftCommandHandler(
+    IShiftRepository shifts,
+    IPermissionEvaluator permissions,
+    IAuditWriter audit,
+    ICurrentUser currentUser) : ICommandHandler<ReconcileShiftCommand, CashierShiftId>
+{
+    /// <inheritdoc />
+    public async Task<Result<CashierShiftId>> HandleAsync(
+        ReconcileShiftCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        CashierShift? shift = await shifts
+            .GetShiftAsync(command.ShiftId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (shift is null)
+        {
+            return Result<CashierShiftId>.Failure(ShiftErrors.ShiftUnknown(command.ShiftId));
+        }
+
+        if (shift.LocationId != command.LocationId)
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.LocationMismatch);
+        }
+
+        if (!await ShiftCommandAccess.CanOperate(shift, currentUser, permissions, cancellationToken))
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.CloseOtherShiftDenied);
+        }
+
+        // A shift whose location is missing fails closed to the strictest
+        // configuration: zero tolerance, so a flagged variance still requires a
+        // reason rather than passing silently.
+        ShiftLocationFacts? location = await shifts
+            .GetLocationFactsAsync(shift.LocationId, cancellationToken)
+            .ConfigureAwait(false);
+
+        decimal varianceThreshold = location?.Settings.CashVarianceThreshold ?? LocationSettings.Default.CashVarianceThreshold;
+
+        Result reconciled = shift.Reconcile(varianceThreshold, command.Reason);
+
+        if (reconciled.IsFailure)
+        {
+            return Result<CashierShiftId>.Failure(reconciled.Errors);
+        }
+
+        await audit.WriteAsync(new AuditEntry(
+            AuditActions.Sales.ShiftReconciled,
+            "cashier_shift",
+            shift.Id.Value,
+            Reason: command.Reason,
+            LocationId: command.LocationId),
+            cancellationToken).ConfigureAwait(false);
+
+        return await shifts
+            .UpdateAsync(shift, cancellationToken)
+            .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Shared ownership rule for operating a shift after it has been opened: the
+/// shift's own cashier, or anyone holding <c>shift.close.other</c> at the
+/// shift's location.
+/// </summary>
+internal static class ShiftCommandAccess
+{
+    /// <summary>Whether the current user may operate the shift.</summary>
+    public static async Task<bool> CanOperate(
+        CashierShift shift,
+        ICurrentUser currentUser,
+        IPermissionEvaluator permissions,
+        CancellationToken cancellationToken)
+    {
+        UserId actor = currentUser.UserId ?? UserId.Empty;
+
+        if (shift.CashierUserId == actor)
+        {
+            return true;
+        }
+
+        return await permissions
+            .HasPermissionAsync(actor, Permissions.Sales.CloseOtherShift, shift.LocationId, cancellationToken)
             .ConfigureAwait(false);
     }
 }

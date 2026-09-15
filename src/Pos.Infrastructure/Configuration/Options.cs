@@ -309,6 +309,30 @@ public sealed class ExpiryOptions
     public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
 }
 
+/// <summary>Cashier shift force-close worker settings.</summary>
+public sealed class ShiftForceCloseOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "ShiftForceClose";
+
+    /// <summary>Gets or sets whether the background shift force-close worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets how many hours between force-close passes. An hourly sweep
+    /// bounds how long an abandoned shift may sit open past its location's
+    /// <c>MaxShiftHours</c> (POS.md §1).
+    /// </summary>
+    [Range(1, 24)]
+    public int IntervalHours { get; set; } = 1;
+
+    /// <summary>Gets or sets whether a force-close pass runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
+}
+
 /// <summary>Maintenance-gated operations such as balance rebuilding.</summary>
 public sealed class MaintenanceOptions
 {
