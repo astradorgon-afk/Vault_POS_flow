@@ -171,6 +171,62 @@ public sealed class SalesReturnRepositoryTests : IAsyncLifetime
         loaded.Should().BeNull();
     }
 
+    [Fact]
+    public async Task AddReceiptPrintAsync_PersistsReprint_WithReasonAndSaleFk()
+    {
+        Sale sale = await NewSaleAsync(quantity: 1m, unitPrice: 100m);
+
+        Result<SaleReceiptPrint> print = SaleReceiptPrint.Create(
+            sale.Id,
+            Cashier,
+            new DateTimeOffset(2026, 9, 15, 9, 45, 0, TimeSpan.Zero),
+            isReprint: true,
+            "Customer copy lost; re-issued at till");
+
+        print.IsSuccess.Should().BeTrue();
+
+        Result<ReceiptPrintId> saved =
+            await _repository.AddReceiptPrintAsync(print.Value, CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+
+        SaleReceiptPrint? loaded = await _context.ReceiptPrints
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == saved.Value);
+
+        loaded.Should().NotBeNull();
+        loaded!.SaleId.Should().Be(sale.Id);
+        loaded.PrintedByUserId.Should().Be(Cashier);
+        loaded.IsReprint.Should().BeTrue();
+        loaded.Reason.Should().Be("Customer copy lost; re-issued at till");
+        loaded.PrintedAtUtc.Should().Be(new DateTimeOffset(2026, 9, 15, 9, 45, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task AddReceiptPrintAsync_FirstPrint_PersistsWithoutReason()
+    {
+        Sale sale = await NewSaleAsync(quantity: 1m, unitPrice: 100m);
+
+        Result<SaleReceiptPrint> print = SaleReceiptPrint.Create(
+            sale.Id,
+            Cashier,
+            new DateTimeOffset(2026, 9, 15, 9, 0, 0, TimeSpan.Zero),
+            isReprint: false,
+            reason: null);
+
+        Result<ReceiptPrintId> saved =
+            await _repository.AddReceiptPrintAsync(print.Value, CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+
+        SaleReceiptPrint? loaded = await _context.ReceiptPrints
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == saved.Value);
+
+        loaded!.IsReprint.Should().BeFalse();
+        loaded.Reason.Should().BeNull();
+    }
+
     private async Task<Sale> NewSaleAsync(decimal quantity, decimal unitPrice)
     {
         CashierShift shift = NewShift();

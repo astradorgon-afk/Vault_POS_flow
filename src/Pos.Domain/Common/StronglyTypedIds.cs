@@ -1080,6 +1080,30 @@ public readonly record struct RefundId(Guid Value) : IStronglyTypedId, IComparab
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
 
+/// <summary>Identifies one entry of the sale receipt print log.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ReceiptPrintId(Guid Value) : IStronglyTypedId, IComparable<ReceiptPrintId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ReceiptPrintId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ReceiptPrintId"/>.</returns>
+    public static ReceiptPrintId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ReceiptPrintId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
 /// <summary>Identifies a notification.</summary>
 /// <param name="Value">The underlying UUIDv7 value.</param>
 [System.Diagnostics.CodeAnalysis.SuppressMessage(

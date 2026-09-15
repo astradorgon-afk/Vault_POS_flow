@@ -217,6 +217,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the refunds issued against customer returns.</summary>
     public DbSet<Refund> Refunds => Set<Refund>();
 
+    /// <summary>Gets the append-only sale receipt print log.</summary>
+    public DbSet<SaleReceiptPrint> ReceiptPrints => Set<SaleReceiptPrint>();
+
     /// <summary>Gets the cashier shift ledger.</summary>
     public DbSet<CashierShift> CashierShifts => Set<CashierShift>();
 

@@ -117,6 +117,15 @@ public interface ISalesRepository
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The refund, or <see langword="null"/> when the event has not been refunded.</returns>
     Task<Refund?> GetRefundByEventAsync(EventId eventId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Appends an entry to the sale receipt print log. The log is append-only:
+    /// a reprint never rewrites history, it extends it.
+    /// </summary>
+    /// <param name="print">The print entry to append.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The print identifier.</returns>
+    Task<Result<ReceiptPrintId>> AddReceiptPrintAsync(SaleReceiptPrint print, CancellationToken cancellationToken);
 }
 
 /// <summary>The facts a completed sale depends on.</summary>

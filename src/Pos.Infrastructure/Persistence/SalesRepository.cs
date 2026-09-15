@@ -208,4 +208,19 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
         => context.Refunds
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.EventId == eventId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<Result<ReceiptPrintId>> AddReceiptPrintAsync(
+        SaleReceiptPrint print,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(print);
+
+        // The print log is append-only; the entry carries the foreign key to the
+        // sale it re-emits, staged here as its own row.
+        context.ReceiptPrints.Add(print);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<ReceiptPrintId>.Success(print.Id);
+    }
 }
