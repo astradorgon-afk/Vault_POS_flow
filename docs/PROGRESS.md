@@ -15,21 +15,16 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Phase 10 — batch and expiration — is **complete and ready to commit**. The
-groundwork commit `77e1e3d` made `ExpiryQuarantine` justifiable by either
-`StockAdjustment` or `ExpiryRun` and added the `ExpiryRun` document type
-(`DocumentType.ExpiryRun = 15` / `EXP`, `ReferenceDocumentType.ExpiryRun = 13`).
-This session built the expiry run on top of it (details in the log below):
-`LocationSettings.ExpiryWarningDays`, `ExpiryErrors`, `ExpiryRunResult`,
-`ExpiryRunRecordId`, `AuditActions.Expiry`, the `inventory.expiry.run` permission,
-`RunExpiryCommand` + thin handler, the `IExpiryService` / `IExpiryRepository`
-ports, the infra `ExpiryService`, `ExpiryRepository`, `ExpiryWorker`
-(`Expiry:Enabled`, 6-hour interval, system actor) and the `ExpiryOptions` binding,
-plus the docs update. Build green (0 warnings, 0 errors); full solution
-**445 passed, 0 failed** (Domain 215, Application 20, Infrastructure 40,
-Security 52, Architecture 13, API 105) with Docker running — the batch has
-cleared the commit gate.
-**Last commit:** `77e1e3d` Phase 10 groundwork (see log).
+**Now:** Phase 10 is committed. **Phase 11 — POS — is underway as the "C" batch
+series** (customer-return and receipt work is being built ahead of the
+shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
+reprint) and C3b (blind return) are committed; details in the log below. The
+latest batch, C3b, cleared the commit gate: build 0 warnings 0 errors, Domain
+335 / Application 183 / Infrastructure 81 passed 0 failed, and the migration
+guard ran against PostgreSQL.
+**Last commits:** `c829307` (C3b — blind customer return), `ac46de3` (C3 —
+receipt reprint with reason), `adf1a65` (C2 — customer returns and refunds),
+`4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
 ---
 
@@ -88,7 +83,9 @@ cleared the commit gate.
   - [x] Migration `20260914120000_InventoryControl`; full flow verified on PostgreSQL
   - [x] Removed six empty junk files from the repository root (three created by the local hook, three committed in Phase 1)
   - [x] Full test run (445 passed) and commit
-- [~] **Phase 10 — Batch and expiration** (code complete, 445 tests passing, ready to commit)
+- [x] **Phase 10 — Batch and expiration** (committed as `70f4dda`; the expiry run
+  itself is done — FEFO allocation service extraction, POS sale-blocking and
+  expiring-soon alerts are deferred to Phases 11/14, see log)
   - [x] Groundwork: `RequiredReferenceDocuments` set, `ExpiryQuarantine` justifiable by `StockAdjustment` or `ExpiryRun` (`G6`)
   - [x] Configurable expiry warning threshold (`LocationSettings.ExpiryWarningDays`, default 90)
   - [x] Expiry scan: expired, expiring-soon (threshold), FEFO-ordered sellable batches (`IExpiryService`)
@@ -96,7 +93,15 @@ cleared the commit gate.
   - [ ] FEFO transfer picking service (pick logic already FEFO-ordered; service extraction deferred)
   - [ ] Sale blocking for expired batches: POS consumers of the sellable-batch query + the authorized override path (Phase 11)
   - [ ] Expiring-soon / expired alerts (Phase 14 notifications)
-- [ ] **Phase 11 — POS:** shifts with cash reconciliation, sale lifecycle, pricing/discount/VAT, payments, atomic completion, receipts and reprint, void/return/refund, customers, daily summary
+- [~] **Phase 11 — POS** (returns side first as the "C" batch series)
+  - [x] C1 — void a completed sale, same shift and business day, with ledger reversal and migration
+  - [x] C2 — referenced customer return with refund limits and the `EXT-CUSTOMER → ReturnPending` ledger legs; refunds capped by the sale's payment mix; migration
+  - [x] C3 — receipt reprint with mandatory reason and the append-only print log; migration
+  - [x] C3b — blind customer return (no sale number): catalogue-priced, zero-sum `CustomerReturn` ledger group, exception audit with the reason, migration
+  - [ ] Shift lifecycle with cash reconciliation opening/closing
+  - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
+  - [ ] Customers
+  - [ ] Daily summary; blind-return refund path (a blind return is accepted and refunded against its own `RefundableTotal`, not a sale's)
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [ ] **Phase 14 — Notifications:** persistent notifications, SignalR hub, alert generators
@@ -194,6 +199,54 @@ cleared the commit gate.
   Verification: build 0 warnings 0 errors; full solution **445 passed, 0 failed**
   (Domain 215, Application 20, Infrastructure 40, Security 52, Architecture 13,
   API 105) with Docker running. Batch cleared the commit gate.
+- **POS C1 committed** (`4a81731`). Void a completed sale: the domain validates
+  same-shift and same-business-day (same shift + same business-day gate), clears
+  the sale's `IsVoided` flag (now excluded from daily summaries), and posts a
+  full reversal `SaleVoided` ledger group referencing the original sale. Handler:
+  shift/device facts check, writes the two `sale.created` and `sale.voided`
+  audits with a mandatory reason (≤ 200 chars), persists through `AddAsync`. Tests
+  for the domain rules, the handler's happy path and error paths, and the
+  repository round-trip.
+- **POS C2 committed** (`adf1a65`). Referenced customer return with refunds:
+  `SalesReturn.Create` takes a `ReturnItemSpec` for each returned sale line
+  (quantity capped at `SaleItem.Quantity − SaleItem.ReturnedQuantity`), freezes
+  a proportional snapshot of the sale line's net paid amount, and validates the
+  return fits inside `ReturnWindowDays` (default 7). The handler posts the
+  zero-sum `CustomerReturn` group (`EXT-CUSTOMER/External −q ⇄ Store/ReturnPending
+  +q`), writes the `sale.created` and `sale.return.created` audits, and persists.
+  A second command issues a refund against the return, capped per payment method
+  at what the return accepted. Refunds are posted through `AddRefundAsync` with
+  a `sale.refund.issued` audit. `RefundCommandErrors` carries the sale-match,
+  already-fully-refunded, and refund-exceeds-allowed caps. Tests: domain rules,
+  both handlers, repository round-trips.
+- **POS C3 committed** (`ac46de3`). Receipt reprint is read-only: the device
+  re-emits the receipt from its local copy, so nothing sale- or ledger-changing
+  happens — what must not be silent is the act of reprinting. `SaleReceiptPrint`
+  (append-only, required-reason ≤ 200 chars for reprints, first prints carry no
+  reason) is persisted by `AddReceiptPrintAsync`, with a `sale.receipt.reprinted`
+  audit. Repository round-trip tests were added. The suite green at Domain 324,
+  App 169, Infra 79.
+- **POS C3b committed** (`c829307`). Blind customer return (POS.md §4) accepts
+  goods back with no original sale under the same `CustomerReturn` ledger effect,
+  plus an exception record — `sale.return.blind.accepted`. Domain:
+  `SalesReturn.CreateBlind` (null `SaleId`, `IsBlind = true`,
+  `BlindReturnItemSpec` as a flat record with product id/name/price/cost but no
+  `SaleItemId`); VAT mirrored from sales (vatable/exempt/zero-rated proportional
+  splits using `SalesReturnItem.SplitTaxInclusive`); `SaleItemId` made nullable
+  on `SalesReturnItem` so both referenced and blind lines share the same table.
+  Migration `20260915051436_AddBlindReturns` makes `sale_id` and `sale_item_id`
+  nullable and adds `is_blind` (not-null, default false); the guard ran against
+  PostgreSQL. Handler: `CreateBlindSalesReturnCommand` behind `sale.return_blind`
+  (POS.md §4) — shift/device facts, RET numbering, catalogue price at the
+  returned instant (no sale-line price available), the same zero-sum ledger group
+  and both the `sale.return.created` and `sale.return.blind.accepted` audits with
+  the exception reason. Referenced paths tightened: the existing handler refuses a
+  null-backed sale item; the refund path rejects blind returns through its
+  existing sale-id check (blind refund is a later batch). Tests: 11 domain tests
+  (VAT splits, caps, reasons, empty and non-positive lines); 14 handler tests
+  (happy paths, persist at today's price, product/location/external-customer
+  errors, device/shift checks, ledger failure); two infra round-trips. The suite
+  green at Domain 335, App 183, Infra 81 (with Docker).
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

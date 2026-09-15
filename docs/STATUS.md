@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-14 · **Milestone:** Phase 9 (Inventory Control) complete, gap batches G1–G5 closed; Phase 10 (batch and expiration) **code complete, 445 tests passing, ready to commit**
+**Last updated:** 2026-09-15 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b committed**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,19 +13,19 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **445 passing, 0 failing, 0 skipped** (2026-09-14 full solution run with Docker: Domain 215, Application 20, Infrastructure 40, Security 52, Architecture 13, API 105 — includes the Phase 10 expiry batch) |
-| Migrations | 19, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **Domain 335, Application 183, Infrastructure 81** in the latest run (2026-09-15); Security 52, Architecture 13, API 105 unchanged from Phase 10 — full six-suite re-run has not been done since the C-batch started |
+| Migrations | 21, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection) |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
-| Phases remaining | 10–18 — see §5 |
+| Phases remaining | 11–18 — see §5 |
 
 ```
-Pos.Domain.Tests            215 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts
-Pos.Infrastructure.Tests     40 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order (18 need Docker)
+Pos.Domain.Tests            335 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS void/customer-return/blind-return rules
+Pos.Infrastructure.Tests     81 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order, sales-return and receipt-print round-trips (Docker needed for the PostgreSQL guard)
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
-Pos.Application.Tests        20 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering
+Pos.Application.Tests       183 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return)
 Pos.Api.IntegrationTests    105 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, API host runs on PostgreSQL (Docker)
 ```
 
@@ -400,6 +400,50 @@ real v1 need was a printable record of cash taken in or paid out.
   cashier/auditor/other-store refusals, and the external-location and
   input-validation errors.
 
+### Phase 11 — POS, returns side (the "C" batch series)
+
+Phase 11 is being built in small "C" batches; the customer-return and receipt
+work landed before the shift/sale/payment bulk. POS.md §4 is the contract: a
+referenced return posts `EXT-CUSTOMER −q → Store/ReturnPending +q`; a **blind**
+return does the same plus an exception record; return quantity per line is
+capped at `SaleItem.Quantity − SaleItem.ReturnedQuantity`; refunds are capped by
+the original payment method; reprints are read-side but never silent.
+
+- **C1 — void** (`4a81731`). Same shift, same business day; `sale.void`; a
+  `SaleVoided` reversal group referencing the original sale plus the mandatory
+  `sale.voided` audit with reason.
+- **C2 — referenced return and refund** (`adf1a65`). `SalesReturn.Create` mirrors
+  each returned sale line as a frozen proportional snapshot inside
+  `ReturnWindowDays` (default 7); the zero-sum `CustomerReturn` group posts
+  `External → ReturnPending`; `RefundSalesReturnCommand` issues refunds capped
+  per way the sale was actually paid. Migration `20260914200101_AddSalesReturnRefund`.
+- **C3 — receipt reprint** (`ac46de3`). `SaleReceiptPrint` append-only log
+  (required reason ≤ 200 chars on reprints, none on first prints), `sale.reprint`,
+  `sale.receipt.reprinted` audit. Migration `20260915035139_AddSaleReceiptPrintLog`.
+- **C3b — blind return** (`c829307`). `SalesReturn.CreateBlind` with a null
+  `SaleId`, `IsBlind`, and `BlindReturnItemSpec` lines (no sale item). Priced at
+  the catalogue at the returned instant (the sale's remembered price does not
+  exist), VAT split mirrored from sales (vatable/exempt/zero-rated), the same
+  zero-sum `CustomerReturn` ledger group, `sale.return.created` plus the
+  `sale.return.blind.accepted` exception audit with the reason, and a 200-
+  character reason cap. `sale_id` and `sale_item_id` become nullable and
+  `is_blind` is added in migration `20260915051436_AddBlindReturns` (the guard
+  ran against PostgreSQL). Referenced paths were tightened for the nullable keys;
+  a blind return's **refund** is a later batch (the existing refund handler
+  rejects it through its sale-id check).
+
+Tests: 11 domain tests for the blind-return rules (VAT splits, quantity and
+reason caps, empty and non-positive lines); 14 handler tests for the
+`CreateBlindSalesReturnCommand` (happy paths posting the ledger group and both
+audits, persist at today's price, unknown-product/price-missing/location and
+missing-external-customer errors, device and shift checks, ledger failure); two
+repository round-trips proving a blind return persists and reads back with its
+sale-free lines. The suit caught three test-side bugs on the way to green: a
+price scheduled in the past was correctly refused by the no-backdating rule
+(ADR-0029) and silently ignored, the product helper never passed its default
+purchase cost to `Product.Create`, and one error-code assertion hardcoded the
+wrong string (`sale.external_customer_missing`).
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -643,29 +687,23 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 8 shipped quarantine and unauthorized inventory: the `QuarantineIncident`
-aggregate with lines and photos, quarantine ledger postings, HQ review outcomes
-(register/link/investigate/release/reject/write-off with per-line caps and
-approvers), and scope-exact list/detail reads. Interim payment receipts
-(ADR-0026) landed alongside it. Three strands remain:
+Phase 10 (batch and expiration) is committed, and Phase 11 POS has started: the
+returns side of the "C" batch series — void (`4a81731`), referenced customer
+return and refund (`adf1a65`), receipt reprint (`ac46de3`), and the blind return
+(`c829307`) — is done. Three strands are open:
 
-1. **Phase 10 — batch and expiration** (per ROADMAP): **code complete, 445 tests
-   passing, ready to commit.** The groundwork is in (movement rules accept a set
-   of reference documents, so `ExpiryQuarantine` is now justifiable by either a
-   stock adjustment or an expiry run — `EXP`, `ReferenceDocumentType.ExpiryRun = 13`),
-   and the expiry run itself is implemented: `LocationSettings.ExpiryWarningDays`
-   (default 90), the `IExpiryService` scans (expired, expiring-soon, FEFO-ordered
-   sellable batches), `RunExpiryCommand` behind the `inventory.expiry.run`
-   permission, the `ExpiryWorker` background service (`Expiry:Enabled`, default
-   6-hour interval) quarantining past-expiry stock `Available → Expired` through
-   EXP-numbered `ExpiryQuarantine` groups with a system actor, and the
-   `ExpiryOptions` binding. Full-suite re-run confirms the gate. Up next after the
-   commit: the FEFO allocation service extraction, the POS sale-blocking override
-   path (Phase 11), and expiring-soon/expired alerts (Phase 14 notifications).
-2. **Phase 8 tail:** the automated quarantine triggers (unknown barcode at scan,
-   over-receipt excess, unclear returns) that would raise incidents without staff
-   action, plus notifications and the Owner-dashboard exception panel — both left
-   unchecked in ROADMAP §8.
+1. **Phase 11 — POS:** the rest of the C batch series, then the main flow.
+   Immediate items under the batch pattern: the **blind-return refund path**
+   (the existing refund command is rejected by its sale-id check; a blind return
+   refunds against its own `RefundableTotal` — currently the same `sale.refund`
+   permission), the **shift lifecycle with cash reconciliation** (opening/closing
+   counts), the **sale flow** (cart, pricing/discount/VAT against the catalogue,
+   payments, atomic completion), then customers and the daily summary. Live
+   endpoints and the API surface are not wired for these commands yet — the
+   domain, handlers, and repositories are the current seam.
+2. **Phase 10 tail:** the FEFO allocation service extraction, the POS sale-
+   blocking override path for expired batches (Phase 11), and expiring-soon /
+   expired alerts (Phase 14 notifications).
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
    correctness and deployment, receipts, identity administration, catalog
    curation, and the negative-stock record with the partitioning decision.
