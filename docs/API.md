@@ -525,7 +525,8 @@ POST   /api/v1/shifts/{id}/close                     shift.close
 GET    /api/v1/shifts/{id}/summary                   shift.open
 POST   /api/v1/sales                                 sale.create   (Idempotency-Key required) -> LEDGER
 GET    /api/v1/sales?locationId&from&to&cashierId    sale.create | report.view
-GET    /api/v1/sales/{id}                            sale.create | report.view
+GET    /api/v1/sales/{id}                            sale.view     -> detail, 403 sale.outside_scope
+GET    /api/v1/sales/{id}/receipt                    sale.view     -> text/plain rendering, logs the first print
 POST   /api/v1/sales/{id}/void                       sale.void     -> LEDGER (reversal)
 POST   /api/v1/sales/{id}/reprint                    sale.reprint
 POST   /api/v1/returns                               sale.return   -> LEDGER (to ReturnPending)
@@ -537,6 +538,37 @@ POST   /api/v1/cash-drawer/open                      cashdrawer.open_without_sal
 
 `POST /sales` accepts the full sale as one payload and completes it atomically.
 There is no "add line to server-side cart" chatter — the cart lives on the device.
+
+### Sales, receipt and first print
+
+The sale is complete in one atomic request (SAL-numbered, device-scoped) against
+an open shift on the same device, and the handler re-derives every economic fact
+the device claims: the effective catalogue price at the completion instant
+(`sale.item.price_missing` when none), the VAT classification, and the FEFO
+allocation from the sellable shelf (`inventory.insufficient_stock` when the
+shelf cannot cover the line; the expired-override exception path requires
+`sale.expired_override`). Payments must cover the total exactly (`cash` records
+`tendered` so the renderer prints the change). A sale needs the `EXT-CUSTOMER`
+counterparty provisioned before it can post — the ledger posts store
+Available → EXT-CUSTOMER.
+
+`GET /api/v1/sales/{id}` and the receipt route require `sale.view` and re-check
+it against the **sale's own location**: a Store Manager of another store gets
+403 `sale.outside_scope`, the Auditor reads business-wide. The receipt route
+renders `SaleReceiptRenderer`'s plain-text form (branch wall-clock time, lines,
+totals, payments with tendered/change) as `text/plain` and logs the first print
+into the `ReceiptPrints` append-only log (reprints are C3's `sale.receipt.
+reprinted`). Name-and-number contract mirrors the payments: `paymentMethod`
+numeric (`1` Cash, `2` Card, `3` EWallet).
+
+Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invalid`,
+`sale.product_unknown`, `sale.product_inactive`, `sale.item.price_missing`,
+`sale.discount_not_authorized`, `sale.price_override_not_authorized`,
+`sale.expired_override_denied`, `sale.external_customer_missing`,
+`sale.number_invalid`, `sale.number_device_mismatch`, `sale.device_unknown`,
+`sale.shift_unknown`, `sale.shift_not_open`, `sale.shift_cashier_mismatch`,
+`sale.shift_device_mismatch`, `sale.payment_mismatch` (409); `sale.outside_scope`
+(403); `sale.unknown` (404).
 
 ---
 

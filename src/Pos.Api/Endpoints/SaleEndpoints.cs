@@ -1,0 +1,342 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Pos.Api.Authorization;
+using Pos.Api.Common;
+using Pos.Application.Common.Abstractions;
+using Pos.Application.Common.Messaging;
+using Pos.Application.Identity;
+using Pos.Application.Receipts;
+using Pos.Application.Sales;
+using Pos.Domain.Common;
+using Pos.Domain.Sales;
+using Pos.Infrastructure.Persistence;
+
+namespace Pos.Api.Endpoints;
+
+/// <summary>The body of a complete-sale request. Fields mirror the command; identity
+/// fields (<see cref="CompleteSaleCommand.CashierId"/> and
+/// <see cref="CompleteSaleCommand.DeviceId"/>) come from the authenticated request.</summary>
+public sealed record CompleteSaleBody(
+    string Number,
+    Guid EventId,
+    Guid LocationId,
+    Guid CashierShiftId,
+    Guid DeviceId,
+    Guid? CustomerId,
+    DateOnly BusinessDate,
+    DateTimeOffset CompletedAtUtc,
+    IReadOnlyList<CompleteSaleLineBody> Lines,
+    IReadOnlyList<CompleteSalePaymentBody> Payments);
+
+/// <summary>One line of a completed sale.</summary>
+public sealed record CompleteSaleLineBody(
+    Guid ProductId,
+    decimal Quantity,
+    Guid UnitOfMeasureId,
+    string? Barcode,
+    decimal? UnitPriceOverride,
+    Guid? PriceOverrideAuthorizedByUserId,
+    decimal Discount,
+    Guid? DiscountAuthorizedByUserId,
+    bool AllowExpiredOverride);
+
+/// <summary>One payment that settles a sale.</summary>
+public sealed record CompleteSalePaymentBody(
+    PaymentMethod Method,
+    decimal Amount,
+    decimal? Tendered,
+    string? ProviderReference);
+
+/// <summary>A sale line as returned by the detail route.</summary>
+public sealed record SaleLineDetail(
+    int LineNumber,
+    Guid ProductId,
+    string ProductName,
+    string? Barcode,
+    decimal Quantity,
+    decimal UnitPrice,
+    decimal Discount,
+    decimal GrossAmount,
+    decimal NetAmount,
+    decimal? VatRate,
+    decimal Vat,
+    bool IsVatExempt,
+    bool IsZeroRated);
+
+/// <summary>A payment as returned by the detail route.</summary>
+public sealed record SalePaymentDetail(
+    string Method,
+    decimal Amount,
+    decimal? Tendered,
+    decimal? Change,
+    string? ProviderReference);
+
+/// <summary>A completed sale as returned by the detail route.</summary>
+public sealed record SaleDetail(
+    Guid Id,
+    string Number,
+    string Status,
+    Guid EventId,
+    Guid LocationId,
+    Guid CashierShiftId,
+    Guid DeviceId,
+    Guid? CustomerId,
+    DateOnly BusinessDate,
+    DateTimeOffset CompletedAtUtc,
+    Guid CompletedByUserId,
+    decimal GrossTotal,
+    decimal DiscountTotal,
+    decimal NetTotal,
+    decimal VatTotal,
+    decimal VatExemptTotal,
+    decimal ZeroRatedTotal,
+    decimal TaxableBaseTotal,
+    IReadOnlyList<SaleLineDetail> Lines,
+    IReadOnlyList<SalePaymentDetail> Payments);
+
+/// <summary>Sale endpoints: complete, read and receipt render (POS.md §3).</summary>
+public static class SaleEndpoints
+{
+    /// <summary>Sets the maximum number of items accepted per sale.</summary>
+    private const int MaxItems = 50;
+
+    /// <summary>Sets the maximum number of payments accepted per sale.</summary>
+    private const int MaxPayments = 5;
+
+    /// <summary>Maps the sale routes.</summary>
+    /// <param name="app">The route builder.</param>
+    /// <returns>The route builder, for chaining.</returns>
+    public static IEndpointRouteBuilder MapSaleEndpoints(this IEndpointRouteBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        RouteGroupBuilder group = app.MapGroup("/api/v1/sales").WithTags("Sales");
+
+        group.MapPost("/", CompleteSaleAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Create)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("CompleteSale")
+            .WithSummary("Completes a point-of-sale transaction.");
+
+        group.MapGet("/{id:guid}", GetSaleDetailAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.View)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetSaleDetail")
+            .WithSummary("Gets a completed sale with its lines and payments.");
+
+        group.MapGet("/{id:guid}/receipt", PrintSaleReceiptAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.View)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("PrintSaleReceipt")
+            .WithSummary("Renders a completed sale as printable plain text.");
+
+        return app;
+    }
+
+    private static async Task<IResult> CompleteSaleAsync(
+        [FromBody] CompleteSaleBody body,
+        [FromServices] IDispatcher dispatcher,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<DocumentNumber> number = DocumentNumber.Parse(body.Number);
+
+        if (number.IsFailure)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<SaleId>.Failure(number.Errors),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<SaleId> result = await dispatcher
+            .SendAsync(
+                new CompleteSaleCommand(
+                    number.Value,
+                    new Pos.Domain.Common.EventId(body.EventId),
+                    new LocationId(body.LocationId),
+                    new CashierShiftId(body.CashierShiftId),
+                    new DeviceId(body.DeviceId),
+                    currentUser.UserId!.Value,
+                    body.CustomerId.HasValue ? new CustomerId(body.CustomerId.Value) : null,
+                    body.BusinessDate,
+                    body.CompletedAtUtc,
+                    MapLines(body.Lines),
+                    MapPayments(body.Payments)),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Created(
+                FormattableString.Invariant($"/api/v1/sales/{result.Value.Value}"),
+                new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> GetSaleDetailAsync(
+        Guid id,
+        [FromServices] ISalesRepository repository,
+        [FromServices] IPermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        SaleId saleId = new(id);
+
+        Sale? sale = await repository
+            .GetByIdAsync(saleId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (sale is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<SaleDetail>.Failure(SaleErrors.Unknown(saleId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        if (!await evaluator
+                .HasPermissionAsync(
+                    currentUser.UserId ?? UserId.Empty,
+                    Permissions.Sales.View,
+                    sale.LocationId,
+                    cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<SaleDetail>.Failure(SaleErrors.OutsideScope(saleId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        return TypedResults.Ok(ToDetail(sale));
+    }
+
+    private static async Task<IResult> PrintSaleReceiptAsync(
+        Guid id,
+        [FromServices] ISalesRepository repository,
+        [FromServices] IPermissionEvaluator evaluator,
+        [FromServices] PosDbContext context,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        SaleId saleId = new(id);
+
+        Sale? sale = await repository
+            .GetByIdAsync(saleId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (sale is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<string>.Failure(SaleErrors.Unknown(saleId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        if (!await evaluator
+                .HasPermissionAsync(
+                    currentUser.UserId ?? UserId.Empty,
+                    Permissions.Sales.View,
+                    sale.LocationId,
+                    cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<string>.Failure(SaleErrors.OutsideScope(saleId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        var location = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Id == sale.LocationId)
+            .Select(l => new { l.Name, l.TimeZoneId })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        string? cashierName = await context.Users
+            .AsNoTracking()
+            .Where(u => u.Id == sale.CompletedByUserId.Value)
+            .Select(u => u.UserName)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        string text = SaleReceiptRenderer.RenderPlainText(
+            sale, location?.Name ?? string.Empty, location?.TimeZoneId, cashierName);
+
+        Result<SaleReceiptPrint> print = SaleReceiptPrint.Create(
+            saleId,
+            currentUser.UserId ?? UserId.Empty,
+            DateTimeOffset.UtcNow,
+            isReprint: false,
+            reason: null);
+
+        if (print.IsSuccess)
+        {
+            await repository
+                .AddReceiptPrintAsync(print.Value, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return TypedResults.Text(text, "text/plain");
+    }
+
+    private static List<CompleteSaleLine> MapLines(IReadOnlyList<CompleteSaleLineBody> lines)
+        => lines.Select(l => new CompleteSaleLine(
+            new ProductId(l.ProductId),
+            l.Quantity,
+            new UnitOfMeasureId(l.UnitOfMeasureId),
+            l.Barcode,
+            l.UnitPriceOverride,
+            l.PriceOverrideAuthorizedByUserId.HasValue
+                ? new UserId(l.PriceOverrideAuthorizedByUserId.Value) : null,
+            l.Discount,
+            l.DiscountAuthorizedByUserId.HasValue
+                ? new UserId(l.DiscountAuthorizedByUserId.Value) : null,
+            l.AllowExpiredOverride)).ToList();
+
+    private static List<CompleteSalePayment> MapPayments(IReadOnlyList<CompleteSalePaymentBody> payments)
+        => payments.Select(p => new CompleteSalePayment(
+            p.Method, p.Amount, p.Tendered, p.ProviderReference)).ToList();
+
+    private static SaleDetail ToDetail(Sale sale) => new(
+        sale.Id.Value,
+        sale.Number,
+        sale.Status.ToString(),
+        sale.EventId.Value,
+        sale.LocationId.Value,
+        sale.CashierShiftId.Value,
+        sale.DeviceId.Value,
+        sale.CustomerId?.Value,
+        sale.BusinessDate,
+        sale.CompletedAtUtc,
+        sale.CompletedByUserId.Value,
+        sale.GrossTotal,
+        sale.DiscountTotal,
+        sale.NetTotal,
+        sale.VatTotal,
+        sale.VatExemptTotal,
+        sale.ZeroRatedTotal,
+        sale.TaxableBaseTotal,
+        sale.Items.Select(i => new SaleLineDetail(
+            i.LineNumber,
+            i.ProductId.Value,
+            i.ProductName,
+            i.Barcode,
+            i.Quantity,
+            i.UnitPrice,
+            i.Discount,
+            i.GrossAmount,
+            i.NetAmount,
+            i.VatRate,
+            i.Vat,
+            i.IsVatExempt,
+            i.IsZeroRated)).ToList(),
+        sale.Payments.Select(p => new SalePaymentDetail(
+            p.Method.ToString(),
+            p.Amount,
+            p.Tendered,
+            p.Change,
+            p.ProviderReference)).ToList());
+}

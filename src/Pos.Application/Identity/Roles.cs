@@ -127,7 +127,7 @@ public static class Roles
 
                 Permissions.Receipts.Create, Permissions.Receipts.View,
 
-                Permissions.Sales.Create, Permissions.Sales.Discount, Permissions.Sales.PriceOverride,
+                Permissions.Sales.Create, Permissions.Sales.View, Permissions.Sales.Discount, Permissions.Sales.PriceOverride,
                 Permissions.Sales.Void, Permissions.Sales.Return, Permissions.Sales.ReturnBlind,
                 Permissions.Sales.Refund, Permissions.Sales.Reprint, Permissions.Sales.ExpiredOverride,
                 Permissions.Sales.OpenShift, Permissions.Sales.CloseShift, Permissions.Sales.CloseOtherShift,
@@ -153,7 +153,7 @@ public static class Roles
                 Permissions.Catalog.View,
                 Permissions.Inventory.View,
                 Permissions.Quarantine.Create,
-                Permissions.Sales.Create, Permissions.Sales.Return,
+                Permissions.Sales.Create, Permissions.Sales.View, Permissions.Sales.Return,
                 Permissions.Sales.OpenShift, Permissions.Sales.CloseShift,
                 Permissions.Sales.ManageCustomers,
             ],
@@ -169,6 +169,7 @@ public static class Roles
                 Permissions.Transfer.View,
                 Permissions.Quarantine.View,
                 Permissions.Receipts.View,
+                Permissions.Sales.View,
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
                 Permissions.Administration.ExportReports, Permissions.Administration.ViewAudit,
                 Permissions.Administration.AllLocations,

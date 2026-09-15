@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-15 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5 committed**
+**Last updated:** 2026-09-15 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5/C6 committed**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 110** in the latest full-suite run (2026-09-15, after C5). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
+| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 115** in the latest full-suite run (2026-09-15, after C6). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
 | Migrations | 22, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests     71 passing   ledger posting + concurrency + reconci
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       237 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return, blind refund, shift suspend/resume/reconcile)
-Pos.Api.IntegrationTests    110 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
+Pos.Api.IntegrationTests    115 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, shift lifecycle, sale complete/read/receipt, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -485,6 +485,35 @@ need a Docker daemon).
   length); 7 infra round-trips (force-close persists the flag, force-close
   survives round-trip, suspend-resume round-trips, force-close candidates by
   age).
+
+- **C6 — sale endpoint surface and the receipt render.** The POS sales routes,
+  through the real pipeline. New permission `sale.view` (read-only, offline-safe,
+  granted to Store Manager, Cashier and Auditor; Owner inherits the catalogue,
+  Administrator deliberately stays off the `sales.*` group). Domain gains
+  `SaleErrors.Unknown` (404 `sale.unknown`) and `SaleErrors.OutsideScope`
+  (403 `sale.outside_scope`). `POST /api/v1/sales` takes the full sale as one
+  payload (`CompleteSaleBody`) and dispatches `CompleteSaleCommand` — the 
+  command is `IAuthorizedMessage` + `ILocationScoped`, so the pipeline caps
+  `sale.create` at the caller's assigned locations and the handler re-derives
+  price (via `PriceAt`), VAT and FEFO allocation as before. `GET
+  /api/v1/sales/{id}` and `GET /api/v1/sales/{id}/receipt` require `sale.view`
+  and re-check it against the *sale's own* location (a Store Manager of another
+  store gets `sale.outside_scope`; the Auditor reads business-wide). The receipt
+  route renders through the new `SaleReceiptRenderer` plain-text form (same wire
+  shape as the payment-receipt renderer: branch wall-clock time, line list,
+  totals, payments with tendered/change) and logs the first print via
+  `SaleReceiptPrint.Create(..., isReprint: false, reason: null)`. No migration:
+  `sale.view` flows through the permission-seeder catalogue and `ReceiptPrints`
+  is already the C3 table. Tests: 5 endpoint tests through the real pipeline —
+  complete-a-cash-sale-creates-it, reads back the detail, renders the receipt and
+  logs exactly one first print; a product with no effective price is refused
+  409 `sale.item.price_missing` (the sale requires the EXT-CUSTOMER counterparty
+  location before it can post); selling past the sellable shelf is refused
+  `inventory.insufficient_stock`; another store's Store Manager is forbidden the
+  detail and the receipt while the Auditor still sees it; an unknown sale is
+  404. Suite at C6: Domain 358, Application 237, Infrastructure 71 (+18 skipped
+  PostgreSQL guards), Security 52, Architecture 13, API 115 (the two 
+  PostgreSQL-guard members need a Docker daemon).
 
 Tests: 11 domain tests for the blind-return rules (VAT splits, quantity and
 reason caps, empty and non-positive lines); 14 handler tests for the

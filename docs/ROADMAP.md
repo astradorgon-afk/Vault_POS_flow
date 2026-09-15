@@ -181,12 +181,13 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 11 — POS
 
-- [ ] Shift open/close with cash reconciliation
+- [x] Shift open/close with cash reconciliation (C5)
 - [ ] Barcode scan, product search, product grid, cart
 - [ ] Pricing, discounts, taxes, rounding
 - [ ] Payments (cash, card via provider, split)
-- [ ] Atomic sale completion (sale + items + payments + ledger + audit)
-- [ ] Receipt rendering and printing; permissioned reprint
+- [x] Atomic sale completion (sale + items + payments + ledger + audit) + sale detail/read-back (C6)
+- [~] Receipt rendering and printing; permissioned reprint
+      *(plain-text render + first print landed in C6; thermal/PDF layout deferred)*
 - [ ] Void, return, refund with disposition
 - [ ] Customer lookup and optional accounts
 - [ ] Daily sales summary

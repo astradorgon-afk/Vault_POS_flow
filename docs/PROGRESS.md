@@ -18,13 +18,14 @@ and the test suites pass. Nothing is pushed.
 **Now:** Phase 10 is committed. **Phase 11 — POS — is underway as the "C" batch
 series** (customer-return and receipt work is being built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
-reprint), C3b (blind return), C4 (blind-return refund) and C5 (shift lifecycle
-with cash reconciliation) are committed; details in the log below. The latest
-batch, C5, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
+reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
+with cash reconciliation) and C6 (sale endpoint surface + receipt render) are
+committed; details in the log below. The latest
+batch, C6, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
 Application 237 / Infrastructure 71 (+ 18 skipped) / Security 52 / Architecture
-13 / API 110 passed, 2 failed (Docker absent — those are PostgreSQL-guard tests,
-not caused by C5), and the migration guard ran against PostgreSQL on C3b.
-**Last commits:** C5 (shift lifecycle), `c829307` (C3b — blind customer return),
+13 / API 115 passed, 2 failed (Docker absent — those are PostgreSQL-guard tests,
+not caused by C6), and the migration guard ran against PostgreSQL on C3b.
+**Last commits:** C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -102,6 +103,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C3b — blind customer return (no sale number): catalogue-priced, zero-sum `CustomerReturn` ledger group, exception audit with the reason, migration
   - [x] C4 — blind-return refund path: `RefundBlindSalesReturnCommand` (no `SaleId`), `IssueBlindRefund` (cash only, capped by `RefundableTotal`, no per-method cap), `sale.refund.issued` audit, handler tests, infra round-trip
   - [x] C5 — shift lifecycle with cash reconciliation: `ForceClose`, `Reconcile(varianceThreshold, reason)` with `IsForceClosed` flag; `Suspend`/`Resume`/`Reconcile` handlers, `ShiftCommandAccess` gate, `ShiftForceCloseWorker`, `GetForceCloseCandidatesAsync`, `AddShiftForceClose` migration; domain/handler/validator/infra tests
+  - [x] C6 — sale endpoint surface and receipt render: `POST /api/v1/sales` (atomic full-sale payload through the `CompleteSaleCommand` pipeline), `GET /api/v1/sales/{id}` and `GET /api/v1/sales/{id}/receipt` behind the new `sale.view` permission re-checked against the sale's own location; `SaleReceiptRenderer` plain-text first print logged to `ReceiptPrints`; `SaleErrors.Unknown`/`OutsideScope`; endpoint tests through the real pipeline
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
   - [ ] Customers
   - [ ] Daily summary
@@ -291,6 +293,29 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   validator, 7 infra round-trips/candidates. Full suite: Domain 358, App 237,
   Infra 71 (+ 18 skipped PostgreSQL guards), Security 52, Architecture 13,
   API 110 (2 Docker-absent Postgres-guard failures, unrelated).
+- **POS C6 committed — sale endpoint surface and the receipt render** (POS.md §2-3).
+  New read-only permission `sale.view` (catalogue `Def(..., offline: true,
+  readOnly: true)`, granted to Store Manager, Cashier and Auditor; the
+  Administrator retains no `sales.*` grants by design, Owner inherits all via the
+  wildcard). Domain: `SaleErrors.Unknown` (404 `sale.unknown`) and
+  `SaleErrors.OutsideScope` (403 `sale.outside_scope`). API: `POST /api/v1/sales`
+  maps `CompleteSaleBody` onto `CompleteSaleCommand` — `CashierId` comes from the
+  authenticated request, `DeviceId` stays on the payload; the command's
+  `IAuthorizedMessage` + `ILocationScoped` let the pipeline cap `sale.create` at
+  the caller's locations (no body-scope route source exists or is needed), and
+  the handler re-derives price, VAT and FEFO as before. `GET /api/v1/sales/{id}`
+  and `GET /api/v1/sales/{id}/receipt` take `sale.view` and re-check it against
+  the sale's own location. `SaleReceiptRenderer.RenderPlainText` emits the
+  branch-wall-clock receipt (line list, totals, payment methods with
+  tendered/change, `Thank you.`) — the same wire shape as the payment-receipt
+  renderer, so the seam is identical — and the receipt route logs the first print
+  (`isReprint: false`, no reason) into `ReceiptPrints`. No migration: permission
+  flows through the seeder catalogue, the print table is C3. Tests: 5 endpoint
+  tests on the real pipeline (complete + read + render + exactly one first print;
+  price-missing 409; insufficient shelf 409; another store's manager 403 on
+  detail and receipt while the Auditor reads; unknown sale 404). Full suite:
+  Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards), Security 52,
+  Architecture 13, API 115 (2 Docker-absent Postgres-guard failures, unrelated).
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each

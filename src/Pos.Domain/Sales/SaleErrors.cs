@@ -263,4 +263,18 @@ public static class SaleErrors
             ["productId"] = productId.Value,
             ["locationId"] = locationId.Value,
         });
+
+    /// <summary>The sale does not exist.</summary>
+    /// <param name="saleId">The unknown sale.</param>
+    /// <returns>The error.</returns>
+    public static Error Unknown(SaleId saleId) => Error.NotFound(
+        "sale.unknown",
+        FormattableString.Invariant($"Unknown sale {saleId.Value}."));
+
+    /// <summary>The sale is outside the caller's location scope.</summary>
+    /// <param name="saleId">The sale.</param>
+    /// <returns>The error.</returns>
+    public static Error OutsideScope(SaleId saleId) => Error.Forbidden(
+        "sale.outside_scope",
+        FormattableString.Invariant($"Sale {saleId.Value} is outside the caller's scope."));
 }

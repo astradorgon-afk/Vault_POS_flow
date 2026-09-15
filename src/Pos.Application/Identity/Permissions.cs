@@ -206,6 +206,9 @@ public static class Permissions
         /// <summary>Ring up and complete a sale.</summary>
         public const string Create = "sale.create";
 
+        /// <summary>View completed sales and receipts.</summary>
+        public const string View = "sale.view";
+
         /// <summary>Apply a manual discount.</summary>
         public const string Discount = "sale.discount";
 
@@ -341,6 +344,7 @@ public static class Permissions
         Def(Receipts.View, "Receipts", "See payment receipts.", offline: false, readOnly: true),
 
         Def(Sales.Create, "Sales", "Ring up and complete a sale.", offline: true, readOnly: false),
+        Def(Sales.View, "Sales", "View completed sales and receipts.", offline: true, readOnly: true),
         Def(Sales.Discount, "Sales", "Apply a manual discount.", offline: true, readOnly: false),
         Def(Sales.PriceOverride, "Sales", "Override a unit price.", offline: true, readOnly: false),
         Def(Sales.Void, "Sales", "Void a sale.", offline: true, readOnly: false),

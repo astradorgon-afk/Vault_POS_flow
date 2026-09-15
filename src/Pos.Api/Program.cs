@@ -250,6 +250,7 @@ try
     app.MapQuarantineEndpoints();
     app.MapReceiptEndpoints();
     app.MapShiftEndpoints();
+    app.MapSaleEndpoints();
     app.MapAdministrationEndpoints();
 
     await app.RunAsync();
