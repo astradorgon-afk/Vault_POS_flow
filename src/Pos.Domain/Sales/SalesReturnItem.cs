@@ -3,11 +3,14 @@ using Pos.Domain.Common;
 namespace Pos.Domain.Sales;
 
 /// <summary>
-/// One line of a customer return: a frozen proportional snapshot of the original
-/// sale line. The multiplier is the returned quantity over the sale quantity, so
-/// a half-returned line half-refunds its gross, discount, VAT legs and net. The
-/// snapshot keeps the batch identity for recall traceability and the unit cost
-/// for return valuation, exactly like a sale line keeps them.
+/// One line of a customer return. A referenced return freezes a proportional
+/// snapshot of the original sale line — the multiplier is the returned quantity
+/// over the sale quantity, so a half-returned line half-refunds its gross,
+/// discount, VAT legs and net. A blind return freezes the catalog facts the
+/// handler resolved instead: the full line at today's price, with no
+/// <see cref="SaleItemId"/> because no sale line exists. The snapshot keeps the
+/// batch identity and unit cost where the source had them, for recall
+/// traceability and return valuation.
 /// </summary>
 public sealed class SalesReturnItem : Entity<SalesReturnItemId>
 {
@@ -21,7 +24,7 @@ public sealed class SalesReturnItem : Entity<SalesReturnItemId>
         SalesReturnItemId id,
         SalesReturnId salesReturnId,
         int lineNumber,
-        SaleItemId saleItemId,
+        SaleItemId? saleItemId,
         ProductId productId,
         string productName,
         string? barcode,
@@ -72,7 +75,6 @@ public sealed class SalesReturnItem : Entity<SalesReturnItemId>
     {
         ProductName = string.Empty;
         SalesReturnId = SalesReturnId.Empty;
-        SaleItemId = SaleItemId.Empty;
         ProductId = ProductId.Empty;
         UnitOfMeasureId = UnitOfMeasureId.Empty;
     }
@@ -83,8 +85,8 @@ public sealed class SalesReturnItem : Entity<SalesReturnItemId>
     /// <summary>Gets the sequential line number within the return.</summary>
     public int LineNumber { get; private set; }
 
-    /// <summary>Gets the original sale line this return line accepts back against.</summary>
-    public SaleItemId SaleItemId { get; private set; }
+    /// <summary>Gets the original sale line this return line accepts back against, or <see langword="null"/> for a blind return.</summary>
+    public SaleItemId? SaleItemId { get; private set; }
 
     /// <summary>Gets the product accepted back.</summary>
     public ProductId ProductId { get; private set; }
@@ -184,5 +186,64 @@ public sealed class SalesReturnItem : Entity<SalesReturnItemId>
             item.BatchCode,
             item.BatchExpiresOn,
             item.UnitCost);
+    }
+
+    /// <summary>
+    /// Creates the full-value snapshot of a blind return line (POS.md §4). The
+    /// parent aggregate validated the quantity; this factory records the
+    /// catalog facts the handler resolved — value at today's price, valuation
+    /// at the product's default cost, no batch identity and no sale line.
+    /// </summary>
+    internal static SalesReturnItem CreateBlind(SalesReturnId salesReturnId, int lineNumber, BlindReturnItemSpec spec)
+    {
+        decimal quantity = decimal.Round(spec.Quantity, Pos.Domain.Common.Quantity.Scale, MidpointRounding.AwayFromZero);
+        decimal gross = decimal.Round(spec.UnitPrice * quantity, Money.StorageScale, Money.IntermediateRounding);
+        decimal net = gross;
+
+        // The vatable branch splits the tax-inclusive net exactly like a sale
+        // line does, so blind returns and sales agree on the base-to-VAT split
+        // for the same shelf price.
+        decimal vatBase;
+        decimal vat;
+
+        if (spec.IsVatExempt)
+        {
+            vatBase = 0m;
+            vat = 0m;
+        }
+        else if (spec.IsZeroRated)
+        {
+            vatBase = net;
+            vat = 0m;
+        }
+        else
+        {
+            (vatBase, vat) = SalesVat.SplitTaxInclusive(net, spec.VatRate!.Value);
+        }
+
+        return new SalesReturnItem(
+            SalesReturnItemId.New(),
+            salesReturnId,
+            lineNumber,
+            saleItemId: null,
+            spec.ProductId,
+            spec.ProductName,
+            spec.Barcode,
+            quantity,
+            spec.UnitOfMeasureId,
+            spec.UnitPrice,
+            gross,
+            discount: 0m,
+            net,
+            net,
+            spec.IsVatExempt || spec.IsZeroRated ? null : spec.VatRate,
+            spec.IsVatExempt,
+            spec.IsZeroRated,
+            decimal.Round(vatBase, Money.StorageScale, Money.IntermediateRounding),
+            decimal.Round(vat, Money.StorageScale, Money.IntermediateRounding),
+            batchId: null,
+            batchCode: null,
+            batchExpiresOn: null,
+            spec.UnitCost);
     }
 }

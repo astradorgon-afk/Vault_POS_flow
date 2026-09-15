@@ -27,7 +27,8 @@ public sealed class SalesReturnConfiguration : IEntityTypeConfiguration<SalesRet
             .IsRequired();
 
         builder.Property(r => r.EventId).HasColumnName("event_id").IsRequired();
-        builder.Property(r => r.SaleId).HasColumnName("sale_id").IsRequired();
+        builder.Property(r => r.SaleId).HasColumnName("sale_id");
+        builder.Property(r => r.IsBlind).HasColumnName("is_blind").IsRequired();
         builder.Property(r => r.LocationId).HasColumnName("location_id").IsRequired();
         builder.Property(r => r.CashierShiftId).HasColumnName("cashier_shift_id").IsRequired();
         builder.Property(r => r.DeviceId).HasColumnName("device_id").IsRequired();
@@ -84,7 +85,7 @@ public sealed class SalesReturnItemConfiguration : IEntityTypeConfiguration<Sale
 
         builder.Property(i => i.SalesReturnId).HasColumnName("sales_return_id").IsRequired();
         builder.Property(i => i.LineNumber).HasColumnName("line_no").IsRequired();
-        builder.Property(i => i.SaleItemId).HasColumnName("sale_item_id").IsRequired();
+        builder.Property(i => i.SaleItemId).HasColumnName("sale_item_id");
         builder.Property(i => i.ProductId).HasColumnName("product_id").IsRequired();
 
         builder.Property(i => i.ProductName)

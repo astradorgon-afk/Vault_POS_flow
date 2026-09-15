@@ -131,7 +131,7 @@ public sealed class RefundSalesReturnCommandHandler(
                 g => decimal.Round(g.Sum(p => p.Amount), Money.StorageScale, Money.IntermediateRounding));
 
         IReadOnlyDictionary<PaymentMethod, decimal> priorRefundedByMethod = await shifts
-            .GetRefundedAmountsByMethodAsync(salesReturn.SaleId, cancellationToken)
+            .GetRefundedAmountsByMethodAsync(salesReturn.SaleId.Value, cancellationToken)
             .ConfigureAwait(false);
 
         Result<Refund> issued = salesReturn.IssueRefund(

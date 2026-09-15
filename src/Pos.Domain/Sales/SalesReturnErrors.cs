@@ -53,6 +53,23 @@ public static class SalesReturnErrors
         "sale.return.items_required",
         "A return must accept at least one line back.");
 
+    /// <summary>A blind return line references no product.</summary>
+    public static Error ItemProductRequired { get; } = Error.Validation(
+        "sale.return.blind.product_required",
+        "A blind return line must reference a product.");
+
+    /// <summary>A blind return requires an exception reason.</summary>
+    public static Error BlindReasonRequired { get; } = Error.Validation(
+        "sale.return.blind.reason_required",
+        "A blind return requires a reason for accepting goods back without their sale.");
+
+    /// <summary>A blind return's exception reason is too long.</summary>
+    /// <param name="maxLength">The maximum length.</param>
+    /// <returns>The error.</returns>
+    public static Error BlindReasonTooLong(int maxLength) => Error.Validation(
+        "sale.return.blind.reason_invalid",
+        FormattableString.Invariant($"A blind return's reason may be at most {maxLength} characters."));
+
     /// <summary>A return line references a sale line the return does not know about.</summary>
     /// <param name="saleItemId">The unknown sale line.</param>
     /// <returns>The error.</returns>

@@ -227,6 +227,49 @@ public sealed class SalesReturnRepositoryTests : IAsyncLifetime
         loaded.Reason.Should().BeNull();
     }
 
+    [Fact]
+    public async Task AddBlindReturnAsync_PersistsWithoutSale_AndReadsThemBack()
+    {
+        SalesReturn salesReturn = NewBlindReturn();
+
+        Result<SalesReturnId> saved = await _repository.AddReturnAsync(salesReturn, CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+        saved.Value.Should().Be(salesReturn.Id);
+
+        SalesReturn stored = await _context.SalesReturns
+            .Include(r => r.Items)
+            .SingleAsync(r => r.Id == salesReturn.Id, CancellationToken.None);
+
+        stored.Number.Should().Be(salesReturn.Number);
+        stored.IsBlind.Should().BeTrue();
+        stored.SaleId.Should().BeNull();
+        stored.LocationId.Should().Be(Store);
+        stored.RefundableTotal.Should().Be(100m);
+        stored.Items.Should().ContainSingle();
+        stored.Items[0].SaleItemId.Should().BeNull();
+        stored.Items[0].LineNumber.Should().Be(1);
+        stored.Items[0].ProductId.Should().Be(Widget);
+        stored.Items[0].Quantity.Should().Be(1m);
+        stored.Items[0].UnitPrice.Should().Be(100m);
+        stored.Items[0].RefundableAmount.Should().Be(100m);
+    }
+
+    [Fact]
+    public async Task GetReturnByIdAsync_LoadsABlindReturn()
+    {
+        SalesReturn salesReturn = NewBlindReturn();
+        await _repository.AddReturnAsync(salesReturn, CancellationToken.None);
+
+        SalesReturn? stored = await _repository.GetReturnByIdAsync(salesReturn.Id, CancellationToken.None);
+
+        stored.Should().NotBeNull();
+        stored!.IsBlind.Should().BeTrue();
+        stored.SaleId.Should().BeNull();
+        stored.Items.Should().ContainSingle();
+        stored.Items[0].SaleItemId.Should().BeNull();
+    }
+
     private async Task<Sale> NewSaleAsync(decimal quantity, decimal unitPrice)
     {
         CashierShift shift = NewShift();
@@ -300,6 +343,43 @@ public sealed class SalesReturnRepositoryTests : IAsyncLifetime
         {
             throw new InvalidOperationException(
                 $"Could not create test return: {string.Join("; ", result.Errors.Select(e => e.Code))}");
+        }
+
+        return result.Value;
+    }
+
+    private static SalesReturn NewBlindReturn()
+    {
+        DateOnly businessDate = new(2026, 9, 15);
+        DateTimeOffset now = new DateTimeOffset(2026, 9, 15, 9, 0, 0, TimeSpan.Zero);
+
+        Result<SalesReturn> result = SalesReturn.CreateBlind(
+            ReturnNumber,
+            EventId.New(),
+            Store,
+            CashierShiftId.New(),
+            Device,
+            customerId: null,
+            businessDate,
+            now,
+            Cashier,
+            "Customer is outside the store; goods returned without a sale number",
+            [new BlindReturnItemSpec(
+                Widget,
+                "Widget",
+                Barcode: null,
+                Quantity: 1m,
+                Unit,
+                UnitPrice: 100m,
+                VatRate: null,
+                IsVatExempt: false,
+                IsZeroRated: true,
+                UnitCost: 0m)]);
+
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException(
+                $"Could not create test blind return: {string.Join("; ", result.Errors.Select(e => e.Code))}");
         }
 
         return result.Value;

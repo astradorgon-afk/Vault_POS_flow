@@ -13,6 +13,36 @@ namespace Pos.Domain.Sales;
 public sealed record ReturnItemSpec(SaleItem Item, decimal Quantity);
 
 /// <summary>
+/// Input to record a blind return line (POS.md §4). A blind return accepts
+/// goods back with no original sale, so there is no <see cref="SaleItem"/>
+/// to freeze a proportional snapshot from; the line freezes the catalog facts
+/// the handler resolved — the current selling price and VAT class, the product
+/// name and the valuation cost. The exchange rate of returned value is today's
+/// shelf price, never a remembered one.
+/// </summary>
+/// <param name="ProductId">The product accepted back.</param>
+/// <param name="ProductName">The frozen product name snapshot.</param>
+/// <param name="Barcode">The frozen barcode snapshot, or <see langword="null"/> when the product has none.</param>
+/// <param name="Quantity">How many units are accepted back, in the unit of measure.</param>
+/// <param name="UnitOfMeasureId">The unit of measure the quantity is expressed in.</param>
+/// <param name="UnitPrice">The current selling price, tax-inclusive, resolved at the return's location.</param>
+/// <param name="VatRate">The VAT rate at the return's location, or <see langword="null"/> for exempt or zero-rated lines.</param>
+/// <param name="IsVatExempt">Whether the accepted-back line is VAT-exempt.</param>
+/// <param name="IsZeroRated">Whether the accepted-back line is zero-rated.</param>
+/// <param name="UnitCost">The product's valuation cost per unit.</param>
+public sealed record BlindReturnItemSpec(
+    ProductId ProductId,
+    string ProductName,
+    string? Barcode,
+    decimal Quantity,
+    UnitOfMeasureId UnitOfMeasureId,
+    decimal UnitPrice,
+    decimal? VatRate,
+    bool IsVatExempt,
+    bool IsZeroRated,
+    decimal UnitCost);
+
+/// <summary>
 /// A customer return: goods accepted back from a completed sale (POS.md §4).
 /// The return freezes a proportional snapshot of every returned sale line and
 /// the total value the customer may be refunded against it. Refunds are issued
@@ -20,9 +50,15 @@ public sealed record ReturnItemSpec(SaleItem Item, decimal Quantity);
 /// sale paid by that method and what the return accepted back. The acceptance
 /// posts the stock from the customer's External bucket into the store's
 /// ReturnPending bucket; disposing of the returned goods is a later batch.
+/// A <em>blind</em> return accepts goods back with no original sale under the
+/// same ledger effect, plus an exception record, and is priced at the catalog
+/// rather than at any remembered sale line.
 /// </summary>
 public class SalesReturn : AggregateRoot<SalesReturnId>
 {
+    /// <summary>The maximum length of a blind return's exception reason.</summary>
+    public const int BlindReasonMaxLength = 200;
+
     private readonly List<SalesReturnItem> _items = [];
     private readonly List<Refund> _refunds = [];
 
@@ -30,7 +66,8 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
         SalesReturnId id,
         DocumentNumber number,
         EventId eventId,
-        SaleId saleId,
+        SaleId? saleId,
+        bool isBlind,
         LocationId locationId,
         CashierShiftId cashierShiftId,
         DeviceId deviceId,
@@ -44,6 +81,7 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
         Number = number.Value;
         EventId = eventId;
         SaleId = saleId;
+        IsBlind = isBlind;
         LocationId = locationId;
         CashierShiftId = cashierShiftId;
         DeviceId = deviceId;
@@ -70,8 +108,11 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
     /// <summary>Gets the event identifier that makes the acceptance idempotent.</summary>
     public EventId EventId { get; private set; }
 
-    /// <summary>Gets the sale the goods were originally bought under.</summary>
-    public SaleId SaleId { get; private set; }
+    /// <summary>Gets the sale the goods were originally bought under, or <see langword="null"/> for a blind return.</summary>
+    public SaleId? SaleId { get; private set; }
+
+    /// <summary>Gets a value indicating whether the return accepted goods back with no original sale.</summary>
+    public bool IsBlind { get; private set; }
 
     /// <summary>Gets the location the return was accepted at.</summary>
     public LocationId LocationId { get; private set; }
@@ -159,7 +200,8 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
             businessDate,
             returnedAtUtc,
             returnedByUserId,
-            items);
+            items,
+            isBlind: false);
 
         if (headerFailure is not null)
         {
@@ -171,6 +213,7 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
             number,
             eventId,
             saleId,
+            isBlind: false,
             locationId,
             cashierShiftId,
             deviceId,
@@ -208,6 +251,116 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
             }
 
             SalesReturnItem returnItem = SalesReturnItem.Create(candidate.Id, index + 1, spec);
+            createdItems.Add(returnItem);
+            candidate.RefundableTotal = decimal.Round(
+                candidate.RefundableTotal + returnItem.RefundableAmount,
+                Money.StorageScale,
+                Money.IntermediateRounding);
+        }
+
+        candidate._items.AddRange(createdItems);
+        return Result<SalesReturn>.Success(candidate);
+    }
+
+    /// <summary>
+    /// Creates a blind customer return: goods accepted back with no original
+    /// sale (POS.md §4). Every value the referenced return freezes from a sale
+    /// line, this factory freezes from the <see cref="BlindReturnItemSpec"/>
+    /// snapshots the handler resolved from the catalog — the current selling
+    /// price, the VAT class and the valuation cost. The reason justifies the
+    /// exception record the blind path must always leave.
+    /// </summary>
+    /// <param name="number">The allocated RET number.</param>
+    /// <param name="eventId">The event identifier for idempotent acceptance.</param>
+    /// <param name="locationId">The location the return was accepted at.</param>
+    /// <param name="cashierShiftId">The cashier shift the return was accepted in.</param>
+    /// <param name="deviceId">The device the return was accepted on.</param>
+    /// <param name="customerId">The account customer, when known.</param>
+    /// <param name="businessDate">The business date the return counts toward.</param>
+    /// <param name="returnedAtUtc">When the goods were accepted back.</param>
+    /// <param name="returnedByUserId">The manager who accepted the goods back.</param>
+    /// <param name="reason">Why a return was accepted without its original sale.</param>
+    /// <param name="items">The lines being returned, each against catalog facts.</param>
+    /// <returns>The new return, or a validation failure.</returns>
+    public static Result<SalesReturn> CreateBlind(
+        DocumentNumber number,
+        EventId eventId,
+        LocationId locationId,
+        CashierShiftId cashierShiftId,
+        DeviceId deviceId,
+        CustomerId? customerId,
+        DateOnly businessDate,
+        DateTimeOffset returnedAtUtc,
+        UserId returnedByUserId,
+        string reason,
+        IReadOnlyList<BlindReturnItemSpec> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        Error? headerFailure = ValidateHeader(
+            eventId,
+            saleId: null,
+            locationId,
+            cashierShiftId,
+            deviceId,
+            businessDate,
+            returnedAtUtc,
+            returnedByUserId,
+            null,
+            isBlind: true);
+
+        if (headerFailure is not null)
+        {
+            return Result<SalesReturn>.Failure(headerFailure);
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result<SalesReturn>.Failure(SalesReturnErrors.BlindReasonRequired);
+        }
+
+        if (reason.Length > BlindReasonMaxLength)
+        {
+            return Result<SalesReturn>.Failure(SalesReturnErrors.BlindReasonTooLong(BlindReasonMaxLength));
+        }
+
+        if (items.Count == 0)
+        {
+            return Result<SalesReturn>.Failure(SalesReturnErrors.ItemsRequired);
+        }
+
+        SalesReturn candidate = new(
+            SalesReturnId.New(),
+            number,
+            eventId,
+            saleId: null,
+            isBlind: true,
+            locationId,
+            cashierShiftId,
+            deviceId,
+            customerId,
+            businessDate,
+            returnedAtUtc,
+            returnedByUserId,
+            refundableTotal: 0m);
+
+        List<SalesReturnItem> createdItems = [];
+
+        for (int index = 0; index < items.Count; index++)
+        {
+            BlindReturnItemSpec spec = items[index];
+
+            if (spec.ProductId.IsEmpty)
+            {
+                return Result<SalesReturn>.Failure(SalesReturnErrors.ItemProductRequired);
+            }
+
+            if (spec.Quantity <= 0m)
+            {
+                return Result<SalesReturn>.Failure(SalesReturnErrors.QuantityInvalid);
+            }
+
+            SalesReturnItem returnItem = SalesReturnItem.CreateBlind(candidate.Id, index + 1, spec);
             createdItems.Add(returnItem);
             candidate.RefundableTotal = decimal.Round(
                 candidate.RefundableTotal + returnItem.RefundableAmount,
@@ -364,21 +517,22 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
 
     private static Error? ValidateHeader(
         EventId eventId,
-        SaleId saleId,
+        SaleId? saleId,
         LocationId locationId,
         CashierShiftId cashierShiftId,
         DeviceId deviceId,
         DateOnly businessDate,
         DateTimeOffset returnedAtUtc,
         UserId returnedByUserId,
-        IReadOnlyList<ReturnItemSpec> items)
+        IReadOnlyList<ReturnItemSpec>? items,
+        bool isBlind)
     {
         if (eventId.IsEmpty)
         {
             return SalesReturnErrors.EventRequired;
         }
 
-        if (saleId.IsEmpty)
+        if (!isBlind && (saleId is null || saleId.Value.IsEmpty))
         {
             return SalesReturnErrors.SaleRequired;
         }
@@ -413,7 +567,7 @@ public class SalesReturn : AggregateRoot<SalesReturnId>
             return SalesReturnErrors.ReturnedByRequired;
         }
 
-        if (items.Count == 0)
+        if (!isBlind && (items is null || items.Count == 0))
         {
             return SalesReturnErrors.ItemsRequired;
         }

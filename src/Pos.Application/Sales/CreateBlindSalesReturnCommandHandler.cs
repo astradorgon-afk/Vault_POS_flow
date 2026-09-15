@@ -2,6 +2,7 @@ using System.Text.Json;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Domain.Auditing;
+using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
@@ -10,34 +11,32 @@ using Pos.Domain.Sales;
 namespace Pos.Application.Sales;
 
 /// <summary>
-/// Handles <see cref="CreateSalesReturnCommand"/>. The handler verifies that the
-/// sale exists, belongs to the same location and device, and still holds
-/// returnable units, then performs first-come first-served FIFO allocation of
-/// each requested product across the sale's lines in line-number order (so
-/// earlier batch slices are returned first, matching the FEFO sell path). It
-/// posts the CustomerReturn ledger movement — EXT-CUSTOMER's External bucket
-/// gives up every returned unit and the store's ReturnPending bucket receives
-/// them — and writes the audit entry, all inside the unit-of-work transaction.
+/// Handles <see cref="CreateBlindSalesReturnCommand"/>. A blind return accepts
+/// goods back with no original sale (POS.md §4), so there is no sale whose facts
+/// can be verified and no proportional snapshot to freeze. The handler instead
+/// verifies the device-allocated RET number against the authenticated device and
+/// the open shift, resolves every line's current selling price, VAT class and
+/// valuation cost from the catalog at the return's location, then lets the
+/// aggregate freeze its snapshot. It posts the same CustomerReturn ledger
+/// movement a referenced return would — EXT-CUSTOMER's External bucket gives up
+/// every unit and the store's ReturnPending bucket receives them — and writes
+/// the <c>sale.return.created</c> audit plus a mandatory
+/// <c>sale.return.blind.accepted</c> exception record with the reason. All of it
+/// commits in the unit-of-work transaction.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Idempotency follows the completion flow: the device-generated
-/// <see cref="CreateSalesReturnCommand.EventId"/> keys the ledger post, so a
-/// retried return replays the stored outcome instead of double-posting.
-/// </para>
-/// <para>
-/// The return window — commonly seven days for a full refund — is enforced by
-/// the device only; the server never hard-codes a day count that would overrule
-/// what a store configures. The server's insistence is structural: the sale
-/// exists, is completed, is not voided and still holds returnable units.
-/// </para>
+/// The External bucket is deliberately unbounded: the ledger's availability check
+/// never probes it, so a blind acceptance that runs the customer's bucket
+/// negative is posted rather than refused. The exception record is what makes
+/// that bounded: every blind acceptance is visible to HQ under its reason, and a
+/// refund against it later remains capped by the accepted value.
 /// </remarks>
-public sealed class CreateSalesReturnCommandHandler(
+public sealed class CreateBlindSalesReturnCommandHandler(
     ISalesRepository repository,
     IShiftRepository shifts,
     IInventoryLedger ledger,
     IAuditWriter audit,
-    ICurrentUser currentUser) : ICommandHandler<CreateSalesReturnCommand, SalesReturnId>
+    ICurrentUser currentUser) : ICommandHandler<CreateBlindSalesReturnCommand, SalesReturnId>
 {
     private static readonly JsonSerializerOptions JsonDefaults = new()
     {
@@ -47,37 +46,13 @@ public sealed class CreateSalesReturnCommandHandler(
 
     /// <inheritdoc />
     public async Task<Result<SalesReturnId>> HandleAsync(
-        CreateSalesReturnCommand command,
+        CreateBlindSalesReturnCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
         // ------------------------------------------------------------------
-        // 1. Load the sale and verify the request matches its facts.
-        // ------------------------------------------------------------------
-        Sale? sale = await repository
-            .GetByIdAsync(command.SaleId, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (sale is null)
-        {
-            return Result<SalesReturnId>.Failure(ReturnCommandErrors.SaleNotFound(command.SaleId));
-        }
-
-        if (command.LocationId != sale.LocationId)
-        {
-            return Result<SalesReturnId>.Failure(
-                ReturnCommandErrors.LocationMismatch(SalesReturnId.Empty, command.LocationId));
-        }
-
-        if (command.DeviceId != sale.DeviceId)
-        {
-            return Result<SalesReturnId>.Failure(
-                ReturnCommandErrors.DeviceMismatch(SalesReturnId.Empty, command.DeviceId));
-        }
-
-        // ------------------------------------------------------------------
-        // 2. Verify the device-allocated RET number's device code matches,
+        // 1. Verify the device-allocated RET number's device code matches,
         //    and verify the shift is open on the same device.
         // ------------------------------------------------------------------
         if (command.Number.DeviceShortCode is null)
@@ -119,81 +94,86 @@ public sealed class CreateSalesReturnCommandHandler(
         }
 
         // ------------------------------------------------------------------
-        // 3. Perform FIFO allocation of each requested product across the
-        //    sale's lines in line-number order, respecting what each line
-        //    still holds unreturned.
+        // 2. Load the location facts and the products' catalog state, then
+        //    resolve every line's price, VAT class and valuation cost.
         // ------------------------------------------------------------------
-        Dictionary<SaleItemId, decimal> alreadyReturned = sale.Items
-            .ToDictionary(i => i.Id, i => i.ReturnedQuantity);
+        SaleLocationFacts? location = await repository
+            .GetLocationAsync(command.LocationId, cancellationToken)
+            .ConfigureAwait(false);
 
-        List<ReturnItemSpec> specs = [];
-        Dictionary<SaleItemId, decimal> allocated = sale.Items.ToDictionary(i => i.Id, _ => 0m);
-
-        foreach (SalesReturnLine line in command.Lines)
+        if (location is null)
         {
-            decimal remaining = line.Quantity;
-            bool foundAny = false;
+            return Result<SalesReturnId>.Failure(SaleCommandErrors.LocationUnknown(command.LocationId));
+        }
 
-            foreach (SaleItem item in sale.Items
-                         .Where(i => i.ProductId == line.ProductId)
-                         .OrderBy(i => i.LineNumber))
+        List<BlindSalesReturnLine> lines = command.Lines.ToList();
+
+        IReadOnlyList<Product> products = await repository
+            .GetSaleProductsAsync(lines.Select(l => l.ProductId).Distinct().ToArray(), cancellationToken)
+            .ConfigureAwait(false);
+
+        Dictionary<ProductId, Product> productById = products.ToDictionary(p => p.Id);
+
+        List<BlindReturnItemSpec> specs = [];
+
+        foreach (BlindSalesReturnLine line in lines)
+        {
+            if (!productById.TryGetValue(line.ProductId, out Product? product))
             {
-                decimal cap = decimal.Round(
-                    item.Quantity - alreadyReturned[item.Id],
-                    Pos.Domain.Common.Quantity.Scale,
-                    MidpointRounding.ToEven);
-
-                decimal availableOnItem = decimal.Round(
-                    cap - allocated[item.Id],
-                    Pos.Domain.Common.Quantity.Scale,
-                    MidpointRounding.ToEven);
-
-                if (availableOnItem <= 0m)
-                {
-                    continue;
-                }
-
-                foundAny = true;
-                decimal slice = remaining < availableOnItem ? remaining : availableOnItem;
-
-                specs.Add(new ReturnItemSpec(item, slice));
-                allocated[item.Id] = decimal.Round(
-                    allocated[item.Id] + slice,
-                    Pos.Domain.Common.Quantity.Scale,
-                    MidpointRounding.ToEven);
-                remaining = decimal.Round(
-                    remaining - slice,
-                    Pos.Domain.Common.Quantity.Scale,
-                    MidpointRounding.ToEven);
-
-                if (remaining <= 0m)
-                {
-                    break;
-                }
+                return Result<SalesReturnId>.Failure(BlindReturnCommandErrors.ProductUnknown(line.ProductId));
             }
 
-            if (!foundAny)
+            if (line.Quantity <= 0m)
             {
-                return Result<SalesReturnId>.Failure(ReturnCommandErrors.NoReturnableLines(line.ProductId));
+                return Result<SalesReturnId>.Failure(SalesReturnErrors.QuantityInvalid);
             }
 
-            if (remaining > 0m)
+            ProductPrice? effectivePrice = product.PriceAt(command.LocationId, command.ReturnedAtUtc);
+
+            if (effectivePrice is null)
             {
-                decimal requested = line.Quantity;
-                decimal available = decimal.Round(requested - remaining, Pos.Domain.Common.Quantity.Scale, MidpointRounding.ToEven);
                 return Result<SalesReturnId>.Failure(
-                    ReturnCommandErrors.QuantityExceedsAvailable(line.ProductId, available, requested));
+                    BlindReturnCommandErrors.PriceMissing(line.ProductId, command.LocationId));
             }
+
+            decimal? vatRate;
+            bool isVatExempt;
+
+            if (product.IsVatExempt)
+            {
+                vatRate = null;
+                isVatExempt = true;
+            }
+            else
+            {
+                vatRate = location.Settings.VatRate;
+                isVatExempt = false;
+            }
+
+            string? barcode = product.Barcodes
+                .FirstOrDefault(b => b.IsPrimary && b.RetiredAtUtc is null)
+                ?.Value;
+
+            specs.Add(new BlindReturnItemSpec(
+                line.ProductId,
+                product.Name,
+                barcode,
+                line.Quantity,
+                product.BaseUnitOfMeasureId,
+                effectivePrice.Price.Amount,
+                vatRate,
+                isVatExempt,
+                IsZeroRated: false,
+                product.DefaultPurchaseCost));
         }
 
         // ------------------------------------------------------------------
-        // 4. Create the return. The aggregate validates every line cap again
-        //    against the same pre-return snapshot.
+        // 3. Create the blind return. The aggregate enforces the mandatory
+        //    exception reason and freezes the resolved valuations.
         // ------------------------------------------------------------------
-        Result<SalesReturn> created = SalesReturn.Create(
+        Result<SalesReturn> created = SalesReturn.CreateBlind(
             command.Number,
             command.EventId,
-            command.SaleId,
             command.LocationId,
             command.ShiftId,
             command.DeviceId,
@@ -201,8 +181,8 @@ public sealed class CreateSalesReturnCommandHandler(
             command.BusinessDate,
             command.ReturnedAtUtc,
             command.ReturnedByUserId,
-            specs,
-            alreadyReturned);
+            command.Reason,
+            specs);
 
         if (created.IsFailure)
         {
@@ -212,23 +192,9 @@ public sealed class CreateSalesReturnCommandHandler(
         SalesReturn salesReturn = created.Value;
 
         // ------------------------------------------------------------------
-        // 5. Accumulate the returned quantities on each sale line, enforcing
-        //    the server-side cap the sale itself holds.
-        // ------------------------------------------------------------------
-        foreach (SalesReturnItem returnItem in salesReturn.Items)
-        {
-            Result recorded = sale.RecordReturn(returnItem.SaleItemId!.Value, returnItem.Quantity);
-
-            if (recorded.IsFailure)
-            {
-                return Result<SalesReturnId>.Failure(recorded.Errors);
-            }
-        }
-
-        // ------------------------------------------------------------------
-        // 6. Post the CustomerReturn ledger movement: EXT-CUSTOMER's External
+        // 4. Post the CustomerReturn ledger movement: EXT-CUSTOMER's External
         //    bucket gives up every returned unit and the store's ReturnPending
-        //    bucket receives them, mirroring the original PosSale legs.
+        //    bucket receives them.
         // ------------------------------------------------------------------
         LocationId? externalCustomerLocationId = await repository
             .GetExternalCustomerLocationIdAsync(cancellationToken)
@@ -243,29 +209,27 @@ public sealed class CreateSalesReturnCommandHandler(
 
         foreach (SalesReturnItem item in salesReturn.Items)
         {
-            bool tracksBatches = item.BatchId is not null;
-
             // Positive leg: store's ReturnPending bucket receives the goods.
             legs.Add(new MovementLegSpec(
                 item.ProductId,
-                item.BatchId,
-                sale.LocationId,
-                LocationKind.Store,
+                BatchId: null,
+                command.LocationId,
+                location.Kind,
                 InventoryState.ReturnPending,
                 +item.Quantity,
                 item.UnitCost,
-                tracksBatches));
+                ProductTracksBatches: false));
 
             // Negative leg: EXT-CUSTOMER's External bucket gives them up.
             legs.Add(new MovementLegSpec(
                 item.ProductId,
-                item.BatchId,
+                BatchId: null,
                 externalCustomerLocationId.Value,
                 LocationKind.External,
                 InventoryState.External,
                 -item.Quantity,
                 item.UnitCost,
-                tracksBatches));
+                ProductTracksBatches: false));
         }
 
         MovementGroupSpec movementGroup = new(
@@ -293,7 +257,7 @@ public sealed class CreateSalesReturnCommandHandler(
         }
 
         // ------------------------------------------------------------------
-        // 7. Audit the return.
+        // 5. Audit the return and the exception record.
         // ------------------------------------------------------------------
         string auditJson = JsonSerializer.Serialize(new
         {
@@ -314,27 +278,31 @@ public sealed class CreateSalesReturnCommandHandler(
             LocationId: command.LocationId),
             cancellationToken).ConfigureAwait(false);
 
+        string blindJson = JsonSerializer.Serialize(new
+        {
+            salesReturn.Id,
+            Number = salesReturn.Number,
+            LocationId = command.LocationId.Value,
+            Reason = command.Reason,
+            ReturnedByUserId = command.ReturnedByUserId.Value,
+        }, JsonDefaults);
+
+        await audit.WriteAsync(new AuditEntry(
+            AuditActions.Sales.BlindReturnAccepted,
+            "sales_return",
+            salesReturn.Id.Value,
+            NewValueJson: blindJson,
+            Reason: command.Reason,
+            ReferenceDocumentType: ReferenceDocumentType.SalesReturn,
+            ReferenceDocumentId: salesReturn.Id.Value,
+            LocationId: command.LocationId),
+            cancellationToken).ConfigureAwait(false);
+
         // ------------------------------------------------------------------
-        // 8. Persist the new return and the updated sale.
+        // 6. Persist the new return.
         // ------------------------------------------------------------------
-        Result<SalesReturnId> added = await repository
+        return await repository
             .AddReturnAsync(salesReturn, cancellationToken)
             .ConfigureAwait(false);
-
-        if (added.IsFailure)
-        {
-            return added;
-        }
-
-        Result<SaleId> updated = await repository
-            .UpdateAsync(sale, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (updated.IsFailure)
-        {
-            return Result<SalesReturnId>.Failure(updated.Errors);
-        }
-
-        return added;
     }
 }
