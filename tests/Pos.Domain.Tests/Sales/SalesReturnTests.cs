@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Pos.Domain.Common;
 using Pos.Domain.Sales;
+using Pos.Domain.Inventory;
 
 namespace Pos.Domain.Tests.Sales;
 
@@ -13,6 +14,64 @@ namespace Pos.Domain.Tests.Sales;
 /// </summary>
 public sealed class SalesReturnTests
 {
+    [Fact]
+    public void DisposeLine_PartialDecisions_ConsumeOnlyPendingQuantity()
+    {
+        Sale sale = SaleWith([Item()], [Cash(100m, 100m)]);
+        SalesReturn returned = Create(sale).Value;
+        returned.DisposeLine(EventId.New(), 1, 0.4m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, "Inspected", ReturnedBy, Now, BusinessDate).IsSuccess.Should().BeTrue();
+        returned.DisposeLine(EventId.New(), 1, 0.6m, ReturnDispositionKind.Damaged,
+            AdjustmentReasonCode.Damaged, "Broken", ReturnedBy, Now, BusinessDate).IsSuccess.Should().BeTrue();
+        returned.Items[0].PendingDispositionQuantity.Should().Be(0m);
+        returned.RefundableTotal.Should().Be(100m);
+        returned.DisposeLine(EventId.New(), 1, 0.001m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, "Inspected", ReturnedBy, Now, BusinessDate).Error
+            .Should().Be(ReturnDispositionErrors.QuantityExceeded);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(0.0001)]
+    public void DisposeLine_InvalidQuantity_DoesNotConsumeGoods(decimal quantity)
+    {
+        SalesReturn returned = Create(SaleWith([Item()], [Cash(100m, 100m)])).Value;
+        returned.DisposeLine(EventId.New(), 1, quantity, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, "Inspected", ReturnedBy, Now, BusinessDate).Error
+            .Should().Be(ReturnDispositionErrors.Invalid);
+        returned.Items[0].PendingDispositionQuantity.Should().Be(1m);
+    }
+
+    [Fact]
+    public void DisposeLine_ExpiredBatch_CannotRestockButCanQuarantine()
+    {
+        ItemSpec expired = Item() with { BatchId = Batch, BatchCode = "LOT1",
+            BatchExpiresOn = BusinessDate.AddDays(-1), TracksBatches = true };
+        SalesReturn returned = Create(SaleWith([expired], [Cash(100m, 100m)])).Value;
+        returned.DisposeLine(EventId.New(), 1, 1m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.Expired, "Expired", ReturnedBy, Now, BusinessDate).Error
+            .Should().Be(ReturnDispositionErrors.Expired);
+        returned.Items[0].PendingDispositionQuantity.Should().Be(1m);
+        returned.DisposeLine(EventId.New(), 1, 1m, ReturnDispositionKind.Quarantine,
+            AdjustmentReasonCode.Expired, "Expired", ReturnedBy, Now, BusinessDate).IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DisposeLine_UnknownLineAndInvalidDecision_DoNotConsumeGoods()
+    {
+        SalesReturn returned = Create(SaleWith([Item()], [Cash(100m, 100m)])).Value;
+        returned.DisposeLine(EventId.New(), 2, 1m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, "Inspected", ReturnedBy, Now, BusinessDate).Error
+            .Should().Be(ReturnDispositionErrors.LineUnknown);
+        returned.DisposeLine(EventId.New(), 1, 1m, (ReturnDispositionKind)99,
+            AdjustmentReasonCode.CountCorrection, "Inspected", ReturnedBy, Now, BusinessDate).Error
+            .Should().Be(ReturnDispositionErrors.Invalid);
+        returned.DisposeLine(EventId.New(), 1, 1m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, " ", ReturnedBy, Now, BusinessDate).IsFailure.Should().BeTrue();
+        returned.Items[0].PendingDispositionQuantity.Should().Be(1m);
+    }
+
     private static readonly UserId Cashier = UserId.New();
     private static readonly UserId ReturnedBy = UserId.New();
     private static readonly LocationId Store = LocationId.New();

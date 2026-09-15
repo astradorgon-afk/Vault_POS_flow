@@ -134,7 +134,7 @@ public sealed class RefundBlindSalesReturnCommandHandlerTests
         await _handler.HandleAsync(command, CancellationToken.None);
 
         await _repository.DidNotReceive().GetByIdAsync(Arg.Any<SaleId>(), Arg.Any<CancellationToken>());
-        await _shifts.DidNotReceive().GetRefundedAmountsByMethodAsync(Arg.Any<SaleId>(), Arg.Any<CancellationToken>());
+        await _shifts.DidNotReceive().GetRefundedAmountsByMethodAsync(Arg.Any<SaleId>(), Arg.Any<CancellationToken>(), Arg.Any<SalesReturnId?>());
     }
 
     // ------------------------------------------------------------------

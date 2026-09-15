@@ -1,4 +1,5 @@
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
 
 namespace Pos.Domain.Sales;
 
@@ -56,6 +57,50 @@ public sealed record BlindReturnItemSpec(
 /// </summary>
 public class SalesReturn : AggregateRoot<SalesReturnId>
 {
+    /// <summary>Records a partial or full inspection decision without changing stock directly.</summary>
+    /// <param name="eventId">The unique disposition event.</param>
+    /// <param name="lineNumber">The return line to inspect.</param>
+    /// <param name="quantity">The quantity to route.</param>
+    /// <param name="kind">The inspection decision.</param>
+    /// <param name="reasonCode">The ledger reason.</param>
+    /// <param name="note">The inspection explanation.</param>
+    /// <param name="actor">The authenticated inspector.</param>
+    /// <param name="now">The server time.</param>
+    /// <param name="businessDate">Today's date at the return's location.</param>
+    /// <returns>The immutable decision, or the failed invariant.</returns>
+    public Result<SalesReturnDisposition> DisposeLine(EventId eventId, int lineNumber, decimal quantity,
+        ReturnDispositionKind kind, AdjustmentReasonCode reasonCode, string? note, UserId actor,
+        DateTimeOffset now, DateOnly businessDate)
+    {
+        if (eventId.IsEmpty || actor.IsEmpty || now == default || businessDate == default
+            || quantity <= 0m || decimal.Round(quantity, Pos.Domain.Common.Quantity.Scale) != quantity
+            || !Enum.IsDefined(kind) || !Enum.IsDefined(reasonCode)
+            || string.IsNullOrWhiteSpace(note) || note.Length > 512)
+        {
+            return Result<SalesReturnDisposition>.Failure(ReturnDispositionErrors.Invalid);
+        }
+
+        SalesReturnItem? item = _items.SingleOrDefault(i => i.LineNumber == lineNumber);
+        if (item is null)
+        {
+            return Result<SalesReturnDisposition>.Failure(ReturnDispositionErrors.LineUnknown);
+        }
+
+        if (quantity > item.PendingDispositionQuantity)
+        {
+            return Result<SalesReturnDisposition>.Failure(ReturnDispositionErrors.QuantityExceeded);
+        }
+
+        if (kind == ReturnDispositionKind.Restock && item.BatchExpiresOn is { } expiry && expiry < businessDate)
+        {
+            return Result<SalesReturnDisposition>.Failure(ReturnDispositionErrors.Expired);
+        }
+
+        item.RecordDisposition(quantity);
+        return Result<SalesReturnDisposition>.Success(new SalesReturnDisposition(
+            eventId, Id, item.Id, quantity, kind, reasonCode, note.Trim(), actor, now));
+    }
+
     /// <summary>The maximum length of a blind return's exception reason.</summary>
     public const int BlindReasonMaxLength = 200;
 

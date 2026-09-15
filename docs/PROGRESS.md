@@ -395,3 +395,47 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   `cmd`, so any `>` in that text creates an empty stray file in the repository
   root (seen as `,-`, `,session_title`, `%{redirect_url}'`). They were removed each
   time; none were committed.
+
+### 2026-09-16 — POS refund follow-up
+
+- Fixed the C9 refund double count: the handler now excludes the active return
+  from the repository's prior-refund totals, because `SalesReturn.IssueRefund`
+  already includes that return's loaded refunds. Refunds from other returns
+  still count toward the original payment-method cap. No migration required.
+- Added an HTTP regression covering two returns against a 90 sale, each refunded
+  in 30 + 15 installments, with every event replayed. It verifies exactly four
+  persisted refunds totaling 90, the per-return cap after the first return, and
+  the original-payment cap after the second. Corrected the existing over-refund
+  test to expect the per-return error when the original payment still covers it.
+- Extended repository coverage for excluding one return while preserving the
+  others, and handler coverage for passing the active return's ID.
+- Updated `STATUS.md` next steps to reflect the endpoints already delivered.
+- Validation: 158 targeted tests passed (Domain 39, Application 69,
+  Infrastructure 32, Architecture 13, API 5); `git diff --check` passed.
+  The full suite and PostgreSQL/Docker tests were not run for this follow-up.
+
+### 2026-09-16 — C10 return disposition
+
+- Added `POST /api/v1/returns/{id}/disposition` under location-scoped
+  `inventory.adjust`, for both referenced and blind returns. The request names
+  a return line, positive quantity (three decimal places), inspection kind,
+  reason, note and retry event. Actor and dates come from the server.
+- Restock, quarantine, damaged, supplier-return staging and waste all post
+  zero-sum `ReturnDisposition` ledger legs. Quarantine also creates one
+  identified incident without posting a second inventory entry. Expired
+  batches cannot be restocked. Disposition leaves refund entitlement unchanged.
+- A line's dispositioned quantity is an optimistic-concurrency token. Immutable
+  `SalesReturnDisposition` rows retain each event; changed event replays and
+  line overshoots are refused. Stale saves become HTTP 412 and roll back the
+  operation. Ledger posting, history, incident and audit share one transaction.
+- Migration `20260915181631_SalesReturnDispositions` adds the line counter and
+  event table, with PostgreSQL mutation/truncate guards. The EF append-only
+  interceptor and deployment grants protect the same history. Apply the
+  migration before running the updated API.
+- Validation: 873 tests passed with PostgreSQL tests excluded (Domain 364,
+  Application 237, Infrastructure 72, Security 52, Architecture 13, API 135).
+  The subsequent concurrency-handler regression and all 12 returns endpoint
+  tests passed. Migration drift and `git diff --check` passed. Docker is not
+  running, so PostgreSQL execution remains unverified. The repository secret
+  scanner still reports existing development/test password patterns and the
+  key-generation script; this batch adds no credentials.

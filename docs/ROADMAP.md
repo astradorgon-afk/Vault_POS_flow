@@ -189,10 +189,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [~] Receipt rendering and printing; permissioned reprint
       *(plain-text render + first print landed in C6; thermal/PDF layout deferred)*
 - [x] Void a completed sale with ledger reversal and reason (C1 domain + C8 route)
-- [~] Return, refund and disposition routes (domain tested; HTTP surface landed in C9)
-  *(`POST /returns`, `POST /returns/blind` and `POST /returns/{id}/refund` work
-  through the real pipeline in C9; the disposition route stays pending — no
-  aggregate method or command yet)*
+- [x] Return, refund and disposition routes (C9 returns/refunds; C10 line inspection,
+  partial dispositions, quarantine incidents, ledger posting and retry safety)
 - [ ] Customer lookup and optional accounts
 - [x] Daily sales summary (C7)
 - [~] POS tests: inventory effects, insufficient stock, tax, discount, refund

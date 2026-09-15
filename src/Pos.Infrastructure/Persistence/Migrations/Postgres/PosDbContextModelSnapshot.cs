@@ -3306,6 +3306,56 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("sales_return", "sales");
                 });
 
+            modelBuilder.Entity("Pos.Domain.Sales.SalesReturnDisposition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("note");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at_utc");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<short>("ReasonCode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("reason_code");
+
+                    b.Property<Guid>("SalesReturnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sales_return_id");
+
+                    b.Property<Guid>("SalesReturnItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sales_return_item_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SalesReturnId");
+
+                    b.HasIndex("SalesReturnItemId");
+
+                    b.ToTable("sales_return_disposition", "sales");
+                });
+
             modelBuilder.Entity("Pos.Domain.Sales.SalesReturnItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3334,6 +3384,12 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasPrecision(19, 4)
                         .HasColumnType("numeric(19,4)")
                         .HasColumnName("discount_amount");
+
+                    b.Property<decimal>("DispositionedQuantity")
+                        .IsConcurrencyToken()
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("dispositioned_quantity");
 
                     b.Property<decimal>("GrossAmount")
                         .HasPrecision(19, 4)
@@ -4382,6 +4438,21 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.HasOne("Pos.Domain.Sales.Sale", null)
                         .WithMany()
                         .HasForeignKey("SaleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Pos.Domain.Sales.SalesReturnDisposition", b =>
+                {
+                    b.HasOne("Pos.Domain.Sales.SalesReturn", null)
+                        .WithMany()
+                        .HasForeignKey("SalesReturnId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pos.Domain.Sales.SalesReturnItem", null)
+                        .WithMany()
+                        .HasForeignKey("SalesReturnItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

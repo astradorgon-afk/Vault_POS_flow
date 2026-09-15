@@ -128,13 +128,14 @@ public sealed class ShiftRepository(PosDbContext context) : IShiftRepository
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
         SaleId saleId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SalesReturnId? excludedReturnId = null)
     {
         Dictionary<PaymentMethod, decimal> refunded = await (
             from r in context.Refunds.AsNoTracking()
             join sr in context.SalesReturns.AsNoTracking()
                 on r.SalesReturnId equals sr.Id
-            where sr.SaleId == saleId
+            where sr.SaleId == saleId && (excludedReturnId == null || sr.Id != excludedReturnId)
             group r by r.Method into g
             select new
             {

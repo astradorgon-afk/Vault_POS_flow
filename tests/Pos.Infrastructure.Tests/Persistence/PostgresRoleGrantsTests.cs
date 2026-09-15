@@ -31,6 +31,7 @@ public sealed class PostgresRoleGrantsTests : IAsyncLifetime
         "core.login_attempt",
         "core.receipt",
         "inventory.negative_stock_attempt",
+        "sales.sales_return_disposition",
     ];
 
     private PostgreSqlContainer? _container;

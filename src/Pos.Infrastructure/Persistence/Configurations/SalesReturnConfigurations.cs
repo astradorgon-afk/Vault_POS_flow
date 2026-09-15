@@ -102,6 +102,10 @@ public sealed class SalesReturnItemConfiguration : IEntityTypeConfiguration<Sale
             .HasPrecision(18, Quantity.Scale)
             .IsRequired();
 
+        builder.Property(i => i.DispositionedQuantity).HasColumnName("dispositioned_quantity")
+            .HasPrecision(18, Quantity.Scale).IsConcurrencyToken();
+        builder.Ignore(i => i.PendingDispositionQuantity);
+
         builder.Property(i => i.UnitOfMeasureId).HasColumnName("uom_id").IsRequired();
 
         builder.Property(i => i.UnitPrice)

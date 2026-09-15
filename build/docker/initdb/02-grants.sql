@@ -64,3 +64,7 @@ GRANT  SELECT, INSERT           ON core.receipt                 TO   pos_app;
 -- counters say is not there; a shrinkage signal must not be erasable.
 REVOKE UPDATE, DELETE, TRUNCATE ON inventory.negative_stock_attempt FROM pos_app;
 GRANT  SELECT, INSERT           ON inventory.negative_stock_attempt TO   pos_app;
+
+-- Return inspection decisions are permanent inventory history.
+REVOKE UPDATE, DELETE, TRUNCATE ON sales.sales_return_disposition FROM pos_app;
+GRANT SELECT, INSERT ON sales.sales_return_disposition TO pos_app;

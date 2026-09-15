@@ -370,6 +370,12 @@ public sealed class ShiftRepositoryTests : IAsyncLifetime
         refunded.Should().HaveCount(2);
         refunded[PaymentMethod.Cash].Should().Be(140m);
         refunded[PaymentMethod.Card].Should().Be(100m);
+
+        IReadOnlyDictionary<PaymentMethod, decimal> otherReturns =
+            await _repository.GetRefundedAmountsByMethodAsync(sale.Id, CancellationToken.None, secondReturn.Id);
+
+        otherReturns.Should().ContainSingle();
+        otherReturns[PaymentMethod.Cash].Should().Be(80m);
     }
 
     [Fact]

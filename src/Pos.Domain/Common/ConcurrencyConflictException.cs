@@ -6,10 +6,11 @@ namespace Pos.Domain.Common;
 /// <remarks>
 /// The unit of work translates the provider's concrete exception into this
 /// domain type so the application layer can map contention to a failed
-/// <see cref="Result"/> without depending on the storage provider. Today every
-/// concurrency-token-bearing row is an inventory balance, so the application
-/// layer maps this to <see cref="Pos.Domain.Inventory.InventoryErrors.BalanceContention"/>;
-/// a second kind of entity with a concurrency token should carry its own error.
+/// <see cref="Result"/> without depending on the storage provider. The inventory
+/// pipeline maps balance contention to
+/// <see cref="Pos.Domain.Inventory.InventoryErrors.BalanceContention"/>; return
+/// inspection maps its line conflicts to
+/// <see cref="Pos.Domain.Sales.ReturnDispositionErrors.Contention"/>.
 /// </remarks>
 public sealed class ConcurrencyConflictException(Exception? inner = null)
     : Exception("A concurrent writer changed a record while this operation was in flight.", inner);

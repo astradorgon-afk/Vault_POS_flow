@@ -531,7 +531,7 @@ POST   /api/v1/sales/{id}/void                       sale.void     -> LEDGER (re
 POST   /api/v1/sales/{id}/reprint                    sale.reprint
 POST   /api/v1/returns                               sale.return   -> LEDGER (to ReturnPending)
 POST   /api/v1/returns/blind                         sale.return_blind -> LEDGER (to ReturnPending) + exception audit
-POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER     (planned — pending, no aggregate/command yet)
+POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER
 POST   /api/v1/returns/{id}/refund                   sale.refund   (branches on body `saleId`: referenced vs blind)
 GET    /api/v1/customers?query=                      customer.manage | sale.create
 POST   /api/v1/cash-drawer/open                      cashdrawer.open_without_sale
@@ -604,6 +604,46 @@ Errors: `sale.return.quantity_exceeds_available` (409),
 `sale.refund.exceeds_paid_for_method`, `sale.refund.exceeds_refundable`,
 `sale.refund.method_not_original`, `sale.refund.sale_mismatch` (409),
 `sale.refund.blind.cash_only` (400, command validator).
+
+### Return disposition
+
+`POST /api/v1/returns/{id}/disposition` inspects one line of a referenced or
+blind return. Requires `inventory.adjust` at the return's location. Body:
+
+```json
+{
+  "eventId": "<new UUID, reuse unchanged for retries>",
+  "locationId": "<return location UUID>",
+  "lineNumber": 1,
+  "quantity": 0.5,
+  "kind": 1,
+  "reasonCode": 6,
+  "note": "Packaging sealed; inspected and approved for restock"
+}
+```
+
+`quantity` must be positive with at most three decimal places; `note` is
+required and limited to 512 characters. `reasonCode` is an existing
+`AdjustmentReasonCode`. The server supplies the actor, timestamp and local
+business date. Returns `200 { eventId }`.
+
+| Kind | Destination |
+|---|---|
+| 1 — Restock | Available; rejects batches expired before today's local date |
+| 2 — Quarantine | Quarantine plus an identified QRT incident |
+| 3 — Damaged | Damaged |
+| 4 — SupplierReturn | Damaged, awaiting the separate supplier-return workflow |
+| 5 — Waste | EXT-WRITEOFF / External |
+
+Each decision consumes only the named return line's remaining quantity.
+The decision, zero-sum ledger group, optional incident and audit commit in one
+transaction. Retrying an unchanged event returns the stored result; changing
+its return, line, quantity, kind, reason or note is a conflict. Concurrent stale
+line updates are refused with HTTP 412. Disposition does not issue a refund.
+
+Errors under `sale.return.disposition.*`: `return_unknown` / `line_unknown`
+(404), `location_mismatch`, `quantity_exceeded`, `expired`, `event_conflict`
+(409), `contention` (412); malformed input is 400 and missing location authority is 403.
 
 ### Daily sales summary
 

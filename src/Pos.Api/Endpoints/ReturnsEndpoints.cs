@@ -7,6 +7,7 @@ using Pos.Application.Identity;
 using Pos.Application.Sales;
 using Pos.Domain.Common;
 using Pos.Domain.Sales;
+using Pos.Domain.Inventory;
 
 namespace Pos.Api.Endpoints;
 
@@ -63,6 +64,17 @@ public sealed record RefundSalesReturnBody(
     string? ProviderReference,
     DateTimeOffset RefundedAtUtc);
 
+/// <summary>An inspection decision for one return line. Actor and timestamps come from the server.</summary>
+/// <param name="EventId">The retry-safe event identifier.</param>
+/// <param name="LocationId">The return's location.</param>
+/// <param name="LineNumber">The return line number.</param>
+/// <param name="Quantity">The quantity inspected.</param>
+/// <param name="Kind">The inspection decision.</param>
+/// <param name="ReasonCode">The ledger reason.</param>
+/// <param name="Note">The inspection explanation.</param>
+public sealed record DisposeSalesReturnBody(Guid EventId, Guid LocationId, int LineNumber,
+    decimal Quantity, ReturnDispositionKind Kind, AdjustmentReasonCode ReasonCode, string Note);
+
 /// <summary>Return and refund endpoints (POS.md §4).</summary>
 public static class ReturnsEndpoints
 {
@@ -74,6 +86,11 @@ public static class ReturnsEndpoints
         ArgumentNullException.ThrowIfNull(app);
 
         RouteGroupBuilder group = app.MapGroup("/api/v1/returns").WithTags("Returns");
+
+        group.MapPost("/{id:guid}/disposition", DisposeReturnAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Inventory.Adjust) { Scope = ScopeSource.None })
+            .WithName("DisposeSalesReturn")
+            .WithSummary("Routes inspected returned goods to restock, quarantine, damaged, supplier-return staging, or waste.");
 
         group.MapPost("/", CreateReturnAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Return)
@@ -100,6 +117,17 @@ public static class ReturnsEndpoints
             .WithSummary("Issues a refund against a return; a blind refund is cash only.");
 
         return app;
+    }
+
+    private static async Task<IResult> DisposeReturnAsync(Guid id,
+        [FromBody] DisposeSalesReturnBody body, [FromServices] IDispatcher dispatcher,
+        [FromServices] ICurrentUser currentUser, CancellationToken cancellationToken)
+    {
+        Result<Pos.Domain.Common.EventId> result = await dispatcher.SendAsync(new DisposeSalesReturnCommand(
+            new Pos.Domain.Common.EventId(body.EventId), new SalesReturnId(id), new LocationId(body.LocationId),
+            body.LineNumber, body.Quantity, body.Kind, body.ReasonCode, body.Note), cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess ? TypedResults.Ok(new { eventId = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 
     private static async Task<IResult> CreateReturnAsync(

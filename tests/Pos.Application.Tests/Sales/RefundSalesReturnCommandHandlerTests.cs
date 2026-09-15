@@ -87,7 +87,7 @@ public sealed class RefundSalesReturnCommandHandlerTests
             .Returns(_sale);
         _shifts.GetShiftAsync(Arg.Any<CashierShiftId>(), Arg.Any<CancellationToken>())
             .Returns(_openShift);
-        _shifts.GetRefundedAmountsByMethodAsync(Arg.Any<SaleId>(), Arg.Any<CancellationToken>())
+        _shifts.GetRefundedAmountsByMethodAsync(Arg.Any<SaleId>(), Arg.Any<CancellationToken>(), _salesReturn.Id)
             .Returns(new Dictionary<PaymentMethod, decimal>());
         _repository.GetLocationAsync(Arg.Any<LocationId>(), Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(
@@ -112,6 +112,8 @@ public sealed class RefundSalesReturnCommandHandlerTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().NotBe(RefundId.Empty);
+        await _shifts.Received(1).GetRefundedAmountsByMethodAsync(
+            _sale.Id, Arg.Any<CancellationToken>(), _salesReturn.Id);
     }
 
     [Fact]
@@ -341,7 +343,7 @@ public sealed class RefundSalesReturnCommandHandlerTests
     [Fact]
     public async Task PriorRefundsFromOtherDocuments_CountAgainstMethodCap()
     {
-        _shifts.GetRefundedAmountsByMethodAsync(_sale.Id, Arg.Any<CancellationToken>())
+        _shifts.GetRefundedAmountsByMethodAsync(_sale.Id, Arg.Any<CancellationToken>(), _salesReturn.Id)
             .Returns(new Dictionary<PaymentMethod, decimal> { [PaymentMethod.Cash] = 60m });
         RefundSalesReturnCommand command = Command() with { Amount = 50m, Tendered = 50m };
 

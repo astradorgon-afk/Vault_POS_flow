@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pos.Domain.Auditing;
 using Pos.Domain.Inventory;
 using Pos.Domain.Receipts;
+using Pos.Domain.Sales;
 
 namespace Pos.Infrastructure.Persistence.Interceptors;
 
@@ -55,6 +56,7 @@ public sealed class AppendOnlyInterceptor : SaveChangesInterceptor
         typeof(AuditLogEntry),
         typeof(Receipt),
         typeof(NegativeStockAttempt),
+        typeof(SalesReturnDisposition),
     ];
 
     /// <inheritdoc />

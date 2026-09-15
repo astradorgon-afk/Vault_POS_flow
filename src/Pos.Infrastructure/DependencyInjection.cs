@@ -71,6 +71,7 @@ public static class DependencyInjection
         services.TryAddScoped<IQuarantineRepository, QuarantineRepository>();
         services.TryAddScoped<IReceiptRepository, ReceiptRepository>();
         services.TryAddScoped<ISalesRepository, SalesRepository>();
+        services.TryAddScoped<IReturnDispositionRepository, ReturnDispositionRepository>();
         services.TryAddScoped<IShiftRepository, ShiftRepository>();
         services.TryAddScoped<IDailySalesReportRepository, DailySalesReportRepository>();
         services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();

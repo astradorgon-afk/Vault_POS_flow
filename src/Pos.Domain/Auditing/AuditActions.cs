@@ -263,6 +263,9 @@ public static class AuditActions
         /// <summary>A customer return accepted goods back.</summary>
         public const string ReturnCreated = "sale.return.created";
 
+        /// <summary>Returned goods were inspected and routed out of ReturnPending.</summary>
+        public const string ReturnDispositioned = "sale.return.dispositioned";
+
         /// <summary>A blind return accepted goods back without their original sale (exception record).</summary>
         public const string BlindReturnAccepted = "sale.return.blind.accepted";
 

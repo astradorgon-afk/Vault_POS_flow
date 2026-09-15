@@ -55,15 +55,18 @@ public interface IShiftRepository
 
     /// <summary>
     /// Aggregates, per payment method, everything already refunded against a
-    /// sale across every return of it. A refund may never push the sum past
+    /// sale, optionally excluding the return whose aggregate counts its own
+    /// refunds. A refund may never push the sum past
     /// what the sale was originally paid by that method.
     /// </summary>
     /// <param name="saleId">The sale.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="excludedReturnId">The return whose refunds are already counted by its aggregate, or null to include all returns.</param>
     /// <returns>The per-method refunded amounts, keyed by method.</returns>
     Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
         SaleId saleId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        SalesReturnId? excludedReturnId = null);
 
     /// <summary>
     /// Loads every shift still open or suspended, paired with the maximum hours

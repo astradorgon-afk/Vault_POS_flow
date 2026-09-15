@@ -6,6 +6,8 @@ using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 using Pos.Domain.Sales;
 using Pos.Infrastructure.Persistence;
+using Pos.Domain.Inventory;
+using Pos.Infrastructure.Persistence.Interceptors;
 
 namespace Pos.Infrastructure.Tests.Sales;
 
@@ -21,6 +23,51 @@ namespace Pos.Infrastructure.Tests.Sales;
 /// </remarks>
 public sealed class SalesReturnRepositoryTests : IAsyncLifetime
 {
+    [Fact]
+    public async Task Disposition_StaleLineCannotConsumeAnotherReturnsPendingStock()
+    {
+        Sale sale = await NewSaleAsync(quantity: 2m, unitPrice: 100m);
+        SalesReturn returned = NewReturn(sale, quantity: 1m);
+        await _repository.AddReturnAsync(returned, CancellationToken.None);
+        _context.ChangeTracker.Clear();
+        await using PosDbContext secondContext = new(new DbContextOptionsBuilder<PosDbContext>().UseSqlite(_connection).Options);
+        ReturnDispositionRepository first = new(_context, new UnitOfWork(_context));
+        ReturnDispositionRepository second = new(secondContext, new UnitOfWork(secondContext));
+        SalesReturn firstRead = (await first.GetReturnAsync(returned.Id, CancellationToken.None))!;
+        SalesReturn staleRead = (await second.GetReturnAsync(returned.Id, CancellationToken.None))!;
+        DateTimeOffset now = new(2026, 9, 16, 0, 0, 0, TimeSpan.Zero);
+        SalesReturnDisposition accepted = firstRead.DisposeLine(EventId.New(), 1, 0.6m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, "Inspected", Cashier, now, new DateOnly(2026, 9, 16)).Value;
+        SalesReturnDisposition stale = staleRead.DisposeLine(EventId.New(), 1, 0.6m, ReturnDispositionKind.Damaged,
+            AdjustmentReasonCode.Damaged, "Broken", Cashier, now, new DateOnly(2026, 9, 16)).Value;
+        await first.AddAsync(accepted, CancellationToken.None);
+        Func<Task> saveStale = () => second.AddAsync(stale, CancellationToken.None);
+        await saveStale.Should().ThrowAsync<ConcurrencyConflictException>();
+        _context.ChangeTracker.Clear();
+        (await first.GetReturnAsync(returned.Id, CancellationToken.None))!.Items[0].DispositionedQuantity.Should().Be(0.6m);
+        (await first.GetEventAsync(stale.Id, CancellationToken.None)).Should().BeNull();
+        (await first.GetEventAsync(accepted.Id, CancellationToken.None))!.Quantity.Should().Be(0.6m);
+    }
+
+    [Fact]
+    public async Task Disposition_HistoryCannotBeDeletedThroughEf()
+    {
+        Sale sale = await NewSaleAsync(quantity: 1m, unitPrice: 100m);
+        SalesReturn returned = NewReturn(sale, quantity: 1m);
+        await _repository.AddReturnAsync(returned, CancellationToken.None);
+        _context.ChangeTracker.Clear();
+        await using PosDbContext guarded = new(new DbContextOptionsBuilder<PosDbContext>().UseSqlite(_connection)
+            .AddInterceptors(new AppendOnlyInterceptor()).Options);
+        ReturnDispositionRepository repository = new(guarded, new UnitOfWork(guarded));
+        SalesReturn loaded = (await repository.GetReturnAsync(returned.Id, CancellationToken.None))!;
+        SalesReturnDisposition decision = loaded.DisposeLine(EventId.New(), 1, 1m, ReturnDispositionKind.Restock,
+            AdjustmentReasonCode.CountCorrection, "Inspected", Cashier, DateTimeOffset.UtcNow, new DateOnly(2026, 9, 16)).Value;
+        await repository.AddAsync(decision, CancellationToken.None);
+        guarded.Remove(decision);
+        Func<Task> remove = () => guarded.SaveChangesAsync();
+        await remove.Should().ThrowAsync<AppendOnlyViolationException>();
+    }
+
     private static readonly LocationId Store = LocationId.New();
     private static readonly UserId Cashier = UserId.New();
     private static readonly DeviceId Device = DeviceId.New();

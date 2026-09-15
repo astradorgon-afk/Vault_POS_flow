@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1–C9 committed**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C9 committed; C10 return disposition implemented**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -848,18 +848,23 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 10 (batch and expiration) is committed, and Phase 11 POS has started: the
-returns side of the "C" batch series — void (`4a81731`), referenced customer
-return and refund (`adf1a65`), receipt reprint (`ac46de3`), the blind return
-(`c829307`), and the **blind-return refund** — and the shift lifecycle with cash
-reconciliation (C5) are done. Two strands are open:
+Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C9 are committed:
+shift lifecycle, sale completion/read/receipt/void, daily sales summary, and
+referenced/blind returns and refunds have HTTP endpoints. The follow-up refund
+correction excludes the current return from the database's prior-refund totals;
+the aggregate already counts its own refunds. Partial refunds now reach the
+original payment without double counting, while both refund caps stay enforced.
+Return disposition is implemented in C10: one-line partial inspections route
+goods to Available, Quarantine (with an incident), Damaged, supplier-return
+staging, or EXT-WRITEOFF. Immutable event history supports retries; a per-line
+concurrency token prevents competing requests consuming the same units.
+Migration `20260915181631_SalesReturnDispositions` must be applied before running
+the updated API. The remaining work is:
 
 1. **Phase 11 — POS:** the rest of the C batch series, then the main flow.
-   Immediate items under the batch pattern: the **sale flow** (cart,
-   pricing/discount/VAT against the catalogue, payments, atomic completion), then
-   customers and the daily summary. Live endpoints and the API surface are not
-   wired for these commands yet — the domain, handlers, and repositories are the
-   current seam.
+   Immediate items: discount regression coverage, customer lookup, and the POS cart
+   interface. Sale completion and the daily summary already have endpoints;
+   receipt thermal/PDF layouts and payment-provider integration remain pending.
 2. **Phase 10 tail:** the FEFO allocation service extraction, the POS sale-
    blocking override path for expired batches (Phase 11), and expiring-soon /
    expired alerts (Phase 14 notifications).

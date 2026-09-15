@@ -100,6 +100,14 @@ public sealed class SalesReturnItem : Entity<SalesReturnItemId>
     /// <summary>Gets the quantity accepted back, in the unit of measure.</summary>
     public decimal Quantity { get; private set; }
 
+    /// <summary>Gets the quantity already routed out of return inspection.</summary>
+    public decimal DispositionedQuantity { get; private set; }
+
+    /// <summary>Gets how much remains pending inspection.</summary>
+    public decimal PendingDispositionQuantity => Quantity - DispositionedQuantity;
+
+    internal void RecordDisposition(decimal quantity) => DispositionedQuantity += quantity;
+
     /// <summary>Gets the unit of measure the quantity is expressed in.</summary>
     public UnitOfMeasureId UnitOfMeasureId { get; private set; }
 

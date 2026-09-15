@@ -130,8 +130,9 @@ public sealed class RefundSalesReturnCommandHandler(
                 g => g.Key,
                 g => decimal.Round(g.Sum(p => p.Amount), Money.StorageScale, Money.IntermediateRounding));
 
+        // IssueRefund counts this return's loaded refunds itself.
         IReadOnlyDictionary<PaymentMethod, decimal> priorRefundedByMethod = await shifts
-            .GetRefundedAmountsByMethodAsync(salesReturn.SaleId.Value, cancellationToken)
+            .GetRefundedAmountsByMethodAsync(salesReturn.SaleId.Value, cancellationToken, salesReturn.Id)
             .ConfigureAwait(false);
 
         Result<Refund> issued = salesReturn.IssueRefund(
