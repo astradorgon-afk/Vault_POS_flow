@@ -573,6 +573,14 @@ Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invali
 
 ### Daily sales summary
 
+> The sale lifecycle is completed by `POST /api/v1/sales/{id}/void` (`sale.void`):
+> the body mirrors the completed sale (`eventId`, `locationId`, `shiftId`,
+> `deviceId`, `businessDate`), so the handler re-checks the void against the
+> sale's own location, shift, device and business date before reversing the
+> original PosSale ledger group; `voidedAtUtc` and `reason` are recorded against
+> the mandatory `sale.voided` audit. Idempotent by `eventId` — a retried void
+> replays instead of double-posting.
+
 `GET /api/v1/reports/daily-sales?locationId={id}&date={yyyy-MM-dd}` returns the
 aggregated day for a location/business date: `salesSummary` (count, gross,
 discount, net, VAT/exempt/zero-rated/taxable splits, `refundTotal`),

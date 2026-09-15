@@ -19,13 +19,13 @@ and the test suites pass. Nothing is pushed.
 series** (customer-return and receipt work is being built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
-with cash reconciliation), C6 (sale endpoint surface + receipt render) and C7
-(daily sales summary report) are committed; details in the log below. The latest
-batch, C7, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
+with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
+(daily sales summary report) and C8 (sale pipeline tests + void route) are
+committed; details in the log below. The latest
+batch, C8, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
 Application 237 / Infrastructure 71 (+ 18 skipped) / Security 52 / Architecture
-13 / API 119 passed (2 Docker-absent PostgreSQL-guard tests aside), and the
-migration guard ran against PostgreSQL on C3b.
-**Last commits:** C7 (daily sales summary), C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
+13 / API 123 passed (2 Docker-absent PostgreSQL-guard tests aside).
+**Last commits:** C8 (sale pipeline tests + void route), C7 (daily sales summary), C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -105,6 +105,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C5 — shift lifecycle with cash reconciliation: `ForceClose`, `Reconcile(varianceThreshold, reason)` with `IsForceClosed` flag; `Suspend`/`Resume`/`Reconcile` handlers, `ShiftCommandAccess` gate, `ShiftForceCloseWorker`, `GetForceCloseCandidatesAsync`, `AddShiftForceClose` migration; domain/handler/validator/infra tests
   - [x] C6 — sale endpoint surface and receipt render: `POST /api/v1/sales` (atomic full-sale payload through the `CompleteSaleCommand` pipeline), `GET /api/v1/sales/{id}` and `GET /api/v1/sales/{id}/receipt` behind the new `sale.view` permission re-checked against the sale's own location; `SaleReceiptRenderer` plain-text first print logged to `ReceiptPrints`; `SaleErrors.Unknown`/`OutsideScope`; endpoint tests through the real pipeline
   - [x] C7 — daily sales summary report: `GET /api/v1/reports/daily-sales` under the existing `report.view` permission re-checked against the report's location; completed sales + per-method payments + per-shift rows + refund amounts for a location/business date; `DailySalesReportRepository` aggregates via the `Refunds → CashierShift` join (referenced and blind refunds both count); `ReportErrors.LocationUnknown`/`OutsideScope`; endpoint tests (aggregation, refunds vs returns, 403 other-store, 404 unknown location)
+  - [x] C8 — sale pipeline tests and the void route: `POST /api/v1/sales/{id}/void` dispatching the C1 `VoidSaleCommand` under `sale.void` (idempotent by `eventId`); integration tests through the real pipeline — insufficient stock 409 before payments, payment mismatch 409, VAT classification at the location rate, void restores the exact shelf quantity
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
   - [ ] Customers
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
@@ -339,6 +340,27 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   for another store's manager but OK for the Auditor, 404 unknown location.
   Full suite: Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards),
   Security 52, Architecture 13, API 119 (2 Docker-absent Postgres-guard
+  failures, unrelated).
+- **POS C8 committed — sale pipeline tests and the void route.**
+  `POST /api/v1/sales/{id}/void` completes the sale lifecycle HTTP surface:
+  `VoidSaleBody` (`eventId`, `locationId`, `shiftId`, `deviceId`, `businessDate`,
+  `voidedAtUtc`, `reason`) dispatches the C1 `VoidSaleCommand` under `sale.void`
+  (the command is `IAuthorizedMessage` + `ILocationScoped`, so the pipeline caps
+  it at the caller's assigned locations) with `VoidedByUserId` taken from the
+  authenticated request — no migration, no new permission. Idempotent by
+  `eventId`, so a retried void replays instead of double-posting the reversal.
+  Tests: 4 integration tests through the real pipeline — selling past the
+  sellable shelf is refused 409 `inventory.insufficient_stock` before payments
+  are considered; payments under-covering the net total are refused 409
+  `sale.payment_mismatch`; a non-exempt default product's line records the
+  location VAT rate (12%), `isVatExempt` false, `isZeroRated` false ($2.6 — no
+  zero-rated product flag yet); and voiding a completed £90 sale of 2 units
+  restores the shelf to its exact pre-sale quantity. The suite pinned two facts
+  on the way to green: the sale-detail route exposes lines as `lines` (not
+  `items`), and PIN sign-in requires the device GUID in `X-Device-Id` — the
+  registered device code string is refused with 400 `auth.device_header_required`.
+  Full suite: Domain 358, App 237, Infra 71 (+ 18 skipped PostgreSQL guards),
+  Security 52, Architecture 13, API 123 (2 Docker-absent Postgres-guard
   failures, unrelated).
 - **Note for the workstation:** a local hook echoes prompts and commands through
   `cmd`, so any `>` in that text creates an empty stray file in the repository

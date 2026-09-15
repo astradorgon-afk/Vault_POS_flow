@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5/C6/C7 committed**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C-batch underway — C1/C2/C3/C3b/C4/C5/C6/C7/C8 committed**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 119** in the latest full-suite run (2026-09-16, after C7). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
+| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 123** in the latest full-suite run (2026-09-16, after C8). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
 | Migrations | 22, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests     71 passing   ledger posting + concurrency + reconci
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       237 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return, blind refund, shift suspend/resume/reconcile)
-Pos.Api.IntegrationTests    119 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, shift lifecycle, sale complete/read/receipt, daily-sales report, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
+Pos.Api.IntegrationTests    123 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, shift lifecycle, sale complete/read/receipt/void, daily-sales report, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -542,6 +542,27 @@ need a Docker daemon).
   Store Manager refused 403 while the Auditor reads; an unknown location 404.
   Suite at C7: Domain 358, Application 237, Infrastructure 71 (+18 skipped
   PostgreSQL guards), Security 52, Architecture 13, API 119 (the two 
+PostgreSQL-guard members need a Docker daemon).
+
+- **C8 — sale pipeline tests and the void route.** Completes the sale lifecycle
+  HTTP surface and tests it through the real pipeline. `POST
+  /api/v1/sales/{id}/void` (`VoidSaleBody`: `eventId`, `locationId`, `shiftId`,
+  `deviceId`, `businessDate`, `voidedAtUtc`, `reason`) dispatches the C1
+  `VoidSaleCommand` under `sale.void` with `VoidedByUserId` from the
+  authenticated request — no migration, no new permission. The command is
+  `IIdempotentCommand` so a retried void replays under the same `EventId`
+  instead of double-posting. Tests: 4 integration tests through the real
+  pipeline — selling past the sellable shelf is refused 409
+  `inventory.insufficient_stock` before payments are considered; payments that
+  under-cover the net total are refused 409 `sale.payment_mismatch`; a
+  non-exempt default product's line records the location VAT rate (12%),
+  `isVatExempt` false and `isZeroRated` false (zero-rating has no product flag
+  yet, §2.6); and voiding a completed sale restores the shelf to its exact
+  pre-sale quantity. The suite caught two test-side facts on the way to green:
+  the sale-detail route exposes lines as `lines` (not `items`), and PIN sign-in
+  requires the device **GUID** in `X-Device-Id` — the device code string is
+  refused. Suite at C8: Domain 358, Application 237, Infrastructure 71 (+18
+  skipped PostgreSQL guards), Security 52, Architecture 13, API 123 (the two
   PostgreSQL-guard members need a Docker daemon).
 
 Tests: 11 domain tests for the blind-return rules (VAT splits, quantity and

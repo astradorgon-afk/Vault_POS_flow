@@ -188,10 +188,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Atomic sale completion (sale + items + payments + ledger + audit) + sale detail/read-back (C6)
 - [~] Receipt rendering and printing; permissioned reprint
       *(plain-text render + first print landed in C6; thermal/PDF layout deferred)*
-- [ ] Void, return, refund with disposition
+- [x] Void a completed sale with ledger reversal and reason (C1 domain + C8 route)
+- [ ] Return, refund and disposition routes (domain tested; HTTP surface pending)
 - [ ] Customer lookup and optional accounts
 - [x] Daily sales summary (C7)
-- [ ] POS tests: inventory effects, insufficient stock, tax, discount, refund
+- [~] POS tests: inventory effects, insufficient stock, tax, discount, refund
+      *(inventory effects, insufficient stock and VAT covered in C8; discount/refund tests pending)*
 
 ## Phase 12 — Offline Storage
 

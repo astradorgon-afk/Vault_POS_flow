@@ -71,6 +71,18 @@ public sealed record SalePaymentDetail(
     decimal? Change,
     string? ProviderReference);
 
+/// <summary>The body of a void-sale request. Identity fields
+/// (<see cref="VoidSaleCommand.VoidedByUserId"/>) come from the authenticated
+/// request.</summary>
+public sealed record VoidSaleBody(
+    Guid EventId,
+    Guid LocationId,
+    Guid ShiftId,
+    Guid DeviceId,
+    DateOnly BusinessDate,
+    DateTimeOffset VoidedAtUtc,
+    string Reason);
+
 /// <summary>A completed sale as returned by the detail route.</summary>
 public sealed record SaleDetail(
     Guid Id,
@@ -135,6 +147,14 @@ public static class SaleEndpoints
             })
             .WithName("PrintSaleReceipt")
             .WithSummary("Renders a completed sale as printable plain text.");
+
+        group.MapPost("/{id:guid}/void", VoidSaleAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Void)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("VoidSale")
+            .WithSummary("Voids a completed sale, reversing its stock movement.");
 
         return app;
     }
@@ -280,6 +300,35 @@ public static class SaleEndpoints
         }
 
         return TypedResults.Text(text, "text/plain");
+    }
+
+    private static async Task<IResult> VoidSaleAsync(
+        Guid id,
+        [FromBody] VoidSaleBody body,
+        [FromServices] IDispatcher dispatcher,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        SaleId saleId = new(id);
+
+        Result<SaleId> result = await dispatcher
+            .SendAsync(
+                new VoidSaleCommand(
+                    new Pos.Domain.Common.EventId(body.EventId),
+                    saleId,
+                    new LocationId(body.LocationId),
+                    new CashierShiftId(body.ShiftId),
+                    new DeviceId(body.DeviceId),
+                    body.BusinessDate,
+                    currentUser.UserId!.Value,
+                    body.VoidedAtUtc,
+                    body.Reason),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 
     private static List<CompleteSaleLine> MapLines(IReadOnlyList<CompleteSaleLineBody> lines)
