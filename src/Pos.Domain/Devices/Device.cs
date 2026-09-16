@@ -14,6 +14,27 @@ public enum DevicePlatform
 
     /// <summary>Android POS or stock terminal.</summary>
     Android = 2,
+
+    /// <summary>
+    /// A browser terminal: the cashier's authenticated user session is the
+    /// credential, so no device key ceremony applies. The server is its single
+    /// source of truth, and it numbers documents with the server-scoped counter
+    /// keyed by this device's short code (docs/DECISIONS.md, web-terminal note).
+    /// </summary>
+    Web = 3,
+}
+
+/// <summary>Determines whether a platform activates without an enrolment code.</summary>
+public static class DevicePlatformExtensions
+{
+    /// <summary>
+    /// Gets whether a platform performs the enrolment-code ceremony. Browser
+    /// terminals have no cryptographic key to bind, because the cashier's login
+    /// is the credential, so they activate on registration instead.
+    /// </summary>
+    /// <param name="platform">The platform.</param>
+    /// <returns><see langword="true"/> when the platform enrols via a one-time code.</returns>
+    public static bool RequiresEnrolmentCode(this DevicePlatform platform) => platform != DevicePlatform.Web;
 }
 
 /// <summary>The lifecycle state of a registered device.</summary>
@@ -197,6 +218,37 @@ public sealed partial class Device : AggregateRoot<DeviceId>
         PublicKeyThumbprint = publicKeyThumbprint.Trim();
         AppVersion = appVersion;
         OsVersion = osVersion;
+        Status = DeviceStatus.Active;
+        EnrolledAtUtc = atUtc;
+        StatusChangedAtUtc = atUtc;
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Activates a browser terminal the moment it is registered. There is no
+    /// enrolment code or device key: the cashier's authenticated session is the
+    /// credential, so the ceremony would only delay the first sale by a step no
+    /// one can verify better than the administrator's click.
+    /// </summary>
+    /// <param name="atUtc">Server time.</param>
+    /// <returns>Success, or the reason activation was refused.</returns>
+    public Result ActivateForWeb(DateTimeOffset atUtc)
+    {
+        if (Platform != DevicePlatform.Web)
+        {
+            return Result.Failure(Error.Conflict(
+                "device.not_web",
+                "Only browser terminals activate straight onto registration."));
+        }
+
+        if (Status != DeviceStatus.PendingEnrolment)
+        {
+            return Result.Failure(Error.Conflict(
+                "device.already_enrolled",
+                "This device is already active."));
+        }
+
         Status = DeviceStatus.Active;
         EnrolledAtUtc = atUtc;
         StatusChangedAtUtc = atUtc;

@@ -48,10 +48,121 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
                 current.AccessToken);
         }
 
+        // Commands sent through the register carry the server-minted numbers;
+        // the API binds the chosen web register from this header.
+        if (session.DeviceId is { } deviceId)
+        {
+            request.Headers.Add("X-Device-Id", deviceId.ToString("D", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         return request;
     }
 
+    /// <summary>Gets and deserializes an authenticated API resource.</summary>
+    public async Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
+        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            ApiProblem? problem = await response.Content
+                .ReadFromJsonAsync<ApiProblem>(cancellationToken)
+                .ConfigureAwait(false);
+            return ApiResult<T>.Failure(
+                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                problem?.ErrorCode);
+        }
+
+        T? value = await response.Content.ReadFromJsonAsync<T>(cancellationToken).ConfigureAwait(false);
+        return value is null
+            ? ApiResult<T>.Failure("The API returned an unreadable response.")
+            : ApiResult<T>.Success(value);
+    }
+
+    /// <summary>Posts a JSON body through the register and reads the response.</summary>
+    public async Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
+        request.Content = JsonContent.Create(body);
+        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            ApiProblem? problem = await response.Content
+                .ReadFromJsonAsync<ApiProblem>(cancellationToken)
+                .ConfigureAwait(false);
+            return ApiResult<T>.Failure(
+                problem?.Detail ?? "VaultFlow could not complete that operation.",
+                problem?.ErrorCode);
+        }
+
+        T? value = await response.Content.ReadFromJsonAsync<T>(cancellationToken).ConfigureAwait(false);
+        return value is null
+            ? ApiResult<T>.Failure("The API returned an unreadable response.")
+            : ApiResult<T>.Success(value);
+    }
+
+    /// <summary>Lists the browser registers a store's checkout can use.</summary>
+    public Task<ApiResult<List<PosRegister>>> GetRegistersAsync(
+        Guid locationId, CancellationToken cancellationToken)
+        => GetAsync<List<PosRegister>>(
+            FormattableString.Invariant($"/api/v1/terminal/registers?locationId={locationId:D}"),
+            cancellationToken);
+
+    /// <summary>Gets the checkout context for the chosen register: business
+    /// date, VAT and rounding settings, and the open shift, if any.</summary>
+    public Task<ApiResult<PosTerminalSession>> GetTerminalSessionAsync(
+        Guid locationId, CancellationToken cancellationToken)
+        => GetAsync<PosTerminalSession>(
+            FormattableString.Invariant($"/api/v1/terminal/session?locationId={locationId:D}"),
+            cancellationToken);
+
+    /// <summary>Asks the server to mint the register's next device-scoped
+    /// number (SAL, RET or SHF). The physical offline counters never see
+    /// these, so Web registers may not mix with a physical device's sequence.</summary>
+    public Task<ApiResult<PosNextNumber>> PostNextNumberAsync(
+        Guid locationId, string documentType, CancellationToken cancellationToken)
+        => PostAsync<PosNextNumber>(
+            FormattableString.Invariant($"/api/v1/terminal/{locationId:D}/next-number"),
+            new { documentType },
+            cancellationToken);
+
+    /// <summary>Opens a cashier shift on the chosen register (POS.md §1).</summary>
+    public Task<ApiResult<PosShiftReference>> OpenShiftAsync(
+        Guid locationId,
+        string number,
+        DateOnly businessDate,
+        decimal openingFloat,
+        CancellationToken cancellationToken)
+        => PostAsync<PosShiftReference>(
+            "/api/v1/shifts/open",
+            new { number, locationId, businessDate, openingFloat },
+            cancellationToken);
+
+    /// <summary>Completes the sale atomically on the server (POS.md §3).</summary>
+    public Task<ApiResult<PosCompletedSale>> CompleteSaleAsync(
+        PosCompleteSaleRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosCompletedSale>("/api/v1/sales", request, cancellationToken);
+
     private sealed record ApiProblem(string? Detail, string? ErrorCode);
+}
+
+/// <summary>An allocated device-scoped document number.</summary>
+public sealed class PosNextNumber
+{
+    /// <summary>Gets or sets the document type code (SAL, RET or SHF).</summary>
+    public string DocumentType { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the allocated number, e.g. <c>SAL-2026-TW1-000001</c>.</summary>
+    public string Number { get; set; } = string.Empty;
+}
+
+/// <summary>A reference to a cashier shift.</summary>
+public sealed class PosShiftReference
+{
+    /// <summary>Gets or sets the shift identifier.</summary>
+    public Guid Id { get; set; }
 }
 
 /// <summary>A client API result with a user-safe failure message.</summary>

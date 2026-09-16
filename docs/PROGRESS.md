@@ -22,9 +22,12 @@ reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
 with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (daily sales summary report), C8 (sale pipeline tests + void route) and C9
 (returns HTTP surface), C10 (return disposition), C11 (customer accounts), C12
-(discount HTTP regressions) and C13 (authenticated web shell) are complete;
+(discount HTTP regressions), C13 (authenticated web shell), C14
+(API-backed POS cart workspace) and C15 (checkout orchestration with
+server-numbered web terminals) are complete;
 details are in the log below.
-**Last commits:** C13 (this commit), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
+**Last commits:** C15 (this commit — carries the C14 web shell and cart
+workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -110,7 +113,8 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C11 — optional customer accounts: create/search/detail/update/deactivate/reactivate routes; `customer.view` and `customer.manage`; mutation audits without duplicated PII; sale completion accepts active known customers only; migration `20260916015216_CustomerAccounts`
   - [x] C12 — discount HTTP regressions: an authorized manual discount persists gross/discount/net/payment totals and its authorizer; a named authorizer without `sale.discount` gets 403 and leaves inventory unchanged
   - [x] C13 — authenticated Blazor shell: API-backed username/password/two-factor sign-in, circuit-scoped token session, protected routing and safe return URLs, sign-out, responsive operations navigation and workspace overview
-  - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
+  - [x] C14 — API-backed POS cart workspace: assigned-store selection, barcode lookup, product search, effective location/global pricing, quantity editing, removal and live totals
+  - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [ ] **Phase 14 — Notifications:** persistent notifications, SignalR hub, alert generators
@@ -495,3 +499,65 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   redirect to sign-in, field interaction, API-unavailable feedback, desktop and
   mobile layouts, and no browser console errors. Screenshots are under
   `artifacts/vaultflow-login*.png` and remain untracked.
+
+### 2026-09-16 — C14 API-backed POS cart workspace
+
+- Added the protected new-sale workspace and linked it from the navigation and
+  operations overview for users with `sale.create`.
+- Store choices come from the locations API and are restricted to the signed-in
+  user's assigned stores. Product search and barcode lookup use the catalogue
+  API; prices resolve the current store override before the organization-wide
+  fallback.
+- Added an in-memory cart with duplicate-line quantity increments, quantity
+  controls, removal, clear, location locking and Philippine-peso totals. Search
+  and scanner inputs update on each keystroke so their actions are immediately
+  available.
+- Validation: `Pos.Web` builds with zero warnings. A headless Playwright flow
+  verified sign-in, assigned-store loading, search, pricing, quantity totals,
+  removal, barcode entry and a clean browser console against a temporary API.
+  No screenshots or design artifacts were generated for this batch.
+
+### 2026-09-16 — C15 checkout orchestration (web-terminal slice)
+
+- **Terminal slice (backend).** `DevicePlatform.Web` registers a browser as an
+  ordinary device, and `Device.ActivateForWeb` marks it Active at registration
+  because the signed-in cashier session is the register's credential. A web
+  terminal has no offline counter, so the server allocates its document
+  numbers: `IDocumentNumberGenerator.NextScopedAsync(documentType, shortCode)`
+  mints `SAL-…/RET-…/SHF-…` from the shared counter table keyed by the device
+  short code — never from a physical device's own counter, which must stay
+  with the device (ADR-0015 / ADR-0032).
+- **`/api/v1/terminal` surface** (all `sale.create`, location-scoped via the
+  scope source):
+  - `GET /registers?locationId=` lists the store's active browser registers as
+    `{ id, shortCode, name }`.
+  - `GET /session?locationId=` (requires `X-Device-Id`) bootstraps the
+    checkout: business date in the store's timezone, VAT rate,
+    cash-rounding increment and the shift open on that register. Refuses a
+    register that is not active (`device.not_active`), belongs to another
+    store (`device.wrong_location`) or is absent (`device.required`).
+  - `POST /{locationId}/next-number` with `{ documentType }` allocates the
+    next SAL/RET/SHF for the calling register. A physical device is refused
+    `409 device.not_web` (its numbers are issued offline and a server-minted
+    value would collide); `SHF` additionally checks `shift.open`; invalid
+    types get `terminal.document_type_invalid`.
+- **Web checkout (`Pos.Web`).** Register picker with auto-select when the
+  store has exactly one register; session bootstrap; shift strip (open-shift
+  banner or "Start shift" with opening float → SHF next-number + `POST
+  /api/v1/shifts/open` + refreshed session); per-line discounts gated on
+  `sale.discount`, clamped to the line total; a cash payment panel with quick
+  tender buttons (Exact/100/500/1000) and change rounded to the location's
+  increment; atomic submission to `POST /api/v1/sales` (SAL next-number +
+  `CompleteSaleBody` with the cash payment) and a success panel with reset.
+  All register context travels on `X-Device-Id`.
+- Validation: 12 new `TerminalEndpointTests` through the real pipeline
+  (register list and 403 without location access; session bootstrap with and
+  without an open shift; wrong-location and suspended registers refused;
+  sequential per-type numbering; SHF `shift.open` gate; invalid document
+  type; physical devices refused `device.not_web`). Full API suite **152
+  passing** — only the two PostgreSQL-guard members fail, and only because
+  Docker is unavailable. Domain 369, Architecture 13, Security 52 green;
+  `Pos.Web` builds with zero warnings. Docs: STATUS, ROADMAP, API §9 and
+  DECISIONS ADR-0032 updated. This commit also carries the C14 web shell:
+  the authenticated operations shell and API-backed cart workspace were
+  never committed separately.

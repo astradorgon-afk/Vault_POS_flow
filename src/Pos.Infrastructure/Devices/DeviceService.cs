@@ -16,14 +16,15 @@ namespace Pos.Infrastructure.Devices;
 /// <param name="ShortCode">The short code embedded in its offline document numbers.</param>
 /// <param name="EnrolmentCode">
 /// The one-time code, returned exactly once. It is stored only as a hash, so it
-/// cannot be retrieved again; a lost code is reissued, not recovered.
+/// cannot be retrieved again; a lost code is reissued, not recovered. Web
+/// terminals activate on registration and receive no code.
 /// </param>
-/// <param name="ExpiresAtUtc">When the code stops working.</param>
+/// <param name="ExpiresAtUtc">When the code stops working, or <see langword="null"/> when no code was issued.</param>
 public sealed record DeviceRegistration(
     DeviceId DeviceId,
     string ShortCode,
-    string EnrolmentCode,
-    DateTimeOffset ExpiresAtUtc);
+    string? EnrolmentCode,
+    DateTimeOffset? ExpiresAtUtc);
 
 /// <summary>The details a device reports when it enrols.</summary>
 /// <param name="EnrolmentCode">The one-time code.</param>
@@ -141,6 +142,33 @@ public sealed class DeviceService(
         }
 
         context.Devices.Add(device.Value);
+
+        // A browser terminal has no device key to bind at enrolment: the
+        // cashier's login is the credential. It activates immediately, which is
+        // also the moment its document numbers first matter, so no ceremony is
+        // skipped — there is nothing a one-time code would add.
+        if (!platform.RequiresEnrolmentCode())
+        {
+            Result activated = device.Value.ActivateForWeb(now);
+
+            if (activated.IsFailure)
+            {
+                return Result<DeviceRegistration>.Failure(activated.Errors);
+            }
+
+            await audit.WriteAsync(
+                new AuditEntry(
+                    AuditActions.Devices.Enrolled,
+                    nameof(Device),
+                    device.Value.Id.Value,
+                    LocationId: locationId),
+                cancellationToken).ConfigureAwait(false);
+
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            return Result<DeviceRegistration>.Success(new DeviceRegistration(
+                device.Value.Id, normalised, EnrolmentCode: null, ExpiresAtUtc: null));
+        }
 
         DeviceRegistration registration = await IssueCodeAsync(device.Value, actor, now, cancellationToken)
             .ConfigureAwait(false);

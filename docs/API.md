@@ -529,6 +529,9 @@ GET    /api/v1/sales/{id}                            sale.view     -> detail, 40
 GET    /api/v1/sales/{id}/receipt                    sale.view     -> text/plain rendering, logs the first print
 POST   /api/v1/sales/{id}/void                       sale.void     -> LEDGER (reversal)
 POST   /api/v1/sales/{id}/reprint                    sale.reprint
+GET    /api/v1/terminal/registers?locationId=        sale.create   -> the store's active browser registers
+GET    /api/v1/terminal/session?locationId=          sale.create   (X-Device-Id) -> date, pricing settings, open shift
+POST   /api/v1/terminal/{locationId}/next-number     sale.create   -> next server-minted SAL/RET/SHF for the register
 POST   /api/v1/returns                               sale.return   -> LEDGER (to ReturnPending)
 POST   /api/v1/returns/blind                         sale.return_blind -> LEDGER (to ReturnPending) + exception audit
 POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER
@@ -587,6 +590,35 @@ Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invali
 `sale.shift_unknown`, `sale.shift_not_open`, `sale.shift_cashier_mismatch`,
 `sale.shift_device_mismatch`, `sale.payment_mismatch`, `sale.customer_inactive`
 (409); `sale.outside_scope` (403); `sale.unknown`, `sale.customer_unknown` (404).
+
+### Web terminals
+
+A browser register is an ordinary device of platform `Web`, activated when it
+is created because the signed-in cashier's session is its credential. It has
+no offline counter, so the server allocates its document numbers per device
+(ADR-0032). A physical device is never numbered server-side: its counter
+lives on the device and a server-minted number would collide with the numbers
+it issues offline, so the number route refuses it `409 device.not_web`.
+
+- `GET /api/v1/terminal/registers?locationId=` lists the store's active web
+  registers as `{ id, shortCode, name }`. Pick one and send its `id` back as
+  `X-Device-Id`.
+- `GET /api/v1/terminal/session?locationId=` bootstraps the checkout,
+  returning `{ deviceId, deviceShortCode, deviceName, businessDate, vatRate,
+  cashRoundingIncrement, openShift }`. `businessDate` is the store's date in
+  its own timezone; `openShift` is the shift open on that register
+  (`{ shiftId, number, cashierId, cashierName, businessDate, openedAtUtc,
+  openingFloat }`) or `null`. Errors: `device.required` (no `X-Device-Id`),
+  `device.not_found`, `device.not_active`, `device.wrong_location`,
+  `location.not_found`.
+- `POST /api/v1/terminal/{locationId}/next-number` with body
+  `{ documentType }` (`SAL`, `RET` or `SHF`) mints the next
+  `PREFIX-{yyyy}-{shortCode}-{000000}` for the calling register via the shared
+  atomic counter keyed by its short code, and returns
+  `{ documentType, number }`. `SHF` additionally requires `shift.open` at the
+  store (`authorization.denied`); an invalid type gets
+  `terminal.document_type_invalid`; a physical or absent/misplaced register
+  gets `device.not_web`/`device.not_found`/`device.wrong_location`.
 
 ### Returns and refunds
 

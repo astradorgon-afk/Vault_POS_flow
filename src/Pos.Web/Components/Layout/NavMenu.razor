@@ -9,7 +9,14 @@
     <span class="nav-heading">Workspace</span>
     <NavLink class="nav-link" href="" Match="NavLinkMatch.All"><span aria-hidden="true">⌂</span> Overview</NavLink>
     <span class="nav-heading">Point of sale</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">▤</span> New sale <small>Next</small></span>
+    @if (CanCreateSale)
+    {
+        <NavLink class="nav-link" href="pos"><span aria-hidden="true">▤</span> New sale</NavLink>
+    }
+    else
+    {
+        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">▤</span> New sale</span>
+    }
     <span class="nav-heading">Operations</span>
     <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◇</span> Inventory</span>
     <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⇄</span> Transfers</span>
@@ -18,6 +25,9 @@
 <AuthorizeView><Authorized><button class="sign-out" type="button" @onclick="SignOut">Sign out</button></Authorized></AuthorizeView>
 
 @code {
+    [Inject] private UserSession Session { get; set; } = null!;
+    private bool CanCreateSale => Session.Current?.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
+
     private void SignOut()
     {
         Authentication.SignOut();

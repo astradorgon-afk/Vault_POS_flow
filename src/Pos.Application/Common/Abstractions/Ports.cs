@@ -118,6 +118,19 @@ public interface IDocumentNumberGenerator
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The allocated number.</returns>
     Task<DocumentNumber> NextAsync(DocumentType type, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Allocates the next number for a device-scoped document type, keyed by the
+    /// owning device's short code. Browser terminals have no offline number
+    /// counter of their own — the server is their single source of truth — so
+    /// the server mints their SAL, RET and SHF numbers from the same
+    /// <c>core.document_counter</c> table, scoped by device.
+    /// </summary>
+    /// <param name="type">The device-scoped document type.</param>
+    /// <param name="deviceShortCode">The short code of the owning device, for example <c>W02</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The allocated number.</returns>
+    Task<DocumentNumber> NextScopedAsync(DocumentType type, string deviceShortCode, CancellationToken cancellationToken);
 }
 
 /// <summary>

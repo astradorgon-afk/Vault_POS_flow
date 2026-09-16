@@ -369,6 +369,62 @@ public sealed class PosApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
         return device.Value.Id;
     }
 
+    /// <summary>Registers an active browser register at a location, or returns
+    /// the one already bearing the short code. The database is shared by every
+    /// test in a class, so seeds are idempotent by code.</summary>
+    /// <param name="shortCode">The document-number short code.</param>
+    /// <param name="locationId">The location.</param>
+    /// <param name="status">The status to leave the device in.</param>
+    /// <returns>The web register's identifier.</returns>
+    public async Task<DeviceId> CreateWebDeviceAsync(
+        string shortCode,
+        LocationId locationId,
+        DeviceStatus status = DeviceStatus.Active)
+    {
+        using IServiceScope scope = Services.CreateScope();
+        PosDbContext context = scope.ServiceProvider.GetRequiredService<PosDbContext>();
+
+        Device? existing = await context.Devices.FirstOrDefaultAsync(d => d.ShortCode == shortCode, CancellationToken.None);
+
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
+
+        UserId systemUser = new(Guid.CreateVersion7());
+
+        Result<Device> device = Device.Register(
+            shortCode, "Web " + shortCode, locationId, DevicePlatform.Web, DateTimeOffset.UtcNow, systemUser);
+
+        if (device.IsFailure)
+        {
+            throw new InvalidOperationException(
+                "Could not register test web device: " + string.Join("; ", device.Errors.Select(e => e.Code)));
+        }
+
+        Result activated = device.Value.ActivateForWeb(DateTimeOffset.UtcNow);
+
+        if (activated.IsFailure)
+        {
+            throw new InvalidOperationException(
+                "Could not activate test web device: " + string.Join("; ", activated.Errors.Select(e => e.Code)));
+        }
+
+        if (status == DeviceStatus.Suspended)
+        {
+            device.Value.Suspend("suspended by a test", DateTimeOffset.UtcNow, systemUser);
+        }
+        else if (status == DeviceStatus.Revoked)
+        {
+            device.Value.Revoke("revoked by a test", DateTimeOffset.UtcNow, systemUser);
+        }
+
+        context.Devices.Add(device.Value);
+        await context.SaveChangesAsync();
+
+        return device.Value.Id;
+    }
+
     /// <summary>Creates a category directly in the database, or returns the one
     /// already bearing the code.</summary>
     /// <param name="code">The short unique code.</param>

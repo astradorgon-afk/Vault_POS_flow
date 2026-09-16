@@ -182,9 +182,15 @@ Substantially delivered in Phase 1, because everything else depends on it.
 ## Phase 11 — POS
 
 - [x] Shift open/close with cash reconciliation (C5)
-- [ ] Barcode scan, product search, product grid, cart
-- [ ] Pricing, discounts, taxes, rounding
-- [ ] Payments (cash, card via provider, split)
+- [x] Barcode scan, product search, product grid, cart (C14)
+- [x] Checkout orchestration: register pick-up, shift start, discounts, cash payment, atomic submit (C15)
+- [x] Pricing, discounts, taxes, rounding
+      *(server-side pricing, VAT classification and discount authorization
+      complete since C8/C12; C15 adds `sale.discount`-gated line discounts in
+      the web checkout and cash change rounded to the location increment)*
+- [~] Payments (cash, card via provider, split)
+      *(cash checkout landed in C15; card/e-wallet provider methods and
+      split payments pending)*
 - [x] Atomic sale completion (sale + items + payments + ledger + audit) + sale detail/read-back (C6)
 - [~] Receipt rendering and printing; permissioned reprint
       *(plain-text render + first print landed in C6; thermal/PDF layout deferred)*

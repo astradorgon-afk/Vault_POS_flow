@@ -9,6 +9,15 @@ public sealed class UserSession
     /// <summary>Gets whether the access token is still usable.</summary>
     public bool IsAuthenticated => Current is { } current && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow;
 
+    /// <summary>Gets the register the circuit sells through, or null.</summary>
+    public Guid? DeviceId { get; private set; }
+
+    /// <summary>Gets the register short code, or null.</summary>
+    public string? DeviceShortCode { get; private set; }
+
+    /// <summary>Gets the register name, or null.</summary>
+    public string? DeviceName { get; private set; }
+
     /// <summary>Replaces the current session.</summary>
     public void Set(SignInResponse response)
     {
@@ -16,8 +25,29 @@ public sealed class UserSession
         Current = response;
     }
 
-    /// <summary>Clears the current session.</summary>
-    public void Clear() => Current = null;
+    /// <summary>Selects the register the circuit sells through.</summary>
+    public void SetRegister(PosRegister register)
+    {
+        ArgumentNullException.ThrowIfNull(register);
+        DeviceId = register.Id;
+        DeviceShortCode = register.ShortCode;
+        DeviceName = register.Name;
+    }
+
+    /// <summary>Clears the register context.</summary>
+    public void ClearRegister()
+    {
+        DeviceId = null;
+        DeviceShortCode = null;
+        DeviceName = null;
+    }
+
+    /// <summary>Clears the current session and register context.</summary>
+    public void Clear()
+    {
+        Current = null;
+        ClearRegister();
+    }
 }
 
 /// <summary>A successful authentication response from the API.</summary>

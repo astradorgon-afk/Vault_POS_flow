@@ -238,14 +238,25 @@ public static class DeviceEndpoints
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 
-    private static object Describe(DeviceRegistration registration) => new
-    {
-        deviceId = registration.DeviceId.Value,
-        shortCode = registration.ShortCode,
+    private static object Describe(DeviceRegistration registration) => registration.EnrolmentCode is { } code
+        ? new
+        {
+            deviceId = registration.DeviceId.Value,
+            shortCode = registration.ShortCode,
 
-        // Returned exactly once: only a hash is stored, so a lost code is
-        // reissued rather than recovered.
-        enrolmentCode = registration.EnrolmentCode,
-        expiresAtUtc = registration.ExpiresAtUtc.ToString("O", CultureInfo.InvariantCulture),
-    };
+            // Returned exactly once: only a hash is stored, so a lost code is
+            // reissued rather than recovered.
+            enrolmentCode = (string?)code,
+            expiresAtUtc = registration.ExpiresAtUtc?.ToString("O", CultureInfo.InvariantCulture),
+        }
+        : new
+        {
+            deviceId = registration.DeviceId.Value,
+            shortCode = registration.ShortCode,
+
+            // Web terminals activate on registration: there is no code to
+            // display, and the device is immediately usable.
+            enrolmentCode = (string?)null,
+            expiresAtUtc = (string?)null,
+        };
 }

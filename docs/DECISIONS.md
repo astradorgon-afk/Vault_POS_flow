@@ -989,3 +989,31 @@ keeps trading.
   adjustment needs approval, and the tiers bound who may give it.
 
 ---
+
+## ADR-0032 — Web-terminal documents are numbered by the server
+
+**Date:** 2026-09-16 · **Status:** Accepted
+
+**Context.** ADR-0015 gives every POS device its own number range keyed by the
+device short code, so that a physical device can allocate `SAL-…` locally with
+no network round-trip and never collide. C15 adds browser registers
+(`DevicePlatform.Web`): a web terminal has no offline counter — the signed-in
+cashier's session is its credential, and there is nothing resident on the
+device to run between requests. But its documents must still sit in the
+device's own sequential range for the receipt, search and reconciliation
+experiences to stay uniform with physical terminals.
+
+**Decision.** The server mints `SAL`/`RET`/`SHF` numbers for web terminals from
+the same atomic shared-counter store as the central documents (ADR-0015), but
+keyed by the register's **short code** rather than organisation-wide, via
+`IDocumentNumberGenerator.NextScopedAsync`. The number routes refuse physical
+devices with `device.not_web`: a device-owned counter is the only source of
+truth for numbers printed while offline, so a server-allocated value would
+eventually collide with one the device issued itself.
+
+**Consequences.** A browser register numbers a sale with no local state and no
+duplicate risk; gap-free numbering is maintained by the server's atomic
+counter. Physical devices keep allocating locally as ADR-0015. The web
+terminal's per-device sequence is exactly what the same device would have
+produced had it allocated online, which keeps the eventual offline flows
+interchangeable rather than a fork.

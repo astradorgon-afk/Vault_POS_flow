@@ -42,6 +42,32 @@ public sealed class DocumentNumberGenerator(PosDbContext context, ISystemClock c
                     $"{type}: device-scoped numbers are issued by the device counter, not the server."));
         }
 
+        long nextValue = await AllocateAsync(type, scopeKey: string.Empty, cancellationToken).ConfigureAwait(false);
+        return DocumentNumber.Create(type, clock.UtcNow.Year, nextValue - 1);
+    }
+
+    /// <inheritdoc />
+    public async Task<DocumentNumber> NextScopedAsync(DocumentType type, string deviceShortCode, CancellationToken cancellationToken)
+    {
+        if (!DocumentNumber.IsDeviceScoped(type))
+        {
+            throw new NotSupportedException(
+                FormattableString.Invariant(
+                    $"{type}: only device-scoped numbers may be allocated per device, not {type}."));
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceShortCode))
+        {
+            throw new ArgumentException("A device short code is required.", nameof(deviceShortCode));
+        }
+
+        long nextValue = await AllocateAsync(type, deviceShortCode.Trim().ToUpperInvariant(), cancellationToken)
+            .ConfigureAwait(false);
+        return DocumentNumber.CreateForDevice(type, clock.UtcNow.Year, deviceShortCode.Trim().ToUpperInvariant(), nextValue - 1);
+    }
+
+    private async Task<long> AllocateAsync(DocumentType type, string scopeKey, CancellationToken cancellationToken)
+    {
         int year = clock.UtcNow.Year;
         string periodKey = year.ToString("D4", CultureInfo.InvariantCulture);
 
@@ -70,13 +96,11 @@ public sealed class DocumentNumberGenerator(PosDbContext context, ISystemClock c
 
         command.Parameters.Add(Parameter(command, "type", (short)type));
         command.Parameters.Add(Parameter(command, "period", periodKey));
-        command.Parameters.Add(Parameter(command, "scope", string.Empty));
+        command.Parameters.Add(Parameter(command, "scope", scopeKey));
 
         object? allocated = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
 
-        long nextValue = Convert.ToInt64(allocated, CultureInfo.InvariantCulture);
-
-        return DocumentNumber.Create(type, year, nextValue - 1);
+        return Convert.ToInt64(allocated, CultureInfo.InvariantCulture);
     }
 
     private const string SqliteUpsert =
