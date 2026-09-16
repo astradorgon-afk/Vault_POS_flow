@@ -79,10 +79,12 @@ public sealed class ProductPrice
            && EffectiveFromUtc < (to ?? DateTimeOffset.MaxValue);
 
     /// <summary>
-    /// Ends the period at a later instant. Only the scheduling rule on
-    /// <see cref="Product"/> calls this, and only to hand the period over to the
-    /// price that supersedes it; the amount and the start never change.
+    /// Ends the period at a later instant, or reopens it. Only the scheduling
+    /// rule on <see cref="Product"/> calls this: to hand the period over to the
+    /// price that supersedes it, or to carry the predecessor through a cancelled
+    /// price's period. The amount and the start never change.
     /// </summary>
-    /// <param name="endUtc">The new exclusive end; after the start.</param>
-    internal void Close(DateTimeOffset endUtc) => EffectiveToUtc = endUtc;
+    /// <param name="endUtc">The new exclusive end; after the start. A null value
+    /// reopens the period (no scheduled end).</param>
+    internal void Close(DateTimeOffset? endUtc) => EffectiveToUtc = endUtc;
 }

@@ -259,6 +259,95 @@ public sealed partial class Product
     }
 
     /// <summary>
+    /// Cancels a selling price that has not yet taken effect (ADR-0029).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Removing a scheduled price reverts the future schedule to the state that
+    /// existed before it was created: the predecessor it superseded (the row
+    /// closed at the cancelled row's start) carries through the cancelled period,
+    /// and a continuation row that existed only to restore the predecessor's
+    /// amount afterwards is removed with it. A price already in effect is never
+    /// cancelled — past prices are history, and a price in effect is changed by
+    /// scheduling a replacement, not by unpicking it.
+    /// </para>
+    /// <para>
+    /// Cancellation never renumbers a price someone else scheduled. When the
+    /// cancelled period hands straight over to a different amount, or to a chain
+    /// of continuation rows, the operation is refused so a replacement price is
+    /// scheduled instead.
+    /// </para>
+    /// </remarks>
+    /// <param name="priceId">The price row to cancel.</param>
+    /// <param name="nowUtc">The authoritative current time.</param>
+    /// <returns>The cancelled row's identifier, or a not-found/conflict failure.</returns>
+    public Result<ProductPriceId> CancelScheduledPrice(
+        ProductPriceId priceId,
+        DateTimeOffset nowUtc)
+    {
+        ProductPrice? cancelled = _prices.FirstOrDefault(p => p.Id == priceId);
+
+        if (cancelled is null)
+        {
+            return Result<ProductPriceId>.Failure(CatalogErrors.PriceUnknown(priceId));
+        }
+
+        if (cancelled.EffectiveFromUtc <= nowUtc)
+        {
+            return Result<ProductPriceId>.Failure(CatalogErrors.PriceAlreadyEffective);
+        }
+
+        ProductPrice? predecessor = _prices.FirstOrDefault(p =>
+            p.LocationId == cancelled.LocationId
+            && p.EffectiveToUtc == cancelled.EffectiveFromUtc);
+
+        // A continuation row exists only to restore the predecessor's amount
+        // after the cancelled price; a row starting at the cancelled end with a
+        // different amount is a price somebody scheduled, and removing it would
+        // silently renumber their plan.
+        ProductPrice? successor = predecessor is null ? null : _prices.FirstOrDefault(p =>
+            p.LocationId == cancelled.LocationId
+            && p.EffectiveFromUtc == cancelled.EffectiveToUtc);
+
+        if (successor is not null)
+        {
+            if (successor.Amount != predecessor!.Price.Amount)
+            {
+                return Result<ProductPriceId>.Failure(CatalogErrors.PriceCancelHasSuccessor);
+            }
+
+            bool longerChain = _prices.Any(p =>
+                p.LocationId == cancelled.LocationId
+                && p.EffectiveFromUtc == successor.EffectiveToUtc
+                && p.Amount == predecessor!.Price.Amount);
+
+            if (longerChain)
+            {
+                return Result<ProductPriceId>.Failure(CatalogErrors.PriceCancelChain);
+            }
+        }
+
+        _prices.Remove(cancelled);
+
+        if (successor is not null)
+        {
+            _prices.Remove(successor);
+        }
+
+        // The predecessor carries the old amount through the cancelled period.
+        // When a resumption (successor) exists, the predecessor re-closes at the
+        // resumption's end — which is null when the predecessor was open-ended.
+        // Without one (a gap-filling price, or a price ending before the cancelled
+        // one), only the cancelled period's own end remains.
+        predecessor?.Close(successor is null
+            ? cancelled.EffectiveToUtc
+            : successor.EffectiveToUtc);
+
+        Touch();
+        return Result<ProductPriceId>.Success(cancelled.Id);
+    }
+
+    /// <summary>
     /// Finds the price in effect at an instant: the location's own price when it
     /// has one, otherwise the price for every location.
     /// </summary>

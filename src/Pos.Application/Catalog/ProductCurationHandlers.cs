@@ -427,3 +427,78 @@ public sealed class ScheduleProductPriceCommandHandler(
         return scheduled;
     }
 }
+
+/// <summary>Handles <see cref="CancelScheduledProductPriceCommand"/>.</summary>
+public sealed class CancelScheduledProductPriceCommandHandler(
+    IMasterDataRepository masterData,
+    IAuditWriter audit,
+    ISystemClock clock) : ICommandHandler<CancelScheduledProductPriceCommand, ProductPriceId>
+{
+    /// <inheritdoc />
+    public async Task<Result<ProductPriceId>> HandleAsync(
+        CancelScheduledProductPriceCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        Result<Product> loaded = await ProductCuration.LoadAsync(masterData, command.ProductId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (loaded.IsFailure)
+        {
+            return Result<ProductPriceId>.Failure(loaded.Errors);
+        }
+
+        Product product = loaded.Value;
+        ProductPrice? cancelled = product.Prices.FirstOrDefault(p => p.Id == command.PriceId);
+
+        if (cancelled is null)
+        {
+            return Result<ProductPriceId>.Failure(CatalogErrors.PriceUnknown(command.PriceId));
+        }
+
+        // Snapshot the row before removing it: cancellation deletes the row, so
+        // the audit carries the only copy of what was cancelled.
+        var before = new
+        {
+            PriceId = cancelled.Id.Value,
+            LocationId = cancelled.LocationId?.Value,
+            cancelled.Amount,
+            cancelled.EffectiveFromUtc,
+            cancelled.EffectiveToUtc,
+        };
+
+        Result<ProductPriceId> cancelledPrice = product.CancelScheduledPrice(
+            command.PriceId,
+            clock.UtcNow);
+
+        if (cancelledPrice.IsFailure)
+        {
+            return cancelledPrice;
+        }
+
+        // The row now covering the cancelled period, if any: the predecessor
+        // restored to carry the old amount through it.
+        ProductPrice? restored = product.Prices.FirstOrDefault(p =>
+            p.LocationId == cancelled.LocationId
+            && p.Overlaps(cancelled.EffectiveFromUtc, cancelled.EffectiveToUtc));
+
+        await ProductCuration.AuditAsync(
+                audit, AuditActions.Catalog.PriceCancelled, product.Id,
+                before,
+                restored is null
+                    ? null
+                    : new
+                    {
+                        PriceId = restored.Id.Value,
+                        LocationId = restored.LocationId?.Value,
+                        restored.Amount,
+                        restored.EffectiveFromUtc,
+                        restored.EffectiveToUtc,
+                    },
+                command.Reason, cancellationToken, cancelled.LocationId)
+            .ConfigureAwait(false);
+
+        return cancelledPrice;
+    }
+}

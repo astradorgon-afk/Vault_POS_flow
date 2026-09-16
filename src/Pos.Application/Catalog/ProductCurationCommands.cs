@@ -105,6 +105,20 @@ public sealed record ScheduleProductPriceCommand(
     public string RequiredPermission => Permissions.Catalog.ManagePrices;
 }
 
+/// <summary>Cancels a selling price that has not yet taken effect (ADR-0029).</summary>
+/// <param name="ProductId">The product.</param>
+/// <param name="PriceId">The price row to cancel.</param>
+/// <param name="Reason">Why the price is cancelled.</param>
+public sealed record CancelScheduledProductPriceCommand(
+    ProductId ProductId,
+    ProductPriceId PriceId,
+    string? Reason)
+    : ICommand<ProductPriceId>, IAuthorizedMessage
+{
+    /// <inheritdoc />
+    public string RequiredPermission => Permissions.Catalog.ManagePrices;
+}
+
 /// <summary>Sets whether and how a product is stocked at one location.</summary>
 /// <param name="ProductId">The product.</param>
 /// <param name="LocationId">The location.</param>

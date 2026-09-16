@@ -122,6 +122,9 @@ public static class AuditActions
         /// <summary>A selling price was superseded.</summary>
         public const string PriceChanged = "product.price.changed";
 
+        /// <summary>A scheduled selling price was cancelled before it took effect.</summary>
+        public const string PriceCancelled = "product.price.cancelled";
+
         /// <summary>A purchase cost was changed.</summary>
         public const string CostChanged = "product.cost.changed";
     }

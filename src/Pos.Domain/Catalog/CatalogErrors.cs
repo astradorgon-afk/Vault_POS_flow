@@ -80,6 +80,28 @@ public static class CatalogErrors
         "A price is already in effect for this product and scope during the requested period.",
         new Dictionary<string, object?> { ["productId"] = productId.Value });
 
+    /// <summary>The price row does not exist on the product.</summary>
+    /// <param name="priceId">The source identifier.</param>
+    /// <returns>The error.</returns>
+    public static Error PriceUnknown(ProductPriceId priceId) => Error.NotFound(
+        "catalog.price_unknown",
+        FormattableString.Invariant($"The price {priceId.Value} was not found on this product."));
+
+    /// <summary>A price that is already in effect cannot be cancelled.</summary>
+    public static readonly Error PriceAlreadyEffective = Error.Conflict(
+        "catalog.price_already_effective",
+        "A price in effect cannot be cancelled; schedule a replacement price instead.");
+
+    /// <summary>A different scheduled price begins exactly where the cancelled one ends.</summary>
+    public static readonly Error PriceCancelHasSuccessor = Error.Conflict(
+        "catalog.price_cancel_successor",
+        "A different price is scheduled to begin where this one ends; schedule a replacement instead of cancelling.");
+
+    /// <summary>Cancelling would renumber a chain of prices scheduled after this one.</summary>
+    public static readonly Error PriceCancelChain = Error.Conflict(
+        "catalog.price_cancel_chain",
+        "Cancelling this price would renumber a chain of later prices; schedule a replacement instead.");
+
     /// <summary>A referenced supplier or unit no longer exists.</summary>
     /// <param name="code">The stable code.</param>
     /// <returns>The error.</returns>

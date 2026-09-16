@@ -98,6 +98,7 @@ already enrolled (`409 identity.two_factor_already_enabled`) and a wrong code
 | POST | `/api/v1/catalog/products/{id}/barcodes/{barcode}/primary` | `product.barcode.manage` |
 | GET | `/api/v1/catalog/products/{id}/prices?locationId` | `product.view` |
 | POST | `/api/v1/catalog/products/{id}/prices` | `product.price.manage` |
+| POST | `/api/v1/catalog/products/{id}/prices/{priceId}/cancel` | `product.price.manage` (cancels a scheduled price only; C19) |
 | GET | `/api/v1/catalog/products/{id}/location-settings` | `product.view` |
 | PUT | `/api/v1/catalog/products/{id}/location-settings/{locationId}` | `product.edit` |
 | GET/POST | `/api/v1/catalog/products/{id}/unit-conversions` | read `product.view` / write `product.edit` |
@@ -128,7 +129,7 @@ list only active barcodes, primary first.
 
 Every change is audited in the same transaction (`product.updated`,
 `product.cost.changed`, `product.activation.changed`, `product.barcode.changed`,
-`product.price.changed`). Successful changes answer `204 No Content`; adding a
+`product.price.changed`, `product.price.cancelled`). Successful changes answer `204 No Content`; adding a
 barcode, a price or a unit conversion answers `201 Created` (`{ "id": ... }` is the
 product, the new price row and the new conversion respectively).
 
@@ -145,6 +146,14 @@ product, the new price row and the new conversion respectively).
   (default now), "effectiveToUtc"? }`. A new price closes the one in effect; a
   temporary price resumes the old amount when it ends. `GET .../prices` marks the
   row in effect now with `isCurrent`.
+- **Cancel a scheduled price** (`POST .../prices/{priceId}/cancel`, C19,
+  ADR-0029): `{ "reason" }` (mandatory, 5–512 characters). Only a price that has
+  not yet taken effect can be cancelled: the predecessor it superseded carries
+  its amount through the cancelled period (reopening when it was open-ended),
+  and the continuation row only there to resume the old amount is removed with
+  it. A differing amount or another continuation starting where the cancelled
+  price ends refuses so a replacement is scheduled instead. Answers
+  `200 OK` with `{ "id": cancelledPriceId }`.
 - **Location settings**: `{ "isStocked", "minimumStock", "reorderPoint",
   "targetStock", "maximumStock", "preferredReplenishmentQuantity" }`, with
   `minimum <= reorder <= target <= maximum`. External counterparties are not
@@ -155,13 +164,17 @@ product, the new price row and the new conversion respectively).
 
 | Status | `errorCode` | When |
 |---|---|---|
-| 400 | `catalog.reason_required` | deactivation, retirement or price without a reason |
+| 400 | `catalog.reason_required` | deactivation, retirement, price or cancellation without a reason |
 | 400 | `catalog.price_backdated` | price starting more than 5 minutes in the past |
 | 400 | `product.price_effective_to` | price ending at or before its start |
 | 400 | `product_location.thresholds_unordered` / `.quantity_negative` | inconsistent stocking thresholds |
 | 404 | `catalog.barcode_not_attached` | retire/primary for a code the product does not have |
 | 404 | `catalog.conversion_unknown` / `catalog.supplier_not_linked` | removing something not there |
+| 404 | `catalog.price_unknown` | cancelling a price row the product does not carry |
 | 409 | `catalog.price_overlap` | price that would replace a scheduled price or span several |
+| 409 | `catalog.price_already_effective` | cancelling a price already in effect (schedule a replacement instead) |
+| 409 | `catalog.price_cancel_successor` | a differing amount starts exactly where the cancelled price ends |
+| 409 | `catalog.price_cancel_chain` | cancelling would renumber a chain of same-amount continuations |
 | 409 | `catalog.barcode_already_attached` | code held by this or another product |
 | 409 | `catalog.barcode_retired` | code was retired and stays reserved |
 | 409 | `catalog.product_already_active` / `_inactive` | activation state unchanged |

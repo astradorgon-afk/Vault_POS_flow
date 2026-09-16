@@ -121,6 +121,20 @@ public sealed class ScheduleProductPriceCommandValidator : AbstractValidator<Sch
     }
 }
 
+/// <summary>Validates <see cref="CancelScheduledProductPriceCommand"/>.</summary>
+public sealed class CancelScheduledProductPriceCommandValidator
+    : AbstractValidator<CancelScheduledProductPriceCommand>
+{
+    /// <summary>Initializes the validator.</summary>
+    public CancelScheduledProductPriceCommandValidator()
+    {
+        RuleFor(c => c.Reason)
+            .NotEmpty().WithErrorCode("catalog.reason_required")
+            .MinimumLength(ProductCurationRules.ReasonMinLength).WithErrorCode("catalog.reason_required")
+            .MaximumLength(ProductCurationRules.ReasonMaxLength).WithErrorCode("catalog.reason_too_long");
+    }
+}
+
 /// <summary>Validates <see cref="SetProductLocationSettingCommand"/>.</summary>
 public sealed class SetProductLocationSettingCommandValidator : AbstractValidator<SetProductLocationSettingCommand>
 {

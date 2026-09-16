@@ -169,6 +169,10 @@ public sealed record ScheduleProductPriceBody(
     DateTimeOffset? EffectiveFromUtc = null,
     DateTimeOffset? EffectiveToUtc = null);
 
+/// <summary>The body of a scheduled-price cancellation.</summary>
+/// <param name="Reason">Why the price is cancelled.</param>
+public sealed record CancelScheduledProductPriceBody(string? Reason);
+
 /// <summary>The body of a per-location stocking setting.</summary>
 /// <param name="IsStocked">Whether the product is sold at the location.</param>
 /// <param name="MinimumStock">The minimum stock threshold.</param>

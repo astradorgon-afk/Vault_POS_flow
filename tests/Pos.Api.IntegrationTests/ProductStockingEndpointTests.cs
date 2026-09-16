@@ -72,6 +72,74 @@ public sealed class ProductStockingEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task ScheduledPriceCanBeCancelledBeforeItTakesEffect_AndOnlyPriceManagersMayCancel()
+    {
+        ProductId product = await factory.CreateProductAsync("CUR-CANCEL-01", "Canned Corn", "4800000300045");
+        await factory.CreateUserAsync("cur-cancel-owner", Roles.Owner);
+        await factory.CreateUserAsync("cur-cancel-mgr", Roles.MainInventoryManager);
+        using HttpClient client = factory.CreateClient();
+
+        string owner = await SignInAsync(client, "cur-cancel-owner");
+        string manager = await SignInAsync(client, "cur-cancel-mgr");
+        string prices = Path(product, "/prices");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        using (HttpResponseMessage baseCreated = await SendAsync(
+                   client, HttpMethod.Post, prices, owner, new { amount = 50m, reason = "Launch price" }))
+        {
+            baseCreated.StatusCode.Should().Be(HttpStatusCode.Created);
+            Guid basePriceId = (await ReadJsonAsync(baseCreated)).RootElement.GetProperty("id").GetGuid();
+
+            await ExpectAsync(
+                client, $"{prices}/{basePriceId}/cancel", manager, new { reason = "Not allowed" },
+                HttpStatusCode.Forbidden);
+        }
+
+        Guid promoId;
+        using (HttpResponseMessage promoCreated = await SendAsync(
+                   client, HttpMethod.Post, prices, owner,
+                   new { amount = 40m, reason = "Weekend promo", effectiveFromUtc = now.AddDays(1), effectiveToUtc = now.AddDays(2) }))
+        {
+            promoCreated.StatusCode.Should().Be(HttpStatusCode.Created);
+            promoId = (await ReadJsonAsync(promoCreated)).RootElement.GetProperty("id").GetGuid();
+        }
+
+        using (HttpResponseMessage cancelled = await SendAsync(
+                   client, HttpMethod.Post, $"{prices}/{promoId}/cancel", owner, new { reason = "Promo cancelled by buyer" }))
+        {
+            cancelled.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await ReadJsonAsync(cancelled)).RootElement.GetProperty("id").GetGuid().Should().Be(promoId);
+        }
+
+        using (JsonDocument listed = await GetJsonAsync(client, prices, manager))
+        {
+            JsonElement[] rows = [.. listed.RootElement.EnumerateArray()];
+            rows.Should().ContainSingle(r => r.GetProperty("isCurrent").GetBoolean())
+                .Which.GetProperty("amount").GetDecimal().Should().Be(50m, "the base price carries through the cancelled period");
+        }
+
+        await ExpectAsync(
+            client, $"{prices}/{promoId}/cancel", owner, new { reason = "Already gone" },
+            HttpStatusCode.NotFound, "catalog.price_unknown");
+        await ExpectAsync(
+            client, $"{prices}/{Guid.CreateVersion7()}/cancel", owner, new { reason = "Unknown row" },
+            HttpStatusCode.NotFound, "catalog.price_unknown");
+
+        int auditedCancellations = await factory.WithServiceAsync(context => context.AuditLog
+            .CountAsync(a => a.EntityId == product.Value && a.Action == AuditActions.Catalog.PriceCancelled));
+        auditedCancellations.Should().Be(1);
+        string? cancelReason = await factory.WithServiceAsync(async context =>
+        {
+            AuditLogEntry? byId = await context.AuditLog
+                .Where(a => a.EntityId == product.Value && a.Action == AuditActions.Catalog.PriceCancelled)
+                .OrderByDescending(a => a.OccurredAtUtc)
+                .FirstOrDefaultAsync();
+            return byId?.Reason;
+        });
+        cancelReason.Should().Be("Promo cancelled by buyer");
+    }
+
+    [Fact]
     public async Task LocationSettings_AreUpsertedInPlace_AndValidated()
     {
         ProductId product = await factory.CreateProductAsync("CUR-STOCK-01", "Bottled Water", "4800000300021");

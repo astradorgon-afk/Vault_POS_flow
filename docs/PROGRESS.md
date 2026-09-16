@@ -26,12 +26,15 @@ with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (API-backed POS cart workspace), C15 (checkout orchestration with
 server-numbered web terminals), C16 (web sale lifecycle: sales search,
 receipt reprint/void and return/refund/disposition workflows in the browser),
-C17 (card/e-wallet and split payment mixes in the web checkout) and C18
+C17 (card/e-wallet and split payment mixes in the web checkout), C18
 (expired-batch sale blocking and the authorized override path — classified
 `inventory.expired_only` refusals, per-line override denial checks, mandatory
-recorded reason, web probe-then-confirm dialog) are
+recorded reason, web probe-then-confirm dialog) and C19 (scheduled-price
+cancellation — `Product.CancelScheduledPrice`, the cancel endpoint under
+`Permissions.Catalog.ManagePrices`, the `catalog.price_cancel_*` refusals and
+the `product.price.cancelled` audit) are
 complete; details are in the log below.
-**Last commits:** C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
+**Last commits:** C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -71,7 +74,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
 - [x] **G4 — Phase 3 leftovers (catalog curation)**
   - [x] Product edit (tracking flags, shelf life and base unit stay fixed), deactivate/activate with reason
   - [x] Barcodes: attach, retire (stops scanning, stays reserved), set primary; migration `20260914100000_ProductBarcodeRetirement`
-  - [x] Effective-dated prices: supersession, temporary prices that resume, no backdating (ADR-0029)
+  - [x] Effective-dated prices: supersession, temporary prices that resume, no backdating; **pre-effective cancellation added later (C19, ADR-0029 consequence)** (ADR-0029)
   - [x] `ProductLocationSetting`, unit conversions, product–supplier links (one preferred)
   - [x] Reference checks (products have no foreign keys to master data)
   - [x] Primary-barcode swap failed on both engines (500) → demotions written first in `PosDbContext`
@@ -690,3 +693,37 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   Totals: Domain 369, Application 245, Infrastructure 80 (18 skipped),
   Security 52, Architecture 13, API **171 passing** (2 known Docker-unavailable
   Postgres failures). Docs: STATUS, PROGRESS, ROADMAP, POS updated.
+
+### C19 — scheduled-price cancellation (`feat(pos-c19)`)
+- **Closes the ADR-0029 gap** ("cancellation of not-yet-effective prices is left
+  for POS pricing, Phase 11"). New `Product.CancelScheduledPrice(priceId, nowUtc)`
+  in `Product.Curation.cs`:
+  - Unknown row → `catalog.price_unknown` (404); a price already in effect → 409
+    `catalog.price_already_effective` (past prices are history; change an
+    effective price by scheduling a replacement, never by unpicking it).
+  - Removing a future price rewinds the schedule exactly as supersession built
+    it: the predecessor it superseded carries the old amount through the
+    cancelled period — re-closing at the resumption's end, or reopening when the
+    base was open-ended (`ProductPrice.Close` is now nullable) — and the
+    single continuation row that existed only to restore the old amount is
+    removed with it.
+  - Cancellation never renumbers someone else's plan: a different amount starting
+    exactly where the cancelled price ends → 409 `catalog.price_cancel_successor`;
+    a chain of same-amount continuations → 409 `catalog.price_cancel_chain`.
+    Both force scheduling a replacement instead.
+- API: `POST /api/v1/catalog/products/{id}/prices/{priceId}/cancel` under
+  `Permissions.Catalog.ManagePrices` (same as scheduling — a MainInventoryManager
+  is 403). Body carries the mandatory reason
+  (`catalog.reason_required` / `catalog.reason_too_long`, matching
+  `ScheduleProductPriceCommandValidator`). 200 with `{ "id": cancelledPriceId }`.
+- Handler audits `product.price.cancelled` with the pre-cancel row as `before`
+  and the restored row (when any) as `after` — mirroring `product.price.changed`.
+- Tests: **7 new domain** (`ProductCurationTests` — temp+resumption rewind with
+  the base reopening, open-ended rewind, gap-filling removal, effective-price
+  refusal, different-amount-successor refusal, chain refusal, unknown id) +
+  **1 new API integration test** (`ProductStockingEndpointTests` — cancel via
+  pipe, base reopens and stays current, `product.price.cancelled` audit row with
+  the recorded reason, 403 for the non-price-manager, `price_unknown` 404s).
+  Totals: Domain **376**, Application 245, Infrastructure 80 (18 skipped),
+  Security 52, Architecture 13, API **172 passing** (2 known Docker-unavailable
+  Postgres failures). Docs: STATUS, PROGRESS, ROADMAP, API, DECISIONS updated.

@@ -852,9 +852,21 @@ never loses a scheduled price. Reserving retired codes follows the same rule as
 re-pointing: a code that once meant one product must never quietly mean another.
 
 **Consequences.**
-- A scheduled future price cannot be cancelled yet; a price that would replace it
-  is refused. A cancellation command for prices not yet in effect is left for the
-  POS pricing work (Phase 11).
+- Cancellation of a scheduled (pre-effective) price is implemented in C19 —
+  `Product.CancelScheduledPrice` plus
+  `POST /api/v1/catalog/products/{id}/prices/{priceId}/cancel`. A price already
+  in effect is never cancelled (`catalog.price_already_effective`): past prices
+  are history, and an effective price is changed by scheduling a replacement.
+  Cancellation rewinds only what supersession itself built: the predecessor the
+  cancelled price superseded carries the old amount through the cancelled period
+  (re-closing at the resumption's end — reopening when that base was open-ended
+  — and the single continuation row that existed only to restore the old amount
+  is removed with it). Cancellation never renumbers someone else's plan: a
+  differing amount, or a chain of more than one same-amount continuation,
+  starting where the cancelled price ends refuses
+  (`catalog.price_cancel_successor` / `catalog.price_cancel_chain`) so a
+  replacement is scheduled instead. The audit records the pre-cancel row under
+  `product.price.cancelled`.
 - A manufacturer that genuinely reuses a retired GTIN for a new product needs a
   deliberate data correction, which is intended.
 - Saving a primary-barcode swap needs the demotion written before the promotion:

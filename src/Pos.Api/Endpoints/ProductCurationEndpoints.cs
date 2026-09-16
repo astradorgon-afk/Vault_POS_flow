@@ -39,6 +39,7 @@ public static class ProductCurationEndpoints
 
         Map(group.MapGet("/prices", ListPricesAsync), Permissions.Catalog.View, "ListProductPrices", "Lists a product's price history and schedule.");
         Map(group.MapPost("/prices", SchedulePriceAsync), Permissions.Catalog.ManagePrices, "ScheduleProductPrice", "Schedules an effective-dated price.");
+        Map(group.MapPost("/prices/{priceId:guid}/cancel", CancelScheduledPriceAsync), Permissions.Catalog.ManagePrices, "CancelScheduledProductPrice", "Cancels a scheduled price that has not yet taken effect.");
 
         Map(group.MapGet("/location-settings", ListLocationSettingsAsync), Permissions.Catalog.View, "ListProductLocationSettings", "Lists a product's per-location stocking settings.");
         Map(group.MapPut("/location-settings/{locationId:guid}", SetLocationSettingAsync), Permissions.Catalog.Edit, "SetProductLocationSetting", "Sets how a product is stocked at a location.");
@@ -190,6 +191,24 @@ public static class ProductCurationEndpoints
 
         return result.IsSuccess
             ? TypedResults.Created(PricesPath(id), new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> CancelScheduledPriceAsync(
+        Guid id, Guid priceId, [FromBody] CancelScheduledProductPriceBody body,
+        IDispatcher dispatcher, ICurrentUser currentUser, CancellationToken cancellationToken)
+    {
+        Result<ProductPriceId> result = await dispatcher
+            .SendAsync(
+                new CancelScheduledProductPriceCommand(
+                    new ProductId(id),
+                    new ProductPriceId(priceId),
+                    body.Reason),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id = result.Value.Value })
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 

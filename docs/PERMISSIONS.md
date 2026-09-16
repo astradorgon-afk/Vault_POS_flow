@@ -67,7 +67,7 @@ Codes are stable strings; renaming one requires a migration that rewrites
 | `product.create` | Create products (Main Warehouse / admin only) |
 | `product.edit` | Edit product master fields |
 | `product.barcode.manage` | Add/retire barcodes |
-| `product.price.manage` | Create effective-dated price changes |
+| `product.price.manage` | Create effective-dated price changes; cancel a scheduled price before it takes effect |
 | `product.cost.view` | See purchase cost and margin |
 | `product.disable` | Deactivate / reactivate a product |
 | `category.manage`, `brand.manage`, `uom.manage` | Reference data |

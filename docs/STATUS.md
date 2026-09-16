@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C18 complete**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C19 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **930 passing without PostgreSQL: Domain 369, Application 245, Infrastructure 80, Security 52, Architecture 13, API 171** (2026-09-16, through C18). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **938 passing without PostgreSQL: Domain 376, Application 245, Infrastructure 80, Security 52, Architecture 13, API 172** (2026-09-16, through C19). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -21,12 +21,12 @@ and what to pick up next.
 | Phases remaining | 11–18 — see §5 |
 
 ```
-Pos.Domain.Tests            369 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
+Pos.Domain.Tests            376 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
 Pos.Infrastructure.Tests     80 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS and customer repository coverage
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       245 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    171 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows and the expired-batch override contract
+Pos.Api.IntegrationTests    172 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract and scheduled-price cancellation
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -691,6 +691,33 @@ wrong string (`sale.external_customer_missing`).
   role snapshot), missing reason → 400, cashier without permission → 403.
   Pos.Web builds 0 warnings, 0 errors.
 
+- **C19 — scheduled-price cancellation, closing the ADR-0029 gap.** ADR-0029
+  deferred cancellation of not-yet-effective prices to "POS pricing, Phase 11";
+  C19 implements it end to end. `Product.CancelScheduledPrice(priceId, nowUtc)`
+  removes a future price row only while it is still pre-effective
+  (`catalog.price_already_effective` → 409 otherwise, `catalog.price_unknown` →
+  404 for a row the product does not carry) and rewinds the schedule the way
+  ADR-0029 describes: the predecessor it superseded carries the old amount
+  through the cancelled period (re-closing at a future resumption's end, or
+  reopening when that resumption was open-ended), and the continuation row that
+  existed only to restore the old amount afterwards is removed with it.
+  Cancellation never renumbers someone else's plan — a different amount starting
+  exactly where the cancelled price ends refuses `catalog.price_cancel_successor`
+  (409), and a chain of same-amount continuations refuses
+  `catalog.price_cancel_chain` (409) — so a replacement price is scheduled
+  instead. The API surface is
+  `POST /api/v1/catalog/products/{id}/prices/{priceId}/cancel` under
+  `Permissions.Catalog.ManagePrices`, with the same mandatory-reason and
+  length-validated body (`catalog.reason_required` / `catalog.reason_too_long`);
+  the response carries the cancelled row's id and the handler audits
+  `product.price.cancelled` with the pre-cancel row as `before` and the restored
+  row (when one exists) as `after`, exactly like supersession. New tests: 7
+  domain (temp+continuation rewind, open-ended rewind, gap-filling removal, the
+  three refusals, unknown id) + 1 `ProductStockingEndpointTests` pipeline test
+  (cancel via API, base reopens, `product.price.cancelled` audit row with the
+  recorded reason, permission, unknown-id 404s). API suite runs 172 / 174
+  (2 known Docker-unavailable Postgres failures).
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -926,7 +953,7 @@ Stated plainly so they are not mistaken for finished work:
 | Register-product is two dispatches; a mid-flow failure could orphan a product | Phase 8 | The unidentified-line pre-check prevents it in the normal path; only a crash between the product creation and the line identification would leave the product in the master with its barcode reserved. |
 | Receipts cannot be voided or emailed | ADR-0026 | Issue, list, detail and print exist and receipts are immutable; a mistaken receipt is corrected by issuing another. A void document and email delivery need their own decision. |
 | No quarantine notifications or dashboard exception panel | Phase 8 | Raises and resolutions post through the API; age-based escalation and the Owner-dashboard exception panel are Phase 14. |
-| A scheduled future price cannot be cancelled | Phase 3 | A price that would replace it is refused (`catalog.price_overlap`); cancellation of not-yet-effective prices is left for POS pricing (Phase 11, ADR-0029). |
+| A scheduled price cannot be cancelled once it has taken effect | Phase 3 | Past prices are history; change an effective price by scheduling a replacement. Pre-effective cancellation is implemented (C19): `catalog.price_cancel_successor` / `catalog.price_cancel_chain` refuse rewinds that would renumber another plan. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
 
@@ -934,7 +961,7 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C18 are committed:
+Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C19 are committed:
 shift lifecycle, sale completion/read/receipt/void, daily sales summary, and
 referenced/blind returns and refunds have HTTP endpoints. C15 adds the
 server-numbered web-terminal slice (`DevicePlatform.Web`, `/api/v1/terminal`)
@@ -961,14 +988,16 @@ server-side permission model and backed by `TerminalBar` register/shift context.
 C17 adds card/e-wallet and split payment mixes to the web checkout. C18 enforces
 the expired-batch override contract end to end: classified `inventory.expired_only`
 refusals, per-line override denial checks, a mandatory recorded reason, and a
-web probe-then-confirm dialog. The remaining work is:
+web probe-then-confirm dialog. C19 implements scheduled-price cancellation,
+closing the ADR-0029 gap in POS pricing. The remaining work is:
 
 1. **Phase 11 — POS:** the main flow and remaining web surfaces.
    Checkout orchestration is done (C15), the sale-lifecycle web views are
-   done (C16), card/e-wallet and split payments are done (C17), and the
-   expired-batch override is done (C18). Remaining items: receipt
-   thermal/PDF layouts and the POS pricing/scheduled-price cancellation
-   flow.
+   done (C16), card/e-wallet and split payments are done (C17), the
+   expired-batch override is done (C18), and scheduled-price cancellation
+   is done (C19). Remaining items: receipt thermal/PDF layouts and the
+   POS-side pricing surface itself (listing/selecting scheduled prices
+   during checkout).
 2. **Phase 10 tail:** the FEFO allocation service extraction, and
    expiring-soon / expired alerts (Phase 14 notifications). The sale-
    blocking override path for expired batches is complete (C18).

@@ -222,6 +222,134 @@ public sealed class ProductCurationTests
         return product;
     }
 
+    [Fact]
+    public void CancelScheduledPrice_RemovesTempAndReopensPredecessor()
+    {
+        Product product = NewProduct();
+        ProductPriceId basePrice = product.SchedulePrice(
+            null, 100m, Now, null, Manager, "Base", Now).Value;
+        ProductPriceId tempPrice = product.SchedulePrice(
+            null, 50m, Now.AddDays(1), Now.AddDays(2), Manager, "Promo", Now).Value;
+
+        product.Prices.Should().HaveCount(3, "base closed + temp + resumption");
+        product.Prices.Should().ContainSingle(p => p.Id == basePrice && p.EffectiveToUtc == Now.AddDays(1));
+
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(tempPrice, Now);
+
+        cancelled.IsSuccess.Should().BeTrue();
+        product.Prices.Should().ContainSingle().Which.Id.Should().Be(basePrice);
+        product.Prices.Single().EffectiveToUtc.Should().BeNull("the base price is open-ended again");
+    }
+
+    [Fact]
+    public void CancelScheduledPrice_RemovesOpenTempAndReopensPredecessor()
+    {
+        Product product = NewProduct();
+        ProductPriceId basePrice = product.SchedulePrice(
+            null, 100m, Now, null, Manager, "Base", Now).Value;
+        ProductPriceId tempPrice = product.SchedulePrice(
+            null, 50m, Now.AddDays(1), null, Manager, "Temp open", Now).Value;
+
+        product.Prices.Should().HaveCount(2, "an open temp closes the base but creates no resumption");
+
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(tempPrice, Now);
+
+        cancelled.IsSuccess.Should().BeTrue();
+        product.Prices.Should().ContainSingle().Which.Id.Should().Be(basePrice);
+        product.Prices.Single().EffectiveToUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public void CancelScheduledPrice_RemovesGapFillingPriceWithNoPredecessor()
+    {
+        Product product = NewProduct();
+        ProductPriceId basePrice = product.SchedulePrice(
+            null, 100m, Now, Now.AddDays(1), Manager, "Base", Now).Value;
+        ProductPriceId gapFill = product.SchedulePrice(
+            null, 75m, Now.AddDays(5), Now.AddDays(10), Manager, "Gap", Now).Value;
+
+        product.Prices.Should().HaveCount(2);
+
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(gapFill, Now);
+
+        cancelled.IsSuccess.Should().BeTrue();
+        product.Prices.Should().ContainSingle().Which.Id.Should().Be(basePrice);
+    }
+
+    [Fact]
+    public void CancelScheduledPrice_RefusesEffectivePrice()
+    {
+        Product product = NewProduct();
+        ProductPriceId effective = product.SchedulePrice(
+            null, 100m, Now, null, Manager, "Now", Now).Value;
+
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(effective, Now);
+
+        cancelled.IsFailure.Should().BeTrue();
+        cancelled.Errors.Should().ContainSingle().Which.Code
+            .Should().Be("catalog.price_already_effective");
+        product.Prices.Should().ContainSingle().Which.Id.Should().Be(effective);
+    }
+
+    [Fact]
+    public void CancelScheduledPrice_RefusesWithDifferentAmountSuccessor()
+    {
+        Product product = NewProduct();
+        // base[Now→Now+1,$100] then after[Now+2→Now+3,$75], then temp[Now+1→Now+2,$50].
+        // Scheduling the differing successor before the temp avoids any resumption.
+        ProductPriceId basePrice = product.SchedulePrice(
+            null, 100m, Now, Now.AddDays(1), Manager, "Base", Now).Value;
+        ProductPriceId afterPrice = product.SchedulePrice(
+            null, 75m, Now.AddDays(2), Now.AddDays(3), Manager, "After promo", Now).Value;
+        ProductPriceId tempPrice = product.SchedulePrice(
+            null, 50m, Now.AddDays(1), Now.AddDays(2), Manager, "Promo", Now).Value;
+
+        // predecessor = base (To == temp.From ✓); successor = after (From == temp.To ✓, amount 75 ≠ 100)
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(tempPrice, Now);
+
+        cancelled.IsFailure.Should().BeTrue();
+        cancelled.Errors.Should().ContainSingle().Which.Code
+            .Should().Be("catalog.price_cancel_successor");
+        product.Prices.Should().Contain(p => p.Id == basePrice);
+        product.Prices.Should().Contain(p => p.Id == afterPrice);
+        product.Prices.Should().Contain(p => p.Id == tempPrice);
+    }
+
+    [Fact]
+    public void CancelScheduledPrice_RefusesChain()
+    {
+        Product product = NewProduct();
+        // base[Now→open,$100]; temp[Now+1→Now+2,$50] closes base at Now+1 and resumes at Now+2;
+        // resume2[Now+3→Now+4,$100] overlaps the resumption → resumption closed at Now+3, continuation at Now+4.
+        product.SchedulePrice(null, 100m, Now, null, Manager, "Base", Now);
+        ProductPriceId tempPrice = product.SchedulePrice(
+            null, 50m, Now.AddDays(1), Now.AddDays(2), Manager, "Promo", Now).Value;
+        ProductPriceId resume2 = product.SchedulePrice(
+            null, 100m, Now.AddDays(3), Now.AddDays(4), Manager, "Resume 2", Now).Value;
+
+        // Cancel temp: successor = resumption[Now+2,$100] (amount matches base) but the next row at
+        // Now+3 also has the base amount → cancellation would renumber the chain → refused.
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(tempPrice, Now);
+
+        cancelled.IsFailure.Should().BeTrue();
+        cancelled.Errors.Should().ContainSingle().Which.Code
+            .Should().Be("catalog.price_cancel_chain");
+        product.Prices.Should().Contain(p => p.Id == tempPrice);
+        product.Prices.Should().Contain(p => p.Id == resume2);
+    }
+
+    [Fact]
+    public void CancelScheduledPrice_UnknownPriceId()
+    {
+        Product product = NewProduct();
+
+        Result<ProductPriceId> cancelled = product.CancelScheduledPrice(ProductPriceId.New(), Now);
+
+        cancelled.IsFailure.Should().BeTrue();
+        cancelled.Errors.Should().ContainSingle().Which.Code
+            .Should().Be("catalog.price_unknown");
+    }
+
     private static Product NewProduct()
         => Product.Create("CURATE-01", "Curated product", CategoryId.New(), UnitOfMeasureId.New(), Manager).Value;
 }
