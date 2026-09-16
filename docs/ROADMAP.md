@@ -193,9 +193,9 @@ Substantially delivered in Phase 1, because everything else depends on it.
   partial dispositions, quarantine incidents, ledger posting and retry safety)
 - [x] Customer lookup and optional accounts (C11)
 - [x] Daily sales summary (C7)
-- [~] POS tests: inventory effects, insufficient stock, tax, discount, refund
+- [x] POS tests: inventory effects, insufficient stock, tax, discount, refund
   *(inventory effects, insufficient stock and VAT covered in C8; returns/refunds
-  covered in C9; discount tests pending)*
+  covered in C9; discount authorization and totals covered in C12)*
 
 ## Phase 12 — Offline Storage
 

@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C11 complete**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C12 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **892 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 138** (2026-09-16, C11). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **894 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 140** (2026-09-16, through C12). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests     79 passing   non-PostgreSQL ledger, numbering, cata
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       241 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    138 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions and audit behavior
+Pos.Api.IntegrationTests    140 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior and discount enforcement
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -865,8 +865,9 @@ mutations, and active-customer validation during sale completion. Migration
 The remaining work is:
 
 1. **Phase 11 — POS:** the rest of the C batch series, then the main flow.
-   Immediate items: discount regression coverage and the POS cart interface.
-   Sale completion, customer accounts and the daily summary already have endpoints;
+   The immediate item is the POS cart interface. Sale completion, customer
+   accounts and the daily summary already have endpoints, and discount regression
+   coverage now runs through the HTTP pipeline;
    receipt thermal/PDF layouts and payment-provider integration remain pending.
 2. **Phase 10 tail:** the FEFO allocation service extraction, the POS sale-
    blocking override path for expired batches (Phase 11), and expiring-soon /

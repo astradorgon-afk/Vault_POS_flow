@@ -79,6 +79,79 @@ public sealed class PosSalePipelineTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task DiscountedSale_RecordsNetTotalsAndAuthorizer()
+    {
+        Seed seed = await SeedAsync("c8e", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string accessToken = await SignInManagerAsync(client, seed);
+        Guid shiftId = await OpenShiftAsync(client, accessToken, seed);
+
+        using HttpResponseMessage createResp = await PostSaleAsync(
+            client,
+            accessToken,
+            seed,
+            quantity: 2m,
+            shiftId,
+            discount: 10m,
+            discountAuthorizedByUserId: seed.ManagerUserId.Value);
+        createResp.StatusCode.Should().Be(HttpStatusCode.Created, await createResp.Content.ReadAsStringAsync());
+
+        using JsonDocument createDoc = JsonDocument.Parse(await createResp.Content.ReadAsStringAsync());
+        Guid saleId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        using HttpResponseMessage detailResp = await GetJsonAsync(client, $"/api/v1/sales/{saleId}", accessToken);
+        detailResp.StatusCode.Should().Be(HttpStatusCode.OK, await detailResp.Content.ReadAsStringAsync());
+
+        using JsonDocument detailDoc = JsonDocument.Parse(await detailResp.Content.ReadAsStringAsync());
+        JsonElement sale = detailDoc.RootElement;
+        sale.GetProperty("grossTotal").GetDecimal().Should().Be(90m);
+        sale.GetProperty("discountTotal").GetDecimal().Should().Be(10m);
+        sale.GetProperty("netTotal").GetDecimal().Should().Be(80m);
+        sale.GetProperty("lines")[0].GetProperty("discount").GetDecimal().Should().Be(10m);
+        sale.GetProperty("payments")[0].GetProperty("amount").GetDecimal().Should().Be(80m);
+
+        Guid? authorizer = await factory.WithServiceAsync(context => context.Sales
+            .AsNoTracking()
+            .Include(s => s.Items)
+            .Where(s => s.Id == new SaleId(saleId))
+            .SelectMany(s => s.Items)
+            .Select(i => i.DiscountAuthorizedByUserId == null
+                ? (Guid?)null
+                : i.DiscountAuthorizedByUserId.Value.Value)
+            .SingleAsync());
+        authorizer.Should().Be(seed.ManagerUserId.Value);
+    }
+
+    [Fact]
+    public async Task Discount_WhenRecordedAuthorizerLacksPermission_IsRefused()
+    {
+        Seed seed = await SeedAsync("c8f", shelfQty: 10m);
+        UserId cashierWithoutDiscount = await factory.CreateUserAsync(
+            "c8pt-c8f-cashier",
+            Roles.Cashier,
+            locations: [seed.Store],
+            employeeCode: "c8fcashier");
+        using HttpClient client = factory.CreateClient();
+        string accessToken = await SignInManagerAsync(client, seed);
+        Guid shiftId = await OpenShiftAsync(client, accessToken, seed);
+
+        decimal before = await InventoryControlTestSupport.QuantityAsync(factory, seed.Store, seed.Product);
+
+        using HttpResponseMessage response = await PostSaleAsync(
+            client,
+            accessToken,
+            seed,
+            quantity: 1m,
+            shiftId,
+            discount: 5m,
+            discountAuthorizedByUserId: cashierWithoutDiscount.Value);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReadErrorCodeAsync(response)).Should().Be("sale.discount_not_authorized");
+        (await InventoryControlTestSupport.QuantityAsync(factory, seed.Store, seed.Product)).Should().Be(before);
+    }
+
+    [Fact]
     public async Task VoidingSale_RestoresShelfQuantity()
     {
         Seed seed = await SeedAsync("c8d", shelfQty: 5m);
@@ -130,7 +203,11 @@ public sealed class PosSalePipelineTests(PosApiFactory factory)
 
         string managerUserName = $"c8pt-{suffix}-sm";
         string employeeCode = $"c8{suffix}";
-        await factory.CreateUserAsync(managerUserName, Roles.StoreManager, locations: [store], employeeCode: employeeCode);
+        UserId managerUserId = await factory.CreateUserAsync(
+            managerUserName,
+            Roles.StoreManager,
+            locations: [store],
+            employeeCode: employeeCode);
 
         string deviceCode = $"C8{suffix.Substring(suffix.Length - 1)}";
         DeviceId device = await factory.CreateDeviceAsync(deviceCode, store);
@@ -157,7 +234,16 @@ public sealed class PosSalePipelineTests(PosApiFactory factory)
 
         await InventoryControlTestSupport.SetBucketAsync(factory, store, product, shelfQty, 30m);
 
-        return new Seed(store, managerUserName, employeeCode, deviceCode, device, product, unitId, $"5000{suffix}0001");
+        return new Seed(
+            store,
+            managerUserId,
+            managerUserName,
+            employeeCode,
+            deviceCode,
+            device,
+            product,
+            unitId,
+            $"5000{suffix}0001");
     }
 
     private static async Task<string> SignInManagerAsync(HttpClient client, Seed seed)
@@ -208,11 +294,19 @@ public sealed class PosSalePipelineTests(PosApiFactory factory)
         Seed seed,
         decimal quantity,
         Guid shiftId,
-        object[]? payments = null)
+        object[]? payments = null,
+        decimal discount = 0m,
+        Guid? discountAuthorizedByUserId = null)
     {
         payments ??= new[]
         {
-            new { method = 1, amount = 45m * quantity, tendered = 100m, providerReference = (string?)null },
+            new
+            {
+                method = 1,
+                amount = (45m * quantity) - discount,
+                tendered = 100m,
+                providerReference = (string?)null,
+            },
         };
 
         return await PostJsonAsync(
@@ -238,8 +332,8 @@ public sealed class PosSalePipelineTests(PosApiFactory factory)
                         barcode = seed.Barcode,
                         unitPriceOverride = (decimal?)null,
                         priceOverrideAuthorizedByUserId = (Guid?)null,
-                        discount = 0m,
-                        discountAuthorizedByUserId = (Guid?)null,
+                        discount,
+                        discountAuthorizedByUserId,
                         allowExpiredOverride = false,
                     },
                 },
@@ -275,6 +369,7 @@ public sealed class PosSalePipelineTests(PosApiFactory factory)
 
     private sealed record Seed(
         LocationId Store,
+        UserId ManagerUserId,
         string ManagerUserName,
         string EmployeeCode,
         string DeviceCode,

@@ -21,10 +21,9 @@ shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
 with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (daily sales summary report), C8 (sale pipeline tests + void route) and C9
-(returns HTTP surface), C10 (return disposition) and C11 (customer accounts) are
-complete; details are in the log below. C11 cleared the commit gate with 892
-non-PostgreSQL tests passing.
-**Last commits:** C11 (this commit), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
+(returns HTTP surface), C10 (return disposition), C11 (customer accounts) and C12
+(discount HTTP regressions) are complete; details are in the log below.
+**Last commits:** C12 (this commit), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -108,6 +107,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C9 — returns HTTP surface: `POST /api/v1/returns` (referenced, `sale.return`), `POST /api/v1/returns/blind` (blind, `sale.return_blind`), `POST /api/v1/returns/{id}/refund` (`sale.refund`, branches on body `saleId` → referenced vs blind); full-command payloads with `DocumentNumber.Parse`, RET-prefixed numbers, `eventId` replay safety, `201`/`200`; integration tests through the real pipeline — return+cash-refund E2E with the second-full-refund cap 409, over-quantity return 409, blind return with cash refund `200` and card refund refused `400`, refund naming a different sale `409 sale.refund.sale_mismatch`. Disposition route (`POST /api/v1/returns/{id}/disposition`) stays pending — no aggregate/command yet
   - [x] C10 — return disposition: partial line inspections into Available, Quarantine, Damaged, supplier-return staging or write-off; immutable retry-safe events, optimistic concurrency, quarantine incidents and zero-sum ledger posts; migration `20260915181631_SalesReturnDispositions`
   - [x] C11 — optional customer accounts: create/search/detail/update/deactivate/reactivate routes; `customer.view` and `customer.manage`; mutation audits without duplicated PII; sale completion accepts active known customers only; migration `20260916015216_CustomerAccounts`
+  - [x] C12 — discount HTTP regressions: an authorized manual discount persists gross/discount/net/payment totals and its authorizer; a named authorizer without `sale.discount` gets 403 and leaves inventory unchanged
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -464,3 +464,16 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   13, API 138). Customer-focused tests contributed 5 domain, 7 repository, 36
   sale-handler and 3 HTTP cases. Migration model drift and `git diff --check`
   passed. Docker is unavailable, so PostgreSQL execution remains unverified.
+
+### 2026-09-16 — C12 discount regressions
+
+- Added HTTP coverage proving an authorized line discount is rechecked at the
+  sale location, reduces the payment and persisted net total, and retains the
+  authorizing user on the sale item.
+- Added the negative path for a caller-supplied authorizer who lacks
+  `sale.discount`: the API returns 403 `sale.discount_not_authorized` and leaves
+  shelf inventory unchanged.
+- Validation: clean integration-test build with zero warnings; all 6 sale
+  pipeline tests and all 140 non-PostgreSQL API integration tests passed. With
+  the broader C11 run immediately before this test-only batch, the current
+  non-PostgreSQL total is 894.
