@@ -1,7 +1,25 @@
-﻿@page "/"
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject UserSession Session
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Operations · VaultFlow</PageTitle>
 
-<h1>Hello, world!</h1>
+<section class="home-head">
+    <div><span class="eyebrow">Operations overview</span><h1>Good work starts with a clean handoff.</h1><p>Review the live workspace, then move directly into the task at hand.</p></div>
+    <div class="policy-chip"><span></span> Policy snapshot @Session.Current?.User.PolicyVersion</div>
+</section>
 
-Welcome to your new app.
+<section class="command-grid">
+    <article class="primary-card"><span class="card-index">POS / 01</span><div><h2>Start a sale</h2><p>The transaction workspace is the next delivery slice.</p></div><span class="coming-soon">Cart foundation ready next</span></article>
+    <article class="status-card"><span class="card-index">ACCESS</span><strong>@(Session.Current?.User.Permissions.Count ?? 0)</strong><p>effective permissions in this session</p></article>
+    <article class="status-card"><span class="card-index">SCOPE</span><strong>@ScopeLabel</strong><p>operational location access</p></article>
+</section>
+
+<section class="readiness"><div><span class="pulse"></span><strong>API session active</strong></div><p>Access expires @Session.Current?.AccessTokenExpiresAtUtc.ToLocalTime().ToString("t").</p></section>
+
+@code {
+    private string ScopeLabel => Session.Current?.User.HasAllLocations == true
+        ? "All"
+        : (Session.Current?.User.Locations.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+}

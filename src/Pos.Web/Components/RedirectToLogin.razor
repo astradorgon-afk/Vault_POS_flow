@@ -1,0 +1,18 @@
+@inject NavigationManager Navigation
+
+<section class="route-message" aria-live="polite">
+    <span>Session required</span>
+    <h1>Sign in to continue</h1>
+</section>
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            string relative = Navigation.ToBaseRelativePath(Navigation.Uri);
+            string returnUrl = Uri.EscapeDataString('/' + relative);
+            Navigation.NavigateTo($"/login?returnUrl={returnUrl}");
+        }
+    }
+}

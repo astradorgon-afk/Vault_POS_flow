@@ -2,8 +2,8 @@
 
 Running record of the work to close the known gaps and finish Phases 9–18.
 Updated at every commit. [STATUS.md](STATUS.md) is the detailed state of the
-system; [ROADMAP.md](ROADMAP.md) is the item-by-item plan. The UI design
-mockups (the "VaultFlow Screens" canvas) are **on hold** until the phases are done.
+system; [ROADMAP.md](ROADMAP.md) is the item-by-item plan. The standalone UI
+mockup canvas is on hold; product UI now lands in tested implementation slices.
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done (with commit)
 
@@ -21,9 +21,10 @@ shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
 with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (daily sales summary report), C8 (sale pipeline tests + void route) and C9
-(returns HTTP surface), C10 (return disposition), C11 (customer accounts) and C12
-(discount HTTP regressions) are complete; details are in the log below.
-**Last commits:** C12 (this commit), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
+(returns HTTP surface), C10 (return disposition), C11 (customer accounts), C12
+(discount HTTP regressions) and C13 (authenticated web shell) are complete;
+details are in the log below.
+**Last commits:** C13 (this commit), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -108,6 +109,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C10 — return disposition: partial line inspections into Available, Quarantine, Damaged, supplier-return staging or write-off; immutable retry-safe events, optimistic concurrency, quarantine incidents and zero-sum ledger posts; migration `20260915181631_SalesReturnDispositions`
   - [x] C11 — optional customer accounts: create/search/detail/update/deactivate/reactivate routes; `customer.view` and `customer.manage`; mutation audits without duplicated PII; sale completion accepts active known customers only; migration `20260916015216_CustomerAccounts`
   - [x] C12 — discount HTTP regressions: an authorized manual discount persists gross/discount/net/payment totals and its authorizer; a named authorizer without `sale.discount` gets 403 and leaves inventory unchanged
+  - [x] C13 — authenticated Blazor shell: API-backed username/password/two-factor sign-in, circuit-scoped token session, protected routing and safe return URLs, sign-out, responsive operations navigation and workspace overview
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -477,3 +479,19 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   pipeline tests and all 140 non-PostgreSQL API integration tests passed. With
   the broader C11 run immediately before this test-only batch, the current
   non-PostgreSQL total is 894.
+
+### 2026-09-16 — C13 authenticated web shell
+
+- Replaced the untouched Blazor template with the VaultFlow operations shell.
+  The web app now has an API base-address option, typed authentication client,
+  circuit-scoped token session and a custom `AuthenticationStateProvider`.
+- Added username/password sign-in with an optional two-factor code, user-safe API
+  failures, protected routes, safe return navigation and local sign-out. The
+  authorization principal carries the API's roles, permissions and locations.
+- Added responsive sign-in and workspace screens with visible keyboard focus,
+  reduced-motion support and mobile layouts. Removed the template counter and
+  weather routes.
+- Validation: `Pos.Web` builds with zero warnings. Playwright verified anonymous
+  redirect to sign-in, field interaction, API-unavailable feedback, desktop and
+  mobile layouts, and no browser console errors. Screenshots are under
+  `artifacts/vaultflow-login*.png` and remain untracked.

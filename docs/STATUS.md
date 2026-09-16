@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C12 complete**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C13 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -881,8 +881,9 @@ The remaining work is:
 
 ## 6. Running it
 
-There is no user interface yet (the web and POS clients are Phases 11, 12 and
-16), so "running it" means the HTTP API. The path verified on 2026-09-14 is a
+The authenticated Blazor operations shell now provides sign-in and protected
+routing; the transaction cart remains the next UI slice. The API path verified
+on 2026-09-14 is a
 development PostgreSQL in Docker plus the API under `dotnet run`, which applies
 migrations and seeds in Development:
 

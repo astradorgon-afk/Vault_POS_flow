@@ -1,0 +1,60 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@layout AuthLayout
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject VaultFlowAuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in · VaultFlow</PageTitle>
+
+<main class="login-page">
+    <section class="login-story" aria-label="VaultFlow introduction">
+        <a class="login-brand" href="/"><span>V</span> VaultFlow</a>
+        <div><span class="eyebrow">Inventory command system</span><h1>Know where every unit went.</h1><p>Sales, transfers, returns and stock decisions share one traceable operational record.</p></div>
+        <small>Built for accountable retail operations.</small>
+    </section>
+    <section class="login-panel">
+        <form @onsubmit="SignInAsync" @onsubmit:preventDefault="true">
+            <header><span class="eyebrow">Secure workspace</span><h2>Welcome back</h2><p>Use your VaultFlow account to open the operations console.</p></header>
+            @if (!string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
+            <label for="username">Username or email</label>
+            <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" disabled="@busy" />
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required @bind="password" disabled="@busy" />
+            <label for="two-factor">Two-factor code <span>if required</span></label>
+            <input id="two-factor" name="two-factor" inputmode="numeric" autocomplete="one-time-code" @bind="twoFactorCode" disabled="@busy" />
+            <button type="submit" disabled="@busy">@(busy ? "Signing in…" : "Open workspace")</button>
+        </form>
+    </section>
+</main>
+
+@code {
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    private string userName = string.Empty;
+    private string password = string.Empty;
+    private string? twoFactorCode;
+    private string? error;
+    private bool busy;
+
+    private async Task SignInAsync()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            ApiResult<SignInResponse> result = await Api.SignInAsync(userName.Trim(), password, twoFactorCode?.Trim(), CancellationToken.None);
+            if (!result.IsSuccess) { error = result.Error; return; }
+            Authentication.NotifySignedIn();
+            Navigation.NavigateTo(SafeReturnUrl(ReturnUrl));
+        }
+        catch (HttpRequestException)
+        {
+            error = "VaultFlow API is unavailable. Check that the API is running, then try again.";
+        }
+        finally { busy = false; }
+    }
+
+    private static string SafeReturnUrl(string? value)
+        => !string.IsNullOrWhiteSpace(value) && value.StartsWith("/", StringComparison.Ordinal) && !value.StartsWith("//", StringComparison.Ordinal) ? value : "/";
+}

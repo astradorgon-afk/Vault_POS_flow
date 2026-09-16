@@ -1,23 +1,33 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 
 <div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
-
+    <aside class="sidebar"><NavMenu /></aside>
     <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
-
-        <article class="content px-4">
-            @Body
-        </article>
+        <header class="top-row">
+            <div><span class="location-label">Active workspace</span><strong>VaultFlow operations</strong></div>
+            <AuthorizeView>
+                <Authorized Context="auth">
+                    <div class="operator">
+                        <span class="operator-mark" aria-hidden="true">@Initials(auth.User.Identity?.Name)</span>
+                        <span><strong>@auth.User.Identity?.Name</strong><small>@PrimaryRole(auth.User)</small></span>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+        </header>
+        <article class="content">@Body</article>
     </main>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    VaultFlow lost its connection. <a href="." class="reload">Reload</a>
+    <span class="dismiss">×</span>
 </div>
+
+@code {
+    private static string Initials(string? name) => string.Concat((name ?? "VF")
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2)
+        .Select(part => char.ToUpperInvariant(part[0])));
+
+    private static string PrimaryRole(System.Security.Claims.ClaimsPrincipal user)
+        => user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "Team member";
+}

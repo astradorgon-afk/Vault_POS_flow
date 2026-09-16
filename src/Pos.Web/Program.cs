@@ -1,10 +1,32 @@
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Pos.Web.Components;
+using Pos.Web.Security;
+using Pos.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+builder.Services.AddAuthorizationCore();
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options => options.LoginPath = "/login");
+builder.Services.AddAuthorization();
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<UserSession>();
+builder.Services.AddScoped<VaultFlowAuthenticationStateProvider>();
+builder.Services.AddScoped<AuthenticationStateProvider>(services =>
+    services.GetRequiredService<VaultFlowAuthenticationStateProvider>());
+builder.Services.AddHttpClient<VaultFlowApiClient>((services, client) =>
+{
+    ApiOptions options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ApiOptions>>().Value;
+    client.BaseAddress = options.BaseAddress;
+});
+builder.Services.AddOptions<ApiOptions>()
+    .BindConfiguration(ApiOptions.SectionName)
+    .Validate(options => options.BaseAddress.IsAbsoluteUri, "Api:BaseAddress must be an absolute URI.")
+    .ValidateOnStart();
 
 var app = builder.Build();
 
