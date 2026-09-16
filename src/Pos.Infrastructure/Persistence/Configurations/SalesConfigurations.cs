@@ -33,6 +33,7 @@ public sealed class SaleConfiguration : IEntityTypeConfiguration<Sale>
         builder.Property(s => s.CashierShiftId).HasColumnName("cashier_shift_id").IsRequired();
         builder.Property(s => s.DeviceId).HasColumnName("device_id").IsRequired();
         builder.Property(s => s.CustomerId).HasColumnName("customer_id");
+        builder.HasOne<Customer>().WithMany().HasForeignKey(s => s.CustomerId).OnDelete(DeleteBehavior.Restrict);
         builder.Property(s => s.BusinessDate).HasColumnName("business_date").IsRequired();
         builder.Property(s => s.CompletedAtUtc).HasColumnName("completed_at_utc").IsRequired();
         builder.Property(s => s.CompletedByUserId).HasColumnName("completed_by_user_id").IsRequired();

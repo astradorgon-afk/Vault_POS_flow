@@ -131,7 +131,7 @@ public static class Roles
                 Permissions.Sales.Void, Permissions.Sales.Return, Permissions.Sales.ReturnBlind,
                 Permissions.Sales.Refund, Permissions.Sales.Reprint, Permissions.Sales.ExpiredOverride,
                 Permissions.Sales.OpenShift, Permissions.Sales.CloseShift, Permissions.Sales.CloseOtherShift,
-                Permissions.Sales.OpenCashDrawer, Permissions.Sales.ManageCustomers,
+                Permissions.Sales.OpenCashDrawer, Permissions.Sales.ManageCustomers, Permissions.Sales.ViewCustomers,
 
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
             ],
@@ -155,7 +155,7 @@ public static class Roles
                 Permissions.Quarantine.Create,
                 Permissions.Sales.Create, Permissions.Sales.View, Permissions.Sales.Return,
                 Permissions.Sales.OpenShift, Permissions.Sales.CloseShift,
-                Permissions.Sales.ManageCustomers,
+                Permissions.Sales.ManageCustomers, Permissions.Sales.ViewCustomers,
             ],
 
             // Read-only by construction. PermissionCatalogueTests asserts that
@@ -169,7 +169,7 @@ public static class Roles
                 Permissions.Transfer.View,
                 Permissions.Quarantine.View,
                 Permissions.Receipts.View,
-                Permissions.Sales.View,
+                Permissions.Sales.View, Permissions.Sales.ViewCustomers,
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
                 Permissions.Administration.ExportReports, Permissions.Administration.ViewAudit,
                 Permissions.Administration.AllLocations,

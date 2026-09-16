@@ -208,6 +208,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the payments recorded against completed sales.</summary>
     public DbSet<Payment> Payments => Set<Payment>();
 
+    /// <summary>Gets customer records.</summary>
+    public DbSet<Customer> Customers => Set<Customer>();
+
     /// <summary>Gets customer returns and their lines and refunds.</summary>
     public DbSet<SalesReturn> SalesReturns => Set<SalesReturn>();
 

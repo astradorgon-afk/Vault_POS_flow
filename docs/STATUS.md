@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C9 committed; C10 return disposition implemented**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C11 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,26 +13,26 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **Domain 358, Application 237, Infrastructure 71 (+ 18 skipped), Security 52, Architecture 13, API 127** in the latest full-suite run (2026-09-16, after C9). The two PostgreSQL-guard suite members fail on a machine with no Docker daemon (`DockerUnavailableException`); with Docker up they run, as verified in earlier batches |
-| Migrations | 22, forward-only, applied cleanly against PostgreSQL 17 — by the Testcontainers suites, the API host test, and the Alpine migrations bundle in the compose stack |
+| Tests | **892 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 138** (2026-09-16, C11). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
 | Phases remaining | 11–18 — see §5 |
 
 ```
-Pos.Domain.Tests            358 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS void/customer-return/blind-return/blind-refund rules, shift lifecycle (suspend/resume/reconcile/force-close)
-Pos.Infrastructure.Tests     71 passing   ledger posting + concurrency + reconciler + PostgreSQL triggers, numbering, role grants, catalog curation, migration order, sales-return/refund/receipt-print/shift round-trips (18 skipped — the PostgreSQL guards, without Docker; the SQLite blind-refund round-trip is included)
+Pos.Domain.Tests            369 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
+Pos.Infrastructure.Tests     79 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS and customer repository coverage
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
-Pos.Application.Tests       237 passing   master-data commands, CQRS unit-of-work and negative-stock-attempt behaviours, receipt rendering, POS C-batch handlers (void, customer return, refund, reprint, blind return, blind refund, shift suspend/resume/reconcile)
-Pos.Api.IntegrationTests    127 passing   endpoints through the real pipeline (SQLite), user/role administration and two-factor, catalog curation, negative-stock report, stock adjustments and counts, shift lifecycle, sale complete/read/receipt/void, returns and refunds, daily-sales report, API host runs on PostgreSQL (Docker) — the two PostgreSQL-guard members fail without a Docker daemon
+Pos.Application.Tests       241 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
+Pos.Api.IntegrationTests    138 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions and audit behavior
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
 
-The PostgreSQL suite needs a Docker daemon. It self-skips without one, so a
-developer with no Docker still gets a green local run; CI always has one.
+The PostgreSQL suite needs a Docker daemon. The local C11 run excluded tests
+whose fully-qualified names contain `Postgres`; CI runs them with Docker.
 
 ---
 
@@ -107,7 +107,7 @@ costing, negative-stock policy, idempotency by event id.
 ### Phase 2 — Identity and authorization
 - ASP.NET Core Identity with Guid keys, PBKDF2 at 600,000 iterations,
   NIST-style password policy (length over composition rules).
-- 73-permission catalogue defined **in code** and seeded to the database, so a
+- 74-permission catalogue defined **in code** and seeded to the database, so a
   permission cannot be invented by editing a table.
 - Seven roles as permission bundles. No code branches on a role name.
 - Per-user overrides with grant/deny, expiry and a mandatory reason. Deny always
@@ -848,7 +848,7 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C9 are committed:
+Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C10 are committed:
 shift lifecycle, sale completion/read/receipt/void, daily sales summary, and
 referenced/blind returns and refunds have HTTP endpoints. The follow-up refund
 correction excludes the current return from the database's prior-refund totals;
@@ -858,12 +858,15 @@ Return disposition is implemented in C10: one-line partial inspections route
 goods to Available, Quarantine (with an incident), Damaged, supplier-return
 staging, or EXT-WRITEOFF. Immutable event history supports retries; a per-line
 concurrency token prevents competing requests consuming the same units.
-Migration `20260915181631_SalesReturnDispositions` must be applied before running
-the updated API. The remaining work is:
+Customer lookup and optional accounts are implemented in C11: searchable paged
+records, detail and lifecycle routes, separate read/manage permissions, audited
+mutations, and active-customer validation during sale completion. Migration
+`20260916015216_CustomerAccounts` must be applied before running the updated API.
+The remaining work is:
 
 1. **Phase 11 — POS:** the rest of the C batch series, then the main flow.
-   Immediate items: discount regression coverage, customer lookup, and the POS cart
-   interface. Sale completion and the daily summary already have endpoints;
+   Immediate items: discount regression coverage and the POS cart interface.
+   Sale completion, customer accounts and the daily summary already have endpoints;
    receipt thermal/PDF layouts and payment-provider integration remain pending.
 2. **Phase 10 tail:** the FEFO allocation service extraction, the POS sale-
    blocking override path for expired batches (Phase 11), and expiring-soon /

@@ -2839,6 +2839,78 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("cashier_shift", "sales");
                 });
 
+            modelBuilder.Entity("Pos.Domain.Sales.Customer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<DateTimeOffset?>("DeactivatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deactivated_at_utc");
+
+                    b.Property<string>("DeactivationReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("deactivation_reason");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("email");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("Tin")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("tin");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by_user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DisplayName")
+                        .HasDatabaseName("ix_customer_display_name");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("ix_customer_is_active");
+
+                    b.ToTable("customer", "sales");
+                });
+
             modelBuilder.Entity("Pos.Domain.Sales.Payment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3042,6 +3114,8 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasColumnName("zero_rated_total");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
 
                     b.HasIndex("EventId")
                         .IsUnique()
@@ -3288,6 +3362,8 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasColumnName("sale_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
 
                     b.HasIndex("EventId")
                         .IsUnique()
@@ -4424,6 +4500,14 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Pos.Domain.Sales.Sale", b =>
+                {
+                    b.HasOne("Pos.Domain.Sales.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Pos.Domain.Sales.SaleItem", b =>
                 {
                     b.HasOne("Pos.Domain.Sales.Sale", null)
@@ -4440,6 +4524,14 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasForeignKey("SaleId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Pos.Domain.Sales.SalesReturn", b =>
+                {
+                    b.HasOne("Pos.Domain.Sales.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Pos.Domain.Sales.SalesReturnDisposition", b =>

@@ -247,6 +247,9 @@ public static class Permissions
 
         /// <summary>Manage customer records.</summary>
         public const string ManageCustomers = "customer.manage";
+
+        /// <summary>View customer records.</summary>
+        public const string ViewCustomers = "customer.view";
     }
 
     /// <summary>Reporting, audit and administration permissions.</summary>
@@ -358,6 +361,7 @@ public static class Permissions
         Def(Sales.CloseOtherShift, "Sales", "Close another user's shift.", offline: true, readOnly: false),
         Def(Sales.OpenCashDrawer, "Sales", "Open the cash drawer without a sale.", offline: true, readOnly: false),
         Def(Sales.ManageCustomers, "Sales", "Manage customer records.", offline: true, readOnly: false),
+        Def(Sales.ViewCustomers, "Sales", "View customer records.", offline: true, readOnly: true),
 
         Def(Administration.ViewReports, "Administration", "View operational reports.", offline: true, readOnly: true),
         Def(Administration.ViewFinancialReports, "Administration", "View financial reports.", offline: false, readOnly: true),

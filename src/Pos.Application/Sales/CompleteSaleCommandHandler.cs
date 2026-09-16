@@ -37,6 +37,7 @@ namespace Pos.Application.Sales;
 /// </remarks>
 public sealed class CompleteSaleCommandHandler(
     ISalesRepository repository,
+    ICustomerRepository customers,
     IExpiryService expiry,
     IInventoryLedger ledger,
     IShiftRepository shifts,
@@ -123,6 +124,26 @@ public sealed class CompleteSaleCommandHandler(
         if (shift.DeviceId != command.DeviceId)
         {
             return Result<SaleId>.Failure(SaleCommandErrors.ShiftDeviceMismatch);
+        }
+
+        // ------------------------------------------------------------------
+        // 1c. Resolve the customer reference, when one is provided.
+        // ------------------------------------------------------------------
+        if (command.CustomerId is { } customerId)
+        {
+            Customer? customer = await customers
+                .GetByIdAsync(customerId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (customer is null)
+            {
+                return Result<SaleId>.Failure(SaleCommandErrors.CustomerUnknown(customerId));
+            }
+
+            if (!customer.IsActive)
+            {
+                return Result<SaleId>.Failure(SaleCommandErrors.CustomerInactive(customerId));
+            }
         }
 
         // ------------------------------------------------------------------

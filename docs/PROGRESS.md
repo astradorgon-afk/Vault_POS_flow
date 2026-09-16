@@ -21,11 +21,10 @@ shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
 with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (daily sales summary report), C8 (sale pipeline tests + void route) and C9
-(returns HTTP surface) are committed; details in the log below. The latest
-batch, C9, cleared the commit gate: build 0 warnings 0 errors, Domain 358 /
-Application 237 / Infrastructure 71 (+ 18 skipped) / Security 52 / Architecture
-13 / API 127 passed (2 Docker-absent PostgreSQL-guard tests aside).
-**Last commits:** C9 (returns/refunds endpoints), C8 (sale pipeline tests + void route), C7 (daily sales summary), C6 (sale endpoints + receipt), C5 (shift lifecycle), `c829307` (C3b — blind customer return),
+(returns HTTP surface), C10 (return disposition) and C11 (customer accounts) are
+complete; details are in the log below. C11 cleared the commit gate with 892
+non-PostgreSQL tests passing.
+**Last commits:** C11 (this commit), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
 
@@ -107,8 +106,9 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C7 — daily sales summary report: `GET /api/v1/reports/daily-sales` under the existing `report.view` permission re-checked against the report's location; completed sales + per-method payments + per-shift rows + refund amounts for a location/business date; `DailySalesReportRepository` aggregates via the `Refunds → CashierShift` join (referenced and blind refunds both count); `ReportErrors.LocationUnknown`/`OutsideScope`; endpoint tests (aggregation, refunds vs returns, 403 other-store, 404 unknown location)
   - [x] C8 — sale pipeline tests and the void route: `POST /api/v1/sales/{id}/void` dispatching the C1 `VoidSaleCommand` under `sale.void` (idempotent by `eventId`); integration tests through the real pipeline — insufficient stock 409 before payments, payment mismatch 409, VAT classification at the location rate, void restores the exact shelf quantity
   - [x] C9 — returns HTTP surface: `POST /api/v1/returns` (referenced, `sale.return`), `POST /api/v1/returns/blind` (blind, `sale.return_blind`), `POST /api/v1/returns/{id}/refund` (`sale.refund`, branches on body `saleId` → referenced vs blind); full-command payloads with `DocumentNumber.Parse`, RET-prefixed numbers, `eventId` replay safety, `201`/`200`; integration tests through the real pipeline — return+cash-refund E2E with the second-full-refund cap 409, over-quantity return 409, blind return with cash refund `200` and card refund refused `400`, refund naming a different sale `409 sale.refund.sale_mismatch`. Disposition route (`POST /api/v1/returns/{id}/disposition`) stays pending — no aggregate/command yet
+  - [x] C10 — return disposition: partial line inspections into Available, Quarantine, Damaged, supplier-return staging or write-off; immutable retry-safe events, optimistic concurrency, quarantine incidents and zero-sum ledger posts; migration `20260915181631_SalesReturnDispositions`
+  - [x] C11 — optional customer accounts: create/search/detail/update/deactivate/reactivate routes; `customer.view` and `customer.manage`; mutation audits without duplicated PII; sale completion accepts active known customers only; migration `20260916015216_CustomerAccounts`
   - [ ] Sale flow: cart, pricing/discount/VAT, payments, atomic completion
-  - [ ] Customers
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [ ] **Phase 14 — Notifications:** persistent notifications, SignalR hub, alert generators
@@ -439,3 +439,28 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   running, so PostgreSQL execution remains unverified. The repository secret
   scanner still reports existing development/test password patterns and the
   key-generation script; this batch adds no credentials.
+
+### 2026-09-16 — C11 customer accounts
+
+- Added optional customer accounts with create, paged search, detail, update,
+  deactivate and reactivate routes. Search is case-insensitive across display
+  name, phone and email and escapes SQL wildcard characters.
+- Split access into offline-capable `customer.view` and `customer.manage`
+  permissions. Store Managers and Cashiers can manage and view customers;
+  Auditors have read-only access.
+- Sale completion now rejects unknown or inactive named customers and persists
+  an active customer's ID on the sale. Anonymous and unauthorized callers are
+  rejected through the normal API authorization pipeline.
+- Customer lifecycle changes use the system clock and write mutation audits.
+  Contact details are not copied into audit JSON; deactivation retains its
+  required reason. Foreign keys prevent deleting customers referenced by sales
+  or returns.
+- Migration `20260916015216_CustomerAccounts` creates `sales.customer`, search
+  indexes and the optional sale/return foreign keys. Historical free-form
+  customer IDs are retained as inactive legacy records before the constraints
+  are added, so an existing database can upgrade without losing references.
+- Validation: clean build with zero warnings; 892 non-PostgreSQL tests passed
+  (Domain 369, Application 241, Infrastructure 79, Security 52, Architecture
+  13, API 138). Customer-focused tests contributed 5 domain, 7 repository, 36
+  sale-handler and 3 HTTP cases. Migration model drift and `git diff --check`
+  passed. Docker is unavailable, so PostgreSQL execution remains unverified.

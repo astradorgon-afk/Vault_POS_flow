@@ -251,6 +251,7 @@ try
     app.MapReceiptEndpoints();
     app.MapShiftEndpoints();
     app.MapSaleEndpoints();
+    app.MapCustomerEndpoints();
     app.MapReturnsEndpoints();
     app.MapReportEndpoints();
     app.MapAdministrationEndpoints();

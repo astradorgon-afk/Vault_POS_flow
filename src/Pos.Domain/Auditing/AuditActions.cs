@@ -266,6 +266,18 @@ public static class AuditActions
         /// <summary>Returned goods were inspected and routed out of ReturnPending.</summary>
         public const string ReturnDispositioned = "sale.return.dispositioned";
 
+        /// <summary>A customer account was created.</summary>
+        public const string CustomerCreated = "customer.created";
+
+        /// <summary>A customer account was updated.</summary>
+        public const string CustomerUpdated = "customer.updated";
+
+        /// <summary>A customer account was deactivated.</summary>
+        public const string CustomerDeactivated = "customer.deactivated";
+
+        /// <summary>A customer account was reactivated.</summary>
+        public const string CustomerReactivated = "customer.reactivated";
+
         /// <summary>A blind return accepted goods back without their original sale (exception record).</summary>
         public const string BlindReturnAccepted = "sale.return.blind.accepted";
 

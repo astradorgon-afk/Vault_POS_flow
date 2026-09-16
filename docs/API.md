@@ -533,13 +533,29 @@ POST   /api/v1/returns                               sale.return   -> LEDGER (to
 POST   /api/v1/returns/blind                         sale.return_blind -> LEDGER (to ReturnPending) + exception audit
 POST   /api/v1/returns/{id}/disposition              inventory.adjust -> LEDGER
 POST   /api/v1/returns/{id}/refund                   sale.refund   (branches on body `saleId`: referenced vs blind)
-GET    /api/v1/customers?query=                      customer.manage | sale.create
+POST   /api/v1/customers                             customer.manage
+GET    /api/v1/customers?search=&page=&pageSize=     customer.view
+GET    /api/v1/customers/{id}                        customer.view
+PUT    /api/v1/customers/{id}                        customer.manage
+POST   /api/v1/customers/{id}/deactivate             customer.manage
+POST   /api/v1/customers/{id}/reactivate             customer.manage
 POST   /api/v1/cash-drawer/open                      cashdrawer.open_without_sale
 GET    /api/v1/reports/daily-sales                   report.view   (re-checked against the location)
 ```
 
 `POST /sales` accepts the full sale as one payload and completes it atomically.
 There is no "add line to server-side cart" chatter — the cart lives on the device.
+
+### Customers
+
+Customer accounts are optional on a sale. Search matches display name, phone or
+email case-insensitively, supports paging, and treats `%` and `_` as literal
+characters. Create and update accept `displayName`, optional `phone`, `email`,
+`tin` and `note`. Deactivation requires a reason; inactive customers remain
+readable and may be reactivated, but cannot be attached to a new sale. Every
+lifecycle mutation is audited without copying customer contact details into the
+audit JSON fields. Unknown customer IDs return 404 `customer.unknown`; invalid
+or inactive records return the corresponding `customer.*` validation error.
 
 ### Sales, receipt and first print
 
@@ -569,8 +585,8 @@ Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invali
 `sale.expired_override_denied`, `sale.external_customer_missing`,
 `sale.number_invalid`, `sale.number_device_mismatch`, `sale.device_unknown`,
 `sale.shift_unknown`, `sale.shift_not_open`, `sale.shift_cashier_mismatch`,
-`sale.shift_device_mismatch`, `sale.payment_mismatch` (409); `sale.outside_scope`
-(403); `sale.unknown` (404).
+`sale.shift_device_mismatch`, `sale.payment_mismatch`, `sale.customer_inactive`
+(409); `sale.outside_scope` (403); `sale.unknown`, `sale.customer_unknown` (404).
 
 ### Returns and refunds
 

@@ -2,7 +2,7 @@
 
 Status legend: `[ ]` Pending · `[~]` In progress · `[x]` Complete
 
-Last updated: 2026-09-14
+Last updated: 2026-09-16
 
 > Phases 0–8 are complete except where marked. Phase 4 was pulled forward
 > because the ledger is the foundation every other module posts through.
@@ -191,7 +191,7 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Void a completed sale with ledger reversal and reason (C1 domain + C8 route)
 - [x] Return, refund and disposition routes (C9 returns/refunds; C10 line inspection,
   partial dispositions, quarantine incidents, ledger posting and retry safety)
-- [ ] Customer lookup and optional accounts
+- [x] Customer lookup and optional accounts (C11)
 - [x] Daily sales summary (C7)
 - [~] POS tests: inventory effects, insufficient stock, tax, discount, refund
   *(inventory effects, insufficient stock and VAT covered in C8; returns/refunds

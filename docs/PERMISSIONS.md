@@ -153,7 +153,8 @@ is offline-capable.
 | `shift.open`, `shift.close` | Shift lifecycle |
 | `shift.close.other` | Close someone else's shift |
 | `cashdrawer.open_without_sale` | No-sale drawer opening |
-| `customer.manage` | Customer records |
+| `customer.view` | Search and read customer records |
+| `customer.manage` | Create, edit, deactivate and reactivate customer records |
 
 ### Reporting, audit, administration
 
@@ -220,6 +221,8 @@ is offline-capable.
 | `shift.open` / `shift.close` | ✓ | — | — | S | — | S | — |
 | `shift.close.other` | ✓ | — | — | S | — | — | — |
 | `cashdrawer.open_without_sale` | ✓ | — | — | S | — | — | — |
+| `customer.view` | ✓ | — | — | S | — | S | ✓ |
+| `customer.manage` | ✓ | — | — | S | — | S | — |
 | `report.view` | ✓ | ✓ | ✓ | S | S | — | ✓ |
 | `report.view.financial` | ✓ | ✓ | ✓ | S | — | — | ✓ |
 | `audit.view` | ✓ | ✓ | — | — | — | — | ✓ |

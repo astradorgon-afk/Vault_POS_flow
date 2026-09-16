@@ -103,4 +103,14 @@ internal static class SaleCommandErrors
     public static Error ShiftDeviceMismatch => Error.Conflict(
         "sale.shift_device_mismatch",
         "A sale can only be completed on the device the shift was opened on.");
+
+    /// <summary>The customer referenced by the sale does not exist.</summary>
+    public static Error CustomerUnknown(CustomerId customerId) => Error.NotFound(
+        "sale.customer_unknown",
+        FormattableString.Invariant($"Unknown customer {customerId.Value}."));
+
+    /// <summary>The customer referenced by the sale is not active.</summary>
+    public static Error CustomerInactive(CustomerId customerId) => Error.Conflict(
+        "sale.customer_inactive",
+        FormattableString.Invariant($"Customer {customerId.Value} is not active."));
 }

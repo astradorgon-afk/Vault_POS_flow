@@ -33,6 +33,7 @@ public sealed class SalesReturnConfiguration : IEntityTypeConfiguration<SalesRet
         builder.Property(r => r.CashierShiftId).HasColumnName("cashier_shift_id").IsRequired();
         builder.Property(r => r.DeviceId).HasColumnName("device_id").IsRequired();
         builder.Property(r => r.CustomerId).HasColumnName("customer_id");
+        builder.HasOne<Customer>().WithMany().HasForeignKey(r => r.CustomerId).OnDelete(DeleteBehavior.Restrict);
         builder.Property(r => r.BusinessDate).HasColumnName("business_date").IsRequired();
         builder.Property(r => r.ReturnedAtUtc).HasColumnName("returned_at_utc").IsRequired();
         builder.Property(r => r.ReturnedByUserId).HasColumnName("returned_by_user_id").IsRequired();

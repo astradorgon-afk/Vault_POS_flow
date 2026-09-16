@@ -412,7 +412,9 @@ sales.payment
   payment_token text NULL, masked_last4 text NULL, status smallint,
   CHECK (method <> 0 /*Cash*/ OR provider IS NULL)
 
-sales.customer      (id, code UNIQUE, name, phone, email, loyalty_ref, is_active)
+sales.customer      (id, display_name, phone NULL, email NULL, tin NULL, note NULL,
+                     is_active, created_at_utc/by, updated_at_utc/by,
+                     deactivated_at_utc/by NULL, deactivation_reason NULL)
 sales.sales_return  + sales.sales_return_item
 sales.receipt_print_log (id, sale_id, printed_at_utc, printed_by, is_reprint, reason)
 ```

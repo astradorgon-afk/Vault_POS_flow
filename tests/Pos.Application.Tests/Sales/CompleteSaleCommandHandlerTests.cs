@@ -29,6 +29,7 @@ public sealed class CompleteSaleCommandHandlerTests
         DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, "D01", 1);
 
     private readonly ISalesRepository _repository = Substitute.For<ISalesRepository>();
+    private readonly ICustomerRepository _customers = Substitute.For<ICustomerRepository>();
     private readonly IExpiryService _expiry = Substitute.For<IExpiryService>();
     private readonly IInventoryLedger _ledger = Substitute.For<IInventoryLedger>();
     private readonly IShiftRepository _shifts = Substitute.For<IShiftRepository>();
@@ -62,6 +63,9 @@ public sealed class CompleteSaleCommandHandlerTests
         _shifts.GetShiftAsync(Arg.Any<CashierShiftId>(), Arg.Any<CancellationToken>())
             .Returns(_openShift);
 
+        _customers.GetByIdAsync(Arg.Any<CustomerId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Customer?>(null));
+
         _ledger.PostAsync(Arg.Any<MovementGroupSpec>(), Arg.Any<CancellationToken>())
             .Returns(Result<PostedMovementGroup>.Success(new PostedMovementGroup(
                 MovementGroupId.New(),
@@ -72,6 +76,7 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _handler = new CompleteSaleCommandHandler(
             _repository,
+            _customers,
             _expiry,
             _ledger,
             _shifts,
@@ -374,6 +379,53 @@ public sealed class CompleteSaleCommandHandlerTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Should().Be(SaleCommandErrors.ShiftDeviceMismatch);
+    }
+
+    // ------------------------------------------------------------------
+    // Customer validation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task NamedCustomer_MustExist()
+    {
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+        CustomerId customerId = CustomerId.New();
+        command = command with { CustomerId = customerId };
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.Error.Should().Be(SaleCommandErrors.CustomerUnknown(customerId));
+        await _ledger.DidNotReceiveWithAnyArgs().PostAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task NamedCustomer_MustBeActive()
+    {
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+        Customer customer = Customer.Create(CustomerId.New(), "Customer", null, null, null, null, Manager, Now).Value;
+        customer.Deactivate("Closed", Manager, Now.AddMinutes(1));
+        _customers.GetByIdAsync(customer.Id, Arg.Any<CancellationToken>()).Returns(customer);
+        command = command with { CustomerId = customer.Id };
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.Error.Should().Be(SaleCommandErrors.CustomerInactive(customer.Id));
+        await _ledger.DidNotReceiveWithAnyArgs().PostAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task ActiveNamedCustomer_IsStampedOnSale()
+    {
+        (CompleteSaleCommand command, _) = SetupHappyPath(sellableQuantity: 10m);
+        Customer customer = Customer.Create(CustomerId.New(), "Customer", null, null, null, null, Manager, Now).Value;
+        _customers.GetByIdAsync(customer.Id, Arg.Any<CancellationToken>()).Returns(customer);
+        command = command with { CustomerId = customer.Id };
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        await _repository.Received(1).AddAsync(
+            Arg.Is<Sale>(sale => sale.CustomerId == customer.Id), Arg.Any<CancellationToken>());
     }
 
     // ------------------------------------------------------------------
