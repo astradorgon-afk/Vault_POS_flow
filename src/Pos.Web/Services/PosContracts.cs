@@ -161,7 +161,8 @@ public sealed record PosSaleLine(
     Guid? PriceOverrideAuthorizedByUserId,
     decimal Discount,
     Guid? DiscountAuthorizedByUserId,
-    bool AllowExpiredOverride);
+    bool AllowExpiredOverride,
+    string? ExpiredOverrideReason);
 
 /// <summary>One payment that settles a sale. Method is the numeric
 /// <c>PaymentMethod</c> value: <c>1</c> cash, <c>2</c> card, <c>3</c> e-wallet.</summary>

@@ -63,6 +63,16 @@ internal static class SaleCommandErrors
         "sale.expired_override_denied",
         "Selling from an expired batch requires the sale.expired_override permission.");
 
+    /// <summary>Selling from an expired batch requires a reason explaining the exception.</summary>
+    public static Error ExpiredOverrideReasonRequired => Error.Validation(
+        "sale.expired_override_reason_required",
+        "Selling from an expired batch requires a reason explaining the exception.");
+
+    /// <summary>The expired-override reason exceeds the allowed length.</summary>
+    public static Error ExpiredOverrideReasonTooLong(int maxLength) => Error.Validation(
+        "sale.expired_override_reason_too_long",
+        FormattableString.Invariant($"The expired-override reason is limited to {maxLength} characters."));
+
     /// <summary>The EXT-CUSTOMER counterparty location has not been provisioned.</summary>
     public static Error ExternalCustomerLocationMissing => Error.Conflict(
         "sale.external_customer_missing",

@@ -25,10 +25,13 @@ with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (discount HTTP regressions), C13 (authenticated web shell), C14
 (API-backed POS cart workspace), C15 (checkout orchestration with
 server-numbered web terminals), C16 (web sale lifecycle: sales search,
-receipt reprint/void and return/refund/disposition workflows in the browser)
-and C17 (card/e-wallet and split payment mixes in the web checkout) are
+receipt reprint/void and return/refund/disposition workflows in the browser),
+C17 (card/e-wallet and split payment mixes in the web checkout) and C18
+(expired-batch sale blocking and the authorized override path — classified
+`inventory.expired_only` refusals, per-line override denial checks, mandatory
+recorded reason, web probe-then-confirm dialog) are
 complete; details are in the log below.
-**Last commits:** C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
+**Last commits:** C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -118,6 +121,8 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C14 — API-backed POS cart workspace: assigned-store selection, barcode lookup, product search, effective location/global pricing, quantity editing, removal and live totals
   - [x] C15 — checkout orchestration with server-numbered web terminals (committed with C14): register auto-select, session bootstrap, shift start, line discounts, cash payment and atomic submission; physical terminals refused `device.not_web`; 12 new `TerminalEndpointTests`
   - [x] C16 — web sale lifecycle: sales search (`GET /api/v1/sales` summaries), `GET /api/v1/returns/{id}` detail, `POST /api/v1/sales/{id}/reprint` reason+append-only; 9 new `SaleLifecycleEndpointTests`; web pages: sales search, sale detail (receipt/reprint/void/accept-return), return detail (disposition/refund/refund history); shared `TerminalBar`; `Pos.Web` builds clean
+  - [x] C17 — card/e-wallet + split payment checkout: allocated-payment list, method tabs (cash/card/e-wallet), quick tender, provider reference; complete gated until allocated = net at 4 dp; 6 new `SalePaymentEndpointTests`, 0 backend changes
+  - [x] C18 — expired-batch sale blocking + authorized override path: `inventory.expired_only` refusal classified against past-expiry coverage (shortfalls stay `inventory.insufficient_stock`); per-line `sale.expired_override` denial check (`sale.expired_override_denied` → 403); mandatory line reason (max 500) recorded in the `sale.expired.override` audit with the authorizing user stamped from context; web probe-then-confirm dialog with reason required; 5 new unit tests (3 validator + 2 handler) and 4 new `ExpiredOverrideEndpointTests`
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -652,3 +657,36 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   `sale.payment_mismatch`. API suite: **167 passing** (2 known Docker-unavailable
   Postgres failures). Domain 369, Application 241 green. Docs: STATUS,
   PROGRESS, ROADMAP updated.
+
+### C18 — expired-batch sale blocking + authorized override path (`feat(pos-c18)`)
+- The §5 contract (`inventory.expired_only`, `sale.expired_override`) was dead
+  code: every FEFO shortfall returned generic `inventory.insufficient_stock`.
+  `CompleteSaleCommandHandler` now classifies after the sellable allocation
+  fails — if the sale's business-date expired shelf can cover the shortfall it
+  refuses `inventory.expired_only` (409) so the terminal can offer the exception
+  path; a genuine shortfall stays `inventory.insufficient_stock`.
+- The exception path carries a mandatory reason per line:
+  `CompleteSaleLine.ExpiredOverrideReason` (max 500 chars; empty →
+  `sale.expired_override_reason_required`, too long →
+  `sale.expired_override_reason_too_long`, both 400). Overriding a line without
+  `sale.expired_override` is refused up front `sale.expired_override_denied`
+  (403) — a cashier cannot even offer the path.
+- `sale.expired.override` audit now records the cashier's reason and the
+  authorizing user, which is stamped from the request context
+  (`AuthorizingUserId`), never caller-supplied; the audit entry is also
+  location-scoped (`LocationId: command.LocationId`, previously null).
+- Web terminal (`NewSale.razor`): on submit the server's `inventory.expired_only`
+  refusal triggers a confirmation dialog (reason textarea, 500-char limit) gated
+  on `sale.expired_override` in the session; confirm re-submits with
+  `expiredOverrideReason` per affected line. `Pos.Web` builds 0 warnings 0
+  errors.
+- Tests: 3 new validator rules + 2 handler refusals/reclassifications +
+  reworked audit assertion (camelCase `authorizingUserId`); 4 new
+  `ExpiredOverrideEndpointTests` through the real API pipeline — refusal from a
+  line whose sellable shelf cannot cover it while the expired shelf could
+  (balances untouched), override completion (sellable batch 3→0, expired batch
+  5→4, audit row with reason + authorizer), missing reason 400, cashier without
+  permission 403.
+  Totals: Domain 369, Application 245, Infrastructure 80 (18 skipped),
+  Security 52, Architecture 13, API **171 passing** (2 known Docker-unavailable
+  Postgres failures). Docs: STATUS, PROGRESS, ROADMAP, POS updated.

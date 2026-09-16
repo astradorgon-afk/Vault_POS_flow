@@ -213,6 +213,14 @@ public sealed class CompleteSaleCommandHandler(
         {
             Product product = productById[line.ProductId];
 
+            // Asking for the exception path itself is a permission use even when
+            // the sellable shelf ends up covering the line: a cashier without
+            // the authority cannot offer to sell expired stock.
+            if (line.AllowExpiredOverride && !hasExpiredOverridePermission)
+            {
+                return Result<SaleId>.Failure(SaleCommandErrors.ExpiredOverrideDenied);
+            }
+
             // --- 4a. Price resolution. ---
             ProductPrice? effectivePrice = product.PriceAt(command.LocationId, command.CompletedAtUtc);
 
@@ -275,6 +283,7 @@ public sealed class CompleteSaleCommandHandler(
                 line.Quantity,
                 allocatableBatches);
 
+            decimal sellableTotal = allocatableBatches.Sum(b => b.Quantity);
             bool expiredUsed = false;
 
             if (allocation.IsFailure && line.AllowExpiredOverride && hasExpiredOverridePermission)
@@ -283,8 +292,6 @@ public sealed class CompleteSaleCommandHandler(
                 // asked for the exception path and holds the permission for it.
                 // Take every unit the sellable shelf can provide, then cover the
                 // remainder from expired batches.
-                decimal sellableTotal = allocatableBatches.Sum(b => b.Quantity);
-
                 IReadOnlyList<ExpiredSaleBatch> expiredBatches = await repository
                     .GetExpiredAvailableBatchesAsync(
                         command.LocationId,
@@ -346,25 +353,54 @@ public sealed class CompleteSaleCommandHandler(
 
             if (allocation.IsFailure)
             {
+                // The sellable shelf cannot cover the line. When the override
+                // path was not available, distinguish "only expired stock
+                // remains" (POS.md §5, inventory.expired_only) from a genuine
+                // shortfall so the terminal can offer the exception path.
+                decimal shortfall = line.Quantity - sellableTotal;
+
+                if (shortfall > 0m)
+                {
+                    IReadOnlyList<ExpiredSaleBatch> expiredProbe = await repository
+                        .GetExpiredAvailableBatchesAsync(
+                            command.LocationId,
+                            line.ProductId,
+                            command.BusinessDate,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (expiredProbe.Sum(b => b.Quantity) >= shortfall)
+                    {
+                        return Result<SaleId>.Failure(
+                            SaleErrors.ExpiredOnly(line.ProductId, command.LocationId));
+                    }
+                }
+
                 return Result<SaleId>.Failure(allocation.Errors);
             }
 
             if (expiredUsed)
             {
                 // Record the override for investigation. Written once per line
-                // that drew on an expired batch, not once per slice.
+                // that drew on an expired batch, not once per slice. The acting
+                // user is stamped by the audit writer from the request context;
+                // the reason the cashier supplied is carried alongside so the
+                // expiry exception report never has to guess why a sale ran.
                 await audit.WriteAsync(new AuditEntry(
                     AuditActions.Sales.ExpiredOverride,
                     "sale_line",
                     line.ProductId.Value,
+                    Reason: line.ExpiredOverrideReason,
                     NewValueJson: JsonSerializer.Serialize(
                         new
                         {
                             ProductId = line.ProductId.Value,
                             LocationId = command.LocationId.Value,
                             Quantity = line.Quantity,
+                            AuthorizingUserId = command.CashierId.Value,
                         },
-                        JsonDefaults)),
+                        JsonDefaults),
+                    LocationId: command.LocationId),
                     cancellationToken).ConfigureAwait(false);
             }
 

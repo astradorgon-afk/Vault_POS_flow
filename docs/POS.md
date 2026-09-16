@@ -113,11 +113,17 @@ Refund amount is capped at the line's net paid amount, discounts included.
 ## 5. Expired batch handling
 
 - FEFO never allocates an expired batch.
-- If every remaining batch is expired, the sale is refused with
-  `inventory.expired_only`.
-- Selling an expired batch requires `sale.expired_override`, records the
-  authorizing user and a mandatory reason, raises a `Critical` notification, and
-  appears permanently on the expiry exception report. There is no silent path.
+- When the sellable shelf cannot cover a line but expired stock could, the sale is
+  refused with `inventory.expired_only` (409) so the terminal can offer the
+  exception path; a genuine shortfall stays `inventory.insufficient_stock`.
+- Selling an expired batch requires `sale.expired_override`
+  (`sale.expired_override_denied`, 403, when a line asks for the exception path
+  without the permission — even offering it is a permission use). The override
+  carries a mandatory reason, at most 500 characters
+  (`sale.expired_override_reason_required` / `sale.expired_override_reason_too_long`,
+  both 400). Completion records a `sale.expired.override` audit entry with the
+  reason, the batch consumed, and the authorizing user stamped from the request
+  context (not supplied by the caller). There is no silent path.
 - A background worker moves batches past expiry from `Available` to `Expired`
   each night, which is itself a posted movement group (`ExpiryQuarantine`), so
   the transition is auditable like everything else.

@@ -70,6 +70,8 @@ public sealed record CompleteSaleCommand(
 /// <param name="Discount">The manual discount applied to the line.</param>
 /// <param name="DiscountAuthorizedByUserId">Who authorised the discount; required when <paramref name="Discount"/> is positive.</param>
 /// <param name="AllowExpiredOverride">Whether an expired batch may cover the line when sellable stock runs short.</param>
+/// <param name="ExpiredOverrideReason">The reason for selling from an expired batch; required and limited to
+/// <see cref="CompleteSaleLine.ExpiredOverrideReasonMaxLength"/> characters when <paramref name="AllowExpiredOverride"/> is set.</param>
 public sealed record CompleteSaleLine(
     ProductId ProductId,
     decimal Quantity,
@@ -79,7 +81,12 @@ public sealed record CompleteSaleLine(
     UserId? PriceOverrideAuthorizedByUserId,
     decimal Discount,
     UserId? DiscountAuthorizedByUserId,
-    bool AllowExpiredOverride);
+    bool AllowExpiredOverride,
+    string? ExpiredOverrideReason)
+{
+    /// <summary>The maximum length of an expired-override reason.</summary>
+    public const int ExpiredOverrideReasonMaxLength = 500;
+}
 
 /// <summary>
 /// One payment that settles a sale.

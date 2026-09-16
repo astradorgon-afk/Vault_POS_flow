@@ -38,7 +38,8 @@ public sealed record CompleteSaleLineBody(
     Guid? PriceOverrideAuthorizedByUserId,
     decimal Discount,
     Guid? DiscountAuthorizedByUserId,
-    bool AllowExpiredOverride);
+    bool AllowExpiredOverride,
+    string? ExpiredOverrideReason);
 
 /// <summary>One payment that settles a sale.</summary>
 public sealed record CompleteSalePaymentBody(
@@ -466,7 +467,8 @@ public static class SaleEndpoints
             l.Discount,
             l.DiscountAuthorizedByUserId.HasValue
                 ? new UserId(l.DiscountAuthorizedByUserId.Value) : null,
-            l.AllowExpiredOverride)).ToList();
+            l.AllowExpiredOverride,
+            l.ExpiredOverrideReason)).ToList();
 
     private static List<CompleteSalePayment> MapPayments(IReadOnlyList<CompleteSalePaymentBody> payments)
         => payments.Select(p => new CompleteSalePayment(

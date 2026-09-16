@@ -84,6 +84,18 @@ public sealed class CompleteSaleCommandValidator : AbstractValidator<CompleteSal
             line.When(l => l.UnitPriceOverride is not null, () => line.RuleFor(l => l.PriceOverrideAuthorizedByUserId)
                 .NotNull()
                 .WithErrorCode(SaleErrors.ItemPriceOverrideAuthorizerRequired.Code));
+
+            line.When(l => l.AllowExpiredOverride, () =>
+            {
+                line.RuleFor(l => l.ExpiredOverrideReason)
+                    .NotEmpty()
+                    .WithErrorCode(SaleCommandErrors.ExpiredOverrideReasonRequired.Code);
+
+                line.RuleFor(l => l.ExpiredOverrideReason)
+                    .MaximumLength(CompleteSaleLine.ExpiredOverrideReasonMaxLength)
+                    .WithErrorCode(
+                        SaleCommandErrors.ExpiredOverrideReasonTooLong(CompleteSaleLine.ExpiredOverrideReasonMaxLength).Code);
+            });
         });
 
         RuleForEach(c => c.Payments).ChildRules(payment =>

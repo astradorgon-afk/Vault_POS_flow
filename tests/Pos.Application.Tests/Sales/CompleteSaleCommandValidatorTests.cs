@@ -274,6 +274,47 @@ public sealed class CompleteSaleCommandValidatorTests
     }
 
     [Fact]
+    public void ExpiredOverrideWithoutReason_IsRejected()
+    {
+        var command = ValidCommand() with
+        {
+            Lines = [ValidLine() with { AllowExpiredOverride = true }],
+        };
+
+        _validator.Validate(command)
+            .Errors.Should().ContainSingle(e => e.ErrorCode == SaleCommandErrors.ExpiredOverrideReasonRequired.Code);
+    }
+
+    [Fact]
+    public void ExpiredOverrideWithReason_IsAccepted()
+    {
+        var command = ValidCommand() with
+        {
+            Lines = [ValidLine() with { AllowExpiredOverride = true, ExpiredOverrideReason = "Customer accepted the batch." }],
+        };
+
+        _validator.Validate(command).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ExpiredOverrideReasonOverMaxLength_IsRejected()
+    {
+        var command = ValidCommand() with
+        {
+            Lines = [ValidLine() with
+            {
+                AllowExpiredOverride = true,
+                ExpiredOverrideReason = new string('x', CompleteSaleLine.ExpiredOverrideReasonMaxLength + 1),
+            }],
+        };
+
+        _validator.Validate(command)
+            .Errors.Should().ContainSingle(
+                e => e.ErrorCode == SaleCommandErrors.ExpiredOverrideReasonTooLong(
+                    CompleteSaleLine.ExpiredOverrideReasonMaxLength).Code);
+    }
+
+    [Fact]
     public void EmptyNumber_IsRejected()
     {
         var command = ValidCommand() with { Number = default };
@@ -316,5 +357,6 @@ public sealed class CompleteSaleCommandValidatorTests
         null,
         0m,
         null,
-        false);
+        false,
+        null);
 }

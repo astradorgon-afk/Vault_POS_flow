@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C17 complete**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C18 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **921 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 167** (2026-09-16, through C17). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **930 passing without PostgreSQL: Domain 369, Application 245, Infrastructure 80, Security 52, Architecture 13, API 171** (2026-09-16, through C18). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -22,11 +22,11 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            369 passing   invariants, money, ledger rules, catalog curation and price supersession, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests     79 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS and customer repository coverage
+Pos.Infrastructure.Tests     80 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS and customer repository coverage
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
-Pos.Application.Tests       241 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    167 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes and the payment-mix checkout flows
+Pos.Application.Tests       245 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
+Pos.Api.IntegrationTests    171 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows and the expired-batch override contract
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -667,6 +667,30 @@ wrong string (`sale.external_customer_missing`).
   Six tests total. API suite runs 167 / 169 (2 known Docker-unavailable
   Postgres failures).
 
+- **C18 — expired-batch sale blocking, enforced end to end.** The §5 contract
+  stops being aspirational. `inventory.expired_only` and
+  `sale.expired_override_denied` were dead codes — every FEFO shortfall returned
+  generic `inventory.insufficient_stock` — and are livelocked against real
+  behaviour: the failure classification now probes past-expiry availability
+  against the sale's business date and refuses `inventory.expired_only` (409)
+  only when the expired shelf could actually cover the shortfall. The
+  `sale.expired_override` exception path now carries a mandatory reason on the
+  line (`CompleteSaleLine.ExpiredOverrideReason`, max 500 chars;
+  `sale.expired_override_reason_required` / `sale.expired_override_reason_too_long`
+  → 400), the denial is pre-checked per line so a cashier without the permission
+  cannot even offer the path (`sale.expired_override_denied` → 403), and the
+  `sale.expired.override` audit now records the cashier's reason and the
+  authorizing user (stamped from the request context, never caller-supplied).
+  The web terminal probes the server and, on `inventory.expired_only`, offers a
+  confirmation dialog with a mandatory reason textarea before re-submitting with
+  `allowExpiredOverride: true` (gated on `sale.expired_override` in the session).
+  New tests: 3 validator rules + 2 handler refusals/reclassifications + 4
+  `ExpiredOverrideEndpointTests` through the real API pipeline — refusal
+  `inventory.expired_only` (balances untouched), override completion (sellable
+  batch drained, expired batch decremented, audit row with reason + authorizer +
+  role snapshot), missing reason → 400, cashier without permission → 403.
+  Pos.Web builds 0 warnings, 0 errors.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -910,7 +934,7 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C16 are committed:
+Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C18 are committed:
 shift lifecycle, sale completion/read/receipt/void, daily sales summary, and
 referenced/blind returns and refunds have HTTP endpoints. C15 adds the
 server-numbered web-terminal slice (`DevicePlatform.Web`, `/api/v1/terminal`)
@@ -934,16 +958,20 @@ filters, receipt text and reprint with reason, void with reason, accept-return
 with per-line quantity, return detail with per-line dispositions and refund
 forms (blind returns cash-locked), and refund history — all gated by the
 server-side permission model and backed by `TerminalBar` register/shift context.
-The remaining work is:
+C17 adds card/e-wallet and split payment mixes to the web checkout. C18 enforces
+the expired-batch override contract end to end: classified `inventory.expired_only`
+refusals, per-line override denial checks, a mandatory recorded reason, and a
+web probe-then-confirm dialog. The remaining work is:
 
 1. **Phase 11 — POS:** the main flow and remaining web surfaces.
-   Checkout orchestration is done (C15) and the sale-lifecycle web views are
-   done (C16). Immediate items: payment-provider methods (card, e-wallet) and
-   split payments in the web checkout, receipt thermal/PDF layouts, and the
-   POS pricing/scheduled-price cancellation flow.
-2. **Phase 10 tail:** the FEFO allocation service extraction, the POS sale-
-   blocking override path for expired batches (Phase 11), and expiring-soon /
-   expired alerts (Phase 14 notifications).
+   Checkout orchestration is done (C15), the sale-lifecycle web views are
+   done (C16), card/e-wallet and split payments are done (C17), and the
+   expired-batch override is done (C18). Remaining items: receipt
+   thermal/PDF layouts and the POS pricing/scheduled-price cancellation
+   flow.
+2. **Phase 10 tail:** the FEFO allocation service extraction, and
+   expiring-soon / expired alerts (Phase 14 notifications). The sale-
+   blocking override path for expired batches is complete (C18).
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
    correctness and deployment, receipts, identity administration, catalog
    curation, and the negative-stock record with the partitioning decision.

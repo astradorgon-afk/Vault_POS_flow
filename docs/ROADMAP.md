@@ -176,8 +176,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Configurable expiry warning thresholds (90/60/30/14/7/3/1 days)
 - [~] Expiry worker: expiring-soon, expired, expired-but-available alerts
       *(worker quarantines past-expiry stock into `Expired`; alerts ride Phase 14 notifications)*
-- [~] Sale blocking for expired batches + authorized exception path
-      *(sellable-batch query excludes past-expiry stock; POS override path lands in Phase 11)*
+- [x] Sale blocking for expired batches + authorized exception path
+      *(sellable-batch query excludes past-expiry stock; shortfalls covered only by
+      expired stock refuse with `inventory.expired_only`, the `sale.expired_override`
+      exception path records a mandatory reason in the `sale.expired.override` audit,
+      and the web terminal probes-then-confirms (C18))*
 
 ## Phase 11 — POS
 

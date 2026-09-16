@@ -566,9 +566,17 @@ The sale is complete in one atomic request (SAL-numbered, device-scoped) against
 an open shift on the same device, and the handler re-derives every economic fact
 the device claims: the effective catalogue price at the completion instant
 (`sale.item.price_missing` when none), the VAT classification, and the FEFO
-allocation from the sellable shelf (`inventory.insufficient_stock` when the
-shelf cannot cover the line; the expired-override exception path requires
-`sale.expired_override`). Payments must cover the total exactly (`cash` records
+allocation from the sellable shelf. When the sellable shelf cannot cover a line
+but the expired shelf could, the sale is refused `409 inventory.expired_only`
+(a genuine shortfall stays `inventory.insufficient_stock`); the terminal may
+then re-submit that line with `expiredOverrideReason`, which requires
+`sale.expired_override` on the acting user — a line carrying the field without
+the permission is refused `403 sale.expired_override_denied`, and the reason is
+mandatory (≤ 500 chars: `sale.expired_override_reason_required`,
+`sale.expired_override_reason_too_long`, both 400). Every override completes
+with a `sale.expired.override` audit entry recording the reason, the batch(es)
+taken and the authorizing user stamped from the request context (never
+caller-supplied). Payments must cover the total exactly (`cash` records
 `tendered` so the renderer prints the change). A sale needs the `EXT-CUSTOMER`
 counterparty provisioned before it can post — the ledger posts store
 Available → EXT-CUSTOMER. Cash, card and e-wallet may be mixed within one sale:
@@ -590,7 +598,10 @@ numeric (`1` Cash, `2` Card, `3` EWallet).
 Errors: `sale.location_unknown`, `sale.location_external`, `sale.vat_rate_invalid`,
 `sale.product_unknown`, `sale.product_inactive`, `sale.item.price_missing`,
 `sale.discount_not_authorized`, `sale.price_override_not_authorized`,
-`sale.expired_override_denied`, `sale.external_customer_missing`,
+`inventory.expired_only` (409, coverable only by expired stock and the override
+was not requested), `sale.expired_override_denied`,
+`sale.expired_override_reason_required`, `sale.expired_override_reason_too_long`,
+`sale.external_customer_missing`,
 `sale.number_invalid`, `sale.number_device_mismatch`, `sale.device_unknown`,
 `sale.shift_unknown`, `sale.shift_not_open`, `sale.shift_cashier_mismatch`,
 `sale.shift_device_mismatch`, `sale.payment_mismatch`, `sale.customer_inactive`

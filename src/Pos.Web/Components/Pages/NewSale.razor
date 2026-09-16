@@ -191,6 +191,33 @@ else
                 }
             </div>
 
+            @if (promptExpiredOverride)
+            {
+                <section class="expired-override" role="dialog" aria-labelledby="expired-override-title" aria-describedby="expired-override-desc">
+                    <span class="eyebrow">Authorized exception</span>
+                    <h3 id="expired-override-title">Sell from an expired batch?</h3>
+                    <p id="expired-override-desc">
+                        The sellable shelf cannot cover one or more items in this transaction.
+                        Completing it draws on expired stock and is recorded against your account
+                        with the reason you give here.
+                    </p>
+                    <label class="override-reason">
+                        <span>Reason <em>required</em></span>
+                        <textarea maxlength="500" rows="3" aria-label="Reason for the expired-stock sale"
+                                  placeholder="For example: supplier delay; customer accepts; clearance directed by the manager."
+                                  value="@expiredOverrideReason" @onchange="OnExpiredOverrideReasonChanged"
+                                  disabled="@completing"></textarea>
+                    </label>
+                    <div class="override-actions">
+                        <button type="button" class="secondary" @onclick="() => promptExpiredOverride = false" disabled="@completing">Cancel</button>
+                        <button type="button" class="checkout" @onclick="CompleteSaleWithExpiredOverrideAsync"
+                                disabled="@(completing || string.IsNullOrWhiteSpace(expiredOverrideReason))">
+                            @(completing ? "Completing…" : "Authorize expired sale")
+                        </button>
+                    </div>
+                </section>
+            }
+
             <footer>
                 <button type="button" class="checkout" @onclick="CompleteSaleAsync"
                         disabled="@(completing || !CanPay || RemainingToPay > 0m)">@(completing ? "Completing…" : "Complete sale")</button>
@@ -335,6 +362,8 @@ else
     private string providerReference = string.Empty;
     private bool completing;
     private CompletedSaleState? completedSale;
+    private bool promptExpiredOverride;
+    private string expiredOverrideReason = string.Empty;
 
     private bool CanCreateSale => Session.Current?.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
     private bool CanDiscount => Session.Current?.User.Permissions.Contains("sale.discount", StringComparer.Ordinal) == true;
@@ -405,6 +434,13 @@ else
     }
 
     private const int PosReferenceMaxLength = 128;
+
+    /// <summary>The API error the server returns when only expired batches can
+    /// cover a line and the expired-override path was not requested.</summary>
+    private const string ExpiredOnlyErrorCode = "inventory.expired_only";
+
+    private bool CanExpiredOverride => Session.Current?.User.Permissions
+        .Contains("sale.expired_override", StringComparer.Ordinal) == true;
 
     private static bool TryParseAmount(string? value, out decimal amount)
         => decimal.TryParse(value, System.Globalization.NumberStyles.Currency, CultureInfo.CurrentCulture, out amount);
@@ -584,15 +620,24 @@ else
         ResetAddPaymentForm();
         showPayment = true;
         checkoutMessage = null;
+        promptExpiredOverride = false;
     }
 
     private void CancelPayment()
     {
         showPayment = false;
         checkoutMessage = null;
+        promptExpiredOverride = false;
     }
 
-    private async Task CompleteSaleAsync()
+    private async Task CompleteSaleAsync() => await CompleteSaleCoreAsync(allowExpiredOverride: false);
+
+    /// <summary>Confirms the authorized-exception path: re-attempts the sale
+    /// drawn (where unavoidable) from expired batches, carrying the mandatory
+    /// reason into the sale's audit trail.</summary>
+    private async Task CompleteSaleWithExpiredOverrideAsync() => await CompleteSaleCoreAsync(allowExpiredOverride: true);
+
+    private async Task CompleteSaleCoreAsync(bool allowExpiredOverride)
     {
         if (terminalSession is null || openShift is null || Session.Current?.User is not { } user || selectedLocationId is not { } locationId)
         {
@@ -604,9 +649,15 @@ else
             checkoutMessage = "The payments do not yet cover the amount due.";
             return;
         }
+        if (allowExpiredOverride && string.IsNullOrWhiteSpace(expiredOverrideReason))
+        {
+            checkoutMessage = "Enter a reason for the expired-stock sale.";
+            return;
+        }
 
         completing = true;
         checkoutMessage = null;
+        promptExpiredOverride = false;
         try
         {
             ApiResult<PosNextNumber> number = await Api.PostNextNumberAsync(locationId, "SAL", CancellationToken.None);
@@ -621,7 +672,8 @@ else
                 PriceOverrideAuthorizedByUserId: null,
                 DiscountFor(line.Product.Id),
                 DiscountFor(line.Product.Id) > 0m ? user.Id : null,
-                AllowExpiredOverride: false)).ToList();
+                AllowExpiredOverride: allowExpiredOverride,
+                ExpiredOverrideReason: allowExpiredOverride ? expiredOverrideReason.Trim() : null)).ToList();
 
             PosCompleteSaleRequest request = new(
                 number.Value.Number,
@@ -640,12 +692,26 @@ else
                     payment.ProviderReference)).ToList());
 
             ApiResult<PosCompletedSale> result = await Api.CompleteSaleAsync(request, CancellationToken.None);
-            if (!result.IsSuccess || result.Value is null) { checkoutMessage = result.Error; return; }
+            if (!result.IsSuccess || result.Value is null)
+            {
+                // Only expired batches can cover part of the cart and the
+                // cashier holds the authority for the exception path: surface
+                // the override dialog instead of just the refusal.
+                if (result.ErrorCode == ExpiredOnlyErrorCode && !allowExpiredOverride && CanExpiredOverride)
+                {
+                    promptExpiredOverride = true;
+                    return;
+                }
+
+                checkoutMessage = result.Error;
+                return;
+            }
 
             completedSale = new CompletedSaleState(number.Value.Number);
             showPayment = false;
             payments.Clear();
             ResetAddPaymentForm();
+            expiredOverrideReason = string.Empty;
             discounts.Clear();
             cart.Clear();
             results.Clear();
@@ -660,6 +726,8 @@ else
         checkoutMessage = null;
         payments.Clear();
         ResetAddPaymentForm();
+        promptExpiredOverride = false;
+        expiredOverrideReason = string.Empty;
     }
 
     private void OnPaymentAmountChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
@@ -675,6 +743,11 @@ else
     private void OnProviderReferenceChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
         providerReference = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private void OnExpiredOverrideReasonChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        expiredOverrideReason = e.Value?.ToString() ?? string.Empty;
     }
 
     private void SetMethod(int method)

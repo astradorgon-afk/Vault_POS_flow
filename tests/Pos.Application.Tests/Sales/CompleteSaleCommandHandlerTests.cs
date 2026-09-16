@@ -509,7 +509,7 @@ public sealed class CompleteSaleCommandHandlerTests
             null,
             BusinessDate,
             Now,
-            [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, 85m, authorizer, 0m, null, false)],
+            [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, 85m, authorizer, 0m, null, false, null)],
             [new CompleteSalePayment(PaymentMethod.Cash, 85m, 85m, null)]);
 
         Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
@@ -638,7 +638,7 @@ public sealed class CompleteSaleCommandHandlerTests
         var command = new CompleteSaleCommand(
             TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
             TestCashier, null, BusinessDate, Now,
-            [new CompleteSaleLine(productId, 3m, uomId, null, null, null, 0m, null, false)],
+            [new CompleteSaleLine(productId, 3m, uomId, null, null, null, 0m, null, false, null)],
             [new CompleteSalePayment(PaymentMethod.Cash, 300m, 300m, null)]);
 
         Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
@@ -682,7 +682,7 @@ public sealed class CompleteSaleCommandHandlerTests
         var command = new CompleteSaleCommand(
             TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
             TestCashier, null, BusinessDate, Now,
-            [new CompleteSaleLine(productId, 5m, uomId, null, null, null, 0m, null, false)],
+            [new CompleteSaleLine(productId, 5m, uomId, null, null, null, 0m, null, false, null)],
             [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
 
         Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
@@ -738,7 +738,7 @@ public sealed class CompleteSaleCommandHandlerTests
         var command = new CompleteSaleCommand(
             TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
             TestCashier, null, BusinessDate, Now,
-            [new CompleteSaleLine(productId, 4m, uomId, null, null, null, 0m, null, true)],
+            [new CompleteSaleLine(productId, 4m, uomId, null, null, null, 0m, null, true, "Customer accepted; manager directed the sale.")],
             [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
 
         Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
@@ -784,13 +784,16 @@ public sealed class CompleteSaleCommandHandlerTests
         var command = new CompleteSaleCommand(
             TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
             TestCashier, null, BusinessDate, Now,
-            [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, true)],
+            [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, true, "Supplier delay; clearance approved.")],
             [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
 
         Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
 
+        // Requesting the exception path without the authority is refused outright
+        // — the cashier cannot even offer to sell expired stock.
         result.IsFailure.Should().BeTrue();
-        result.Error!.Code.Should().Be("inventory.insufficient_stock");
+        result.Error!.Code.Should().Be("sale.expired_override_denied");
+        result.Error.Type.Should().Be(ErrorType.Forbidden);
     }
 
     [Fact]
@@ -826,7 +829,7 @@ public sealed class CompleteSaleCommandHandlerTests
         var command = new CompleteSaleCommand(
             TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
             TestCashier, null, BusinessDate, Now,
-            [new CompleteSaleLine(productId, 4m, UnitOfMeasureId.New(), null, null, null, 0m, null, true)],
+            [new CompleteSaleLine(productId, 4m, UnitOfMeasureId.New(), null, null, null, 0m, null, true, "Customer accepted the batch.")],
             [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
 
         await _handler.HandleAsync(command, CancellationToken.None);
@@ -836,7 +839,10 @@ public sealed class CompleteSaleCommandHandlerTests
             Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
 
         await _audit.Received(1).WriteAsync(
-            Arg.Is<AuditEntry>(e => e.Action == AuditActions.Sales.ExpiredOverride),
+            Arg.Is<AuditEntry>(e =>
+                e.Action == AuditActions.Sales.ExpiredOverride
+                && e.Reason == "Customer accepted the batch."
+                && e.NewValueJson!.Contains("\"authorizingUserId\":")),
             Arg.Any<CancellationToken>());
 
         await _audit.Received(1).WriteAsync(
@@ -845,7 +851,7 @@ public sealed class CompleteSaleCommandHandlerTests
     }
 
     [Fact]
-    public async Task AllowExpiredOverrideFalse_DoesNotQueryExpiredBatches()
+    public async Task ExpiredOverrideNotRequested_ProbesExpiredShelfOnlyToClassifyTheRefusal()
     {
         LocationId locationId = LocationId.New();
         Product product = NewPricedProduct();
@@ -860,18 +866,70 @@ public sealed class CompleteSaleCommandHandlerTests
             {
                 new(productId, BatchId.New(), "", 1m, null, 10m),
             });
+        // The expired shelf is never probed for allocation — but with the
+        // override path not requested, the server still probes it once on the
+        // failure path to classify the refusal (expired_only vs a shortfall).
+        _repository.GetExpiredAvailableBatchesAsync(
+                locationId, productId, BusinessDate, Arg.Any<CancellationToken>())
+            .Returns(new List<ExpiredSaleBatch>
+            {
+                new(BatchId.New(), "EXP", 1m, new DateOnly(2026, 9, 1), 10m),
+            });
 
         var command = new CompleteSaleCommand(
             TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
             TestCashier, null, BusinessDate, Now,
-            [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            [new CompleteSaleLine(productId, 5m, UnitOfMeasureId.New(), null, null, null, 0m, null, false, null)],
             [new CompleteSalePayment(PaymentMethod.Cash, 500m, 500m, null)]);
 
-        await _handler.HandleAsync(command, CancellationToken.None);
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
 
-        // Should never call expired batches because AllowExpiredOverride = false.
-        await _repository.DidNotReceive().GetExpiredAvailableBatchesAsync(
+        // Classification probe only: the expired shelf holds 1 of the 4-unit
+        // shortfall, so this remains a plain shortfall, not expired_only.
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("inventory.insufficient_stock");
+
+        await _repository.Received(1).GetExpiredAvailableBatchesAsync(
             Arg.Any<LocationId>(), Arg.Any<ProductId>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExpiredOnly_RefusedWhenShortfallCoverableByExpiredButOverrideNotRequested()
+    {
+        LocationId locationId = LocationId.New();
+        Product product = NewPricedProduct();
+        ProductId productId = product.Id;
+
+        _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
+        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Product> { product });
+        _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
+            .Returns(new List<SellableBatchItem>
+            {
+                new(productId, BatchId.New(), "", 1m, null, 10m),
+            });
+        _repository.GetExpiredAvailableBatchesAsync(
+                locationId, productId, BusinessDate, Arg.Any<CancellationToken>())
+            .Returns(new List<ExpiredSaleBatch>
+            {
+                new(BatchId.New(), "EXP", 3m, new DateOnly(2026, 9, 1), 10m),
+            });
+
+        var command = new CompleteSaleCommand(
+            TestSaleNumber, EventId.New(), locationId, TestShiftId, TestDevice,
+            TestCashier, null, BusinessDate, Now,
+            [new CompleteSaleLine(productId, 4m, UnitOfMeasureId.New(), null, null, null, 0m, null, false, null)],
+            [new CompleteSalePayment(PaymentMethod.Cash, 400m, 400m, null)]);
+
+        Result<SaleId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        // The 3-unit shortfall is exactly coverable by the expired shelf: the
+        // refusal is classified expired_only (POS.md §5) so the terminal can
+        // offer the exception path.
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("inventory.expired_only");
+        result.Error.Type.Should().Be(ErrorType.Conflict);
     }
 
     // ------------------------------------------------------------------
@@ -999,7 +1057,7 @@ public sealed class CompleteSaleCommandHandlerTests
             null,
             BusinessDate,
             Now,
-            [new CompleteSaleLine(ProductId.New(), 1m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            [new CompleteSaleLine(ProductId.New(), 1m, UnitOfMeasureId.New(), null, null, null, 0m, null, false, null)],
             [new CompleteSalePayment(PaymentMethod.Cash, 100m, 100m, null)]);
 
     private static CompleteSaleCommand CommandWithLines(LocationId locationId, ProductId productId) =>
@@ -1013,7 +1071,7 @@ public sealed class CompleteSaleCommandHandlerTests
             null,
             BusinessDate,
             Now,
-            [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, null, null, 0m, null, false, null)],
             [new CompleteSalePayment(PaymentMethod.Cash, 100m, 100m, null)]);
 
     private (CompleteSaleCommand Command, Product Product) BuildCommand(
@@ -1057,7 +1115,7 @@ public sealed class CompleteSaleCommandHandlerTests
 
         CompleteSaleCommand command = CommandWithLines(locationId, productId) with
         {
-            Lines = [new CompleteSaleLine(productId, quantity, UnitOfMeasureId.New(), null, null, null, 0m, null, false)],
+            Lines = [new CompleteSaleLine(productId, quantity, UnitOfMeasureId.New(), null, null, null, 0m, null, false, null)],
         };
         return (command, product);
     }
@@ -1086,7 +1144,7 @@ public sealed class CompleteSaleCommandHandlerTests
         decimal paymentAmount = 100m - discount;
         CompleteSaleCommand command = CommandWithLines(locationId, productId) with
         {
-            Lines = [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, null, null, discount, authorizer, false)],
+            Lines = [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, null, null, discount, authorizer, false, null)],
             Payments = [new CompleteSalePayment(PaymentMethod.Cash, paymentAmount, paymentAmount, null)],
         };
         return (command, product);
@@ -1115,7 +1173,7 @@ public sealed class CompleteSaleCommandHandlerTests
 
         CompleteSaleCommand command = CommandWithLines(locationId, productId) with
         {
-            Lines = [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, overridePrice, authorizer, 0m, null, false)],
+            Lines = [new CompleteSaleLine(productId, 1m, UnitOfMeasureId.New(), null, overridePrice, authorizer, 0m, null, false, null)],
             Payments = [new CompleteSalePayment(PaymentMethod.Cash, overridePrice, overridePrice, null)],
         };
         return (command, product);
