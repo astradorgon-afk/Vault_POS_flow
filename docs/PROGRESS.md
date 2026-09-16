@@ -103,7 +103,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] Configurable expiry warning threshold (`LocationSettings.ExpiryWarningDays`, default 90)
   - [x] Expiry scan: expired, expiring-soon (threshold), FEFO-ordered sellable batches (`IExpiryService`)
   - [x] Expiry run: worker- or command-driven quarantine of past-expiry stock → `Expired`, EXP-numbered `ExpiryQuarantine` groups, system-actor audit
-  - [ ] FEFO transfer picking service (pick logic already FEFO-ordered; service extraction deferred)
+  - [x] FEFO transfer picking service (C22: transfer picks validate against the shared `FefoBatches` allocator)
   - [ ] Sale blocking for expired batches: POS consumers of the sellable-batch query + the authorized override path (Phase 11)
   - [ ] Expiring-soon / expired alerts (Phase 14 notifications)
 - [~] **Phase 11 — POS** (returns side first as the "C" batch series)
@@ -128,6 +128,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C18 — expired-batch sale blocking + authorized override path: `inventory.expired_only` refusal classified against past-expiry coverage (shortfalls stay `inventory.insufficient_stock`); per-line `sale.expired_override` denial check (`sale.expired_override_denied` → 403); mandatory line reason (max 500) recorded in the `sale.expired.override` audit with the authorizing user stamped from context; web probe-then-confirm dialog with reason required; 5 new unit tests (3 validator + 2 handler) and 4 new `ExpiredOverrideEndpointTests`
   - [x] C20 — receipt formats: `Plain` remains default; `Thermal` renders every line at 42 columns for 80 mm printers; `Html` emits an escaped, self-contained 80 mm document. Both receipt endpoints select formats through `?format=Plain|Thermal|Html`; the web sale detail opens HTML in the browser print dialog for PDF output.
   - [x] C21 — browser price schedule: catalog search, current/history/scheduled price timeline, scoped scheduling form and cancellation reason flow, gated by `catalog.view` / `product.price.manage`.
+  - [x] C22 — FEFO allocation extraction: transfer-pick validation calls the same `FefoBatches` allocator as sales, then compares submitted batch totals with its canonical slices.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules

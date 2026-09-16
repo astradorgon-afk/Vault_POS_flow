@@ -171,8 +171,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
 ## Phase 10 — Batch and Expiration
 
 - [x] Batch aggregate, creation from receipts
-- [~] FEFO allocation service
-      *(sellable/expiring queries are FEFO-ordered today; standalone allocation service deferred)*
+- [x] FEFO allocation service
+      *(C22 routes transfer pick validation through the shared `FefoBatches` allocator used by sales)*
 - [x] Configurable expiry warning thresholds (90/60/30/14/7/3/1 days)
 - [~] Expiry worker: expiring-soon, expired, expired-but-available alerts
       *(worker quarantines past-expiry stock into `Expired`; alerts ride Phase 14 notifications)*

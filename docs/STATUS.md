@@ -997,8 +997,8 @@ closing the ADR-0029 gap in POS pricing. The remaining work is:
    expired-batch override is done (C18), and scheduled-price cancellation
    is done (C19). C20 completes receipt thermal/PDF layouts, and C21 adds the
    price-schedule workspace for reviewing, scheduling and cancelling future
-   catalogue prices. The next planned work is the Phase 10 FEFO allocation
-   service extraction.
+   catalogue prices. C22 completes the Phase 10 FEFO allocation extraction;
+   the next planned work is expiry alerts in Phase 14.
 2. **Phase 10 tail:** the FEFO allocation service extraction, and
    expiring-soon / expired alerts (Phase 14 notifications). The sale-
    blocking override path for expired batches is complete (C18).

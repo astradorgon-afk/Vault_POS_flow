@@ -4,6 +4,7 @@ using Pos.Application.Identity;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
+using Pos.Domain.Sales;
 using Pos.Domain.Transfers;
 
 namespace Pos.Application.Transfers;
@@ -170,34 +171,32 @@ public sealed class PickTransferCommandHandler(
                 .ThenBy(b => b.BatchKey.Value)
                 .ToList();
 
-            decimal totalAvailable = productBuckets.Sum(b => b.AvailableQuantity);
+            Result<IReadOnlyList<AllocatedSlice>> canonical = FefoBatches.Allocate(
+                line.ProductId,
+                transfer.SourceLocationId,
+                totalRequested,
+                [.. productBuckets.Select(bucket => new AllocatableBatch(
+                    bucket.BatchKey,
+                    BatchCode: null,
+                    bucket.AvailableQuantity,
+                    bucket.UnitCost,
+                    bucket.ExpiresOn))]);
 
-            if (totalRequested > totalAvailable)
+            if (canonical.IsFailure)
             {
                 errors.Add(TransferErrors.StockUnavailable(lineNo, totalRequested));
                 continue;
             }
 
-            decimal remaining = totalRequested;
-            Dictionary<BatchId, decimal> greedy = [];
+            Dictionary<BatchId, decimal> expected = canonical.Value
+                .ToDictionary(slice => slice.BatchId ?? BatchId.Empty, slice => slice.Quantity);
+            Dictionary<BatchId, decimal> actual = group
+                .GroupBy(a => a.BatchId ?? BatchId.Empty)
+                .ToDictionary(g => g.Key, g => g.Sum(a => a.Quantity));
 
-            foreach (PickableStockItem bucket in productBuckets)
-            {
-                decimal take = Math.Min(remaining, bucket.AvailableQuantity);
-                greedy[bucket.BatchKey] = take;
-                remaining -= take;
-
-                if (remaining == 0m)
-                {
-                    break;
-                }
-            }
-
-            bool matchesGreedy = group.All(a =>
-            {
-                BatchId batchKey = a.BatchId is null ? BatchId.Empty : a.BatchId.Value;
-                return greedy.TryGetValue(batchKey, out decimal canonical) && a.Quantity == canonical;
-            });
+            bool matchesGreedy = actual.Count == expected.Count
+                && actual.All(pair => expected.TryGetValue(pair.Key, out decimal allocated)
+                    && pair.Value == allocated);
 
             if (!matchesGreedy)
             {
