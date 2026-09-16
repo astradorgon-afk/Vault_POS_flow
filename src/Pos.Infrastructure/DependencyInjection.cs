@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Inventory;
+using Pos.Application.Notifications;
 using Pos.Application.Purchasing;
 using Pos.Application.Quarantine;
 using Pos.Application.Receipts;
@@ -18,6 +19,7 @@ using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Devices;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Inventory;
+using Pos.Infrastructure.Notifications;
 using Pos.Infrastructure.Persistence;
 using Pos.Infrastructure.Persistence.Interceptors;
 using Pos.Infrastructure.Sales;
@@ -78,6 +80,7 @@ public static class DependencyInjection
         services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();
         services.TryAddScoped<IExpiryService, ExpiryService>();
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();
+        services.TryAddScoped<INotificationWriter, NotificationWriter>();
 
         // The reconciliation tripwire is optional so a host can run without it
         // (tests, short-lived tools); when enabled it only reads.

@@ -2,9 +2,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Pos.Application.Common.Abstractions;
 using Pos.Application.Inventory;
+using Pos.Application.Notifications;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
+using Pos.Domain.Notifications;
 using Pos.Infrastructure.Configuration;
 
 namespace Pos.Infrastructure.Inventory;
@@ -22,10 +25,12 @@ namespace Pos.Infrastructure.Inventory;
 /// </remarks>
 /// <param name="services">Service provider, so each pass gets a fresh scope.</param>
 /// <param name="options">Worker schedule.</param>
+/// <param name="clock">System clock.</param>
 /// <param name="logger">Logger.</param>
 public sealed class ExpiryWorker(
     IServiceScopeFactory services,
     IOptions<ExpiryOptions> options,
+    ISystemClock clock,
     ILogger<ExpiryWorker> logger) : BackgroundService
 {
     /// <summary>The system actor used when no authenticated user is present.</summary>
@@ -59,6 +64,7 @@ public sealed class ExpiryWorker(
 
         IExpiryService expiryService = scope.ServiceProvider.GetRequiredService<IExpiryService>();
         IExpiryRepository repository = scope.ServiceProvider.GetRequiredService<IExpiryRepository>();
+        INotificationWriter notifications = scope.ServiceProvider.GetRequiredService<INotificationWriter>();
 
         IReadOnlyList<ExpiryLocationInfo> locations = await repository
             .GetAllStockingLocationsAsync(cancellationToken)
@@ -81,6 +87,17 @@ public sealed class ExpiryWorker(
                 continue;
             }
 
+            IReadOnlyList<ExpiringBatchSummary> expiring = await expiryService
+                .GetExpiringBatchesAsync(location.LocationId, cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (ExpiringBatchSummary item in expiring)
+            {
+                Notification alert = ExpiryNotificationFactory.CreateExpiringBatch(item, clock.UtcNow);
+
+                await notifications.WriteOnceAsync(alert, cancellationToken).ConfigureAwait(false);
+            }
+
             Result<ExpiryRunResult> result = await expiryService
                 .PostExpiryRunAsync(location.LocationId, SystemActor, cancellationToken)
                 .ConfigureAwait(false);
@@ -88,6 +105,10 @@ public sealed class ExpiryWorker(
             if (result.IsSuccess)
             {
                 expiredCount += result.Value.ExpiredBatchesCount;
+
+                Notification alert = ExpiryNotificationFactory.CreateExpiredRun(result.Value);
+
+                await notifications.WriteOnceAsync(alert, cancellationToken).ConfigureAwait(false);
 
                 if (result.Value.ExpiredBatchesCount > 0 && logger.IsEnabled(LogLevel.Information))
                 {

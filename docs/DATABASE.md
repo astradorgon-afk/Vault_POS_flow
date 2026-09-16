@@ -487,7 +487,22 @@ audit.audit_log
   idx_audit_user (user_id, occurred_at_utc DESC)
   idx_audit_correlation (correlation_id)
 
-core.notification          + core.notification_receipt
+core.notification
+  id uuid PK,
+  kind smallint NOT NULL, severity smallint NOT NULL,
+  title varchar(160) NOT NULL, body varchar(1000) NOT NULL,
+  deduplication_key varchar(240) NOT NULL UNIQUE,
+  location_id uuid NULL, product_id uuid NULL, batch_id uuid NULL,
+  reference_document_type smallint NULL, reference_document_id uuid NULL,
+  created_at_utc timestamptz NOT NULL,
+  idx_notification_location_time (location_id, created_at_utc)
+
+core.notification_receipt
+  notification_id uuid FK -> notification ON DELETE CASCADE,
+  user_id uuid,
+  read_at_utc timestamptz NULL, acknowledged_at_utc timestamptz NULL,
+  PRIMARY KEY (notification_id, user_id),
+  idx_notification_receipt_user_read (user_id, read_at_utc)
 ```
 
 ---

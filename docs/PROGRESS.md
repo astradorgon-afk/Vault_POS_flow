@@ -105,7 +105,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] Expiry run: worker- or command-driven quarantine of past-expiry stock → `Expired`, EXP-numbered `ExpiryQuarantine` groups, system-actor audit
   - [x] FEFO transfer picking service (C22: transfer picks validate against the shared `FefoBatches` allocator)
   - [ ] Sale blocking for expired batches: POS consumers of the sellable-batch query + the authorized override path (Phase 11)
-  - [ ] Expiring-soon / expired alerts (Phase 14 notifications)
+  - [x] Expiring-soon / expired alerts (C23: durable location-scoped notifications with stable deduplication keys)
 - [~] **Phase 11 — POS** (returns side first as the "C" batch series)
   - [x] C1 — void a completed sale, same shift and business day, with ledger reversal and migration
   - [x] C2 — referenced customer return with refund limits and the `EXT-CUSTOMER → ReturnPending` ledger legs; refunds capped by the sale's payment mix; migration
@@ -129,10 +129,11 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C20 — receipt formats: `Plain` remains default; `Thermal` renders every line at 42 columns for 80 mm printers; `Html` emits an escaped, self-contained 80 mm document. Both receipt endpoints select formats through `?format=Plain|Thermal|Html`; the web sale detail opens HTML in the browser print dialog for PDF output.
   - [x] C21 — browser price schedule: catalog search, current/history/scheduled price timeline, scoped scheduling form and cancellation reason flow, gated by `catalog.view` / `product.price.manage`.
   - [x] C22 — FEFO allocation extraction: transfer-pick validation calls the same `FefoBatches` allocator as sales, then compares submitted batch totals with its canonical slices.
+  - [x] C23 — notification foundation and expiry alerts: durable notification rows, per-user read/acknowledgement receipts, unique deduplication keys, and expiring-soon/expired-run generation from the expiry worker; migration `20260916190504_AddNotifications`.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
-- [ ] **Phase 14 — Notifications:** persistent notifications, SignalR hub, alert generators
+- [~] **Phase 14 — Notifications:** persistence and expiry alerts are complete; SignalR, notification APIs/UI and the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
@@ -755,3 +756,17 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - The web client now has typed price-schedule requests. Validation: the product
   stocking/curation integration suite passes all four scenarios; `Pos.Web` and
   the solution build cleanly.
+
+### C23 — notification persistence and expiry alerts (`feat(notifications-c23)`)
+
+- Added `core.notification` as the durable source of truth and
+  `core.notification_receipt` for per-user read and acknowledgement state.
+  A unique deduplication key prevents a repeated worker pass from raising the
+  same operational event twice while still allowing one early warning and one
+  critical reminder for a batch nearing expiry.
+- The expiry worker now emits location-scoped warnings for every batch inside
+  the configured warning window and a critical summary after each successful
+  expiry quarantine run. Alert timestamps use the system clock and numeric
+  content is culture invariant.
+- Added domain, persistence and alert-factory coverage plus migration-ordering
+  verification.

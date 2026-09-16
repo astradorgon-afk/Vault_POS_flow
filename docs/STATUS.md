@@ -997,11 +997,12 @@ closing the ADR-0029 gap in POS pricing. The remaining work is:
    expired-batch override is done (C18), and scheduled-price cancellation
    is done (C19). C20 completes receipt thermal/PDF layouts, and C21 adds the
    price-schedule workspace for reviewing, scheduling and cancelling future
-   catalogue prices. C22 completes the Phase 10 FEFO allocation extraction;
-   the next planned work is expiry alerts in Phase 14.
-2. **Phase 10 tail:** the FEFO allocation service extraction, and
-   expiring-soon / expired alerts (Phase 14 notifications). The sale-
-   blocking override path for expired batches is complete (C18).
+   catalogue prices. C22 completes the Phase 10 FEFO allocation extraction.
+   C23 adds durable notifications, per-user receipt state, and deduplicated
+   expiring-soon / expired-run alerts. The next planned work is the SignalR
+   delivery and notification-centre API/UI slice.
+2. **Phase 10 tail:** FEFO allocation extraction (C22), expiring-soon / expired
+   alerts (C23), and the sale-blocking override path (C18) are complete.
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
    correctness and deployment, receipts, identity administration, catalog
    curation, and the negative-stock record with the partitioning decision.

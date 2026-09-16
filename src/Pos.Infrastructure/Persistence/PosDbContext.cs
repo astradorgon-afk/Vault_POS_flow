@@ -7,6 +7,7 @@ using Pos.Domain.Common;
 using Pos.Domain.Devices;
 using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
+using Pos.Domain.Notifications;
 using Pos.Domain.Organizations;
 using Pos.Domain.Purchasing;
 using Pos.Domain.Quarantine;
@@ -72,6 +73,12 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// ledger; an audit trail that can be edited is not a trail.
     /// </summary>
     public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
+
+    /// <summary>Gets durable operational notifications.</summary>
+    public DbSet<Notification> Notifications => Set<Notification>();
+
+    /// <summary>Gets per-user notification read and acknowledgement state.</summary>
+    public DbSet<NotificationReceipt> NotificationReceipts => Set<NotificationReceipt>();
 
     /// <summary>Gets the permission catalogue, seeded from code.</summary>
     public DbSet<PermissionRecord> Permissions => Set<PermissionRecord>();

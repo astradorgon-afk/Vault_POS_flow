@@ -174,8 +174,9 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] FEFO allocation service
       *(C22 routes transfer pick validation through the shared `FefoBatches` allocator used by sales)*
 - [x] Configurable expiry warning thresholds (90/60/30/14/7/3/1 days)
-- [~] Expiry worker: expiring-soon, expired, expired-but-available alerts
-      *(worker quarantines past-expiry stock into `Expired`; alerts ride Phase 14 notifications)*
+- [x] Expiry worker: expiring-soon, expired, expired-but-available alerts
+      *(C23 persists location-scoped alerts with stable deduplication keys before
+      quarantining past-expiry stock into `Expired`)*
 - [x] Sale blocking for expired batches + authorized exception path
       *(sellable-batch query excludes past-expiry stock; shortfalls covered only by
       expired stock refuse with `inventory.expired_only`, the `sale.expired_override`
@@ -235,9 +236,10 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 14 — Notifications
 
-- [ ] Persistent notifications + per-user receipts
+- [x] Persistent notifications + per-user receipts
 - [ ] SignalR hub, groups, reconnection
-- [ ] Alert generators (low stock, expiry, discrepancy, emergency, sync failure)
+- [~] Alert generators (low stock, expiry, discrepancy, emergency, sync failure)
+      *(C23 completes expiring-soon and expired-run alerts; the other generators remain)*
 - [ ] Notification centre UI
 
 ## Phase 15 — Analytics and Reports
