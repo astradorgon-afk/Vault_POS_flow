@@ -309,6 +309,26 @@ public sealed class ExpiryOptions
     public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
 }
 
+/// <summary>Low-stock alert worker settings.</summary>
+public sealed class LowStockOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "LowStock";
+
+    /// <summary>Gets or sets whether the background low-stock worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets how many hours between low-stock sweeps.</summary>
+    [Range(1, 24)]
+    public int IntervalHours { get; set; } = 1;
+
+    /// <summary>Gets or sets whether a low-stock sweep runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
+}
+
 /// <summary>Cashier shift force-close worker settings.</summary>
 public sealed class ShiftForceCloseOptions
 {

@@ -81,6 +81,7 @@ public static class DependencyInjection
         services.TryAddScoped<IExpiryService, ExpiryService>();
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();
         services.TryAddScoped<INotificationWriter, NotificationWriter>();
+        services.TryAddScoped<ILowStockRepository, LowStockRepository>();
         services.TryAddScoped<INotificationReader, NotificationReader>();
         services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 
@@ -102,6 +103,15 @@ public static class DependencyInjection
         if (expiry.Enabled)
         {
             services.AddHostedService<ExpiryWorker>();
+        }
+
+        LowStockOptions lowStock = configuration
+            .GetSection(LowStockOptions.SectionName)
+            .Get<LowStockOptions>() ?? new LowStockOptions();
+
+        if (lowStock.Enabled)
+        {
+            services.AddHostedService<LowStockWorker>();
         }
 
         ShiftForceCloseOptions shiftForceClose = configuration
@@ -177,6 +187,11 @@ public static class DependencyInjection
 
         services.AddOptions<ExpiryOptions>()
             .Bind(configuration.GetSection(ExpiryOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<LowStockOptions>()
+            .Bind(configuration.GetSection(LowStockOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

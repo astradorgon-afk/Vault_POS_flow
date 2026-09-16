@@ -131,6 +131,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C22 — FEFO allocation extraction: transfer-pick validation calls the same `FefoBatches` allocator as sales, then compares submitted batch totals with its canonical slices.
   - [x] C23 — notification foundation and expiry alerts: durable notification rows, per-user read/acknowledgement receipts, unique deduplication keys, and expiring-soon/expired-run generation from the expiry worker; migration `20260916190504_AddNotifications`.
   - [x] C24 — live notification centre: authenticated, location-scoped list/read/read-all API; SignalR user/location groups with automatic reconnect; live unread badge and responsive operations signal ledger in the Blazor shell.
+  - [x] C25 (low stock) — hourly `LowStockWorker` raises location-scoped alerts for active stocked products at or below a positive reorder point: Warning at the reorder point, Critical below minimum or out of stock; deduplicated per product, level and UTC day; no migration.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -783,3 +784,15 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - Added the web notification ledger, unread filters, read controls, live status,
   navigation count and compact top-bar badge. API integration coverage verifies
   scoping, receipt persistence, anonymous rejection and live SignalR delivery.
+
+### C25 — low-stock alerts (`feat(notifications-c25)`)
+
+- Added `NotificationKind.LowStock` and `ILowStockRepository`. The read sums
+  Available balances across batches for active, stocked products at active,
+  non-external locations; a reorder point of zero means thresholds were never
+  configured and never alerts.
+- `LowStockWorker` (section `LowStock`, hourly by default) writes one alert per
+  low product: Warning at or below the reorder point, Critical below minimum or
+  at zero. The deduplication key carries the level and UTC day, so a product
+  that stays low is reminded daily and a worse level alerts immediately.
+- Added factory, SQLite repository and worker coverage. No schema change.

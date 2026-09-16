@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C19 complete**
+**Last updated:** 2026-09-17 · **Milestone:** Phase 11 (POS) complete; Phase 14 (notifications) **C23–C25 in progress**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **938 passing without PostgreSQL: Domain 376, Application 245, Infrastructure 80, Security 52, Architecture 13, API 172** (2026-09-16, through C19). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **955 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 91, Security 52, Architecture 13, API 174** (2026-09-17, through C25 low stock). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -1000,9 +1000,11 @@ closing the ADR-0029 gap in POS pricing. The remaining work is:
    catalogue prices. C22 completes the Phase 10 FEFO allocation extraction.
    C23 adds durable notifications, per-user receipt state, and deduplicated
    expiring-soon / expired-run alerts. C24 adds the scoped notification API,
-   authenticated SignalR delivery and the Blazor notification centre. The next
-   Phase 14 work is the remaining low-stock, discrepancy, emergency and sync-
-   failure alert generators.
+   authenticated SignalR delivery and the Blazor notification centre. C25
+   starts the remaining generators with low-stock alerts: an hourly worker
+   compares summed Available balances with each stocked product's reorder
+   point and minimum. The next Phase 14 work is the discrepancy and emergency
+   generators; the sync-failure alert waits for Phase 13.
 2. **Phase 10 tail:** FEFO allocation extraction (C22), expiring-soon / expired
    alerts (C23), and the sale-blocking override path (C18) are complete.
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
