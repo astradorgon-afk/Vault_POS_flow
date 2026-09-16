@@ -170,3 +170,295 @@ public sealed record PosPayment(
     decimal Amount,
     decimal? Tendered,
     string? ProviderReference);
+
+/// <summary>One completed sale as returned by the sales search.</summary>
+public sealed class PosSaleSummary
+{
+    /// <summary>Gets or sets the sale identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the SAL document number.</summary>
+    public string Number { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the sale status (Completed, Voided).</summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the business date the sale belongs to.</summary>
+    public DateOnly BusinessDate { get; set; }
+
+    /// <summary>Gets or sets when the sale was completed.</summary>
+    public DateTimeOffset CompletedAtUtc { get; set; }
+
+    /// <summary>Gets or sets the gross total before discounts.</summary>
+    public decimal GrossTotal { get; set; }
+
+    /// <summary>Gets or sets the net amount settled.</summary>
+    public decimal NetTotal { get; set; }
+}
+
+/// <summary>A completed sale as returned by the detail route.</summary>
+public sealed class PosSaleDetail
+{
+    /// <summary>Gets or sets the sale identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the SAL document number.</summary>
+    public string Number { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the sale status (Completed, Voided).</summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the store the sale was completed at.</summary>
+    public Guid LocationId { get; set; }
+
+    /// <summary>Gets or sets the customer the sale was settled for, or null.</summary>
+    public Guid? CustomerId { get; set; }
+
+    /// <summary>Gets or sets the business date the sale belongs to.</summary>
+    public DateOnly BusinessDate { get; set; }
+
+    /// <summary>Gets or sets when the sale was completed.</summary>
+    public DateTimeOffset CompletedAtUtc { get; set; }
+
+    /// <summary>Gets or sets the gross total before discounts.</summary>
+    public decimal GrossTotal { get; set; }
+
+    /// <summary>Gets or sets the applied discounts.</summary>
+    public decimal DiscountTotal { get; set; }
+
+    /// <summary>Gets or sets the net amount settled.</summary>
+    public decimal NetTotal { get; set; }
+
+    /// <summary>Gets or sets the VAT charged on the sale.</summary>
+    public decimal VatTotal { get; set; }
+
+    /// <summary>Gets or sets the sale lines, ordered by line number.</summary>
+    public IReadOnlyList<PosSaleLineDetail> Lines { get; set; } = [];
+
+    /// <summary>Gets or sets the payments that settled the sale.</summary>
+    public IReadOnlyList<PosSalePaymentDetail> Payments { get; set; } = [];
+}
+
+/// <summary>One line of a completed sale.</summary>
+public sealed class PosSaleLineDetail
+{
+    /// <summary>Gets or sets the line number on the sale.</summary>
+    public int LineNumber { get; set; }
+
+    /// <summary>Gets or sets the product identifier.</summary>
+    public Guid ProductId { get; set; }
+
+    /// <summary>Gets or sets the product display name.</summary>
+    public string ProductName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the scanned barcode, or null.</summary>
+    public string? Barcode { get; set; }
+
+    /// <summary>Gets or sets the quantity sold.</summary>
+    public decimal Quantity { get; set; }
+
+    /// <summary>Gets or sets the selling unit price.</summary>
+    public decimal UnitPrice { get; set; }
+
+    /// <summary>Gets or sets the applied line discount.</summary>
+    public decimal Discount { get; set; }
+
+    /// <summary>Gets or sets the gross line amount.</summary>
+    public decimal GrossAmount { get; set; }
+
+    /// <summary>Gets or sets the net line amount after discount.</summary>
+    public decimal NetAmount { get; set; }
+
+    /// <summary>Gets or sets the VAT allocated to the line.</summary>
+    public decimal Vat { get; set; }
+}
+
+/// <summary>One payment that settled a sale.</summary>
+public sealed class PosSalePaymentDetail
+{
+    /// <summary>Gets or sets the payment method name.</summary>
+    public string Method { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the settled amount.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>Gets or sets the cash tendered, or null.</summary>
+    public decimal? Tendered { get; set; }
+
+    /// <summary>Gets or sets the change returned, or null.</summary>
+    public decimal? Change { get; set; }
+
+    /// <summary>Gets or sets the card or wallet reference, or null.</summary>
+    public string? ProviderReference { get; set; }
+}
+
+/// <summary>A customer return as returned by the detail route.</summary>
+public sealed class PosReturnDetail
+{
+    /// <summary>Gets or sets the return identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the RET document number.</summary>
+    public string Number { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets whether the return has no original sale.</summary>
+    public bool IsBlind { get; set; }
+
+    /// <summary>Gets or sets the original sale, or null for a blind return.</summary>
+    public Guid? SaleId { get; set; }
+
+    /// <summary>Gets or sets the store the return was accepted at.</summary>
+    public Guid LocationId { get; set; }
+
+    /// <summary>Gets or sets the customer, or null.</summary>
+    public Guid? CustomerId { get; set; }
+
+    /// <summary>Gets or sets the business date the return belongs to.</summary>
+    public DateOnly BusinessDate { get; set; }
+
+    /// <summary>Gets or sets when the return was accepted.</summary>
+    public DateTimeOffset ReturnedAtUtc { get; set; }
+
+    /// <summary>Gets or sets the total still refundable.</summary>
+    public decimal RefundableTotal { get; set; }
+
+    /// <summary>Gets or sets the total already refunded.</summary>
+    public decimal RefundedTotal { get; set; }
+
+    /// <summary>Gets or sets the return lines, ordered by line number.</summary>
+    public IReadOnlyList<PosReturnLineDetail> Lines { get; set; } = [];
+
+    /// <summary>Gets or sets the refunds paid, ordered by time.</summary>
+    public IReadOnlyList<PosReturnRefundDetail> Refunds { get; set; } = [];
+}
+
+/// <summary>One accepted return line.</summary>
+public sealed class PosReturnLineDetail
+{
+    /// <summary>Gets or sets the line number on the return.</summary>
+    public int LineNumber { get; set; }
+
+    /// <summary>Gets or sets the original sale item, or null for a blind return.</summary>
+    public Guid? SaleItemId { get; set; }
+
+    /// <summary>Gets or sets the product identifier.</summary>
+    public Guid ProductId { get; set; }
+
+    /// <summary>Gets or sets the product display name.</summary>
+    public string ProductName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the scanned barcode, or null.</summary>
+    public string? Barcode { get; set; }
+
+    /// <summary>Gets or sets the accepted quantity.</summary>
+    public decimal Quantity { get; set; }
+
+    /// <summary>Gets or sets the quantity inspected so far.</summary>
+    public decimal DispositionedQuantity { get; set; }
+
+    /// <summary>Gets or sets the quantity awaiting inspection.</summary>
+    public decimal PendingDispositionQuantity { get; set; }
+
+    /// <summary>Gets or sets the original selling unit price.</summary>
+    public decimal UnitPrice { get; set; }
+
+    /// <summary>Gets or sets the net amount returned.</summary>
+    public decimal NetAmount { get; set; }
+
+    /// <summary>Gets or sets the amount still refundable on this line.</summary>
+    public decimal RefundableAmount { get; set; }
+
+    /// <summary>Gets or sets the batch returned, or null.</summary>
+    public string? BatchCode { get; set; }
+
+    /// <summary>Gets or sets the batch expiry, or null.</summary>
+    public DateOnly? BatchExpiresOn { get; set; }
+}
+
+/// <summary>One refund paid against a return.</summary>
+public sealed class PosReturnRefundDetail
+{
+    /// <summary>Gets or sets the refund identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the payment method name.</summary>
+    public string Method { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the refunded amount.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>Gets or sets the cash tendered, or null.</summary>
+    public decimal? Tendered { get; set; }
+
+    /// <summary>Gets or sets the card or wallet reference, or null.</summary>
+    public string? ProviderReference { get; set; }
+
+    /// <summary>Gets or sets when the refund was paid.</summary>
+    public DateTimeOffset RefundedAtUtc { get; set; }
+}
+
+/// <summary>The body of a receipt-reprint request. The operator comes from the
+/// signed-in session; a reprint is a read-side emission and needs no shift.</summary>
+public sealed record PosReprintSaleRequest(
+    Guid LocationId,
+    Guid DeviceId,
+    string Reason,
+    DateTimeOffset ReprintedAtUtc);
+
+/// <summary>The body of a void-sale request.</summary>
+public sealed record PosVoidSaleRequest(
+    Guid EventId,
+    Guid LocationId,
+    Guid ShiftId,
+    Guid DeviceId,
+    DateOnly BusinessDate,
+    DateTimeOffset VoidedAtUtc,
+    string Reason);
+
+/// <summary>The body of a return-against-a-sale request. The operator comes from
+/// the signed-in session.</summary>
+public sealed record PosCreateReturnRequest(
+    string Number,
+    Guid EventId,
+    Guid SaleId,
+    Guid LocationId,
+    Guid ShiftId,
+    Guid DeviceId,
+    Guid? CustomerId,
+    DateOnly BusinessDate,
+    DateTimeOffset ReturnedAtUtc,
+    IReadOnlyList<PosCreateReturnLine> Lines);
+
+/// <summary>One line of an accepted return.</summary>
+public sealed record PosCreateReturnLine(Guid ProductId, decimal Quantity);
+
+/// <summary>The body of a return-refund request. The operator comes from the
+/// signed-in session; a blind return's refund is cash only.</summary>
+public sealed record PosRefundReturnRequest(
+    Guid? SaleId,
+    Guid EventId,
+    Guid LocationId,
+    Guid ShiftId,
+    Guid DeviceId,
+    int Method,
+    decimal Amount,
+    decimal? Tendered,
+    string? ProviderReference,
+    DateTimeOffset RefundedAtUtc);
+
+/// <summary>The body of a return-inspection decision. Needs no register context.</summary>
+public sealed record PosDisposeReturnRequest(
+    Guid EventId,
+    Guid LocationId,
+    int LineNumber,
+    decimal Quantity,
+    int Kind,
+    int ReasonCode,
+    string Note);
+
+/// <summary>A server-issued reference to a created or updated document.</summary>
+public sealed class PosReference
+{
+    /// <summary>Gets or sets the referenced document identifier.</summary>
+    public Guid Id { get; set; }
+}

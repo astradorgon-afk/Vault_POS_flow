@@ -524,7 +524,7 @@ POST   /api/v1/shifts/open                           shift.open
 POST   /api/v1/shifts/{id}/close                     shift.close
 GET    /api/v1/shifts/{id}/summary                   shift.open
 POST   /api/v1/sales                                 sale.create   (Idempotency-Key required) -> LEDGER
-GET    /api/v1/sales?locationId&from&to&cashierId    sale.create | report.view
+GET    /api/v1/sales?locationId&from&to&cashierId    sale.view
 GET    /api/v1/sales/{id}                            sale.view     -> detail, 403 sale.outside_scope
 GET    /api/v1/sales/{id}/receipt                    sale.view     -> text/plain rendering, logs the first print
 POST   /api/v1/sales/{id}/void                       sale.void     -> LEDGER (reversal)
@@ -618,7 +618,57 @@ it issues offline, so the number route refuses it `409 device.not_web`.
   `{ documentType, number }`. `SHF` additionally requires `shift.open` at the
   store (`authorization.denied`); an invalid type gets
   `terminal.document_type_invalid`; a physical or absent/misplaced register
-  gets `device.not_web`/`device.not_found`/`device.wrong_location`.
+   gets `device.not_web`/`device.not_found`/`device.wrong_location`.
+
+### Web sale lifecycle
+
+The browser web UI (`Pos.Web`) drives the sale-lifecycle flows against the
+existing API routes. All permission checks happen on the server; the pages
+gate their own controls client-side using the cached permission set.
+
+**Sales search.** `GET /api/v1/sales?locationId&from&to` requires `sale.view`
+and is scoped to the caller's assigned locations. Returns an array of
+summaries (`{ id, number, status, businessDate, completedAtUtc, grossTotal,
+netTotal }`) with `status` equal to `Completed` or `Voided`. The `from` and
+`to` filters are business dates (ISO-8601 `yyyy-MM-dd`); `cashierId` further
+narrows to one cashier. An invalid or unassigned `locationId` returns 404 or
+403 `sale.outside_scope`.
+
+**Sale detail and receipt.** `GET /api/v1/sales/{id}` (`sale.view`) returns
+full detail: lines with product/batch/pricing, payments with method/tendered,
+totals and the sale status. `GET /api/v1/sales/{id}/receipt` (`sale.view`)
+returns the plain-text receipt. Both re-check `sale.view` against the sale's
+own location. A reprint (`POST /api/v1/sales/{id}/reprint`, `sale.reprint`)
+requires `reason` (≤ 200 chars) and appends to the `ReceiptPrints` log; the
+route takes `locationId`, `deviceId`, `reprintedAtUtc` in the body and is
+read-location-only (does not need an open shift).
+
+**Void.** `POST /api/v1/sales/{id}/void` (`sale.void`) requires an open shift
+on the same register (the register is identified by the `deviceId` header).
+The web page sends `eventId`, `locationId`, `shiftId`, `deviceId`,
+`businessDate`, `voidedAtUtc` and `reason`; the server dispatches the C1
+`VoidSaleCommand` (ledger reversal, `sale.voided` audit).
+
+**Return detail.** `GET /api/v1/returns/{id}` (readable with any of
+`sale.view`, `sale.return`, `sale.refund`, `inventory.adjust`) returns the full
+return: lines with product/batch info, returned quantities, refund totals
+and per-line refund history. Returns 404 `return.unknown` or 403
+`return.outside_scope`. The web page re-derives read permission from the same
+union, so a cashier who can accept returns or run dispositions can always
+open the page.
+
+**Disposition.** `POST /api/v1/returns/{id}/disposition` (`inventory.adjust`)
+takes per-line partial inspections with `quantity`, `kind` (1=Restock,
+2=Quarantine, 3=Damaged, 4=SupplierReturn, 5=Waste), `reasonCode` and
+`note`; does not require a register or shift. Immutable retry-safe events;
+concurrency token prevents double consumption of the same units.
+
+**Refund.** `POST /api/v1/returns/{id}/refund` (`sale.refund`) takes `saleId`
+(null for blind returns), `method`, `amount`, `tendered`, `providerReference`
+and `refundedAtUtc`; requires an open shift. The web page enforces cash-only
+for blind returns; card/e-wallet refunds are refused at the form level and
+at the server (`sale.refund.blind.cash_only`). Both referenced and blind
+refund caps are enforced server-side.
 
 ### Returns and refunds
 

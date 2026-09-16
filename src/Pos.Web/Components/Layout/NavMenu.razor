@@ -17,6 +17,14 @@
     {
         <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">▤</span> New sale</span>
     }
+    @if (CanViewSales)
+    {
+        <NavLink class="nav-link" href="sales"><span aria-hidden="true">◫</span> Sales</NavLink>
+    }
+    else
+    {
+        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◫</span> Sales</span>
+    }
     <span class="nav-heading">Operations</span>
     <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◇</span> Inventory</span>
     <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⇄</span> Transfers</span>
@@ -27,6 +35,7 @@
 @code {
     [Inject] private UserSession Session { get; set; } = null!;
     private bool CanCreateSale => Session.Current?.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
+    private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
 
     private void SignOut()
     {

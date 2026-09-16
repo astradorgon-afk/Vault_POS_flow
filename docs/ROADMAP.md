@@ -192,9 +192,14 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(cash checkout landed in C15; card/e-wallet provider methods and
       split payments pending)*
 - [x] Atomic sale completion (sale + items + payments + ledger + audit) + sale detail/read-back (C6)
-- [~] Receipt rendering and printing; permissioned reprint
-      *(plain-text render + first print landed in C6; thermal/PDF layout deferred)*
+- [x] Receipt rendering and printing; permissioned reprint
+      *(plain-text render + first print landed in C6; web reprint with reason
+      and the sale-lifecycle views landed in C16; thermal/PDF layout deferred)*
 - [x] Void a completed sale with ledger reversal and reason (C1 domain + C8 route)
+- [~] Web sale lifecycle: search, detail, void, returns/refunds/dispositions
+      *(backend routes + full web pages completed in C16; payment-provider
+      methods in the checkout, receipt thermal/PDF layouts, and the
+      scheduled-price cancellation flow remain)*
 - [x] Return, refund and disposition routes (C9 returns/refunds; C10 line inspection,
   partial dispositions, quarantine incidents, ledger posting and retry safety)
 - [x] Customer lookup and optional accounts (C11)

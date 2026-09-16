@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C15 complete**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C16 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **906 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 152** (2026-09-16, through C15). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **915 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 161** (2026-09-16, through C16). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests     79 passing   non-PostgreSQL ledger, numbering, cata
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       241 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    152 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement and the web-terminal checkout surface
+Pos.Api.IntegrationTests    161 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface and sale-lifecycle read routes
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -605,6 +605,45 @@ price scheduled in the past was correctly refused by the no-backdating rule
 purchase cost to `Product.Create`, and one error-code assertion hardcoded the
 wrong string (`sale.external_customer_missing`).
 
+- **C16 — web sale-lifecycle slice.** Completes the web workflows for past
+  sales. Backend adds three routes to the real pipeline: `GET
+  /api/v1/sales?locationId&from&to` (`sale.view`, scoped to the caller's
+  assigned locations) returning a list of summaries (`{ id, number, status,
+  businessDate, completedAtUtc, grossTotal, netTotal }`); `POST
+  /api/v1/sales/{id}/reprint` (`sale.reprint`, reason ≤ 200 chars, append-only
+  print log); `GET /api/v1/returns/{id}` (any of `sale.view | sale.return |
+  sale.refund | inventory.adjust`, returns the full return
+  detail with lines, batch info and refund history; 404 `return.unknown`,
+  403 `return.outside_scope` through `SalesReturnErrors`). Nine new
+  `SaleLifecycleEndpointTests` through the real pipeline: sales search by
+  store with the location/date filters honoured, and another store's Store
+  Manager forbidden; reprint that logs the print and the audit and keeps the
+  sale Completed, refused without `sale.reprint`, and refused at another
+  store; return detail showing the lines and the refund history (referenced),
+  a blind return's detail describing the return with no sale, an unknown
+  return 404, and another store's Store Manager forbidden the detail.
+  Web (`Pos.Web`): `PosContracts` records for summary/detail/refund shapes;
+  `VaultFlowApiClient` search, detail, receipt, reprint, void, return-detail
+  and refund/dispose methods; `UserSession` gains `TerminalBusinessDate` and
+  `OpenShift` set via `SetTerminal(PosTerminalSession)`. New shared
+  `TerminalBar` component: register auto-select, shift strip with start, stale
+  register cleared on location mismatch. `Sales.razor` — `/sales` search page
+  with location/date-range filters gated by `sale.view`. `SaleDetail.razor` —
+  detail with lines/payments/totals, receipt print and reprint with reason,
+  void with reason (blocked without open register/shift), accept-return with
+  per-line quantity; terminal bar shown for Completed sales when the cashier
+  has reprint/void/return permission; navigates to `/returns/{id}` after
+  accept. `ReturnDetail.razor` — return detail with lines/batch, per-line
+  disposition form (restock/quarantine/damaged/supplier-return/waste with
+  reason-code mapping, gated by `inventory.adjust`), refund form (method,
+  amount, tendered, provider ref; cash-locked for blind returns, gated by
+  `sale.refund`), refund history, back-to-sale link. `TerminalBar` is reused
+  in both pages when register/shift context is needed. `NavMenu` adds a
+  "Sales" link; `Home.razor` adds a conditional "Review sales" card when
+  `sale.view` is present; `app.css` reworked: two-column grid,
+  `primary-card` and `secondary-card` both span full width with distinct
+  light backgrounds. Pos.Web builds 0 warnings, 0 errors.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -848,7 +887,7 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C15 are committed:
+Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C16 are committed:
 shift lifecycle, sale completion/read/receipt/void, daily sales summary, and
 referenced/blind returns and refunds have HTTP endpoints. C15 adds the
 server-numbered web-terminal slice (`DevicePlatform.Web`, `/api/v1/terminal`)
@@ -867,15 +906,18 @@ Customer lookup and optional accounts are implemented in C11: searchable paged
 records, detail and lifecycle routes, separate read/manage permissions, audited
 mutations, and active-customer validation during sale completion. Migration
 `20260916015216_CustomerAccounts` must be applied before running the updated API.
+C16 completes the web sale-lifecycle workflows: sales search with location/date
+filters, receipt text and reprint with reason, void with reason, accept-return
+with per-line quantity, return detail with per-line dispositions and refund
+forms (blind returns cash-locked), and refund history — all gated by the
+server-side permission model and backed by `TerminalBar` register/shift context.
 The remaining work is:
 
-1. **Phase 11 — POS:** the rest of the C batch series, then the main flow.
-   Checkout orchestration is done: the web terminal picks a register
-   (auto-selected when there is exactly one), starts shifts with an opening
-   float, applies `sale.discount`-gated line discounts and submits a complete
-   sale with a cash payment in one request. Immediate items: web flows for
-   void/returns/refunds and the reprint screen, payment-provider methods
-   (card, e-wallet) and split payments, receipt thermal/PDF layouts.
+1. **Phase 11 — POS:** the main flow and remaining web surfaces.
+   Checkout orchestration is done (C15) and the sale-lifecycle web views are
+   done (C16). Immediate items: payment-provider methods (card, e-wallet) and
+   split payments in the web checkout, receipt thermal/PDF layouts, and the
+   POS pricing/scheduled-price cancellation flow.
 2. **Phase 10 tail:** the FEFO allocation service extraction, the POS sale-
    blocking override path for expired batches (Phase 11), and expiring-soon /
    expired alerts (Phase 14 notifications).

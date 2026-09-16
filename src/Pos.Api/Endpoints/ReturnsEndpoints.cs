@@ -75,6 +75,49 @@ public sealed record RefundSalesReturnBody(
 public sealed record DisposeSalesReturnBody(Guid EventId, Guid LocationId, int LineNumber,
     decimal Quantity, ReturnDispositionKind Kind, AdjustmentReasonCode ReasonCode, string Note);
 
+/// <summary>A customer return as returned by the detail route.</summary>
+public sealed record ReturnDetail(
+    Guid Id,
+    string Number,
+    bool IsBlind,
+    Guid? SaleId,
+    Guid LocationId,
+    Guid CashierShiftId,
+    Guid DeviceId,
+    Guid? CustomerId,
+    DateOnly BusinessDate,
+    DateTimeOffset ReturnedAtUtc,
+    Guid ReturnedByUserId,
+    decimal RefundableTotal,
+    decimal RefundedTotal,
+    IReadOnlyList<ReturnLineDetail> Lines,
+    IReadOnlyList<ReturnRefundDetail> Refunds);
+
+/// <summary>One return line as returned by the detail route.</summary>
+public sealed record ReturnLineDetail(
+    int LineNumber,
+    Guid? SaleItemId,
+    Guid ProductId,
+    string ProductName,
+    string? Barcode,
+    decimal Quantity,
+    decimal DispositionedQuantity,
+    decimal PendingDispositionQuantity,
+    decimal UnitPrice,
+    decimal NetAmount,
+    decimal RefundableAmount,
+    string? BatchCode,
+    DateOnly? BatchExpiresOn);
+
+/// <summary>One refund as returned by the detail route.</summary>
+public sealed record ReturnRefundDetail(
+    Guid Id,
+    string Method,
+    decimal Amount,
+    decimal? Tendered,
+    string? ProviderReference,
+    DateTimeOffset RefundedAtUtc);
+
 /// <summary>Return and refund endpoints (POS.md §4).</summary>
 public static class ReturnsEndpoints
 {
@@ -86,6 +129,14 @@ public static class ReturnsEndpoints
         ArgumentNullException.ThrowIfNull(app);
 
         RouteGroupBuilder group = app.MapGroup("/api/v1/returns").WithTags("Returns");
+
+        group.MapGet("/{id:guid}", GetReturnDetailAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.View)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetSalesReturn")
+            .WithSummary("Gets a customer return with its lines and refunds.");
 
         group.MapPost("/{id:guid}/disposition", DisposeReturnAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Inventory.Adjust) { Scope = ScopeSource.None })
@@ -129,6 +180,113 @@ public static class ReturnsEndpoints
         return result.IsSuccess ? TypedResults.Ok(new { eventId = result.Value.Value })
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
+
+    /// <summary>
+    /// The permissions that let a caller read a return at its location. The
+    /// write flows that operate on a return — refunds and inspections — need the
+    /// return's lines and refund history, so any of them suffices to read.
+    /// </summary>
+    private static readonly string[] ReturnReadingPermissions =
+    [
+        Permissions.Sales.View,
+        Permissions.Sales.Return,
+        Permissions.Sales.Refund,
+        Permissions.Inventory.Adjust,
+    ];
+
+    private static async Task<IResult> GetReturnDetailAsync(
+        Guid id,
+        [FromServices] ISalesRepository repository,
+        [FromServices] IPermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        SalesReturnId returnId = new(id);
+
+        SalesReturn? salesReturn = await repository
+            .GetReturnByIdAsync(returnId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (salesReturn is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<ReturnDetail>.Failure(SalesReturnErrors.Unknown(returnId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        if (!await CanReadReturnAsync(
+                evaluator,
+                currentUser.UserId ?? UserId.Empty,
+                salesReturn.LocationId,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<ReturnDetail>.Failure(SalesReturnErrors.OutsideScope(returnId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        return TypedResults.Ok(ToDetail(salesReturn));
+    }
+
+    private static async Task<bool> CanReadReturnAsync(
+        IPermissionEvaluator evaluator,
+        UserId userId,
+        LocationId locationId,
+        CancellationToken cancellationToken)
+    {
+        foreach (string code in ReturnReadingPermissions)
+        {
+            if (await evaluator
+                    .HasPermissionAsync(userId, code, locationId, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static ReturnDetail ToDetail(SalesReturn salesReturn) => new(
+        salesReturn.Id.Value,
+        salesReturn.Number,
+        salesReturn.IsBlind,
+        salesReturn.SaleId?.Value,
+        salesReturn.LocationId.Value,
+        salesReturn.CashierShiftId.Value,
+        salesReturn.DeviceId.Value,
+        salesReturn.CustomerId?.Value,
+        salesReturn.BusinessDate,
+        salesReturn.ReturnedAtUtc,
+        salesReturn.ReturnedByUserId.Value,
+        salesReturn.RefundableTotal,
+        salesReturn.RefundedTotal,
+        salesReturn.Items
+            .OrderBy(i => i.LineNumber)
+            .Select(i => new ReturnLineDetail(
+            i.LineNumber,
+            i.SaleItemId?.Value,
+            i.ProductId.Value,
+            i.ProductName,
+            i.Barcode,
+            i.Quantity,
+            i.DispositionedQuantity,
+            i.PendingDispositionQuantity,
+            i.UnitPrice,
+            i.NetAmount,
+            i.RefundableAmount,
+            i.BatchCode,
+            i.BatchExpiresOn)).ToList(),
+        salesReturn.Refunds
+            .OrderBy(r => r.RefundedAtUtc)
+            .Select(r => new ReturnRefundDetail(
+            r.Id.Value,
+            r.Method.ToString(),
+            r.Amount,
+            r.Tendered,
+            r.ProviderReference,
+            r.RefundedAtUtc)).ToList());
 
     private static async Task<IResult> CreateReturnAsync(
         [FromBody] CreateSalesReturnBody body,

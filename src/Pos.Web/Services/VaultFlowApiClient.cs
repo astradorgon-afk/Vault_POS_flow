@@ -145,6 +145,106 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         PosCompleteSaleRequest request, CancellationToken cancellationToken)
         => PostAsync<PosCompletedSale>("/api/v1/sales", request, cancellationToken);
 
+    /// <summary>Gets a plain-text body from an authenticated API resource.</summary>
+    public async Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
+        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            ApiProblem? problem = await response.Content
+                .ReadFromJsonAsync<ApiProblem>(cancellationToken)
+                .ConfigureAwait(false);
+            return ApiResult<string>.Failure(
+                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                problem?.ErrorCode);
+        }
+
+        string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return ApiResult<string>.Success(text);
+    }
+
+    /// <summary>Finds completed sales by store and a business-date window.
+    /// Pass a store the operator may operate; the API re-checks <c>sale.view</c>.</summary>
+    public Task<ApiResult<List<PosSaleSummary>>> SearchSalesAsync(
+        Guid locationId, DateOnly? from, DateOnly? to, CancellationToken cancellationToken)
+    {
+        string path = FormattableString.Invariant($"/api/v1/sales?locationId={locationId:D}");
+        if (from is { } fromDate)
+        {
+            path += FormattableString.Invariant($"&from={fromDate:yyyy-MM-dd}");
+        }
+
+        if (to is { } toDate)
+        {
+            path += FormattableString.Invariant($"&to={toDate:yyyy-MM-dd}");
+        }
+
+        return GetAsync<List<PosSaleSummary>>(path, cancellationToken);
+    }
+
+    /// <summary>Gets a completed sale with its lines and payments.</summary>
+    public Task<ApiResult<PosSaleDetail>> GetSaleAsync(
+        Guid saleId, CancellationToken cancellationToken)
+        => GetAsync<PosSaleDetail>(
+            FormattableString.Invariant($"/api/v1/sales/{saleId:D}"),
+            cancellationToken);
+
+    /// <summary>Renders a completed sale as printable plain text, logging the
+    /// first print against the sale.</summary>
+    public Task<ApiResult<string>> GetSaleReceiptAsync(
+        Guid saleId, CancellationToken cancellationToken)
+        => GetTextAsync(
+            FormattableString.Invariant($"/api/v1/sales/{saleId:D}/receipt"),
+            cancellationToken);
+
+    /// <summary>Logs a permissioned reprint of a sale receipt. The reprint flows
+    /// through the register selected in the session.</summary>
+    public Task<ApiResult<PosReference>> ReprintSaleAsync(
+        Guid saleId, PosReprintSaleRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/sales/{saleId:D}/reprint"),
+            request,
+            cancellationToken);
+
+    /// <summary>Voids a completed sale through the open shift, reversing its stock movement.</summary>
+    public Task<ApiResult<PosReference>> VoidSaleAsync(
+        Guid saleId, PosVoidSaleRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/sales/{saleId:D}/void"),
+            request,
+            cancellationToken);
+
+    /// <summary>Gets a customer return with its lines, inspections and refunds.</summary>
+    public Task<ApiResult<PosReturnDetail>> GetReturnAsync(
+        Guid returnId, CancellationToken cancellationToken)
+        => GetAsync<PosReturnDetail>(
+            FormattableString.Invariant($"/api/v1/returns/{returnId:D}"),
+            cancellationToken);
+
+    /// <summary>Accepts a customer return against a completed sale.</summary>
+    public Task<ApiResult<PosReference>> CreateReturnAsync(
+        PosCreateReturnRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>("/api/v1/returns", request, cancellationToken);
+
+    /// <summary>Issues a refund against a return through the open shift.</summary>
+    public Task<ApiResult<PosReference>> RefundReturnAsync(
+        Guid returnId, PosRefundReturnRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/returns/{returnId:D}/refund"),
+            request,
+            cancellationToken);
+
+    /// <summary>Routes inspected returned goods to restock, quarantine, damaged,
+    /// supplier-return staging, or waste.</summary>
+    public Task<ApiResult<PosReference>> DisposeReturnAsync(
+        Guid returnId, PosDisposeReturnRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/returns/{returnId:D}/disposition"),
+            request,
+            cancellationToken);
+
     private sealed record ApiProblem(string? Detail, string? ErrorCode);
 }
 

@@ -1,0 +1,427 @@
+@page "/returns/{Id:guid}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Return @salesReturn?.Number · VaultFlow</PageTitle>
+
+@if (salesReturn is null && !string.IsNullOrWhiteSpace(message))
+{
+    <section class="sale-blocked" role="alert">
+        <span>Cannot load this return</span>
+        <h2>@message</h2>
+        <p><a href="sales">Back to the sales ledger</a></p>
+    </section>
+}
+else if (salesReturn is not null)
+{
+    <section class="sale-head">
+        <div>
+            <span class="eyebrow">After-sales</span>
+            <h1>Return @salesReturn.Number</h1>
+            <p>
+                @if (salesReturn.IsBlind)
+                {
+                    <span class="blind-chip">Blind return</span>
+                }
+                @if (salesReturn.SaleId is { } saleId)
+                {
+                    <a href="@($"sales/{saleId:D}")">original sale</a>
+                    <span> · </span>
+                }
+                @salesReturn.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ·
+                Accepted @salesReturn.ReturnedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
+            </p>
+        </div>
+        <strong class="remaining">@Money(Remaining) <span>still refundable</span></strong>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(actionMessage))
+    {
+        <div class="pos-message" role="status">@actionMessage</div>
+    }
+
+    <section class="detail-panel">
+        <header><span class="eyebrow">Accepted goods</span><h2>Lines <em>@salesReturn.Lines.Count</em></h2></header>
+        <table class="lines-table">
+            <thead>
+                <tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Net</th><th class="num">Disposed</th><th class="num">Pending</th></tr>
+            </thead>
+            <tbody>
+                @foreach (PosReturnLineDetail line in salesReturn.Lines)
+                {
+                    <tr @key="line.LineNumber">
+                        <td>@line.LineNumber</td>
+                        <td>
+                            <strong>@line.ProductName</strong>
+                            @if (!string.IsNullOrWhiteSpace(line.BatchCode)) { <small>Batch @line.BatchCode@(line.BatchExpiresOn is { } expiry ? $" · expires {expiry.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}" : "")</small> }
+                        </td>
+                        <td class="num">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                        <td class="num">@Money(line.UnitPrice)</td>
+                        <td class="num"><strong>@Money(line.NetAmount)</strong></td>
+                        <td class="num">@line.DispositionedQuantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                        <td class="num">@line.PendingDispositionQuantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+
+    @if (CanAdjust && salesReturn.Lines.Any(line => line.PendingDispositionQuantity > 0m))
+    {
+        <section class="actions-panel">
+            <header>
+                <div>
+                    <span class="eyebrow">Inspection</span>
+                    <h2>Route returned goods</h2>
+                    <p>Decide each pending line's destination. The disposition moves ledger stock, so no register or shift is needed.</p>
+                </div>
+            </header>
+
+            @foreach (PosReturnLineDetail line in salesReturn.Lines.Where(l => l.PendingDispositionQuantity > 0m))
+            {
+                <div class="dispose-row" @key="line.LineNumber">
+                    <span class="dispose-product">
+                        <strong>@line.LineNumber · @line.ProductName</strong>
+                        <small>Pending @line.PendingDispositionQuantity.ToString("0.###", CultureInfo.InvariantCulture)</small>
+                    </span>
+                    <label class="dispose-field">
+                        Quantity
+                        <input class="qty-input" type="number" min="0.001" step="any"
+                               value="@DisposeQty(line)" @onchange="e => SetDisposeQty(line, e.Value?.ToString())" />
+                    </label>
+                    <label class="dispose-field">
+                        Destination
+                        <select value="@DisposeKind(line)" @onchange="e => SetDisposeKind(line, e.Value?.ToString())">
+                            @foreach ((int value, string label) in Options)
+                            {
+                                <option value="@value">@label</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="dispose-field">
+                        Reason
+                        <select value="@DisposeReason(line)" @onchange="e => SetDisposeReason(line, e.Value?.ToString())">
+                            @foreach ((int value, string label) in Reasons)
+                            {
+                                <option value="@value">@label</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="dispose-field">
+                        Inspection note
+                        <input class="note-input" maxlength="512" placeholder="Why did it come back…"
+                               value="@DisposeNote(line)" @onchange="e => SetDisposeNote(line, e.Value?.ToString())" />
+                    </label>
+                    <button type="button" @onclick="() => DisposeLineAsync(line)"
+                            disabled="@disposing">
+                        @(disposing ? "Routing…" : "Route goods")
+                    </button>
+                </div>
+            }
+        </section>
+    }
+
+    @if (CanRefund && Remaining > 0m)
+    {
+        <section class="refund-panel">
+            <header>
+                <div>
+                    <span class="eyebrow">Settlement</span>
+                    <h2>Issue a refund</h2>
+                    <p>@(salesReturn.IsBlind ? "A blind return refunds in cash only." : "Refund against the return's original sale, through the open shift.")</p>
+                </div>
+                <strong class="remaining">@Money(Remaining) <span>available</span></strong>
+            </header>
+
+            <TerminalBar LocationId="salesReturn.LocationId" OnStateChanged="HandleTerminalChanged" />
+
+            <div class="refund-form" aria-live="polite">
+                <label class="dispose-field">
+                    Amount
+                    <input class="qty-input" type="number" min="0.01" step="any" value="@refundAmount"
+                           @onchange="OnRefundAmountChanged" />
+                </label>
+                <label class="dispose-field">
+                    Method
+                    <select value="@refundMethod" @onchange="OnRefundMethodChanged" disabled="@salesReturn.IsBlind">
+                        <option value="1">Cash</option>
+                        <option value="2">Card</option>
+                        <option value="3">E-Wallet</option>
+                    </select>
+                </label>
+                @if (refundMethod == 1)
+                {
+                    <label class="dispose-field">
+                        Cash tendered
+                        <input class="qty-input" type="number" min="0.01" step="any" value="@refundTendered"
+                               @onchange="OnRefundTenderedChanged" />
+                    </label>
+                }
+                else
+                {
+                    <label class="dispose-field">
+                        Provider reference
+                        <input class="note-input" placeholder="Card or wallet reference" value="@refundProviderReference"
+                               @onchange="OnRefundProviderChanged" />
+                    </label>
+                }
+                <button type="button" @onclick="RefundAsync"
+                        disabled="@(refunding || RegisterMissing || ShiftMissing || RefundAmountValue <= 0m)">
+                    @(refunding ? "Refunding…" : "Issue refund")
+                </button>
+            </div>
+
+            @if (RegisterMissing || ShiftMissing)
+            {
+                <div class="action-hint" role="status">@TerminalHint</div>
+            }
+        </section>
+    }
+
+    <section class="detail-panel refund-history">
+        <header><span class="eyebrow">History</span><h2>Refunds <em>@salesReturn.Refunds.Count</em></h2></header>
+        @if (salesReturn.Refunds.Count == 0)
+        {
+            <div class="panel-empty">No refunds yet.</div>
+        }
+        else
+        {
+            <table class="payments-table">
+                <thead><tr><th>#</th><th>Method</th><th class="num">Amount</th><th class="num">Tendered</th><th>Reference</th><th>When</th></tr></thead>
+                <tbody>
+                    @foreach (PosReturnRefundDetail refund in salesReturn.Refunds)
+                    {
+                        <tr @key="refund.Id">
+                            <td>@refund.Id.ToString("D")[..8]</td>
+                            <td><span class="method-chip">@refund.Method</span></td>
+                            <td class="num"><strong>@Money(refund.Amount)</strong></td>
+                            <td class="num">@(refund.Tendered is { } tendered ? Money(tendered) : "—")</td>
+                            <td>@(refund.ProviderReference ?? "—")</td>
+                            <td>@refund.RefundedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private static readonly (int Value, string Label)[] Options =
+    [
+        (1, "Restock"),
+        (2, "Quarantine"),
+        (3, "Damaged"),
+        (4, "Supplier return"),
+        (5, "Waste"),
+    ];
+
+    private static readonly (int Value, string Label)[] Reasons =
+    [
+        (1, "Damaged"),
+        (2, "Expired"),
+        (3, "Spoilage"),
+        (4, "Loss"),
+        (5, "Theft"),
+        (6, "Count correction"),
+        (7, "Supplier return"),
+        (8, "Broken"),
+        (9, "Contaminated"),
+    ];
+
+    private PosReturnDetail? salesReturn;
+    private string? message;
+    private string? actionMessage;
+    private readonly Dictionary<int, decimal> disposeQuantities = [];
+    private readonly Dictionary<int, int> disposeKinds = [];
+    private readonly Dictionary<int, int> disposeReasons = [];
+    private readonly Dictionary<int, string> disposeNotes = [];
+    private string refundAmount = string.Empty;
+    private int refundMethod = 1;
+    private string refundTendered = string.Empty;
+    private string refundProviderReference = string.Empty;
+    private bool disposing;
+    private bool refunding;
+    private Guid loadedId;
+
+    private bool CanRead => Session.Current?.User.Permissions.Any(permission =>
+        permission is "sale.view" or "sale.return" or "sale.refund" or "inventory.adjust") == true;
+    private bool CanRefund => Session.Current?.User.Permissions.Contains("sale.refund", StringComparer.Ordinal) == true;
+    private bool CanAdjust => Session.Current?.User.Permissions.Contains("inventory.adjust", StringComparer.Ordinal) == true;
+    private bool RegisterMissing => Session.DeviceId is null;
+    private bool ShiftMissing => Session.OpenShift is null;
+    private string TerminalHint =>
+        RegisterMissing ? "Select the register above to unlock refunds."
+        : ShiftMissing ? "Open a shift on the register above to unlock refunds."
+        : $"Ready — {Session.DeviceName}";
+
+    private decimal Remaining => (salesReturn?.RefundableTotal ?? 0m) - (salesReturn?.RefundedTotal ?? 0m);
+    private decimal RefundAmountValue => decimal.TryParse(refundAmount, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal amount) ? amount : 0m;
+
+    private string DisposeQty(PosReturnLineDetail line) => disposeQuantities.GetValueOrDefault(line.LineNumber, line.PendingDispositionQuantity).ToString("0.###", CultureInfo.InvariantCulture);
+    private int DisposeKind(PosReturnLineDetail line) => disposeKinds.GetValueOrDefault(line.LineNumber, 1);
+    private int DisposeReason(PosReturnLineDetail line) => disposeReasons.GetValueOrDefault(line.LineNumber, 6);
+    private string DisposeNote(PosReturnLineDetail line) => disposeNotes.GetValueOrDefault(line.LineNumber) ?? string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id == loadedId) return;
+        loadedId = Id;
+        await LoadReturnAsync();
+    }
+
+    private async Task LoadReturnAsync()
+    {
+        message = null;
+        actionMessage = null;
+        disposeQuantities.Clear();
+        disposeKinds.Clear();
+        disposeReasons.Clear();
+        disposeNotes.Clear();
+        refundAmount = string.Empty;
+        refundTendered = string.Empty;
+        refundProviderReference = string.Empty;
+        refundMethod = 1;
+        try
+        {
+            if (!CanRead)
+            {
+                message = "This account cannot view returns. Ask an administrator for sale.view, sale.return, sale.refund or inventory.adjust.";
+                return;
+            }
+
+            ApiResult<PosReturnDetail> response = await Api.GetReturnAsync(Id, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+            salesReturn = response.Value;
+            refundAmount = Remaining.ToString("0.##", CultureInfo.InvariantCulture);
+        }
+        catch (HttpRequestException) { message = "The returns service is unavailable. Try again shortly."; }
+    }
+
+    private void HandleTerminalChanged() { }
+
+    private void SetDisposeQty(PosReturnLineDetail line, string? value)
+    {
+        if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal quantity)
+            || quantity <= 0m)
+        {
+            disposeQuantities.Remove(line.LineNumber);
+            return;
+        }
+
+        disposeQuantities[line.LineNumber] = Math.Min(quantity, line.PendingDispositionQuantity);
+    }
+
+    private void SetDisposeKind(PosReturnLineDetail line, string? value)
+    {
+        if (int.TryParse(value, out int kind))
+        {
+            disposeKinds[line.LineNumber] = kind;
+            disposeReasons[line.LineNumber] = DefaultReasonFor(kind);
+        }
+    }
+
+    private void SetDisposeReason(PosReturnLineDetail line, string? value)
+    {
+        if (int.TryParse(value, out int reason)) { disposeReasons[line.LineNumber] = reason; }
+    }
+
+    private void SetDisposeNote(PosReturnLineDetail line, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) { disposeNotes.Remove(line.LineNumber); } else { disposeNotes[line.LineNumber] = value.Trim(); }
+    }
+
+    private static int DefaultReasonFor(int kind) => kind switch
+    {
+        1 => 6, // Restock → count correction
+        2 => 6, // Quarantine → count correction
+        3 => 1, // Damaged → damaged
+        4 => 7, // Supplier return → supplier return
+        5 => 3, // Waste → spoilage
+        _ => 6,
+    };
+
+    private async Task DisposeLineAsync(PosReturnLineDetail line)
+    {
+        if (salesReturn is null) return;
+        disposing = true;
+        actionMessage = null;
+        try
+        {
+            decimal quantity = disposeQuantities.GetValueOrDefault(line.LineNumber, line.PendingDispositionQuantity);
+            if (quantity <= 0m) { actionMessage = "Enter a quantity to route."; return; }
+
+            ApiResult<PosReference> result = await Api.DisposeReturnAsync(
+                Id,
+                new PosDisposeReturnRequest(
+                    Guid.CreateVersion7(),
+                    salesReturn.LocationId,
+                    line.LineNumber,
+                    Math.Min(quantity, line.PendingDispositionQuantity),
+                    DisposeKind(line),
+                    DisposeReason(line),
+                    DisposeNote(line)),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { actionMessage = result.Error; return; }
+
+            await LoadReturnAsync();
+            actionMessage = $"Goods on line {line.LineNumber} routed.";
+        }
+        catch (HttpRequestException) { actionMessage = "The disposition service is unavailable. Try again shortly."; }
+        finally { disposing = false; }
+    }
+
+    private async Task RefundAsync()
+    {
+        if (salesReturn is null || Session.DeviceId is not { } deviceId || Session.OpenShift is not { } openShift) return;
+        if (RefundAmountValue <= 0m) { actionMessage = "Enter a refund amount."; return; }
+        if (refundMethod == 1 && RefundTenderedValue < RefundAmountValue) { actionMessage = "Cash tendered is below the refund amount."; return; }
+        if (refundMethod != 1 && string.IsNullOrWhiteSpace(refundProviderReference)) { actionMessage = "Provide the card or wallet reference."; return; }
+
+        refunding = true;
+        actionMessage = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.RefundReturnAsync(
+                Id,
+                new PosRefundReturnRequest(
+                    salesReturn.IsBlind ? null : salesReturn.SaleId,
+                    Guid.CreateVersion7(),
+                    salesReturn.LocationId,
+                    openShift.ShiftId,
+                    deviceId,
+                    refundMethod,
+                    RefundAmountValue,
+                    refundMethod == 1 ? RefundTenderedValue : null,
+                    refundMethod == 1 ? null : refundProviderReference.Trim(),
+                    DateTimeOffset.UtcNow),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { actionMessage = result.Error; return; }
+
+            await LoadReturnAsync();
+            actionMessage = $"Refund of {Money(RefundAmountValue)} issued.";
+        }
+        catch (HttpRequestException) { actionMessage = "The refund service is unavailable. Try again shortly."; }
+        finally { refunding = false; }
+    }
+
+    private decimal RefundTenderedValue => decimal.TryParse(refundTendered, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal value) ? value : 0m;
+    private void OnRefundAmountChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => refundAmount = e.Value?.ToString() ?? string.Empty;
+    private void OnRefundMethodChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        int.TryParse(e.Value?.ToString(), out refundMethod);
+        refundTendered = string.Empty;
+        refundProviderReference = string.Empty;
+    }
+
+    private void OnRefundTenderedChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => refundTendered = e.Value?.ToString() ?? string.Empty;
+    private void OnRefundProviderChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => refundProviderReference = e.Value?.ToString() ?? string.Empty;
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

@@ -18,6 +18,12 @@ public sealed class UserSession
     /// <summary>Gets the register name, or null.</summary>
     public string? DeviceName { get; private set; }
 
+    /// <summary>Gets the store's business date for the selected register, or null.</summary>
+    public DateOnly? TerminalBusinessDate { get; private set; }
+
+    /// <summary>Gets the open shift on the selected register, or null.</summary>
+    public PosOpenShift? OpenShift { get; private set; }
+
     /// <summary>Replaces the current session.</summary>
     public void Set(SignInResponse response)
     {
@@ -34,12 +40,22 @@ public sealed class UserSession
         DeviceName = register.Name;
     }
 
+    /// <summary>Refreshes the register's checkout context (business date and open shift).</summary>
+    public void SetTerminal(PosTerminalSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        TerminalBusinessDate = session.BusinessDate;
+        OpenShift = session.OpenShift;
+    }
+
     /// <summary>Clears the register context.</summary>
     public void ClearRegister()
     {
         DeviceId = null;
         DeviceShortCode = null;
         DeviceName = null;
+        TerminalBusinessDate = null;
+        OpenShift = null;
     }
 
     /// <summary>Clears the current session and register context.</summary>

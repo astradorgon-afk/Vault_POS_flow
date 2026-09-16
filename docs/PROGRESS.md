@@ -23,10 +23,13 @@ with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (daily sales summary report), C8 (sale pipeline tests + void route) and C9
 (returns HTTP surface), C10 (return disposition), C11 (customer accounts), C12
 (discount HTTP regressions), C13 (authenticated web shell), C14
-(API-backed POS cart workspace) and C15 (checkout orchestration with
-server-numbered web terminals) are complete;
+(API-backed POS cart workspace), C15 (checkout orchestration with
+server-numbered web terminals) and C16 (web sale lifecycle: sales search,
+receipt reprint/void and return/refund/disposition workflows in the browser)
+are complete;
 details are in the log below.
-**Last commits:** C15 (this commit — carries the C14 web shell and cart
+**Last commits:** C16 (this commit — web sale lifecycle with 9 new backend
+tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -114,6 +117,8 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C12 — discount HTTP regressions: an authorized manual discount persists gross/discount/net/payment totals and its authorizer; a named authorizer without `sale.discount` gets 403 and leaves inventory unchanged
   - [x] C13 — authenticated Blazor shell: API-backed username/password/two-factor sign-in, circuit-scoped token session, protected routing and safe return URLs, sign-out, responsive operations navigation and workspace overview
   - [x] C14 — API-backed POS cart workspace: assigned-store selection, barcode lookup, product search, effective location/global pricing, quantity editing, removal and live totals
+  - [x] C15 — checkout orchestration with server-numbered web terminals (committed with C14): register auto-select, session bootstrap, shift start, line discounts, cash payment and atomic submission; physical terminals refused `device.not_web`; 12 new `TerminalEndpointTests`
+  - [x] C16 — web sale lifecycle: sales search (`GET /api/v1/sales` summaries), `GET /api/v1/returns/{id}` detail, `POST /api/v1/sales/{id}/reprint` reason+append-only; 9 new `SaleLifecycleEndpointTests`; web pages: sales search, sale detail (receipt/reprint/void/accept-return), return detail (disposition/refund/refund history); shared `TerminalBar`; `Pos.Web` builds clean
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -560,4 +565,63 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   `Pos.Web` builds with zero warnings. Docs: STATUS, ROADMAP, API §9 and
   DECISIONS ADR-0032 updated. This commit also carries the C14 web shell:
   the authenticated operations shell and API-backed cart workspace were
-  never committed separately.
+   never committed separately.
+
+### 2026-09-16 — C16 web sale lifecycle
+
+- **Backend.** Three routes through the real pipeline: `GET
+  /api/v1/sales?locationId&from&to` (`sale.view`, scoped to the caller's
+  assigned locations) returning summaries `{ id, number, status, businessDate,
+  completedAtUtc, grossTotal, netTotal }`; `POST /api/v1/sales/{id}/reprint`
+  (`sale.reprint`,
+  reason ≤ 200 chars, append-only print log); `GET /api/v1/returns/{id}`
+  (any of `sale.view | sale.return | sale.refund | inventory.adjust`, full
+  return detail with lines, batch info and refund history;
+  404 `return.unknown`, 403 `return.outside_scope` via `SalesReturnErrors`).
+  Web contracts added: `PosSaleSummary`, `PosSaleDetail`, `PosSaleLineDetail`,
+  `PosSalePaymentDetail`, `PosReturnDetail`, `PosReturnLineDetail`,
+  `PosReturnRefundDetail`, `PosReference`, and the request records
+  (`PosReprintSaleRequest`, `PosVoidSaleRequest`, `PosCreateReturnRequest`,
+  `PosCreateReturnLine`, `PosRefundReturnRequest`, `PosDisposeReturnRequest`).
+  `VaultFlowApiClient` gains `GetTextAsync`, `SearchSalesAsync`, `GetSaleAsync`,
+  `GetSaleReceiptAsync`, `ReprintSaleAsync`, `VoidSaleAsync`, `GetReturnAsync`,
+  `CreateReturnAsync`, `RefundReturnAsync`, `DisposeReturnAsync`.
+- **`UserSession` register context.** `SetTerminal(PosTerminalSession)` now
+  caches the terminal's `TerminalBusinessDate` and `OpenShift` alongside the
+  device info, so pages can read register/shift context without re-calling the
+  session endpoint. `ClearRegister()` wipes stale register identity on location
+  mismatch.
+- **`TerminalBar` shared component.** Register auto-select (single register in
+  the store), shift strip with "Start shift" flow or open-shift banner,
+  stale-register cleared on location mismatch; exposes `OnStateChanged` for
+  pages to refresh after register or shift changes. Reused on sale detail,
+  return detail and (implicitly) the new sale page.
+- **`Sales.razor`** (`/sales`) — store/date-range search page gated by
+  `sale.view`; results table with number, time, cashier, total, status;
+  row click navigates to `/sales/{id}`.
+- **`SaleDetail.razor`** (`/sales/{Id}`) — lines/payments/totals, receipt print
+  and reprint with reason, void with reason (blocked without open register and
+  shift), accept-return with per-line quantity; `TerminalBar` shown for
+  Completed sales when the cashier has reprint/void/return permission; after
+  accept-return, navigates to `/returns/{id}`.
+- **`ReturnDetail.razor`** (`/returns/{Id}`) — return detail with lines/batch
+  info, per-line disposition form (restock/quarantine/damaged/supplier-return/
+  waste with reason-code mapping, gated by `inventory.adjust`), refund form
+  (method, amount, tendered, provider reference; cash-locked for blind returns,
+  gated by `sale.refund`), refund history table, back-to-sale link.
+- **`NavMenu`** adds a "Sales" NavLink gated by `sale.view`. **`Home.razor`**
+  adds a conditional "Review sales" secondary card for
+  `CanViewSales`. **`app.css`** reworked: two-column `command-grid`,
+  `primary-card` and `secondary-card` both span full width with distinct
+  light backgrounds.
+- Validation: 9 new `SaleLifecycleEndpointTests` through the real pipeline —
+  sales search by store with the location/date filters honoured and another
+  store's Store Manager forbidden; reprint logging the print and the audit
+  while keeping the sale Completed, refused without `sale.reprint`, and
+  refused at another store; return detail showing the lines and the refund
+  history (referenced), a blind return's detail describing the return with no
+  sale, an unknown return 404, and another store's Store Manager forbidden the
+  detail. Full API
+  suite **161 passing** — only the two PostgreSQL-guard members fail (Docker
+  unavailable). Domain 369, Application 241 green; `Pos.Web` builds 0 warnings
+  0 errors. Docs: STATUS, ROADMAP, API §9 updated.

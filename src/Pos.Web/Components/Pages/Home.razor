@@ -11,6 +11,10 @@
 </section>
 
 <section class="command-grid">
+    @if (CanViewSales)
+    {
+        <a class="secondary-card" href="sales"><span class="card-index">POS / 02</span><div><h2>Review sales</h2><p>Find completed transactions, reprint receipts, void mistakes and drive returns.</p></div><span class="coming-soon">Open the sales ledger →</span></a>
+    }
     <a class="primary-card" href="pos"><span class="card-index">POS / 01</span><div><h2>Start a sale</h2><p>Scan or search the live catalogue and build the customer cart.</p></div><span class="coming-soon">Open transaction workspace →</span></a>
     <article class="status-card"><span class="card-index">ACCESS</span><strong>@(Session.Current?.User.Permissions.Count ?? 0)</strong><p>effective permissions in this session</p></article>
     <article class="status-card"><span class="card-index">SCOPE</span><strong>@ScopeLabel</strong><p>operational location access</p></article>
@@ -19,6 +23,7 @@
 <section class="readiness"><div><span class="pulse"></span><strong>API session active</strong></div><p>Access expires @Session.Current?.AccessTokenExpiresAtUtc.ToLocalTime().ToString("t").</p></section>
 
 @code {
+    private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
     private string ScopeLabel => Session.Current?.User.HasAllLocations == true
         ? "All"
         : (Session.Current?.User.Locations.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);

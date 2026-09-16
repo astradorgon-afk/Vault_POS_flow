@@ -1,0 +1,400 @@
+@page "/sales/{Id:guid}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Sale @sale?.Number · VaultFlow</PageTitle>
+
+@if (sale is null && !string.IsNullOrWhiteSpace(message))
+{
+    <section class="sale-blocked" role="alert">
+        <span>Cannot load this sale</span>
+        <h2>@message</h2>
+        <p><a href="sales">Back to the sales ledger</a></p>
+    </section>
+}
+else if (sale is not null)
+{
+    <section class="sale-head">
+        <div>
+            <span class="eyebrow">Point of sale</span>
+            <h1>Sale @sale.Number</h1>
+            <p>
+                @(storeName is null ? "Unknown store" : storeName) ·
+                @sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ·
+                Completed @sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
+            </p>
+        </div>
+        <span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span>
+    </section>
+
+    @if (sale.Status == "Completed" && (CanReprint || CanVoid || CanReturn))
+    {
+        <TerminalBar LocationId="sale.LocationId" OnStateChanged="HandleTerminalChanged" />
+    }
+
+    @if (!string.IsNullOrWhiteSpace(actionMessage))
+    {
+        <div class="pos-message" role="status">@actionMessage</div>
+    }
+
+    <div class="detail-grid">
+        <section class="detail-panel">
+            <header><span class="eyebrow">Transaction</span><h2>Lines <em>@sale.Lines.Count</em></h2></header>
+            <table class="lines-table">
+                <thead>
+                    <tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Discount</th><th class="num">VAT</th><th class="num">Net</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosSaleLineDetail line in sale.Lines)
+                    {
+                        <tr @key="line.LineNumber">
+                            <td>@line.LineNumber</td>
+                            <td>
+                                <strong>@line.ProductName</strong>
+                                @if (!string.IsNullOrWhiteSpace(line.Barcode)) { <small>@line.Barcode</small> }
+                            </td>
+                            <td class="num">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                            <td class="num">@Money(line.UnitPrice)</td>
+                            <td class="num">@(line.Discount > 0m ? $"- {Money(line.Discount)}" : "—")</td>
+                            <td class="num">@Money(line.Vat)</td>
+                            <td class="num"><strong>@Money(line.NetAmount)</strong></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <div class="totals">
+                <div><span>Gross</span><strong>@Money(sale.GrossTotal)</strong></div>
+                @if (sale.DiscountTotal > 0m) { <div><span>Discounts</span><strong class="discount-total">− @Money(sale.DiscountTotal)</strong></div> }
+                <div><span>VAT</span><strong>@Money(sale.VatTotal)</strong></div>
+                <div class="net"><span>Net settled</span><strong>@Money(sale.NetTotal)</strong></div>
+            </div>
+        </section>
+
+        <section class="detail-panel">
+            <header><span class="eyebrow">Settlement</span><h2>Payments <em>@sale.Payments.Count</em></h2></header>
+            @if (sale.Payments.Count == 0)
+            {
+                <div class="panel-empty">No payments recorded.</div>
+            }
+            else
+            {
+                <table class="payments-table">
+                    <thead><tr><th>Method</th><th class="num">Amount</th><th class="num">Tendered</th><th class="num">Change</th><th>Reference</th></tr></thead>
+                    <tbody>
+                        @foreach (PosSalePaymentDetail payment in sale.Payments)
+                        {
+                            <tr @key="payment.Method">
+                                <td><span class="method-chip">@payment.Method</span></td>
+                                <td class="num"><strong>@Money(payment.Amount)</strong></td>
+                                <td class="num">@(payment.Tendered is { } tendered ? Money(tendered) : "—")</td>
+                                <td class="num">@(payment.Change is { } change ? Money(change) : "—")</td>
+                                <td>@(payment.ProviderReference ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+    </div>
+
+    <section class="receipt-panel">
+        <header>
+            <div>
+                <span class="eyebrow">Receipt</span>
+                <h2>Printed copy</h2>
+            </div>
+            <div class="receipt-actions">
+                <button type="button" @onclick="LoadReceiptAsync" disabled="@loadingReceipt">
+                    @(loadingReceipt ? "Printing…" : "Print receipt")
+                </button>
+                @if (CanReprint)
+                {
+                    <label class="inline-reason">
+                        Reprint reason
+                        <input value="@reprintReason" @onchange="OnReprintReasonChanged" placeholder="Required" disabled="@reprinting"/>
+                    </label>
+                    <button type="button" @onclick="ReprintAsync"
+                            disabled="@(reprinting || string.IsNullOrWhiteSpace(reprintReason) || RegisterMissing)">
+                        @(reprinting ? "Reprinting…" : "Log reprint")
+                    </button>
+                }
+            </div>
+        </header>
+
+        @if (receiptText is not null)
+        {
+            <pre class="receipt-text">@receiptText</pre>
+        }
+        else if (!loadingReceipt)
+        {
+            <div class="receipt-empty">Receipts render after the sale settles. Press <strong>Print receipt</strong>.</div>
+        }
+    </section>
+
+    @if (sale.Status == "Completed")
+    {
+        <section class="actions-panel">
+            @if (CanVoid)
+            {
+                <header>
+                    <div>
+                        <span class="eyebrow">Correction</span>
+                        <h2>Void this sale</h2>
+                        <p>Reverses the stock movement and requires an open shift. A voided document stays in the ledger.</p>
+                    </div>
+                    <label class="action-reason">
+                        Void reason
+                        <input value="@voidReason" @onchange="OnVoidReasonChanged" placeholder="Required" disabled="@voiding"/>
+                    </label>
+                    <button type="button" class="danger" @onclick="VoidSaleAsync"
+                            disabled="@(voiding || string.IsNullOrWhiteSpace(voidReason) || RegisterMissing || ShiftMissing)">
+                        @(voiding ? "Voiding…" : "Void sale")
+                    </button>
+                </header>
+                @if (RegisterMissing || ShiftMissing)
+                {
+                    <span class="action-hint block-hint" role="status">@TerminalHint</span>
+                }
+            }
+
+            @if (CanReturn)
+            {
+                <header>
+                    <div>
+                        <span class="eyebrow">After-sales</span>
+                        <h2>Accept a return</h2>
+                        <p>Choose quantities to accept against this sale. Goods land as pending inspection, then get routed.</p>
+                    </div>
+                    <span class="action-hint" role="status">@TerminalHint</span>
+                </header>
+
+                <table class="return-table">
+                    <thead><tr><th>#</th><th>Product</th><th class="num">Sold</th><th class="num">Unit price</th><th class="num">Return qty</th><th class="num">Amount</th></tr></thead>
+                    <tbody>
+                        @foreach (PosSaleLineDetail line in sale.Lines)
+                        {
+                            <tr @key="line.LineNumber">
+                                <td>@line.LineNumber</td>
+                                <td>@line.ProductName</td>
+                                <td class="num">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                                <td class="num">@Money(line.UnitPrice)</td>
+                                <td class="num">
+                                    <input class="qty-input" type="number" min="0" step="any" value="@ReturnQty(line)"
+                                           @onchange="e => SetReturnQty(line, e.Value?.ToString())"
+                                           disabled="@acceptingReturn" aria-label="Return quantity for @line.ProductName"/>
+                                </td>
+                                <td class="num">@Money(line.NetAmount)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                <div class="return-commit">
+                    <span>@(ReturnTotal > 0m ? $"Returning {Money(ReturnTotal)}" : "Choose quantities above to accept a return.")</span>
+                    <button type="button" @onclick="AcceptReturnAsync"
+                            disabled="@(acceptingReturn || ReturnTotal <= 0m || RegisterMissing || ShiftMissing)">
+                        @(acceptingReturn ? "Accepting…" : "Accept return")
+                    </button>
+                </div>
+            }
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private PosSaleDetail? sale;
+    private string? storeName;
+    private string? message;
+    private string? actionMessage;
+    private string? receiptText;
+    private string reprintReason = string.Empty;
+    private string voidReason = string.Empty;
+    private readonly Dictionary<int, decimal> returnQuantities = [];
+    private bool loadingReceipt;
+    private bool reprinting;
+    private bool voiding;
+    private bool acceptingReturn;
+    private Guid loadedId;
+
+    private bool CanView => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
+    private bool CanReprint => Session.Current?.User.Permissions.Contains("sale.reprint", StringComparer.Ordinal) == true;
+    private bool CanVoid => Session.Current?.User.Permissions.Contains("sale.void", StringComparer.Ordinal) == true;
+    private bool CanReturn => Session.Current?.User.Permissions.Contains("sale.return", StringComparer.Ordinal) == true;
+    private bool RegisterMissing => Session.DeviceId is null;
+    private bool ShiftMissing => Session.OpenShift is null;
+    private string TerminalHint =>
+        RegisterMissing ? "Select the register above to unlock these actions."
+        : ShiftMissing ? "Open a shift on the register above to unlock these actions."
+        : $"Ready — {Session.DeviceName}";
+
+    private decimal ReturnQty(PosSaleLineDetail line) => returnQuantities.GetValueOrDefault(line.LineNumber);
+    private decimal ReturnTotal => returnQuantities.Values.Sum(value => value);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id == loadedId) return;
+        loadedId = Id;
+        await LoadSaleAsync();
+    }
+
+    private async Task LoadSaleAsync()
+    {
+        message = null;
+        actionMessage = null;
+        receiptText = null;
+        returnQuantities.Clear();
+        try
+        {
+            if (!CanView)
+            {
+                message = "This account cannot view sales. Ask an administrator for the sale.view permission.";
+                return;
+            }
+
+            ApiResult<PosSaleDetail> response = await Api.GetSaleAsync(Id, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+            sale = response.Value;
+
+            ApiResult<List<PosLocation>> locations = await Api.GetAsync<List<PosLocation>>(
+                "/api/v1/locations", CancellationToken.None);
+            if (locations.IsSuccess && locations.Value is not null)
+            {
+                storeName = locations.Value.FirstOrDefault(location => location.Id == sale.LocationId)?.Name;
+            }
+        }
+        catch (HttpRequestException) { message = "The sale service is unavailable. Try again shortly."; }
+    }
+
+    private void HandleTerminalChanged() { }
+
+    private async Task LoadReceiptAsync()
+    {
+        loadingReceipt = true;
+        actionMessage = null;
+        try
+        {
+            ApiResult<string> response = await Api.GetSaleReceiptAsync(Id, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { actionMessage = response.Error; return; }
+            receiptText = response.Value;
+        }
+        catch (HttpRequestException) { actionMessage = "The receipts service is unavailable. Try again shortly."; }
+        finally { loadingReceipt = false; }
+    }
+
+    private async Task ReprintAsync()
+    {
+        if (sale is null || Session.DeviceId is not { } deviceId) return;
+        reprinting = true;
+        actionMessage = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.ReprintSaleAsync(
+                Id,
+                new PosReprintSaleRequest(
+                    sale.LocationId,
+                    deviceId,
+                    reprintReason.Trim(),
+                    DateTimeOffset.UtcNow),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { actionMessage = result.Error; return; }
+
+            actionMessage = $"Reprint logged for {sale.Number}.";
+            await LoadReceiptAsync();
+        }
+        catch (HttpRequestException) { actionMessage = "The reprint service is unavailable. Try again shortly."; }
+        finally { reprinting = false; }
+    }
+
+    private async Task VoidSaleAsync()
+    {
+        if (sale is null || Session.DeviceId is not { } deviceId || Session.OpenShift is not { } openShift) return;
+        voiding = true;
+        actionMessage = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.VoidSaleAsync(
+                Id,
+                new PosVoidSaleRequest(
+                    Guid.CreateVersion7(),
+                    sale.LocationId,
+                    openShift.ShiftId,
+                    deviceId,
+                    openShift.BusinessDate,
+                    DateTimeOffset.UtcNow,
+                    voidReason.Trim()),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { actionMessage = result.Error; return; }
+
+            await LoadSaleAsync();
+            actionMessage = $"Sale {sale?.Number} is voided.";
+        }
+        catch (HttpRequestException) { actionMessage = "The void service is unavailable. Try again shortly."; }
+        finally { voiding = false; }
+    }
+
+    private async Task AcceptReturnAsync()
+    {
+        if (sale is null || Session.DeviceId is not { } deviceId || Session.OpenShift is not { } openShift) return;
+
+        List<PosCreateReturnLine> lines = sale.Lines
+            .Select(line => new PosCreateReturnLine(line.ProductId, ReturnQty(line)))
+            .Where(line => line.Quantity > 0m)
+            .ToList();
+        if (lines.Count == 0)
+        {
+            actionMessage = "Choose at least one quantity to return.";
+            return;
+        }
+
+        acceptingReturn = true;
+        actionMessage = null;
+        try
+        {
+            ApiResult<PosNextNumber> number = await Api.PostNextNumberAsync(
+                sale.LocationId, "RET", CancellationToken.None);
+            if (!number.IsSuccess || number.Value is null) { actionMessage = number.Error; return; }
+
+            ApiResult<PosReference> result = await Api.CreateReturnAsync(
+                new PosCreateReturnRequest(
+                    number.Value.Number,
+                    Guid.CreateVersion7(),
+                    sale.Id,
+                    sale.LocationId,
+                    openShift.ShiftId,
+                    deviceId,
+                    sale.CustomerId,
+                    openShift.BusinessDate,
+                    DateTimeOffset.UtcNow,
+                    lines),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { actionMessage = result.Error; return; }
+
+            Navigation.NavigateTo($"/returns/{result.Value.Id:D}");
+        }
+        catch (HttpRequestException) { actionMessage = "The returns service is unavailable. Try again shortly."; }
+        finally { acceptingReturn = false; }
+    }
+
+    private void SetReturnQty(PosSaleLineDetail line, string? value)
+    {
+        if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal quantity))
+        {
+            returnQuantities.Remove(line.LineNumber);
+            return;
+        }
+
+        quantity = Math.Clamp(quantity, 0m, line.Quantity);
+        if (quantity is 0m) { returnQuantities.Remove(line.LineNumber); } else { returnQuantities[line.LineNumber] = quantity; }
+    }
+
+    private void OnReprintReasonChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => reprintReason = e.Value?.ToString() ?? string.Empty;
+    private void OnVoidReasonChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => voidReason = e.Value?.ToString() ?? string.Empty;
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

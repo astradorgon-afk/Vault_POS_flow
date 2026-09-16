@@ -83,6 +83,27 @@ public sealed record VoidSaleBody(
     DateTimeOffset VoidedAtUtc,
     string Reason);
 
+/// <summary>One completed sale as returned by the search route.</summary>
+public sealed record SaleSummary(
+    Guid Id,
+    string Number,
+    string Status,
+    DateOnly BusinessDate,
+    DateTimeOffset CompletedAtUtc,
+    decimal GrossTotal,
+    decimal NetTotal);
+
+/// <summary>
+/// The body of a receipt-reprint request. Identity fields
+/// (<see cref="ReprintSaleReceiptCommand.ReprintedByUserId"/>) come from the
+/// authenticated request; a reprint is a read-side emission and needs no shift.
+/// </summary>
+public sealed record ReprintSaleReceiptBody(
+    Guid LocationId,
+    Guid DeviceId,
+    string Reason,
+    DateTimeOffset ReprintedAtUtc);
+
 /// <summary>A completed sale as returned by the detail route.</summary>
 public sealed record SaleDetail(
     Guid Id,
@@ -132,6 +153,14 @@ public static class SaleEndpoints
             .WithName("CompleteSale")
             .WithSummary("Completes a point-of-sale transaction.");
 
+        group.MapGet("/", SearchSalesAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.View)
+            {
+                Scope = ScopeSource.QueryValue,
+            })
+            .WithName("SearchSales")
+            .WithSummary("Finds completed sales by location, business-date window and cashier.");
+
         group.MapGet("/{id:guid}", GetSaleDetailAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.View)
             {
@@ -147,6 +176,14 @@ public static class SaleEndpoints
             })
             .WithName("PrintSaleReceipt")
             .WithSummary("Renders a completed sale as printable plain text.");
+
+        group.MapPost("/{id:guid}/reprint", ReprintSaleReceiptAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Reprint)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ReprintSaleReceipt")
+            .WithSummary("Logs a permissioned reprint of a sale receipt, appending to the print log.");
 
         group.MapPost("/{id:guid}/void", VoidSaleAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Void)
@@ -195,6 +232,92 @@ public static class SaleEndpoints
             ? TypedResults.Created(
                 FormattableString.Invariant($"/api/v1/sales/{result.Value.Value}"),
                 new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> SearchSalesAsync(
+        [FromQuery] Guid locationId,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] Guid? cashierId,
+        [FromServices] PosDbContext context,
+        CancellationToken cancellationToken)
+    {
+        LocationId scope = new(locationId);
+
+        IQueryable<Sale> query = context.Sales
+            .AsNoTracking()
+            .Where(s => s.LocationId == scope);
+
+        if (from is { } fromDate)
+        {
+            query = query.Where(s => s.BusinessDate >= fromDate);
+        }
+
+        if (to is { } toDate)
+        {
+            query = query.Where(s => s.BusinessDate <= toDate);
+        }
+
+        if (cashierId is { } cashier)
+        {
+            UserId cashierAccount = new(cashier);
+            query = query.Where(s => s.CompletedByUserId == cashierAccount);
+        }
+
+        var rows = await query
+            .OrderByDescending(s => s.CompletedAtUtc)
+            .Take(200)
+            .Select(s => new
+            {
+                s.Id,
+                s.Number,
+                s.Status,
+                s.BusinessDate,
+                s.CompletedAtUtc,
+                s.GrossTotal,
+                s.NetTotal,
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<SaleSummary> results = rows
+            .Select(s => new SaleSummary(
+                s.Id.Value,
+                s.Number,
+                s.Status.ToString(),
+                s.BusinessDate,
+                s.CompletedAtUtc,
+                s.GrossTotal,
+                s.NetTotal))
+            .ToList();
+
+        return TypedResults.Ok(results);
+    }
+
+    private static async Task<IResult> ReprintSaleReceiptAsync(
+        Guid id,
+        [FromBody] ReprintSaleReceiptBody body,
+        [FromServices] IDispatcher dispatcher,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        SaleId saleId = new(id);
+
+        Result<SaleId> result = await dispatcher
+            .SendAsync(
+                new ReprintSaleReceiptCommand(
+                    saleId,
+                    new LocationId(body.LocationId),
+                    new DeviceId(body.DeviceId),
+                    body.Reason,
+                    body.ReprintedAtUtc,
+                    currentUser.UserId!.Value),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id = result.Value.Value })
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 

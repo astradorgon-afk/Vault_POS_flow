@@ -97,6 +97,23 @@ public static class SalesReturnErrors
             ["requested"] = requested,
         });
 
+    /// <summary>The return does not exist.</summary>
+    /// <param name="salesReturnId">The unknown return.</param>
+    /// <returns>The error.</returns>
+    public static Error Unknown(SalesReturnId salesReturnId) => Error.NotFound(
+        "sale.return.unknown",
+        FormattableString.Invariant($"Unknown return {salesReturnId.Value}."));
+
+    /// <summary>
+    /// The caller does not hold a return, refund, disposition or sales-view
+    /// permission at the return's own location.
+    /// </summary>
+    /// <param name="salesReturnId">The return.</param>
+    /// <returns>The error.</returns>
+    public static Error OutsideScope(SalesReturnId salesReturnId) => Error.Forbidden(
+        "sale.return.outside_scope",
+        FormattableString.Invariant($"The caller cannot act at the location of return {salesReturnId.Value}."));
+
     /// <summary>A refund carries no event identifier.</summary>
     public static Error RefundEventRequired { get; } = Error.Validation(
         "sale.refund.event_required",

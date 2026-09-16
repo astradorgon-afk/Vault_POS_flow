@@ -1,0 +1,187 @@
+@page "/sales"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Sales · VaultFlow</PageTitle>
+
+<section class="pos-head">
+    <div>
+        <span class="eyebrow">Point of sale</span>
+        <h1>Sales</h1>
+        <p>Find completed transactions by store and business date, then review, reprint or act on them.</p>
+    </div>
+    <div class="head-pickers">
+        <label class="location-picker">
+            <span>Store</span>
+            <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
+                    @onchange="OnLocationChangedAsync" disabled="@loadingLocations">
+                <option value="">Select a store</option>
+                @foreach (PosLocation location in locations)
+                {
+                    <option value="@location.Id">@location.Code · @location.Name</option>
+                }
+            </select>
+        </label>
+        <label class="location-picker">
+            <span>From</span>
+            <input type="date" @bind="from" disabled="@(selectedLocationId is null)"/>
+        </label>
+        <label class="location-picker">
+            <span>To</span>
+            <input type="date" @bind="to" disabled="@(selectedLocationId is null)"/>
+        </label>
+    </div>
+</section>
+
+@if (!CanViewSales)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view sales.</h2>
+        <p>Ask an administrator for the <code>sale.view</code> permission.</p>
+    </section>
+}
+else
+{
+    <section class="search-strip">
+        <span>@(results.Count) transaction@(results.Count == 1 ? "" : "s")@(searched ? $" · {searchedRange}" : "")</span>
+        <button type="button" class="search-action" @onclick="SearchAsync"
+                disabled="@(searching || selectedLocationId is null)">
+            @(searching ? "Searching…" : "Find sales")
+        </button>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    <section class="results-panel" aria-live="polite">
+        @if (searching)
+        {
+            <div class="results-empty">Searching the ledger…</div>
+        }
+        else if (results.Count == 0)
+        {
+            <div class="results-empty"><strong>No sales yet.</strong><span>Choose a store and business-date window, then search.</span></div>
+        }
+        else
+        {
+            <table class="sales-table">
+                <thead>
+                    <tr><th>SALE #</th><th>Status</th><th>Business date</th><th>Completed</th><th>Gross</th><th>Net</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosSaleSummary sale in results)
+                    {
+                        <tr @key="sale.Id" @onclick="() => OpenSale(sale.Id)">
+                            <td class="sale-number">@sale.Number</td>
+                            <td><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></td>
+                            <td>@sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
+                            <td>@sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@Money(sale.GrossTotal)</td>
+                            <td><strong>@Money(sale.NetTotal)</strong></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosSaleSummary> results = [];
+    private Guid? selectedLocationId;
+    private DateOnly? from;
+    private DateOnly? to;
+    private bool loadingLocations = true;
+    private bool searching;
+    private bool searched;
+    private string? message;
+    private string searchedRange = string.Empty;
+
+    private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewSales)
+        {
+            loadingLocations = false;
+            return;
+        }
+
+        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>(
+            "/api/v1/locations",
+            CancellationToken.None);
+        loadingLocations = false;
+        if (!response.IsSuccess || response.Value is null)
+        {
+            message = response.Error;
+            return;
+        }
+
+        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
+        locations.AddRange(response.Value.Where(location =>
+            location.Kind == 1 &&
+            (Session.Current?.User.HasAllLocations == true || assigned.Contains(location.Id))));
+        selectedLocationId = locations.Count == 1 ? locations[0].Id : null;
+        if (locations.Count == 0)
+        {
+            message = "No active store is assigned to this account.";
+        }
+    }
+
+    private void OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+        results.Clear();
+        searched = false;
+        message = null;
+    }
+
+    private async Task SearchAsync()
+    {
+        if (selectedLocationId is not { } locationId)
+        {
+            message = "Select the store before searching.";
+            return;
+        }
+
+        searching = true;
+        searched = true;
+        message = null;
+        results.Clear();
+        try
+        {
+            ApiResult<List<PosSaleSummary>> response = await Api.SearchSalesAsync(
+                locationId, from, to, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+
+            results.AddRange(response.Value);
+            searchedRange = BuildRangeLabel();
+            if (results.Count == 0)
+            {
+                message = "No completed sales matched that window.";
+            }
+        }
+        catch (HttpRequestException) { message = "The sales ledger is unavailable. Try again shortly."; }
+        finally { searching = false; }
+    }
+
+    private string BuildRangeLabel()
+    {
+        string fromLabel = from?.ToString("MMM d", CultureInfo.InvariantCulture) ?? "the beginning";
+        string toLabel = to?.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ?? "today";
+        return from is null && to is null ? "all business dates" : $"{fromLabel} – {toLabel}";
+    }
+
+    private void OpenSale(Guid saleId) => Navigation.NavigateTo($"/sales/{saleId:D}");
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}
