@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C16 complete**
+**Last updated:** 2026-09-16 · **Milestone:** Phase 10 complete; Phase 11 (POS) **C1–C17 complete**
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **915 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 161** (2026-09-16, through C16). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **921 passing without PostgreSQL: Domain 369, Application 241, Infrastructure 79, Security 52, Architecture 13, API 167** (2026-09-16, through C17). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests     79 passing   non-PostgreSQL ledger, numbering, cata
 Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       241 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    161 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface and sale-lifecycle read routes
+Pos.Api.IntegrationTests    167 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes and the payment-mix checkout flows
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -643,6 +643,29 @@ wrong string (`sale.external_customer_missing`).
   `sale.view` is present; `app.css` reworked: two-column grid,
   `primary-card` and `secondary-card` both span full width with distinct
   light backgrounds. Pos.Web builds 0 warnings, 0 errors.
+
+- **C17 — card/e-wallet + split payment checkout.** Web checkout
+  (`NewSale.razor`) now supports card, e-wallet and split payment mixes
+  alongside cash. The single cash tendered input is replaced by an allocated-
+  payment list with an add-payment form: method tabs (Cash / Card / E-wallet),
+  a precise-money amount input (seeded with the remaining amount using
+  `ToString("0.00########", InvariantCulture)` to prevent rounding-induced
+  payment mismatches), a cash tendered field with quick-tender buttons
+  (Exact / 100 / 500 / 1000), and an optional provider reference (max 128
+  chars) for card/e-wallet. Complete is disabled until the allocated total
+  equals the net total at 4 dp. Summary shows amount due, allocated,
+  remaining (or estimated change for cash). The server's existing payment
+  validation (method enum, amount > 0, cash tendered >= amount,
+  `sale.payment_mismatch` sum check at 4 dp) is reused as-is; no backend
+  changes required. New CSS for the allocated list, method chips (cash green,
+  card blue, e-wallet purple), the add-payment panel and quick-tender
+  layout. Pos.Web builds 0 warnings, 0 errors.
+  New `SalePaymentEndpointTests`: card-only (with provider reference),
+  e-wallet-only, split cash + card (asserts both payments, cash change and
+  provider ref), split cash + e-wallet, under-coverage refused
+  `sale.payment_mismatch`, over-coverage refused `sale.payment_mismatch`.
+  Six tests total. API suite runs 167 / 169 (2 known Docker-unavailable
+  Postgres failures).
 
 ---
 

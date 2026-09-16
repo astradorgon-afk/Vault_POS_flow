@@ -571,7 +571,12 @@ shelf cannot cover the line; the expired-override exception path requires
 `sale.expired_override`). Payments must cover the total exactly (`cash` records
 `tendered` so the renderer prints the change). A sale needs the `EXT-CUSTOMER`
 counterparty provisioned before it can post — the ledger posts store
-Available → EXT-CUSTOMER.
+Available → EXT-CUSTOMER. Cash, card and e-wallet may be mixed within one sale:
+payment rows carry `method` (`1` Cash, `2` Card, `3` EWallet), `amount`,
+optional `tendered` (cash only, may exceed `amount` to produce change) and an
+optional `providerReference` (≤ 128 chars) for card/e-wallet; the web checkout
+supports the full mix (C17), and a sum that differs from the total at 4 dp is
+refused `409 sale.payment_mismatch`.
 
 `GET /api/v1/sales/{id}` and the receipt route require `sale.view` and re-check
 it against the **sale's own location**: a Store Manager of another store gets

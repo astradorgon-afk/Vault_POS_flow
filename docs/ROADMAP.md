@@ -188,18 +188,17 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(server-side pricing, VAT classification and discount authorization
       complete since C8/C12; C15 adds `sale.discount`-gated line discounts in
       the web checkout and cash change rounded to the location increment)*
-- [~] Payments (cash, card via provider, split)
-      *(cash checkout landed in C15; card/e-wallet provider methods and
-      split payments pending)*
+- [x] Payments (cash, card via provider, split)
+      *(C15 landed cash checkout; C17 adds card/e-wallet methods and
+      split payment mixes in the web checkout; receipt thermal/PDF layout deferred)*
 - [x] Atomic sale completion (sale + items + payments + ledger + audit) + sale detail/read-back (C6)
 - [x] Receipt rendering and printing; permissioned reprint
       *(plain-text render + first print landed in C6; web reprint with reason
       and the sale-lifecycle views landed in C16; thermal/PDF layout deferred)*
 - [x] Void a completed sale with ledger reversal and reason (C1 domain + C8 route)
-- [~] Web sale lifecycle: search, detail, void, returns/refunds/dispositions
-      *(backend routes + full web pages completed in C16; payment-provider
-      methods in the checkout, receipt thermal/PDF layouts, and the
-      scheduled-price cancellation flow remain)*
+- [x] Web sale lifecycle: search, detail, void, returns/refunds/dispositions
+      *(backend routes + full web pages completed in C16; C17 adds payment-
+      provider methods to the checkout; receipt thermal/PDF layout deferred)*
 - [x] Return, refund and disposition routes (C9 returns/refunds; C10 line inspection,
   partial dispositions, quarantine incidents, ledger posting and retry safety)
 - [x] Customer lookup and optional accounts (C11)

@@ -88,3 +88,25 @@
 .sale-complete p { margin:0 0 22px; color:var(--muted); }
 .sale-complete button { min-width:150px; height:50px; border:0; border-radius:9px; background:var(--forest); color:white; font-weight:700; }
 @media(max-width:620px){.head-pickers{flex-direction:column}.shift-strip{align-items:stretch;flex-direction:column}.quick-tender{flex-wrap:wrap}}
+
+/* C17 split payments: allocated list, method tabs, add form. */
+.allocated-list { display:grid; gap:9px; margin-bottom:20px; }
+.allocated-empty { padding:16px; border:1px dashed #cbd5cd; border-radius:11px; color:var(--muted); text-align:center; font-size:.86rem; }
+.allocated-row { display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:12px; padding:13px 15px; border:1px solid var(--line); border-radius:11px; background:#fafbf9; }
+.allocated-row strong { text-align:right; font-size:1.08rem; }
+.allocated-row small { color:var(--muted); font-size:.8rem; }
+.method-chip { padding:4px 10px; border-radius:999px; font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+.method-chip.method-1 { background:#e7f0ea; color:var(--forest); }
+.method-chip.method-2 { background:#e8eefc; color:#33528c; }
+.method-chip.method-3 { background:#f4eaf7; color:#7a4186; }
+.remove-payment { width:30px; height:30px; border:1px solid var(--line); border-radius:8px; background:white; color:#8b3b35; font-size:1.1rem; line-height:1; }
+.remove-payment:disabled { opacity:.5; }
+.add-payment { padding:17px; border:1px solid var(--line); border-radius:13px; background:#fafbf9; }
+.method-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-bottom:15px; }
+.method-tabs button { height:40px; border:1px solid var(--line); border-radius:9px; background:white; color:var(--muted); font-size:.8rem; font-weight:700; }
+.method-tabs button.selected { border-color:var(--forest); background:var(--forest); color:white; }
+.field-hint { text-transform:none; letter-spacing:0; font-weight:600; }
+.add-payment .optional { color:var(--muted); font-weight:600; text-transform:none; letter-spacing:0; }
+.add-payment-btn { width:100%; height:46px; margin-top:16px; border:0; border-radius:9px; background:var(--forest); color:white; font-weight:700; }
+.add-payment-btn:disabled { opacity:.55; }
+.payment-body .tender-row + .tender-row { margin-top:13px; }

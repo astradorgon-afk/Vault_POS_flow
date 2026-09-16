@@ -96,24 +96,93 @@ else
             </header>
 
             <div class="payment-body">
-                <label class="tender-row">
-                    <span>Cash tendered</span>
-                    <input type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"
-                           value="@tendered" @onchange="OnTenderedChanged"
-                           disabled="@completing" />
-                </label>
+                <div class="allocated-list" aria-live="polite">
+                    @if (payments.Count == 0)
+                    {
+                        <div class="allocated-empty">No payments added yet.</div>
+                    }
+                    else
+                    {
+                        @foreach (PaymentInput payment in payments)
+                        {
+                            <article class="allocated-row" @key="payment">
+                                <span class="method-chip method-@payment.Method">@MethodLabel(payment.Method)</span>
+                                <strong>@Money(payment.Amount)</strong>
+                                <small>
+                                    @if (payment.Method == 1)
+                                    {
+                                        <text>tendered @Money(payment.Tendered ?? 0m) · change @Money(EstimatedChange(payment))</text>
+                                    }
+                                    else
+                                    {
+                                        <text>@(string.IsNullOrWhiteSpace(payment.ProviderReference) ? "no provider reference" : $"ref {payment.ProviderReference}")</text>
+                                    }
+                                </small>
+                                <button type="button" class="remove-payment" aria-label="Remove @MethodLabel(payment.Method) payment" @onclick="() => RemovePayment(payment)" disabled="@completing">×</button>
+                            </article>
+                        }
+                    }
+                </div>
 
-                <div class="quick-tender">
-                    <button type="button" @onclick="() => tendered = MoneyPlain(RoundedNet)" disabled="@completing">Exact</button>
-                    <button type="button" @onclick="() => tendered = MoneyPlain(100m)" disabled="@completing">100</button>
-                    <button type="button" @onclick="() => tendered = MoneyPlain(500m)" disabled="@completing">500</button>
-                    <button type="button" @onclick="() => tendered = MoneyPlain(1000m)" disabled="@completing">1000</button>
+                <div class="add-payment">
+                    <div class="method-tabs" role="group" aria-label="Payment method">
+                        <button type="button" class="@(paymentMethod == 1 ? "selected" : "")" @onclick="() => SetMethod(1)">Cash</button>
+                        <button type="button" class="@(paymentMethod == 2 ? "selected" : "")" @onclick="() => SetMethod(2)">Card</button>
+                        <button type="button" class="@(paymentMethod == 3 ? "selected" : "")" @onclick="() => SetMethod(3)">E-wallet</button>
+                    </div>
+
+                    <label class="tender-row">
+                        <span>Amount</span>
+                        <input type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"
+                               value="@paymentAmount" @onchange="OnPaymentAmountChanged"
+                               disabled="@completing" />
+                        <small class="field-hint">Up to @Money(MaxAddableAmount)</small>
+                    </label>
+
+                    @if (paymentMethod == 1)
+                    {
+                        <label class="tender-row">
+                            <span>Cash tendered</span>
+                            <input type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"
+                                   value="@cashTendered" @onchange="OnCashTenderedChanged"
+                                   disabled="@completing" />
+                        </label>
+                        <div class="quick-tender">
+                            <button type="button" @onclick="() => cashTendered = PaymentAmountExact()" disabled="@completing">Exact</button>
+                            <button type="button" @onclick="() => cashTendered = MoneyPlain(100m)" disabled="@completing">100</button>
+                            <button type="button" @onclick="() => cashTendered = MoneyPlain(500m)" disabled="@completing">500</button>
+                            <button type="button" @onclick="() => cashTendered = MoneyPlain(1000m)" disabled="@completing">1000</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="tender-row">
+                            <span>Provider reference <em class="optional">optional</em></span>
+                            <input type="text" maxlength="128" placeholder="Terminal or gateway reference" autocomplete="off"
+                                   value="@providerReference" @onchange="OnProviderReferenceChanged"
+                                   disabled="@completing" />
+                        </label>
+                    }
+
+                    @if (AddPaymentError is not null)
+                    {
+                        <div class="pos-message" role="alert">@AddPaymentError</div>
+                    }
+
+                    <button type="button" class="add-payment-btn" @onclick="AddPayment" disabled="@(completing || !CanAddPayment)">Add payment</button>
                 </div>
 
                 <div class="tender-summary">
                     <div><span>Amount due</span><strong>@Money(NetTotal)</strong></div>
-                    <div><span>Tendered</span><strong>@Money(TenderedAmount)</strong></div>
-                    <div class="change"><span>Estimated change</span><strong>@Money(ChangeEstimate)</strong></div>
+                    <div><span>Allocated</span><strong>@Money(AllocatedTotal)</strong></div>
+                    @if (RemainingToPay > 0m)
+                    {
+                        <div><span>Remaining to pay</span><strong>@Money(RemainingToPay)</strong></div>
+                    }
+                    else
+                    {
+                        <div class="change"><span>Estimated change (cash)</span><strong>@Money(TotalChangeEstimate)</strong></div>
+                    }
                 </div>
 
                 @if (!string.IsNullOrWhiteSpace(checkoutMessage))
@@ -124,7 +193,7 @@ else
 
             <footer>
                 <button type="button" class="checkout" @onclick="CompleteSaleAsync"
-                        disabled="@(completing || !CanPay || TenderedAmount < NetTotal)">@(completing ? "Completing…" : "Complete sale")</button>
+                        disabled="@(completing || !CanPay || RemainingToPay > 0m)">@(completing ? "Completing…" : "Complete sale")</button>
             </footer>
         </section>
     }
@@ -259,7 +328,11 @@ else
     private bool loadingRegisters;
     private bool startingShift;
     private bool showPayment;
-    private string tendered = string.Empty;
+    private readonly List<PaymentInput> payments = [];
+    private int paymentMethod = 1;
+    private string paymentAmount = string.Empty;
+    private string cashTendered = string.Empty;
+    private string providerReference = string.Empty;
     private bool completing;
     private CompletedSaleState? completedSale;
 
@@ -269,11 +342,100 @@ else
     private decimal Subtotal => cart.Sum(line => line.Total);
     private decimal DiscountTotal => cart.Sum(line => DiscountFor(line.Product.Id));
     private decimal NetTotal => decimal.Round(Subtotal - DiscountTotal, 4, MidpointRounding.ToEven);
-    private decimal RoundedNet => RoundToIncrement(NetTotal);
-    private decimal TenderedAmount => decimal.TryParse(tendered, System.Globalization.NumberStyles.Currency, CultureInfo.CurrentCulture, out decimal amount) ? amount : 0m;
-    private decimal ChangeEstimate => TenderedAmount >= NetTotal ? RoundToIncrement(TenderedAmount - NetTotal) : 0m;
+    private decimal AllocatedTotal => payments.Sum(payment => payment.Amount);
+    private decimal RemainingToPay => decimal.Round(NetTotal - AllocatedTotal, 4, MidpointRounding.ToEven);
+    private decimal MaxAddableAmount => RemainingToPay;
+    private decimal TotalChangeEstimate => payments.Where(payment => payment.Method == 1).Sum(EstimatedChange);
     private decimal DiscountFor(Guid productId) => discounts.GetValueOrDefault(productId);
     private decimal LineTotalAfterDiscount(PosCartLine line) => decimal.Round(line.Total - DiscountFor(line.Product.Id), 4, MidpointRounding.ToEven);
+
+    private bool CanAddPayment
+    {
+        get
+        {
+            if (!TryParseAmount(paymentAmount, out decimal amount)) return false;
+            if (amount <= 0m || amount > MaxAddableAmount) return false;
+            if (paymentMethod == 1)
+            {
+                if (!TryParseAmount(cashTendered, out decimal tendered)) return false;
+                if (tendered < amount) return false;
+            }
+
+            return ProviderReferenceValid;
+        }
+    }
+
+    private bool ProviderReferenceValid
+        => string.IsNullOrWhiteSpace(providerReference) || providerReference.Trim().Length <= PosReferenceMaxLength;
+
+    private string? AddPaymentError
+    {
+        get
+        {
+            if (!TryParseAmount(paymentAmount, out decimal amount) || amount <= 0m)
+            {
+                return "Enter an amount above zero.";
+            }
+
+            if (amount > MaxAddableAmount)
+            {
+                return "That amount exceeds what is still due.";
+            }
+
+            if (paymentMethod == 1)
+            {
+                if (!TryParseAmount(cashTendered, out decimal tendered))
+                {
+                    return "Enter the cash tendered.";
+                }
+
+                if (tendered < amount)
+                {
+                    return "The cash tendered is below the payment amount.";
+                }
+            }
+
+            if (!ProviderReferenceValid)
+            {
+                return $"The provider reference is limited to {PosReferenceMaxLength} characters.";
+            }
+
+            return null;
+        }
+    }
+
+    private const int PosReferenceMaxLength = 128;
+
+    private static bool TryParseAmount(string? value, out decimal amount)
+        => decimal.TryParse(value, System.Globalization.NumberStyles.Currency, CultureInfo.CurrentCulture, out amount);
+
+    private async Task AddPayment()
+    {
+        if (!TryParseAmount(paymentAmount, out decimal amount) || amount <= 0m || amount > MaxAddableAmount)
+        {
+            return;
+        }
+
+        if (paymentMethod == 1)
+        {
+            if (!TryParseAmount(cashTendered, out decimal tendered) || tendered < amount)
+            {
+                return;
+            }
+
+            payments.Add(new PaymentInput(1, amount, tendered, null));
+        }
+        else
+        {
+            payments.Add(new PaymentInput(
+                paymentMethod,
+                amount,
+                Tendered: null,
+                string.IsNullOrWhiteSpace(providerReference) ? null : providerReference.Trim()));
+        }
+
+        ResetAddPaymentForm();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -418,6 +580,8 @@ else
     private void StartPayment()
     {
         if (NetTotal <= 0m) return;
+        payments.Clear();
+        ResetAddPaymentForm();
         showPayment = true;
         checkoutMessage = null;
     }
@@ -435,9 +599,9 @@ else
             checkoutMessage = "The terminal session is not ready. Reopen this page.";
             return;
         }
-        if (TenderedAmount < NetTotal)
+        if (RemainingToPay > 0m)
         {
-            checkoutMessage = "The cash tendered is below the amount due.";
+            checkoutMessage = "The payments do not yet cover the amount due.";
             return;
         }
 
@@ -469,14 +633,19 @@ else
                 terminalSession.BusinessDate,
                 CompletedAtUtc: DateTimeOffset.UtcNow,
                 lines,
-                [new PosPayment(Method: 1 /* Cash */, NetTotal, TenderedAmount, ProviderReference: null)]);
+                payments.Select(payment => new PosPayment(
+                    payment.Method,
+                    payment.Amount,
+                    payment.Tendered,
+                    payment.ProviderReference)).ToList());
 
             ApiResult<PosCompletedSale> result = await Api.CompleteSaleAsync(request, CancellationToken.None);
             if (!result.IsSuccess || result.Value is null) { checkoutMessage = result.Error; return; }
 
             completedSale = new CompletedSaleState(number.Value.Number);
             showPayment = false;
-            tendered = string.Empty;
+            payments.Clear();
+            ResetAddPaymentForm();
             discounts.Clear();
             cart.Clear();
             results.Clear();
@@ -489,13 +658,70 @@ else
     {
         completedSale = null;
         checkoutMessage = null;
-        tendered = string.Empty;
+        payments.Clear();
+        ResetAddPaymentForm();
     }
 
-    private void OnTenderedChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    private void OnPaymentAmountChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
-        tendered = e.Value?.ToString() ?? string.Empty;
+        paymentAmount = e.Value?.ToString() ?? string.Empty;
     }
+
+    private void OnCashTenderedChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        cashTendered = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private void OnProviderReferenceChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        providerReference = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private void SetMethod(int method)
+    {
+        paymentMethod = method;
+        if (method == 1)
+        {
+            providerReference = string.Empty;
+        }
+        else
+        {
+            cashTendered = string.Empty;
+        }
+    }
+
+    private void RemovePayment(PaymentInput payment)
+    {
+        payments.Remove(payment);
+    }
+
+    private void ResetAddPaymentForm()
+    {
+        paymentAmount = MoneyPrecise(MaxAddableAmount);
+        cashTendered = string.Empty;
+        providerReference = string.Empty;
+    }
+
+    private string PaymentAmountExact()
+        => TryParseAmount(paymentAmount, out decimal amount) && amount > 0m ? MoneyPrecise(amount) : string.Empty;
+
+    private decimal EstimatedChange(PaymentInput payment)
+    {
+        if (payment.Method != 1 || payment.Tendered is not { } tendered)
+        {
+            return 0m;
+        }
+
+        return RoundToIncrement(tendered - payment.Amount);
+    }
+
+    private static string MethodLabel(int method) => method switch
+    {
+        1 => "Cash",
+        2 => "Card",
+        3 => "E-wallet",
+        _ => "Other",
+    };
 
     private void SetDiscount(PosCartLine line, string? value)
     {
@@ -516,6 +742,9 @@ else
 
     private static string MoneyPlain(decimal value)
         => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string MoneyPrecise(decimal value)
+        => value.ToString("0.00########", CultureInfo.InvariantCulture);
 
     private async Task SearchAsync()
     {
@@ -584,4 +813,6 @@ else
     private void ClearCart() { cart.Clear(); discounts.Clear(); results.Clear(); message = null; }
 
     private sealed record CompletedSaleState(string Number);
+
+    private sealed record PaymentInput(int Method, decimal Amount, decimal? Tendered, string? ProviderReference);
 }

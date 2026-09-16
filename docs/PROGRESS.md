@@ -24,12 +24,11 @@ with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
 (returns HTTP surface), C10 (return disposition), C11 (customer accounts), C12
 (discount HTTP regressions), C13 (authenticated web shell), C14
 (API-backed POS cart workspace), C15 (checkout orchestration with
-server-numbered web terminals) and C16 (web sale lifecycle: sales search,
+server-numbered web terminals), C16 (web sale lifecycle: sales search,
 receipt reprint/void and return/refund/disposition workflows in the browser)
-are complete;
-details are in the log below.
-**Last commits:** C16 (this commit — web sale lifecycle with 9 new backend
-tests), C15 (this commit — carries the C14 web shell and cart
+and C17 (card/e-wallet and split payment mixes in the web checkout) are
+complete; details are in the log below.
+**Last commits:** C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -625,3 +624,31 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   suite **161 passing** — only the two PostgreSQL-guard members fail (Docker
   unavailable). Domain 369, Application 241 green; `Pos.Web` builds 0 warnings
   0 errors. Docs: STATUS, ROADMAP, API §9 updated.
+
+### C17 — card/e-wallet + split payment checkout (`feat(pos-c17)`)
+- `NewSale.razor`: the single cash tendered input is replaced by a payment
+  allocation flow. A `List<PaymentInput>` tracks added payments (method, amount,
+  optional tendered for cash, optional provider reference). The add-payment form
+  presents method tabs (Cash / Card / E-wallet), a precise-money amount input
+  seeded with the remaining amount (`MoneyPrecise` = `ToString("0.00########",
+  InvariantCulture)`) to avoid rounding-induced payment mismatches at the 4 dp
+  compare, a cash tendered field with quick-tender buttons (Exact / 100 / 500 /
+  1000), and a provider reference (max 128 chars) for card and e-wallet.
+  `Complete` is disabled until `RemainingToPay == 0`. Summary shows amount due,
+  allocated, remaining (or estimated change for cash per `RoundToIncrement`).
+  No backend changes required: the server-side payment validation (method enum,
+  amount > 0, cash tendered ≥ amount, `sale.payment_mismatch` sum check at 4 dp,
+  max 128-char provider reference) already supports the full payment mix.
+- New CSS: `.allocated-list`, `.allocated-row`, `.method-chip` (`.method-1` /
+  `.method-2` / `.method-3` with cash green, card blue, e-wallet purple),
+  `.add-payment`, `.method-tabs`, `.quick-tender`, `.add-payment-btn`,
+  `.remove-payment`, `.optional`, `.field-hint`. `Pos.Web` builds 0 warnings
+  0 errors.
+- New `SalePaymentEndpointTests` (6 integration tests): card-only with provider
+  reference, e-wallet-only with provider reference, split cash + card (asserts
+  both payments, cash change of 5 and card provider reference), split cash +
+  e-wallet (asserts total allocated equals net total), under-coverage refused
+  409 `sale.payment_mismatch`, over-coverage (cash amount > net) refused 409
+  `sale.payment_mismatch`. API suite: **167 passing** (2 known Docker-unavailable
+  Postgres failures). Domain 369, Application 241 green. Docs: STATUS,
+  PROGRESS, ROADMAP updated.
