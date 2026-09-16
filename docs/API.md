@@ -486,7 +486,7 @@ money balance; there is no subscription, invoice or usage metering behind it.
 GET    /api/v1/receipts                  receipt.view     -> list, newest first, scoped to the caller's locations
 POST   /api/v1/receipts                  receipt.create   -> 201 { id }, Location header; RCT number allocated
 GET    /api/v1/receipts/{id}             receipt.view     -> detail, 403 receipt.outside_scope
-GET    /api/v1/receipts/{id}/print       receipt.view     -> text/plain rendering for print or email
+GET    /api/v1/receipts/{id}/print       receipt.view     -> ?format=Plain|Thermal|Html; text/plain or text/html
 ```
 
 Notes:
@@ -512,11 +512,15 @@ Notes:
   (1–200, default 100). A store-scoped caller only ever sees receipts at their
   assigned locations; filtering on another location returns an empty list rather
   than revealing it.
-- **Rendering:** `ReceiptRenderer` produces the plain-text form (number, issue
+- **Rendering:** `?format=Plain` is the default. `Thermal` emits a fixed
+  42-column, 80 mm layout for a receipt printer; `Html` emits a self-contained
+  80 mm print document for a browser's print-to-PDF flow. All variants contain
+  the same stored document data, HTML-encode dynamic values, and retain the
+  branch-wall-clock issue time.
+- **Plain form:** `ReceiptRenderer` produces the plain-text form (number, issue
   time in the branch's own time zone — `2026-09-14 10:52 (Asia/Manila)`, UTC only
   when the zone is unknown — location, type, amount, optional
   counterparty/reference/note, issuer). Emailing is out of scope; the rendering is
-  the seam a thermal or PDF layout replaces.
 - **Immutable:** a receipt is never edited or deleted — domain type, EF
   interceptor, database triggers and `pos_app` grants all refuse it. A wrong
   receipt is corrected by issuing another, not by changing the first.
@@ -539,7 +543,7 @@ GET    /api/v1/shifts/{id}/summary                   shift.open
 POST   /api/v1/sales                                 sale.create   (Idempotency-Key required) -> LEDGER
 GET    /api/v1/sales?locationId&from&to&cashierId    sale.view
 GET    /api/v1/sales/{id}                            sale.view     -> detail, 403 sale.outside_scope
-GET    /api/v1/sales/{id}/receipt                    sale.view     -> text/plain rendering, logs the first print
+GET    /api/v1/sales/{id}/receipt                    sale.view     -> ?format=Plain|Thermal|Html; logs the first print
 POST   /api/v1/sales/{id}/void                       sale.void     -> LEDGER (reversal)
 POST   /api/v1/sales/{id}/reprint                    sale.reprint
 GET    /api/v1/terminal/registers?locationId=        sale.create   -> the store's active browser registers

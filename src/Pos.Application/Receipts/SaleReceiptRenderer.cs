@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Pos.Domain.Sales;
 
 namespace Pos.Application.Receipts;
@@ -58,6 +59,230 @@ public static class SaleReceiptRenderer
 
         return string.Join(line, lines) + line;
     }
+
+    /// <summary>
+    /// Renders a sale receipt in the requested <see cref="ReceiptFormat"/>,
+    /// keeping the plain-text form as the default.
+    /// </summary>
+    public static string Render(
+        Sale sale,
+        string locationName,
+        string? timeZoneId,
+        string? issuedByName,
+        ReceiptFormat format,
+        string lineSeparator = "\n")
+        => format switch
+        {
+            ReceiptFormat.Thermal => RenderThermal(sale, locationName, timeZoneId, issuedByName, lineSeparator),
+            ReceiptFormat.Html => RenderHtml(sale, locationName, timeZoneId, issuedByName),
+            _ => RenderPlainText(sale, locationName, timeZoneId, issuedByName, lineSeparator),
+        };
+
+    /// <summary>
+    /// Renders a sale receipt as a fixed 42-column, 80 mm thermal layout:
+    /// every line is cut-width and amounts align at the right edge, ready for a
+    /// device thermal head.
+    /// </summary>
+    public static string RenderThermal(
+        Sale sale,
+        string locationName,
+        string? timeZoneId,
+        string? issuedByName,
+        string lineSeparator = "\n")
+    {
+        ArgumentNullException.ThrowIfNull(sale);
+
+        string number = sale.Number;
+
+        List<string> lines =
+        [
+            ReceiptThermal.Center("SALE RECEIPT"),
+            ReceiptThermal.Center(new string('=', Math.Max(8, number.Length))),
+            ReceiptThermal.Center(number),
+            ReceiptThermal.Line($"Sold: {FormatCompleted(sale.CompletedAtUtc, timeZoneId)}"),
+            ReceiptThermal.Line($"Location: {locationName}"),
+            ReceiptThermal.Line($"Cashier: {issuedByName ?? string.Empty}"),
+            ReceiptThermal.Divider,
+        ];
+
+        foreach (SaleItem item in sale.Items)
+        {
+            lines.AddRange(RenderThermalItem(item));
+        }
+
+        lines.Add(ReceiptThermal.Divider);
+        lines.AddRange(RenderThermalTotals(sale));
+        lines.AddRange(RenderThermalPayments(sale));
+        lines.Add(ReceiptThermal.Divider);
+        lines.Add(ReceiptThermal.Center("Thank you."));
+
+        return string.Join(lineSeparator, lines) + lineSeparator;
+    }
+
+    /// <summary>
+    /// Renders a sale receipt as a self-contained HTML document sized for an
+    /// 80 mm printout — the browser's print-to-PDF path for a cashier who
+    /// needs a readable, copyable copy. Every value is HTML-escaped.
+    /// </summary>
+    public static string RenderHtml(
+        Sale sale,
+        string locationName,
+        string? timeZoneId,
+        string? issuedByName)
+    {
+        ArgumentNullException.ThrowIfNull(sale);
+
+        StringBuilder body = new();
+
+        body.Append("<div class=\"receipt\">").Append('\n');
+        body.Append("  <header class=\"receipt-head\">").Append('\n');
+        body.Append("    <h1>Sale Receipt</h1>").Append('\n');
+        body.Append("    <div class=\"number\">").Append(ReceiptHtml.Escape(sale.Number)).Append("</div>").Append('\n');
+        body.Append("    <div class=\"meta\">").Append('\n');
+        body.Append("      <span>Sold: ").Append(ReceiptHtml.Escape(FormatCompleted(sale.CompletedAtUtc, timeZoneId))).Append("</span>").Append('\n');
+        body.Append("      <span>Location: ").Append(ReceiptHtml.Escape(locationName)).Append("</span>").Append('\n');
+        body.Append("      <span>Cashier: ").Append(ReceiptHtml.Escape(issuedByName ?? string.Empty)).Append("</span>").Append('\n');
+        body.Append("    </div>").Append('\n');
+        body.Append("  </header>").Append('\n');
+        body.Append("  <hr class=\"seal\" />").Append('\n');
+        body.Append("  <table class=\"items\">").Append('\n');
+        body.Append("    <tbody>").Append('\n');
+
+        foreach (SaleItem item in sale.Items)
+        {
+            body.Append("      <tr>").Append('\n');
+            body.Append("        <td>")
+                .Append(ReceiptHtml.Escape($"{Number(item.LineNumber)} {item.ProductName}"))
+                .Append("</td>").Append('\n');
+            body.Append("        <td class=\"amount\">")
+                .Append(ReceiptHtml.Escape(Money(item.NetAmount)))
+                .Append("</td>").Append('\n');
+            body.Append("      </tr>").Append('\n');
+
+            string qty = $"{item.Quantity.ToString("N3", CultureInfo.InvariantCulture)} @ {Money(item.UnitPrice)}";
+            if (!string.IsNullOrWhiteSpace(item.Barcode))
+            {
+                qty += " · " + item.Barcode;
+            }
+
+            if (item.Discount > 0m)
+            {
+                qty += " · discount " + Money(item.Discount);
+            }
+
+            body.Append("      <tr class=\"qty\"><td colspan=\"2\">")
+                .Append(ReceiptHtml.Escape(qty))
+                .Append("</td></tr>").Append('\n');
+        }
+
+        body.Append("    </tbody>").Append('\n');
+        body.Append("  </table>").Append('\n');
+        body.Append("  <hr class=\"seal\" />").Append('\n');
+        body.Append("  <table class=\"totals\">").Append('\n');
+        body.Append("    <tbody>").Append('\n');
+        body.Append(HtmlRow("VAT-exempt:", Money(sale.VatExemptTotal)));
+        body.Append(HtmlRow("Zero-rated:", Money(sale.ZeroRatedTotal)));
+        body.Append(HtmlRow("Discount:", Money(sale.DiscountTotal)));
+        body.Append(HtmlRow($"VAT ({VatRateLabel(sale)}):", Money(sale.VatTotal)));
+        body.Append("      <tr class=\"grand\"><td>TOTAL:</td><td class=\"amount\">")
+            .Append(ReceiptHtml.Escape(Money(sale.NetTotal)))
+            .Append("</td></tr>").Append('\n');
+        body.Append("    </tbody>").Append('\n');
+        body.Append("  </table>").Append('\n');
+        body.Append("  <hr class=\"seal\" />").Append('\n');
+        body.Append("  <table class=\"payments\">").Append('\n');
+        body.Append("    <tbody>").Append('\n');
+
+        foreach (Payment payment in sale.Payments)
+        {
+            string method = PaymentMethodLabel(payment.Method);
+            body.Append("      <tr><td>Paid by ").Append(ReceiptHtml.Escape(method))
+                .Append(":</td><td class=\"amount\">")
+                .Append(ReceiptHtml.Escape(Money(payment.Amount)))
+                .Append("</td></tr>").Append('\n');
+
+            if (payment.Tendered is { } tendered)
+            {
+                body.Append("      <tr><td class=\"indent\">Tendered:</td><td class=\"amount\">")
+                    .Append(ReceiptHtml.Escape(Money(tendered)))
+                    .Append("</td></tr>").Append('\n');
+                body.Append("      <tr><td class=\"indent\">Change:</td><td class=\"amount\">")
+                    .Append(ReceiptHtml.Escape(Money(payment.Change ?? 0m)))
+                    .Append("</td></tr>").Append('\n');
+            }
+
+            if (!string.IsNullOrWhiteSpace(payment.ProviderReference))
+            {
+                body.Append("      <tr><td class=\"indent\">Reference:</td><td>")
+                    .Append(ReceiptHtml.Escape(payment.ProviderReference))
+                    .Append("</td></tr>").Append('\n');
+            }
+        }
+
+        body.Append("    </tbody>").Append('\n');
+        body.Append("  </table>").Append('\n');
+        body.Append("  <footer>Thank you.</footer>").Append('\n');
+        body.Append("</div>").Append('\n');
+
+        return ReceiptHtml.Document($"SALE RECEIPT — {sale.Number}", body.ToString());
+    }
+
+    private static IEnumerable<string> RenderThermalItem(SaleItem item)
+    {
+        string quantity = item.Quantity.ToString("N3", CultureInfo.InvariantCulture);
+        string unit = item.UnitPrice.ToString("N2", CultureInfo.InvariantCulture);
+        string net = item.NetAmount.ToString("N2", CultureInfo.InvariantCulture);
+
+        yield return ReceiptThermal.Line($"{Number(item.LineNumber)} {item.ProductName}");
+        yield return ReceiptThermal.Row($"     {quantity} @ {unit}", net);
+
+        if (!string.IsNullOrWhiteSpace(item.Barcode))
+        {
+            yield return ReceiptThermal.Line($"     {item.Barcode}");
+        }
+
+        if (item.Discount > 0m)
+        {
+            yield return ReceiptThermal.Row(
+                "     discount", item.Discount.ToString("N2", CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static IEnumerable<string> RenderThermalTotals(Sale sale)
+    {
+        yield return ReceiptThermal.Row("VAT-exempt:", Money(sale.VatExemptTotal));
+        yield return ReceiptThermal.Row("Zero-rated:", Money(sale.ZeroRatedTotal));
+        yield return ReceiptThermal.Row("Discount:", Money(sale.DiscountTotal));
+        yield return ReceiptThermal.Row($"VAT ({VatRateLabel(sale)}):", Money(sale.VatTotal));
+        yield return ReceiptThermal.Row("TOTAL:", Money(sale.NetTotal));
+    }
+
+    private static IEnumerable<string> RenderThermalPayments(Sale sale)
+    {
+        foreach (Payment payment in sale.Payments)
+        {
+            string method = PaymentMethodLabel(payment.Method);
+            yield return ReceiptThermal.Row($"Paid by {method}:", Money(payment.Amount));
+
+            if (payment.Tendered is { } tendered)
+            {
+                yield return ReceiptThermal.Row("  Tendered:", Money(tendered));
+                yield return ReceiptThermal.Row("  Change:", Money(payment.Change ?? 0m));
+            }
+
+            if (!string.IsNullOrWhiteSpace(payment.ProviderReference))
+            {
+                yield return ReceiptThermal.Line($"  Reference: {payment.ProviderReference}");
+            }
+        }
+    }
+
+    private static string HtmlRow(string label, string amount)
+        => "      <tr><td>" + ReceiptHtml.Escape(label)
+           + "</td><td class=\"amount\">" + ReceiptHtml.Escape(amount)
+           + "</td></tr>\n";
+
+    private static string Money(decimal value) => value.ToString("N2", CultureInfo.InvariantCulture);
 
     private static IEnumerable<string> RenderItem(SaleItem item)
     {

@@ -126,6 +126,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C16 — web sale lifecycle: sales search (`GET /api/v1/sales` summaries), `GET /api/v1/returns/{id}` detail, `POST /api/v1/sales/{id}/reprint` reason+append-only; 9 new `SaleLifecycleEndpointTests`; web pages: sales search, sale detail (receipt/reprint/void/accept-return), return detail (disposition/refund/refund history); shared `TerminalBar`; `Pos.Web` builds clean
   - [x] C17 — card/e-wallet + split payment checkout: allocated-payment list, method tabs (cash/card/e-wallet), quick tender, provider reference; complete gated until allocated = net at 4 dp; 6 new `SalePaymentEndpointTests`, 0 backend changes
   - [x] C18 — expired-batch sale blocking + authorized override path: `inventory.expired_only` refusal classified against past-expiry coverage (shortfalls stay `inventory.insufficient_stock`); per-line `sale.expired_override` denial check (`sale.expired_override_denied` → 403); mandatory line reason (max 500) recorded in the `sale.expired.override` audit with the authorizing user stamped from context; web probe-then-confirm dialog with reason required; 5 new unit tests (3 validator + 2 handler) and 4 new `ExpiredOverrideEndpointTests`
+  - [x] C20 — receipt formats: `Plain` remains default; `Thermal` renders every line at 42 columns for 80 mm printers; `Html` emits an escaped, self-contained 80 mm document. Both receipt endpoints select formats through `?format=Plain|Thermal|Html`; the web sale detail opens HTML in the browser print dialog for PDF output.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -727,3 +728,16 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   Totals: Domain **376**, Application 245, Infrastructure 80 (18 skipped),
   Security 52, Architecture 13, API **172 passing** (2 known Docker-unavailable
   Postgres failures). Docs: STATUS, PROGRESS, ROADMAP, API, DECISIONS updated.
+
+### C20 — thermal and HTML receipt formats (`feat(pos-c20)`)
+
+- `ReceiptRenderer` and `SaleReceiptRenderer` now retain plain text as the
+  default while adding a 42-column `Thermal` layout for 80 mm receipt printers
+  and a self-contained, escaped `Html` print document sized for 80 mm paper.
+- `GET /api/v1/receipts/{id}/print` and `GET /api/v1/sales/{id}/receipt` accept
+  `?format=Plain|Thermal|Html`; HTML returns `text/html`, all other formats
+  return `text/plain`. Sale receipt first-print logging is unchanged.
+- The sale-detail page now offers **Printable / PDF**, which opens the HTML
+  document in the browser print dialog.
+- Tests: 2 renderer tests (fixed-width output and HTML escaping) plus one API
+  integration scenario covering all payment-receipt formats.

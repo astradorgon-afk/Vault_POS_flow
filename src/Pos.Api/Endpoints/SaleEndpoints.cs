@@ -360,6 +360,7 @@ public static class SaleEndpoints
 
     private static async Task<IResult> PrintSaleReceiptAsync(
         Guid id,
+        [FromQuery] ReceiptFormat? format,
         [FromServices] ISalesRepository repository,
         [FromServices] IPermissionEvaluator evaluator,
         [FromServices] PosDbContext context,
@@ -406,8 +407,9 @@ public static class SaleEndpoints
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        string text = SaleReceiptRenderer.RenderPlainText(
-            sale, location?.Name ?? string.Empty, location?.TimeZoneId, cashierName);
+        ReceiptFormat requestedFormat = format ?? ReceiptFormat.Plain;
+        string text = SaleReceiptRenderer.Render(
+            sale, location?.Name ?? string.Empty, location?.TimeZoneId, cashierName, requestedFormat);
 
         Result<SaleReceiptPrint> print = SaleReceiptPrint.Create(
             saleId,
@@ -423,7 +425,8 @@ public static class SaleEndpoints
                 .ConfigureAwait(false);
         }
 
-        return TypedResults.Text(text, "text/plain");
+        string contentType = requestedFormat == ReceiptFormat.Html ? "text/html" : "text/plain";
+        return TypedResults.Text(text, contentType);
     }
 
     private static async Task<IResult> VoidSaleAsync(

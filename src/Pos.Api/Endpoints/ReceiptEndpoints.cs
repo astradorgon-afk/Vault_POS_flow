@@ -224,6 +224,7 @@ public static class ReceiptEndpoints
 
     private static async Task<IResult> PrintReceiptAsync(
         Guid id,
+        [FromQuery] ReceiptFormat? format,
         [FromServices] PosDbContext context,
         [FromServices] IPermissionEvaluator evaluator,
         [FromServices] ICurrentUser currentUser,
@@ -264,10 +265,12 @@ public static class ReceiptEndpoints
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        string text = ReceiptRenderer.RenderPlainText(
-            receipt, location?.Name ?? string.Empty, location?.TimeZoneId, issuedByName);
+        ReceiptFormat requestedFormat = format ?? ReceiptFormat.Plain;
+        string text = ReceiptRenderer.Render(
+            receipt, location?.Name ?? string.Empty, location?.TimeZoneId, issuedByName, requestedFormat);
 
-        return TypedResults.Text(text, "text/plain");
+        string contentType = requestedFormat == ReceiptFormat.Html ? "text/html" : "text/plain";
+        return TypedResults.Text(text, contentType);
     }
 
     private static async Task<bool> CanViewAsync(

@@ -199,6 +199,14 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             FormattableString.Invariant($"/api/v1/sales/{saleId:D}/receipt"),
             cancellationToken);
 
+    /// <summary>Renders a completed sale as a printable HTML document (browser
+    /// print-to-PDF), logging the first print exactly like the plain-text form.</summary>
+    public Task<ApiResult<string>> GetSaleReceiptHtmlAsync(
+        Guid saleId, CancellationToken cancellationToken)
+        => GetTextAsync(
+            FormattableString.Invariant($"/api/v1/sales/{saleId:D}/receipt?format=Html"),
+            cancellationToken);
+
     /// <summary>Logs a permissioned reprint of a sale receipt. The reprint flows
     /// through the register selected in the session.</summary>
     public Task<ApiResult<PosReference>> ReprintSaleAsync(

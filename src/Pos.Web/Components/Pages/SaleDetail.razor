@@ -5,6 +5,7 @@
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 @inject NavigationManager Navigation
+@inject IJSRuntime Js
 
 <PageTitle>Sale @sale?.Number · VaultFlow</PageTitle>
 
@@ -111,6 +112,9 @@ else if (sale is not null)
                 <button type="button" @onclick="LoadReceiptAsync" disabled="@loadingReceipt">
                     @(loadingReceipt ? "Printing…" : "Print receipt")
                 </button>
+                <button type="button" @onclick="OpenPrintableAsync" disabled="@(openingPrintable || loadingReceipt)">
+                    @(openingPrintable ? "Opening…" : "Printable / PDF")
+                </button>
                 @if (CanReprint)
                 {
                     <label class="inline-reason">
@@ -216,6 +220,7 @@ else if (sale is not null)
     private string voidReason = string.Empty;
     private readonly Dictionary<int, decimal> returnQuantities = [];
     private bool loadingReceipt;
+    private bool openingPrintable;
     private bool reprinting;
     private bool voiding;
     private bool acceptingReturn;
@@ -284,6 +289,21 @@ else if (sale is not null)
         }
         catch (HttpRequestException) { actionMessage = "The receipts service is unavailable. Try again shortly."; }
         finally { loadingReceipt = false; }
+    }
+
+    private async Task OpenPrintableAsync()
+    {
+        openingPrintable = true;
+        actionMessage = null;
+        try
+        {
+            ApiResult<string> response = await Api.GetSaleReceiptHtmlAsync(Id, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { actionMessage = response.Error; return; }
+
+            await Js.InvokeVoidAsync("vaultflowPrintReceipt", response.Value);
+        }
+        catch (HttpRequestException) { actionMessage = "The receipts service is unavailable. Try again shortly."; }
+        finally { openingPrintable = false; }
     }
 
     private async Task ReprintAsync()

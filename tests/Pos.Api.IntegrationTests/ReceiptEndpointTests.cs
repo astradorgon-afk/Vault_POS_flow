@@ -73,6 +73,26 @@ public sealed class ReceiptEndpointTests(PosApiFactory factory)
             text.Should().Contain("Reference: PO-2026-000017");
             text.Should().Contain("Issued by: " + seed.StoreManagerUserName);
         }
+
+        using (HttpResponseMessage thermal = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/receipts/{receiptId}/print?format=Thermal"), storeManager))
+        {
+            thermal.StatusCode.Should().Be(HttpStatusCode.OK, await thermal.Content.ReadAsStringAsync());
+            thermal.Content.Headers.ContentType?.MediaType.Should().Be("text/plain");
+            (await thermal.Content.ReadAsStringAsync()).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Should().OnlyContain(line => line.Length == 42);
+        }
+
+        using (HttpResponseMessage html = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/receipts/{receiptId}/print?format=Html"), storeManager))
+        {
+            html.StatusCode.Should().Be(HttpStatusCode.OK, await html.Content.ReadAsStringAsync());
+            html.Content.Headers.ContentType?.MediaType.Should().Be("text/html");
+            string body = await html.Content.ReadAsStringAsync();
+            body.Should().StartWith("<!DOCTYPE html>");
+            body.Should().Contain(number);
+            body.Should().Contain("@page { size: 80mm auto;");
+        }
     }
 
     [Fact]

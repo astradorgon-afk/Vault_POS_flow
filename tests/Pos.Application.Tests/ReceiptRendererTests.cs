@@ -51,6 +51,41 @@ public sealed class ReceiptRendererTests
             "\n");
     }
 
+    [Fact]
+    public void RenderThermal_UsesFixedWidthRowsAndRightAlignedAmount()
+    {
+        string text = ReceiptRenderer.Render(Sample(), "Store One", "Asia/Manila", "store1.mgr", ReceiptFormat.Thermal);
+        string[] lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        lines.Should().OnlyContain(line => line.Length == 42);
+        lines.Should().Contain(line => line.EndsWith("480.75", StringComparison.Ordinal));
+        lines.Should().Contain(line => line.Contains("Issued: 2026-09-14 10:52 (Asia/Manila)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RenderHtml_ProducesASelfContainedEscapedPrintDocument()
+    {
+        Receipt receipt = Receipt.Create(
+            DocumentNumber.Create(DocumentType.Receipt, 2026, 15),
+            ReceiptKind.WalkInSale,
+            LocationId.New(),
+            10m,
+            "<Maria & Co>",
+            "<paid>",
+            referenceNumber: null,
+            UserId.New(),
+            IssuedAtUtc).Value;
+
+        string html = ReceiptRenderer.Render(receipt, "<Store>", "Asia/Manila", "<cashier>", ReceiptFormat.Html);
+
+        html.Should().StartWith("<!DOCTYPE html>");
+        html.Should().Contain("@page { size: 80mm auto;");
+        html.Should().Contain("&lt;Store&gt;");
+        html.Should().Contain("&lt;Maria &amp; Co&gt;");
+        html.Should().Contain("&lt;cashier&gt;");
+        html.Should().NotContain("<Maria & Co>");
+    }
+
     private static Receipt Sample()
         => Receipt.Create(
             DocumentNumber.Create(DocumentType.Receipt, 2026, 14),

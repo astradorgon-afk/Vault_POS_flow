@@ -995,7 +995,7 @@ closing the ADR-0029 gap in POS pricing. The remaining work is:
    Checkout orchestration is done (C15), the sale-lifecycle web views are
    done (C16), card/e-wallet and split payments are done (C17), the
    expired-batch override is done (C18), and scheduled-price cancellation
-   is done (C19). Remaining items: receipt thermal/PDF layouts and the
+   is done (C19). C20 completes receipt thermal/PDF layouts. Remaining item: the
    POS-side pricing surface itself (listing/selecting scheduled prices
    during checkout).
 2. **Phase 10 tail:** the FEFO allocation service extraction, and
