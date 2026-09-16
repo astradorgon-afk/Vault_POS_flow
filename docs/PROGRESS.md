@@ -127,6 +127,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C17 — card/e-wallet + split payment checkout: allocated-payment list, method tabs (cash/card/e-wallet), quick tender, provider reference; complete gated until allocated = net at 4 dp; 6 new `SalePaymentEndpointTests`, 0 backend changes
   - [x] C18 — expired-batch sale blocking + authorized override path: `inventory.expired_only` refusal classified against past-expiry coverage (shortfalls stay `inventory.insufficient_stock`); per-line `sale.expired_override` denial check (`sale.expired_override_denied` → 403); mandatory line reason (max 500) recorded in the `sale.expired.override` audit with the authorizing user stamped from context; web probe-then-confirm dialog with reason required; 5 new unit tests (3 validator + 2 handler) and 4 new `ExpiredOverrideEndpointTests`
   - [x] C20 — receipt formats: `Plain` remains default; `Thermal` renders every line at 42 columns for 80 mm printers; `Html` emits an escaped, self-contained 80 mm document. Both receipt endpoints select formats through `?format=Plain|Thermal|Html`; the web sale detail opens HTML in the browser print dialog for PDF output.
+  - [x] C21 — browser price schedule: catalog search, current/history/scheduled price timeline, scoped scheduling form and cancellation reason flow, gated by `catalog.view` / `product.price.manage`.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -741,3 +742,15 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   document in the browser print dialog.
 - Tests: 2 renderer tests (fixed-width output and HTML escaping) plus one API
   integration scenario covering all payment-receipt formats.
+
+### C21 — browser price schedule (`feat(pos-c21)`)
+
+- New `/catalog/prices` workspace: operators can search the active catalogue,
+  inspect current, past and scheduled price rows, and see their effective window
+  and location scope. Price managers can schedule a global or store-specific
+  change in UTC and cancel a future row with a recorded reason.
+- The navigation and overview expose the workspace only to `catalog.view` users;
+  scheduling and cancellation are separately gated by `product.price.manage`.
+- The web client now has typed price-schedule requests. Validation: the product
+  stocking/curation integration suite passes all four scenarios; `Pos.Web` and
+  the solution build cleanly.

@@ -41,15 +41,38 @@ public sealed class PosProduct
 /// <summary>An effective-dated price returned by the catalog API.</summary>
 public sealed class PosProductPrice
 {
+    /// <summary>Gets or sets the price row identifier.</summary>
+    public Guid Id { get; set; }
+
     /// <summary>Gets or sets the location override, or null for the organization price.</summary>
     public Guid? LocationId { get; set; }
 
     /// <summary>Gets or sets the selling amount.</summary>
     public decimal Amount { get; set; }
 
+    /// <summary>Gets or sets when the price takes effect.</summary>
+    public DateTimeOffset EffectiveFromUtc { get; set; }
+
+    /// <summary>Gets or sets when the temporary price stops, if applicable.</summary>
+    public DateTimeOffset? EffectiveToUtc { get; set; }
+
+    /// <summary>Gets or sets why this price was scheduled.</summary>
+    public string? Reason { get; set; }
+
     /// <summary>Gets or sets whether the row is effective now.</summary>
     public bool IsCurrent { get; set; }
 }
+
+/// <summary>The body used to schedule a product selling price.</summary>
+public sealed record PosSchedulePriceRequest(
+    decimal Amount,
+    string Reason,
+    Guid? LocationId,
+    DateTimeOffset? EffectiveFromUtc,
+    DateTimeOffset? EffectiveToUtc);
+
+/// <summary>The body used to cancel a future product price.</summary>
+public sealed record PosCancelPriceRequest(string Reason);
 
 /// <summary>One editable line in the in-memory POS cart.</summary>
 public sealed class PosCartLine(PosProduct product, decimal unitPrice)

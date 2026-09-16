@@ -145,6 +145,22 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         PosCompleteSaleRequest request, CancellationToken cancellationToken)
         => PostAsync<PosCompletedSale>("/api/v1/sales", request, cancellationToken);
 
+    /// <summary>Schedules an effective-dated product price.</summary>
+    public Task<ApiResult<PosReference>> SchedulePriceAsync(
+        Guid productId, PosSchedulePriceRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/catalog/products/{productId:D}/prices"),
+            request,
+            cancellationToken);
+
+    /// <summary>Cancels a future product price with its recorded reason.</summary>
+    public Task<ApiResult<PosReference>> CancelScheduledPriceAsync(
+        Guid productId, Guid priceId, PosCancelPriceRequest request, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/catalog/products/{productId:D}/prices/{priceId:D}/cancel"),
+            request,
+            cancellationToken);
+
     /// <summary>Gets a plain-text body from an authenticated API resource.</summary>
     public async Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
     {

@@ -1,0 +1,163 @@
+@page "/catalog/prices"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Price schedule · VaultFlow</PageTitle>
+
+<section class="price-head">
+    <div>
+        <span class="eyebrow">Catalogue</span>
+        <h1>Price schedule</h1>
+        <p>Review the price in effect, then set or withdraw the next change before it reaches the till.</p>
+    </div>
+    <div class="price-key"><i></i> Current price <i class="scheduled"></i> Scheduled</div>
+</section>
+
+@if (!CanViewCatalog)
+{
+    <section class="price-blocked" role="alert"><span>Access required</span><h2>This account cannot view catalogue prices.</h2><p>Ask an administrator for <code>catalog.view</code>.</p></section>
+}
+else
+{
+    <section class="price-workspace">
+        <aside class="price-catalogue">
+            <label for="product-search">Find a product</label>
+            <div class="price-search"><input id="product-search" @bind="search" @bind:event="oninput" @onkeydown="SearchOnEnterAsync" placeholder="Name, SKU or barcode" /><button type="button" @onclick="SearchAsync" disabled="@searching">@(searching ? "…" : "Find")</button></div>
+            <div class="product-picks" aria-live="polite">
+                @if (searching)
+                {
+                    <div class="price-empty">Searching catalogue…</div>
+                }
+                else if (products.Count == 0)
+                {
+                    <div class="price-empty"><strong>Choose a product</strong><span>Search by name, SKU or barcode to view its price history.</span></div>
+                }
+                else
+                {
+                    @foreach (PosProduct product in products)
+                    {
+                        <button type="button" class="product-pick @(selected?.Id == product.Id ? "selected" : string.Empty)" @onclick="() => SelectProductAsync(product)">
+                            <span>@Monogram(product.Name)</span><div><strong>@product.Name</strong><small>@product.Sku</small></div>
+                        </button>
+                    }
+                }
+            </div>
+        </aside>
+
+        <section class="price-board" aria-live="polite">
+            @if (!string.IsNullOrWhiteSpace(message)) { <div class="price-message" role="status">@message</div> }
+            @if (selected is null)
+            {
+                <div class="price-empty board-empty"><strong>No product selected</strong><span>Search the catalogue, then select a product to inspect its price timeline.</span></div>
+            }
+            else
+            {
+                <header class="board-title"><div><span>@selected.Sku</span><h2>@selected.Name</h2></div><strong>@(prices.FirstOrDefault(p => p.IsCurrent)?.Amount.ToString("C", Peso) ?? "No current price")</strong></header>
+                <div class="price-timeline">
+                    @foreach (PosProductPrice price in prices)
+                    {
+                        bool future = price.EffectiveFromUtc > DateTimeOffset.UtcNow;
+                        <article class="price-row @(price.IsCurrent ? "current" : future ? "future" : "past")">
+                            <span class="price-marker"></span>
+                            <div class="price-amount"><strong>@price.Amount.ToString("C", Peso)</strong><small>@(price.IsCurrent ? "In effect now" : future ? "Scheduled" : "Previous price")</small></div>
+                            <div class="price-window"><strong>@DisplayWindow(price)</strong><small>@(price.LocationId is null ? "All locations" : LocationName(price.LocationId.Value)) · @price.Reason</small></div>
+                            @if (future && CanManagePrices)
+                            {
+                                <button type="button" class="cancel-price" @onclick="() => PromptCancel(price)">Cancel</button>
+                            }
+                        </article>
+                    }
+                    @if (prices.Count == 0) { <div class="price-empty compact"><strong>No price history.</strong><span>Schedule the first selling price below.</span></div> }
+                </div>
+
+                @if (CanManagePrices)
+                {
+                    <section class="schedule-form"><header><span>Next price</span><h3>Schedule a change</h3></header>
+                        <div class="schedule-fields">
+                            <label>Amount<input type="number" min="0.0001" step="0.01" @bind="amount" /></label>
+                            <label>Scope<select @bind="locationScope"><option value="">All locations</option>@foreach (PosLocation location in locations) { <option value="@location.Id">@location.Code · @location.Name</option> }</select></label>
+                            <label>Starts (UTC)<input type="datetime-local" @bind="effectiveFrom" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+                            <label>Ends (UTC, optional)<input type="datetime-local" @bind="effectiveTo" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+                            <label class="reason-field">Reason<textarea maxlength="512" @bind="reason" placeholder="Why is this price changing?"></textarea></label>
+                        </div>
+                        <button type="button" class="save-price" @onclick="ScheduleAsync" disabled="@saving">@(saving ? "Scheduling…" : "Schedule price")</button>
+                    </section>
+                }
+
+                @if (cancelling is not null)
+                {
+                    <section class="cancel-panel"><div><span>Cancel scheduled price</span><strong>@cancelling.Amount.ToString("C", Peso) from @cancelling.EffectiveFromUtc.ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture) UTC</strong></div><label>Reason<textarea maxlength="512" @bind="cancelReason" placeholder="Why is this scheduled price no longer needed?"></textarea></label><div><button type="button" class="cancel-price confirm" @onclick="CancelAsync" disabled="@saving">Confirm cancellation</button><button type="button" class="dismiss-cancel" @onclick="DismissCancel">Keep price</button></div></section>
+                }
+            }
+        </section>
+    </section>
+}
+
+@code {
+    private static readonly CultureInfo Peso = CultureInfo.GetCultureInfo("en-PH");
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosProduct> products = [];
+    private readonly List<PosProductPrice> prices = [];
+    private PosProduct? selected;
+    private PosProductPrice? cancelling;
+    private string search = string.Empty, reason = string.Empty, cancelReason = string.Empty, locationScope = string.Empty;
+    private decimal amount;
+    private DateTime? effectiveFrom = DateTime.UtcNow.AddHours(1);
+    private DateTime? effectiveTo;
+    private bool searching, saving;
+    private string? message;
+    private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("catalog.view", StringComparer.Ordinal) == true;
+    private bool CanManagePrices => Session.Current?.User.Permissions.Contains("product.price.manage", StringComparer.Ordinal) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewCatalog) return;
+        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        if (response.IsSuccess && response.Value is not null) locations.AddRange(response.Value.Where(l => l.Kind == 1));
+    }
+
+    private async Task SearchOnEnterAsync(KeyboardEventArgs args) { if (args.Key == "Enter") await SearchAsync(); }
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(search)) { message = "Enter a product name, SKU or barcode."; return; }
+        searching = true; message = null; products.Clear();
+        try { ApiResult<List<PosProduct>> response = await Api.GetAsync<List<PosProduct>>($"/api/v1/catalog/products?q={Uri.EscapeDataString(search.Trim())}&limit=50", CancellationToken.None); if (!response.IsSuccess || response.Value is null) { message = response.Error; return; } products.AddRange(response.Value); if (products.Count == 0) message = "No active products matched that search."; }
+        catch (HttpRequestException) { message = "The catalogue is unavailable. Try again shortly."; }
+        finally { searching = false; }
+    }
+
+    private async Task SelectProductAsync(PosProduct product)
+    {
+        selected = product; cancelling = null; prices.Clear(); message = null;
+        try { ApiResult<List<PosProductPrice>> response = await Api.GetAsync<List<PosProductPrice>>($"/api/v1/catalog/products/{product.Id:D}/prices", CancellationToken.None); if (!response.IsSuccess || response.Value is null) { message = response.Error; return; } prices.AddRange(response.Value); amount = prices.FirstOrDefault(p => p.IsCurrent)?.Amount ?? 0m; }
+        catch (HttpRequestException) { message = "Pricing is unavailable. Try again shortly."; }
+    }
+
+    private async Task ScheduleAsync()
+    {
+        if (selected is null || amount <= 0m || string.IsNullOrWhiteSpace(reason)) { message = "Enter a positive amount and the reason for this price change."; return; }
+        saving = true; message = null;
+        try { Guid? locationId = Guid.TryParse(locationScope, out Guid parsed) ? parsed : null; ApiResult<PosReference> response = await Api.SchedulePriceAsync(selected.Id, new(amount, reason.Trim(), locationId, AsUtc(effectiveFrom), AsUtc(effectiveTo)), CancellationToken.None); if (!response.IsSuccess) { message = response.Error; return; } reason = string.Empty; effectiveTo = null; message = "Price scheduled."; await SelectProductAsync(selected); }
+        catch (HttpRequestException) { message = "Pricing is unavailable. Try again shortly."; }
+        finally { saving = false; }
+    }
+
+    private void PromptCancel(PosProductPrice price) { cancelling = price; cancelReason = string.Empty; message = null; }
+    private void DismissCancel() { cancelling = null; cancelReason = string.Empty; }
+    private async Task CancelAsync()
+    {
+        if (selected is null || cancelling is null || string.IsNullOrWhiteSpace(cancelReason)) { message = "Enter the reason for cancelling this scheduled price."; return; }
+        saving = true; message = null;
+        try { ApiResult<PosReference> response = await Api.CancelScheduledPriceAsync(selected.Id, cancelling.Id, new(cancelReason.Trim()), CancellationToken.None); if (!response.IsSuccess) { message = response.Error; return; } DismissCancel(); message = "Scheduled price cancelled."; await SelectProductAsync(selected); }
+        catch (HttpRequestException) { message = "Pricing is unavailable. Try again shortly."; }
+        finally { saving = false; }
+    }
+
+    private string LocationName(Guid id) => locations.FirstOrDefault(l => l.Id == id) is { } location ? location.Code : "Location price";
+    private static DateTimeOffset? AsUtc(DateTime? value) => value is { } time ? new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Utc)) : null;
+    private static string DisplayWindow(PosProductPrice price) => price.EffectiveToUtc is { } end ? $"{price.EffectiveFromUtc:MMM d, yyyy HH:mm} – {end:MMM d, yyyy HH:mm} UTC" : $"From {price.EffectiveFromUtc:MMM d, yyyy HH:mm} UTC";
+    private static string Monogram(string name) => string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(word => char.ToUpperInvariant(word[0])));
+}

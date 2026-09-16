@@ -192,7 +192,7 @@ Substantially delivered in Phase 1, because everything else depends on it.
       complete since C8/C12; C15 adds `sale.discount`-gated line discounts in
       the web checkout and cash change rounded to the location increment;
       C19 adds scheduled-price cancellation before a price takes effect
-      (ADR-0029 consequence), the POS-side pricing surface stays open)*
+      (ADR-0029 consequence); C21 adds the browser price-schedule workspace)*
 - [x] Payments (cash, card via provider, split)
       *(C15 landed cash checkout; C17 adds card/e-wallet methods and
       split payment mixes in the web checkout; C20 adds thermal and browser
