@@ -130,10 +130,11 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C21 — browser price schedule: catalog search, current/history/scheduled price timeline, scoped scheduling form and cancellation reason flow, gated by `catalog.view` / `product.price.manage`.
   - [x] C22 — FEFO allocation extraction: transfer-pick validation calls the same `FefoBatches` allocator as sales, then compares submitted batch totals with its canonical slices.
   - [x] C23 — notification foundation and expiry alerts: durable notification rows, per-user read/acknowledgement receipts, unique deduplication keys, and expiring-soon/expired-run generation from the expiry worker; migration `20260916190504_AddNotifications`.
+  - [x] C24 — live notification centre: authenticated, location-scoped list/read/read-all API; SignalR user/location groups with automatic reconnect; live unread badge and responsive operations signal ledger in the Blazor shell.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
-- [~] **Phase 14 — Notifications:** persistence and expiry alerts are complete; SignalR, notification APIs/UI and the remaining alert generators remain
+- [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
@@ -770,3 +771,15 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   content is culture invariant.
 - Added domain, persistence and alert-factory coverage plus migration-ordering
   verification.
+
+### C24 — live notification centre (`feat(notifications-c24)`)
+
+- Added authenticated notification list, mark-read and read-all routes. Every
+  query resolves current assignments and `location.all` authority from the
+  database; an out-of-scope identifier returns 404 and creates no receipt.
+- Added `/hubs/notifications` with per-user and per-location groups. The durable
+  writer publishes only after its row commits, and connected Blazor circuits
+  automatically reconnect and reload the durable feed.
+- Added the web notification ledger, unread filters, read controls, live status,
+  navigation count and compact top-bar badge. API integration coverage verifies
+  scoping, receipt persistence, anonymous rejection and live SignalR delivery.

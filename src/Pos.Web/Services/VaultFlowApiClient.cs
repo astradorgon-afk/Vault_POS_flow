@@ -161,6 +161,31 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             request,
             cancellationToken);
 
+    /// <summary>Loads the authenticated operator's durable notification feed.</summary>
+    public Task<ApiResult<PosNotificationFeed>> GetNotificationsAsync(
+        bool unreadOnly,
+        CancellationToken cancellationToken)
+        => GetAsync<PosNotificationFeed>(
+            $"/api/v1/notifications?unreadOnly={unreadOnly.ToString().ToLowerInvariant()}&limit=100",
+            cancellationToken);
+
+    /// <summary>Marks one visible notification read.</summary>
+    public Task<ApiResult<PosReference>> MarkNotificationReadAsync(
+        Guid notificationId,
+        CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/notifications/{notificationId:D}/read"),
+            new { },
+            cancellationToken);
+
+    /// <summary>Marks every notification visible to the operator read.</summary>
+    public Task<ApiResult<PosMarkedReadResult>> MarkAllNotificationsReadAsync(
+        CancellationToken cancellationToken)
+        => PostAsync<PosMarkedReadResult>(
+            "/api/v1/notifications/read-all",
+            new { },
+            cancellationToken);
+
     /// <summary>Gets a plain-text body from an authenticated API resource.</summary>
     public async Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
     {

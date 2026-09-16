@@ -15,6 +15,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<UserSession>();
+builder.Services.AddScoped<NotificationStore>();
 builder.Services.AddScoped<VaultFlowAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(services =>
     services.GetRequiredService<VaultFlowAuthenticationStateProvider>());

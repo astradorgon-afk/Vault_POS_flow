@@ -81,6 +81,8 @@ public static class DependencyInjection
         services.TryAddScoped<IExpiryService, ExpiryService>();
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();
         services.TryAddScoped<INotificationWriter, NotificationWriter>();
+        services.TryAddScoped<INotificationReader, NotificationReader>();
+        services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 
         // The reconciliation tripwire is optional so a host can run without it
         // (tests, short-lived tools); when enabled it only reads.

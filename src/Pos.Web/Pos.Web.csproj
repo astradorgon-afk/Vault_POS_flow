@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Pos.SharedUI\Pos.SharedUI.csproj" />
     <ProjectReference Include="..\Pos.Infrastructure\Pos.Infrastructure.csproj" />
   </ItemGroup>

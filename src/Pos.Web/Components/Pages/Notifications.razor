@@ -1,0 +1,124 @@
+@page "/notifications"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IDisposable
+@inject NotificationStore Store
+
+<PageTitle>Notifications · VaultFlow</PageTitle>
+
+<section class="signal-head">
+    <div>
+        <span class="eyebrow">Operations signal ledger</span>
+        <h1>What needs attention now.</h1>
+        <p>Alerts stay here until you read them. Live delivery adds new events without replacing the durable record.</p>
+    </div>
+    <div class="signal-state @(Store.IsLive ? "live" : string.Empty)">
+        <i aria-hidden="true"></i>
+        <span><strong>@(Store.IsLive ? "Live feed" : "Durable feed")</strong><small>@Store.UnreadCount unread</small></span>
+    </div>
+</section>
+
+<section class="signal-toolbar" aria-label="Notification filters">
+    <div class="signal-filters">
+        <button class="@(unreadOnly ? string.Empty : "active")" type="button" @onclick="() => unreadOnly = false">All</button>
+        <button class="@(unreadOnly ? "active" : string.Empty)" type="button" @onclick="() => unreadOnly = true">Unread <span>@Store.UnreadCount</span></button>
+    </div>
+    <div class="signal-actions">
+        <button type="button" @onclick="RefreshAsync" disabled="@working">Refresh</button>
+        <button class="mark-all" type="button" @onclick="MarkAllReadAsync" disabled="@(working || Store.UnreadCount == 0)">Mark all read</button>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(Store.Error))
+{
+    <div class="signal-error" role="alert">@Store.Error</div>
+}
+
+@if (Visible.Count == 0)
+{
+    <section class="signal-empty">
+        <span aria-hidden="true">✓</span>
+        <div><h2>@(unreadOnly ? "Nothing waiting for you." : "No operational alerts yet.")</h2><p>@(unreadOnly ? "New alerts will appear here as work changes." : "The expiry worker and future operational monitors will write here.")</p></div>
+    </section>
+}
+else
+{
+    <section class="signal-ledger" aria-live="polite">
+        @foreach (PosNotification item in Visible)
+        {
+            <article class="signal-entry severity-@SeverityName(item.Severity) @(item.ReadAtUtc is null ? "unread" : "read")">
+                <div class="signal-rail"><i></i><time datetime="@item.CreatedAtUtc.ToString("O")">@Age(item.CreatedAtUtc)</time></div>
+                <div class="signal-copy">
+                    <header><span>@SeverityLabel(item.Severity)</span>@if (item.ReadAtUtc is null) { <b>New</b> }</header>
+                    <h2>@item.Title</h2>
+                    <p>@item.Body</p>
+                    <footer>
+                        <span>@item.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · h:mm tt")</span>
+                        @if (item.ReadAtUtc is null)
+                        {
+                            <button type="button" @onclick="() => MarkReadAsync(item.Id)" disabled="@working">Mark read</button>
+                        }
+                        else
+                        {
+                            <span class="read-stamp">Read</span>
+                        }
+                    </footer>
+                </div>
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private bool unreadOnly;
+    private bool working;
+    private List<PosNotification> Visible => [.. Store.Items
+        .Where(item => !unreadOnly || item.ReadAtUtc is null)
+        .OrderByDescending(item => item.CreatedAtUtc)];
+
+    protected override void OnInitialized() => Store.Changed += OnChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Store.InitializeAsync();
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        working = true;
+        try { await Store.RefreshAsync(); }
+        finally { working = false; }
+    }
+
+    private async Task MarkReadAsync(Guid id)
+    {
+        working = true;
+        try { await Store.MarkReadAsync(id); }
+        finally { working = false; }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        working = true;
+        try { await Store.MarkAllReadAsync(); }
+        finally { working = false; }
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string SeverityName(int severity) => severity switch { 3 => "critical", 2 => "warning", _ => "info" };
+    private static string SeverityLabel(int severity) => severity switch { 3 => "Critical", 2 => "Attention", _ => "Information" };
+    private static string Age(DateTimeOffset createdAtUtc)
+    {
+        TimeSpan age = DateTimeOffset.UtcNow - createdAtUtc;
+        if (age < TimeSpan.FromMinutes(1)) return "now";
+        if (age < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)age.TotalMinutes)}m";
+        if (age < TimeSpan.FromDays(1)) return $"{(int)age.TotalHours}h";
+        return $"{(int)age.TotalDays}d";
+    }
+
+    public void Dispose() => Store.Changed -= OnChanged;
+}

@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using NSubstitute;
 using Pos.Domain.Common;
 using Pos.Domain.Notifications;
+using Pos.Application.Notifications;
 using Pos.Infrastructure.Notifications;
 using Pos.Infrastructure.Persistence;
 
@@ -13,6 +15,7 @@ public sealed class NotificationWriterTests : IAsyncLifetime
     private SqliteConnection _connection = null!;
     private PosDbContext _context = null!;
     private NotificationWriter _writer = null!;
+    private INotificationPublisher _publisher = null!;
 
     public async Task InitializeAsync()
     {
@@ -20,7 +23,8 @@ public sealed class NotificationWriterTests : IAsyncLifetime
         await _connection.OpenAsync();
         _context = new PosDbContext(new DbContextOptionsBuilder<PosDbContext>().UseSqlite(_connection).Options);
         await _context.Database.EnsureCreatedAsync();
-        _writer = new NotificationWriter(_context);
+        _publisher = Substitute.For<INotificationPublisher>();
+        _writer = new NotificationWriter(_context, _publisher);
     }
 
     public async Task DisposeAsync()
@@ -40,6 +44,8 @@ public sealed class NotificationWriterTests : IAsyncLifetime
 
         (await _context.Notifications.AsNoTracking().ToListAsync()).Should().ContainSingle()
             .Which.Id.Should().Be(first.Id);
+        await _publisher.Received(1).PublishAsync(first, Arg.Any<CancellationToken>());
+        await _publisher.DidNotReceive().PublishAsync(duplicate, Arg.Any<CancellationToken>());
     }
 
     private static Notification Create(string key) => Notification.Create(

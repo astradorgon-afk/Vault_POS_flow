@@ -5,7 +5,9 @@ using Pos.Infrastructure.Persistence;
 
 namespace Pos.Infrastructure.Notifications;
 
-public sealed class NotificationWriter(PosDbContext context) : INotificationWriter
+public sealed class NotificationWriter(
+    PosDbContext context,
+    INotificationPublisher publisher) : INotificationWriter
 {
     public async Task<bool> WriteOnceAsync(Notification notification, CancellationToken cancellationToken)
     {
@@ -20,6 +22,7 @@ public sealed class NotificationWriter(PosDbContext context) : INotificationWrit
 
         context.Notifications.Add(notification);
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        await publisher.PublishAsync(notification, cancellationToken).ConfigureAwait(false);
         return true;
     }
 }

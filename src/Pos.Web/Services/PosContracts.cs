@@ -1,5 +1,39 @@
 namespace Pos.Web.Services;
 
+/// <summary>The authenticated operator's durable notification feed.</summary>
+public sealed class PosNotificationFeed
+{
+    /// <summary>Gets or sets the newest visible notifications.</summary>
+    public IReadOnlyList<PosNotification> Items { get; set; } = [];
+
+    /// <summary>Gets or sets the total unread count across the visible feed.</summary>
+    public int UnreadCount { get; set; }
+}
+
+/// <summary>One operational notification delivered by HTTP or SignalR.</summary>
+public sealed class PosNotification
+{
+    public Guid Id { get; set; }
+    public int Kind { get; set; }
+    public int Severity { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public Guid? LocationId { get; set; }
+    public Guid? ProductId { get; set; }
+    public Guid? BatchId { get; set; }
+    public int? ReferenceDocumentType { get; set; }
+    public Guid? ReferenceDocumentId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? ReadAtUtc { get; set; }
+    public DateTimeOffset? AcknowledgedAtUtc { get; set; }
+}
+
+/// <summary>The result of marking the visible feed read.</summary>
+public sealed class PosMarkedReadResult
+{
+    public int MarkedRead { get; set; }
+}
+
 /// <summary>A physical location available to the signed-in operator.</summary>
 public sealed class PosLocation
 {

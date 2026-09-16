@@ -1,5 +1,6 @@
 @inject VaultFlowAuthenticationStateProvider Authentication
 @inject NavigationManager Navigation
+@inject NotificationStore Notifications
 
 <div class="brand-block">
     <a class="brand" href=""><span class="brand-glyph" aria-hidden="true">V</span><span><strong>VaultFlow</strong><small>Inventory command</small></span></a>
@@ -7,6 +8,7 @@
 
 <nav class="nav-stack" aria-label="Primary navigation">
     <span class="nav-heading">Workspace</span>
+    <NavLink class="nav-link" href="notifications"><span aria-hidden="true">!</span> Notifications @if (Notifications.UnreadCount > 0) { <small>@Notifications.UnreadCount</small> }</NavLink>
     <NavLink class="nav-link" href="" Match="NavLinkMatch.All"><span aria-hidden="true">⌂</span> Overview</NavLink>
     <span class="nav-heading">Point of sale</span>
     @if (CanCreateSale)
@@ -39,7 +41,7 @@
     <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⇄</span> Transfers</span>
 </nav>
 
-<AuthorizeView><Authorized><button class="sign-out" type="button" @onclick="SignOut">Sign out</button></Authorized></AuthorizeView>
+<AuthorizeView><Authorized><button class="sign-out" type="button" @onclick="SignOutAsync">Sign out</button></Authorized></AuthorizeView>
 
 @code {
     [Inject] private UserSession Session { get; set; } = null!;
@@ -47,8 +49,9 @@
     private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
     private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("catalog.view", StringComparer.Ordinal) == true;
 
-    private void SignOut()
+    private async Task SignOutAsync()
     {
+        await Notifications.StopAsync();
         Authentication.SignOut();
         Navigation.NavigateTo("/login");
     }

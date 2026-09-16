@@ -290,7 +290,8 @@ Full detail in [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md).
 
 ## 9. Real-time
 
-SignalR hub `/hubs/ops` with groups per location and per capability:
+SignalR hub `/hubs/notifications` with authenticated groups per user and
+location. Users holding `location.all` join the all-locations group:
 
 | Event | Consumers |
 |---|---|
@@ -300,8 +301,9 @@ SignalR hub `/hubs/ops` with groups per location and per capability:
 | Sync failure, device offline | HQ |
 
 Every real-time message has a **persisted `Notification` row** written first.
-SignalR is a delivery accelerator, never the source of truth — a device that was
-offline retrieves the same notifications on reconnect through the change feed.
+SignalR is a delivery accelerator, never the source of truth — the web client
+reloads the same scoped notification feed after reconnect. Offline devices will
+retrieve it through the Phase 13 change feed when synchronization is built.
 
 ---
 

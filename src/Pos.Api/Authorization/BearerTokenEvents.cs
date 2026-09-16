@@ -31,7 +31,22 @@ public sealed class PosJwtBearerEvents : JwtBearerEvents
     /// <summary>Initializes the events.</summary>
     public PosJwtBearerEvents()
     {
+        OnMessageReceived = ReadHubTokenAsync;
         OnTokenValidated = ValidateAsync;
+    }
+
+    private static Task ReadHubTokenAsync(MessageReceivedContext context)
+    {
+        if (context.HttpContext.Request.Path.StartsWithSegments(
+                Notifications.NotificationHub.Route,
+                StringComparison.Ordinal)
+            && context.Request.Query.TryGetValue("access_token", out Microsoft.Extensions.Primitives.StringValues token)
+            && token.Count == 1)
+        {
+            context.Token = token[0];
+        }
+
+        return Task.CompletedTask;
     }
 
     private static async Task ValidateAsync(TokenValidatedContext context)

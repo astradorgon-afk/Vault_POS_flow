@@ -12,8 +12,10 @@ using Pos.Api.Development;
 using Pos.Api.Endpoints;
 using Pos.Api.Logging;
 using Pos.Api.Middleware;
+using Pos.Api.Notifications;
 using Pos.Application;
 using Pos.Application.Common.Abstractions;
+using Pos.Application.Notifications;
 using Pos.Domain.Common;
 using Pos.Infrastructure;
 using Pos.Infrastructure.Configuration;
@@ -82,6 +84,8 @@ try
     builder.Services.AddScoped<PosJwtBearerEvents>();
 
     builder.Services.AddAuthorization();
+    builder.Services.AddSignalR();
+    builder.Services.AddSingleton<INotificationPublisher, SignalRNotificationPublisher>();
     builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
     builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
@@ -256,6 +260,8 @@ try
     app.MapReturnsEndpoints();
     app.MapReportEndpoints();
     app.MapAdministrationEndpoints();
+    app.MapNotificationEndpoints();
+    app.MapHub<NotificationHub>(NotificationHub.Route).RequireAuthorization();
 
     await app.RunAsync();
     return 0;

@@ -237,10 +237,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
 ## Phase 14 — Notifications
 
 - [x] Persistent notifications + per-user receipts
-- [ ] SignalR hub, groups, reconnection
+- [x] SignalR hub, groups, reconnection
+      *(C24 authenticates the hub and derives user/location groups from current database authority)*
 - [~] Alert generators (low stock, expiry, discrepancy, emergency, sync failure)
       *(C23 completes expiring-soon and expired-run alerts; the other generators remain)*
-- [ ] Notification centre UI
+- [x] Notification centre UI
+      *(C24 adds the scoped HTTP feed, read/read-all receipts, live badge and responsive web ledger)*
 
 ## Phase 15 — Analytics and Reports
 

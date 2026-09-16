@@ -999,8 +999,10 @@ closing the ADR-0029 gap in POS pricing. The remaining work is:
    price-schedule workspace for reviewing, scheduling and cancelling future
    catalogue prices. C22 completes the Phase 10 FEFO allocation extraction.
    C23 adds durable notifications, per-user receipt state, and deduplicated
-   expiring-soon / expired-run alerts. The next planned work is the SignalR
-   delivery and notification-centre API/UI slice.
+   expiring-soon / expired-run alerts. C24 adds the scoped notification API,
+   authenticated SignalR delivery and the Blazor notification centre. The next
+   Phase 14 work is the remaining low-stock, discrepancy, emergency and sync-
+   failure alert generators.
 2. **Phase 10 tail:** FEFO allocation extraction (C22), expiring-soon / expired
    alerts (C23), and the sale-blocking override path (C18) are complete.
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —

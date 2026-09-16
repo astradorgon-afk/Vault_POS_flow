@@ -861,9 +861,18 @@ hold `location.all`.
 GET    /api/v1/notifications                 authenticated
 POST   /api/v1/notifications/{id}/read       authenticated
 POST   /api/v1/notifications/read-all        authenticated
+HUB    /hubs/notifications                   authenticated SignalR
 GET    /api/v1/audit                         audit.view
 GET    /api/v1/health/live  |  /health/ready anonymous (ready is IP-restricted)
 ```
+
+`GET /api/v1/notifications?unreadOnly=false&limit=50` returns
+`{ items, unreadCount }`, newest first. Global rows and rows for the caller's
+current location assignments are included; `location.all` includes every
+location. Read state is stored per user. The SignalR hub sends
+`notificationReceived` after the durable row commits, using the same current
+database scope. Reconnect reloads the HTTP feed, so live delivery is only an
+accelerator.
 
 ### User and role administration (implemented, ADR-0028)
 
