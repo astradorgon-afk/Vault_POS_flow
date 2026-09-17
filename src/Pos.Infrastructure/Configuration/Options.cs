@@ -356,6 +356,33 @@ public sealed class DiscrepancyAlertOptions
     public TimeSpan Lookback => TimeSpan.FromDays(LookbackDays);
 }
 
+/// <summary>Emergency-transfer alert worker settings.</summary>
+public sealed class EmergencyTransferAlertOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "EmergencyTransferAlerts";
+
+    /// <summary>Gets or sets whether the background emergency-transfer alert worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets how many minutes between emergency-transfer sweeps.</summary>
+    [Range(1, 1440)]
+    public int IntervalMinutes { get; set; } = 5;
+
+    /// <summary>Gets or sets how many days back a sweep looks for committed emergency transfers.</summary>
+    [Range(1, 90)]
+    public int LookbackDays { get; set; } = 30;
+
+    /// <summary>Gets or sets whether an emergency-transfer sweep runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromMinutes(IntervalMinutes);
+
+    /// <summary>Gets the lookback as a time span.</summary>
+    public TimeSpan Lookback => TimeSpan.FromDays(LookbackDays);
+}
+
 /// <summary>Cashier shift force-close worker settings.</summary>
 public sealed class ShiftForceCloseOptions
 {

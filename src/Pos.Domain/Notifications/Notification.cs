@@ -11,6 +11,7 @@ public enum NotificationKind : short
     LowStock = 3,
     ReceivingDiscrepancy = 4,
     TransferShortage = 5,
+    EmergencyTransfer = 6,
 }
 
 /// <summary>The attention level of a notification.</summary>

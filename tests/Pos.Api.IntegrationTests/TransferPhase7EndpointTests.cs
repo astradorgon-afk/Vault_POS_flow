@@ -6,12 +6,14 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Identity;
+using Pos.Application.Notifications;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Transfers;
+using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.IntegrationTests;
 
@@ -51,6 +53,16 @@ public sealed class TransferPhase7EndpointTests(PosApiFactory factory)
         emergency.Mode.Should().Be(TransferMode.EmergencyOffline);
         emergency.Number.Should().MatchRegex(@"^TRF-\d{4}-\d{6}$");
         emergency.CustodyKinds.Should().Equal("Created", "EmergencyCreated");
+
+        IReadOnlyList<EmergencyTransferAlert> recentAlerts = await factory.WithServiceAsync(context =>
+            new EmergencyTransferAlertRepository(context)
+                .GetRecentAsync(DateTimeOffset.UtcNow.AddDays(-1), CancellationToken.None));
+        EmergencyTransferAlert alert = recentAlerts.Single(a => a.TransferId.Value == transferId);
+        alert.TransferNumber.Should().Be(emergency.Number);
+        alert.SourceLocationId.Should().Be(seed.StoreA);
+        alert.DestinationLocationId.Should().Be(seed.StoreB);
+        alert.LineCount.Should().Be(1);
+        alert.TotalQuantity.Should().Be(6m);
 
         // The stock moved the moment the emergency was raised: six left the
         // source's available bucket and landed in the destination's, valued at

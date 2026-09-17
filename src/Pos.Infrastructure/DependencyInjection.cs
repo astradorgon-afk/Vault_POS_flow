@@ -83,6 +83,7 @@ public static class DependencyInjection
         services.TryAddScoped<INotificationWriter, NotificationWriter>();
         services.TryAddScoped<ILowStockRepository, LowStockRepository>();
         services.TryAddScoped<IDiscrepancyAlertRepository, DiscrepancyAlertRepository>();
+        services.TryAddScoped<IEmergencyTransferAlertRepository, EmergencyTransferAlertRepository>();
         services.TryAddScoped<INotificationReader, NotificationReader>();
         services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 
@@ -122,6 +123,15 @@ public static class DependencyInjection
         if (discrepancyAlerts.Enabled)
         {
             services.AddHostedService<DiscrepancyAlertWorker>();
+        }
+
+        EmergencyTransferAlertOptions emergencyTransferAlerts = configuration
+            .GetSection(EmergencyTransferAlertOptions.SectionName)
+            .Get<EmergencyTransferAlertOptions>() ?? new EmergencyTransferAlertOptions();
+
+        if (emergencyTransferAlerts.Enabled)
+        {
+            services.AddHostedService<EmergencyTransferAlertWorker>();
         }
 
         ShiftForceCloseOptions shiftForceClose = configuration
@@ -207,6 +217,11 @@ public static class DependencyInjection
 
         services.AddOptions<DiscrepancyAlertOptions>()
             .Bind(configuration.GetSection(DiscrepancyAlertOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<EmergencyTransferAlertOptions>()
+            .Bind(configuration.GetSection(EmergencyTransferAlertOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

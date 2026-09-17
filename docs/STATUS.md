@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **960 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 96, Security 52, Architecture 13, API 174** (2026-09-17, through C26 discrepancy alerts). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **963 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 99, Security 52, Architecture 13, API 174** (2026-09-17, through C27 emergency-transfer alerts). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -1006,8 +1006,9 @@ closing the ADR-0029 gap in POS pricing. The remaining work is:
    point and minimum. C26 then adds discrepancy alerts: a 15-minute worker
    raises one alert per posted goods receipt with unresolved receiving
    discrepancies, and one per end (source and destination) for each short
-   transfer arrival. The next Phase 14 work is the emergency-transfer
-   generator; the sync-failure alert waits for Phase 13.
+   transfer arrival. C27 adds critical, source-and-destination alerts for every
+   committed emergency transfer. The remaining sync-failure alert waits for the
+   Phase 13 synchronization pipeline that will produce those failures.
 2. **Phase 10 tail:** FEFO allocation extraction (C22), expiring-soon / expired
    alerts (C23), and the sale-blocking override path (C18) are complete.
 3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —

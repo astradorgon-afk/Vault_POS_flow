@@ -241,7 +241,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(C24 authenticates the hub and derives user/location groups from current database authority)*
 - [~] Alert generators (low stock, expiry, discrepancy, emergency, sync failure)
       *(C23 completes expiring-soon and expired-run alerts; C25 adds low-stock alerts;
-      C26 adds receiving/transfer discrepancy alerts; emergency and sync-failure generators remain)*
+      C26 adds receiving/transfer discrepancy alerts; C27 adds emergency-transfer alerts;
+      the sync-failure generator waits for the Phase 13 synchronization pipeline)*
 - [x] Notification centre UI
       *(C24 adds the scoped HTTP feed, read/read-all receipts, live badge and responsive web ledger)*
 

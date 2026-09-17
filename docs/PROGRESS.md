@@ -133,6 +133,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C24 — live notification centre: authenticated, location-scoped list/read/read-all API; SignalR user/location groups with automatic reconnect; live unread badge and responsive operations signal ledger in the Blazor shell.
   - [x] C25 (low stock) — hourly `LowStockWorker` raises location-scoped alerts for active stocked products at or below a positive reorder point: Warning at the reorder point, Critical below minimum or out of stock; deduplicated per product, level and UTC day; no migration.
   - [x] C26 — 15-minute `DiscrepancyAlertWorker` alerts posted goods receipts with unresolved receiving discrepancies (Warning, receiving location) and short transfer arrivals (Critical, source and destination), each linked to its document; 7-day lookback; no migration.
+  - [x] C27 — 5-minute `EmergencyTransferAlertWorker` announces committed emergency transfers as Critical alerts to both endpoint stores (and all-location HQ users), linked to the transfer; durable per-location deduplication and 30-day restart lookback; no migration.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -815,3 +816,17 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - Added factory and worker unit coverage; the partial-receipt and partial-arrival
   API tests now also assert what the alert repository returns, including that a
   resolved shortage drops out. No schema change.
+
+### C27 — emergency-transfer alerts (`feat(notifications-c27)`)
+
+- Added `NotificationKind.EmergencyTransfer` and an
+  `IEmergencyTransferAlertRepository` projection over emergency transfers that
+  have a recorded ledger group, so a failed or rolled-back initiation never
+  produces an alert.
+- `EmergencyTransferAlertWorker` (section `EmergencyTransferAlerts`: every 5
+  minutes, 30-day lookback) writes a Critical alert for the source and
+  destination store. All-location users see both through the existing scope.
+  Each alert references the transfer and deduplicates by transfer plus location.
+- Added factory and worker unit coverage, and the real emergency initiation API
+  test now verifies the alert projection after the transfer and ledger post
+  commit. No schema change.

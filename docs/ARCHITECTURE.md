@@ -295,7 +295,7 @@ location. Users holding `location.all` join the all-locations group:
 
 | Event | Consumers |
 |---|---|
-| Transfer requested / approved / dispatched / received / discrepancy | source + destination + HQ *(arrival shortages alert since C26)* |
+| Transfer requested / approved / dispatched / received / discrepancy | source + destination + HQ *(arrival shortages alert since C26; emergency creation since C27)* |
 | Quarantine incident raised / resolved | HQ + originating store |
 | Low stock, expiry, receiving discrepancy, high-value adjustment | HQ + owning location *(low stock, expiry and receiving discrepancies alert today)* |
 | Sync failure, device offline | HQ |
