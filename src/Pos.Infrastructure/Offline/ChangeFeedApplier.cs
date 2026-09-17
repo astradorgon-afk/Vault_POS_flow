@@ -123,12 +123,28 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 {
                     context.Products.Add(new DeviceCachedProduct(
                         p.ProductId, p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry,
-                        p.SourceVersion, p.UpdatedAtUtc));
+                        p.SourceVersion, p.UpdatedAtUtc, p.IsVatExempt));
                 }
                 else
                 {
                     product.Refresh(
-                        p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.SourceVersion, p.UpdatedAtUtc);
+                        p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.SourceVersion,
+                        p.UpdatedAtUtc, p.IsVatExempt);
+                }
+
+                break;
+
+            case BatchChanged b2:
+                DeviceCachedBatch? batch = await context.Batches
+                    .FindAsync([b2.BatchId], cancellationToken).ConfigureAwait(false);
+                if (batch is null)
+                {
+                    context.Batches.Add(new DeviceCachedBatch(
+                        b2.BatchId, b2.ProductId, b2.LotNumber, b2.ReceivedOn, b2.ExpiresOn, b2.UnitCost));
+                }
+                else
+                {
+                    batch.Refresh(b2.ProductId, b2.LotNumber, b2.ReceivedOn, b2.ExpiresOn, b2.UnitCost);
                 }
 
                 break;

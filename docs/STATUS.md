@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — and C36 caching what a sale reads
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,8 +13,8 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,109 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 233, Security 52, Architecture 25, API 174** (2026-09-17, through C35 the device ledger). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C35 have not been run against PostgreSQL; they add no PostgreSQL migration. |
-| Migrations | 28 PostgreSQL migrations plus 6 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
+| Tests | **1,112 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 236, Security 52, Architecture 25, API 174** (2026-09-17, through C36 the sale catalogue cache). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C35 have not been run against PostgreSQL; they add no PostgreSQL migration. |
+| Migrations | 28 PostgreSQL migrations plus 7 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
@@ -22,7 +22,7 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    233 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store
+Pos.Infrastructure.Tests    236 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -1000,6 +1000,25 @@ negative-stock policy; a repeated event replays instead of posting twice; and
 raw SQL on a keyed connection cannot set a quantity, delete a balance, or rewrite
 a movement. Every movement group sums to zero.
 
+C36 closes a gap found by reading the sale handler rather than by running it.
+`CompleteSaleCommand` reads two things off a product that the device cache did
+not carry: `IsVatExempt`, and the batch each line is allocated from. Neither is
+optional. An offline sale computes its own tax, so a missing VAT flag puts the
+wrong figure on a receipt the customer keeps; and a device selling batch-tracked
+stock allocates first-expiry-first-out and refuses expired stock, neither of
+which it can decide without each batch's expiry date.
+
+So `cache_product` gained `is_vat_exempt` and the feed a `BatchChanged` kind
+behind a new `cache_batch` table, indexed by product and expiry — the only way
+FEFO reads it. `cache_batch` is applier-owned like every other downloaded table
+and carries the same C29 guards. The page validator refuses a batch that expires
+before it was received.
+
+Both C29 change-detector tests fired on this, which is what they are for: one
+when the ledger added five triggers it does not own, one when `cache_batch`
+joined the applier-owned set. Both were updated deliberately rather than
+loosened.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -1260,12 +1279,16 @@ hashed, and in the same transaction as the records they describe. Nothing moves
 those events yet.
 
 1. **The local sale tables, and the cash sale.** The ledger is done (C35) and
-   the outbox is ready: what is left for `CompleteSaleCommand` is `local_sale`,
-   `local_sale_item`, `local_payment`, a device `ISalesRepository`, and the
-   remaining ports its handler resolves — `ICustomerRepository` and
-   `IExpiryService` over the cached catalogue. Then the entry flips to
-   `Registered` and a device can sell. `CloseShiftCommand` follows immediately:
-   it only waits on local sales for its cash totals.
+   the catalogue a sale reads is cached (C36). What is left for
+   `CompleteSaleCommand` is `local_sale`, `local_sale_item`, `local_payment`, a
+   device `ISalesRepository`, and the two other ports its handler resolves:
+   `ICustomerRepository` (only `GetByIdAsync` is on the sale path) and
+   `IExpiryService` (only `GetSellableBatchesAsync`), both over the cache. Those
+   ports are server-shaped and most of their members answer questions a device
+   cannot — expect the same pattern as `DeviceShiftRepository`, where what a
+   device cannot answer refuses outright rather than improvising. Then the entry
+   flips to `Registered` and a device can sell, with `CloseShiftCommand` right
+   behind it: it waits only on local sales for its cash totals.
 2. **The push endpoint** — `POST /api/sync/push`, per-event idempotent
    processing keyed on the event identifier, with a repeated identifier carrying
    a different payload hash treated as tampering rather than as an update

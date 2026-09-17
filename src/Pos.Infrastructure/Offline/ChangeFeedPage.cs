@@ -26,7 +26,23 @@ public sealed record ProductChanged(
     bool TracksBatches,
     bool TracksExpiry,
     long SourceVersion,
-    DateTimeOffset UpdatedAtUtc) : ChangeFeedChange(Sequence);
+    DateTimeOffset UpdatedAtUtc,
+    bool IsVatExempt = false) : ChangeFeedChange(Sequence);
+
+/// <summary>A batch was created or its details changed.</summary>
+/// <remarks>
+/// Cached because a device selling batch-tracked stock allocates
+/// first-expiry-first-out and refuses expired stock, and it can do neither
+/// without each batch's expiry date.
+/// </remarks>
+public sealed record BatchChanged(
+    long Sequence,
+    BatchId BatchId,
+    ProductId ProductId,
+    string LotNumber,
+    DateOnly ReceivedOn,
+    DateOnly? ExpiresOn,
+    decimal UnitCost) : ChangeFeedChange(Sequence);
 
 /// <summary>A barcode was attached, retired or made primary.</summary>
 public sealed record ProductBarcodeChanged(

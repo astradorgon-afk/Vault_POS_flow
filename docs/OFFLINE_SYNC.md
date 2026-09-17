@@ -55,8 +55,9 @@ nothing at a till depends on it.
 ```
 device.db (SQLite, encrypted)
 ├── cache_*        master data mirrors, written only by the sync downloader
-│    product, product_barcode, product_price, uom, unit_conversion,
-│    location, supplier_lite, customer_lite, tax_code
+│    product, product_barcode, product_price, batch, location  (built)
+│    uom, unit_conversion, supplier_lite, customer_lite,
+│    tax_code                                                  (not built yet)
 ├── snapshot_permission   user -> permission set, policy_version, expires_at_utc
 ├── snapshot_token        pre-approval tokens (signed, scoped, expiring)
 ├── local_*        authoritative-until-synced local records
@@ -329,7 +330,7 @@ Server returns changes with `change_sequence > cursor` where
 `location_scope_id IS NULL` (global master data) **or** equals the device's
 location, ordered by `change_sequence`. The feed carries:
 
-- catalog changes (products, barcodes, prices, conversions, settings),
+- catalog changes (products, barcodes, prices, batches, conversions, settings),
 - location and supplier changes,
 - the device's own document acknowledgements and server-side corrections,
 - transfers and POs addressed to the device's location,

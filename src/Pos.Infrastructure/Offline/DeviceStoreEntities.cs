@@ -100,7 +100,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        bool isVatExempt = false)
     {
         Id = id;
         Sku = sku;
@@ -110,6 +111,7 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        IsVatExempt = isVatExempt;
     }
 
     public ProductId Id { get; private init; }
@@ -121,6 +123,13 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
     public long SourceVersion { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Gets whether the product is exempt from VAT. Cached because an offline
+    /// sale computes its own tax: getting this wrong would put the wrong figure
+    /// on a receipt a customer keeps.
+    /// </summary>
+    public bool IsVatExempt { get; private set; }
+
     internal void Refresh(
         string sku,
         string name,
@@ -128,7 +137,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        bool isVatExempt)
     {
         Sku = sku;
         Name = name;
@@ -137,6 +147,58 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        IsVatExempt = isVatExempt;
+    }
+}
+
+/// <summary>
+/// A batch mirror. A device that sells batch-tracked stock has to allocate it
+/// first-expiry-first-out and refuse what has expired, and both are decisions it
+/// cannot make without knowing each batch's expiry date and cost.
+/// </summary>
+public sealed class DeviceCachedBatch : IChangeFeedOwned
+{
+    private DeviceCachedBatch() { LotNumber = string.Empty; }
+
+    /// <summary>Creates a cached batch.</summary>
+    public DeviceCachedBatch(
+        BatchId id,
+        ProductId productId,
+        string lotNumber,
+        DateOnly receivedOn,
+        DateOnly? expiresOn,
+        decimal unitCost)
+    {
+        Id = id;
+        ProductId = productId;
+        LotNumber = lotNumber;
+        ReceivedOn = receivedOn;
+        ExpiresOn = expiresOn;
+        UnitCost = unitCost;
+    }
+
+    public BatchId Id { get; private init; }
+    public ProductId ProductId { get; private set; }
+    public string LotNumber { get; private set; }
+    public DateOnly ReceivedOn { get; private set; }
+
+    /// <summary>Gets when the batch expires, or null when it does not.</summary>
+    public DateOnly? ExpiresOn { get; private set; }
+
+    public decimal UnitCost { get; private set; }
+
+    internal void Refresh(
+        ProductId productId,
+        string lotNumber,
+        DateOnly receivedOn,
+        DateOnly? expiresOn,
+        decimal unitCost)
+    {
+        ProductId = productId;
+        LotNumber = lotNumber;
+        ReceivedOn = receivedOn;
+        ExpiresOn = expiresOn;
+        UnitCost = unitCost;
     }
 }
 

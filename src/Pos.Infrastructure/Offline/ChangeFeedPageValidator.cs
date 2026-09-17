@@ -64,6 +64,13 @@ internal static class ChangeFeedPageValidator
             ?? Text(p.Name, 240, "product name")
             ?? (p.SourceVersion < 0 ? "A product source version cannot be negative." : null),
         ProductBarcodeChanged b => Text(b.Barcode, 64, "barcode") ?? Id(b.ProductId, "product"),
+        BatchChanged b => Id(b.BatchId, "batch")
+            ?? Id(b.ProductId, "product")
+            ?? Text(b.LotNumber, 64, "lot number")
+            ?? Amount(b.UnitCost)
+            ?? (b.ExpiresOn is { } expires && expires < b.ReceivedOn
+                ? "A batch cannot expire before it was received."
+                : null),
         ProductPriceChanged p => Id(p.PriceId, "price")
             ?? Id(p.ProductId, "product")
             ?? OptionalId(p.LocationId, "location")

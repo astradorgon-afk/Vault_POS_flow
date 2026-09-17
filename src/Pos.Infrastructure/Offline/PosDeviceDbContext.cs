@@ -28,6 +28,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<DeviceCachedProduct> Products => Set<DeviceCachedProduct>();
     public DbSet<DeviceCachedProductBarcode> ProductBarcodes => Set<DeviceCachedProductBarcode>();
     public DbSet<DeviceCachedProductPrice> ProductPrices => Set<DeviceCachedProductPrice>();
+    public DbSet<DeviceCachedBatch> Batches => Set<DeviceCachedBatch>();
     public DbSet<DeviceCachedLocation> Locations => Set<DeviceCachedLocation>();
     public DbSet<DeviceCachedUser> Users => Set<DeviceCachedUser>();
     public DbSet<DevicePermissionSnapshot> PermissionSnapshots => Set<DevicePermissionSnapshot>();
@@ -120,6 +121,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.TracksExpiry).HasColumnName("tracks_expiry").IsRequired();
             entity.Property(x => x.SourceVersion).HasColumnName("source_version").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+            entity.Property(x => x.IsVatExempt).HasColumnName("is_vat_exempt").IsRequired();
             entity.HasIndex(x => x.Sku).IsUnique().HasDatabaseName("ux_cache_product_sku");
         });
 
@@ -147,6 +149,21 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.EffectiveToUtc).HasColumnName("effective_to_utc");
             entity.HasIndex(x => new { x.ProductId, x.LocationId, x.EffectiveFromUtc })
                 .HasDatabaseName("ix_cache_product_price_effective");
+        });
+
+        builder.Entity<DeviceCachedBatch>(entity =>
+        {
+            OwnedByChangeFeed(entity, "cache_batch");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(x => x.ProductId).HasColumnName("product_id").IsRequired();
+            entity.Property(x => x.LotNumber).HasColumnName("lot_number").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ReceivedOn).HasColumnName("received_on").IsRequired();
+            entity.Property(x => x.ExpiresOn).HasColumnName("expires_on");
+            entity.Property(x => x.UnitCost).HasColumnName("unit_cost").HasPrecision(19, 4).IsRequired();
+
+            // First-expiry-first-out reads by product and expiry, and nothing else.
+            entity.HasIndex(x => new { x.ProductId, x.ExpiresOn }).HasDatabaseName("ix_cache_batch_fefo");
         });
 
         builder.Entity<DeviceCachedLocation>(entity =>

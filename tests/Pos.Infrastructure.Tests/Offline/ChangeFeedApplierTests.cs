@@ -52,6 +52,47 @@ public sealed class ChangeFeedApplierTests
     }
 
     [Fact]
+    public async Task ApplyAsync_CachesWhatAnOfflineSaleReads()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+        ProductId productId = ProductId.New();
+        BatchId batchId = BatchId.New();
+
+        Result<ChangeFeedApplyOutcome> result = await database.Applier.ApplyAsync(new ChangeFeedPage(0, 8,
+        [
+            new ProductChanged(4, productId, "SKU-7", "Rice 5kg", true, true, true, 1, IssuedAt, IsVatExempt: true),
+            new BatchChanged(8, batchId, productId, "LOT-A", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), 41.5m),
+        ]));
+
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+
+        // An offline sale computes its own tax; the wrong flag puts the wrong
+        // figure on a receipt the customer keeps.
+        (await context.Products.SingleAsync()).IsVatExempt.Should().BeTrue();
+
+        DeviceCachedBatch batch = await context.Batches.SingleAsync();
+        batch.ExpiresOn.Should().Be(new DateOnly(2026, 12, 31), "first-expiry-first-out needs this");
+        batch.UnitCost.Should().Be(41.5m);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_RefusesABatchThatExpiresBeforeItWasReceived()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+
+        Result<ChangeFeedApplyOutcome> result = await database.Applier.ApplyAsync(new ChangeFeedPage(0, 4,
+        [
+            new BatchChanged(4, BatchId.New(), ProductId.New(), "LOT-A",
+                new DateOnly(2026, 9, 1), new DateOnly(2026, 8, 1), 41.5m),
+        ]));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("sync.feed_page_invalid");
+    }
+
+    [Fact]
     public async Task ApplyAsync_LaterPages_UpdateRows_RemoveCancelledPrices_AndReplaceSnapshots()
     {
         await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();

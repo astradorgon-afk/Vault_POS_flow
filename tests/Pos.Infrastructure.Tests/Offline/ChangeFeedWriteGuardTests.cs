@@ -25,7 +25,7 @@ public sealed class ChangeFeedWriteGuardTests
         },
         {
             "update product",
-            async context => (await context.Products.SingleAsync()).Refresh("SKU-1", "Tampered", true, false, false, 99, Now)
+            async context => (await context.Products.SingleAsync()).Refresh("SKU-1", "Tampered", true, false, false, 99, Now, false)
         },
         { "delete product", async context => context.Products.Remove(await context.Products.SingleAsync()) },
         {
@@ -169,7 +169,7 @@ public sealed class ChangeFeedWriteGuardTests
 
         List<IEntityType> owned = [.. context.Model.GetEntityTypes().Where(e => typeof(IChangeFeedOwned).IsAssignableFrom(e.ClrType))];
         owned.Select(e => e.GetTableName()).Should().BeEquivalentTo(
-            ["cache_location", "cache_product", "cache_product_barcode", "cache_product_price", "cache_user", "snapshot_permission", "sync_cursor"]);
+            ["cache_batch", "cache_location", "cache_product", "cache_product_barcode", "cache_product_price", "cache_user", "snapshot_permission", "sync_cursor"]);
 
         string[] declared = [.. owned.SelectMany(e => e.GetDeclaredTriggers()).Select(t => t.ModelName)];
         declared.Should().HaveCount(owned.Count * 3);
