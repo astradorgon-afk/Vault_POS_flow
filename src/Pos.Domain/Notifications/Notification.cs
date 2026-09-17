@@ -9,6 +9,8 @@ public enum NotificationKind : short
     BatchExpiringSoon = 1,
     BatchExpired = 2,
     LowStock = 3,
+    ReceivingDiscrepancy = 4,
+    TransferShortage = 5,
 }
 
 /// <summary>The attention level of a notification.</summary>

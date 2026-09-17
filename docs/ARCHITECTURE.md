@@ -295,9 +295,9 @@ location. Users holding `location.all` join the all-locations group:
 
 | Event | Consumers |
 |---|---|
-| Transfer requested / approved / dispatched / received / discrepancy | source + destination + HQ |
+| Transfer requested / approved / dispatched / received / discrepancy | source + destination + HQ *(arrival shortages alert since C26)* |
 | Quarantine incident raised / resolved | HQ + originating store |
-| Low stock, expiry, high-value adjustment | HQ + owning location |
+| Low stock, expiry, receiving discrepancy, high-value adjustment | HQ + owning location *(low stock, expiry and receiving discrepancies alert today)* |
 | Sync failure, device offline | HQ |
 
 Every real-time message has a **persisted `Notification` row** written first.

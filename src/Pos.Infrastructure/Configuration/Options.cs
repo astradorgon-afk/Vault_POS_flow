@@ -329,6 +329,33 @@ public sealed class LowStockOptions
     public TimeSpan Interval => TimeSpan.FromHours(IntervalHours);
 }
 
+/// <summary>Receiving and transfer discrepancy alert worker settings.</summary>
+public sealed class DiscrepancyAlertOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "DiscrepancyAlerts";
+
+    /// <summary>Gets or sets whether the background discrepancy alert worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets how many minutes between discrepancy sweeps.</summary>
+    [Range(5, 1440)]
+    public int IntervalMinutes { get; set; } = 15;
+
+    /// <summary>Gets or sets how many days back a sweep looks for unresolved discrepancies.</summary>
+    [Range(1, 90)]
+    public int LookbackDays { get; set; } = 7;
+
+    /// <summary>Gets or sets whether a discrepancy sweep runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromMinutes(IntervalMinutes);
+
+    /// <summary>Gets the lookback as a time span.</summary>
+    public TimeSpan Lookback => TimeSpan.FromDays(LookbackDays);
+}
+
 /// <summary>Cashier shift force-close worker settings.</summary>
 public sealed class ShiftForceCloseOptions
 {

@@ -7,11 +7,13 @@ using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Identity;
+using Pos.Application.Notifications;
 using Pos.Domain.Common;
 using Pos.Domain.Identity;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Transfers;
+using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.IntegrationTests;
 
@@ -295,12 +297,20 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         blocked.StatusCode.Should().Be(HttpStatusCode.Conflict, await blocked.Content.ReadAsStringAsync());
         (await ReadErrorCodeAsync(blocked)).Should().Be("transfer.verify_has_open_variance");
 
+        // The open shortage is what the discrepancy alert worker reads.
+        TransferShortageAlert shortage = (await OpenShortagesAsync())
+            .Should().ContainSingle(a => a.TransferId == new TransferOrderId(transferId)).Subject;
+        shortage.ShortQuantity.Should().Be(2m);
+        shortage.ShortLineCount.Should().Be(1);
+        shortage.DestinationLocationId.Should().Be(seed.Store);
+
         using HttpResponseMessage resolved = await PostAsJsonAsync(
             client,
             FormattableString.Invariant($"/api/v1/transfers/{transferId}/discrepancies/{partial.DiscrepancyIds[0]}/resolve"),
             new { outcome = 1, note = "Found in the back room." },
             approver);
         resolved.StatusCode.Should().Be(HttpStatusCode.OK, await resolved.Content.ReadAsStringAsync());
+        (await OpenShortagesAsync()).Should().NotContain(a => a.TransferId == new TransferOrderId(transferId));
 
         // The resolution is balanced: variance leaves the destination and the
         // found units re-enter available there.
@@ -702,6 +712,10 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
             client, FormattableString.Invariant($"/api/v1/transfers/{transferId}/dispatch"), accessToken);
         dispatched.StatusCode.Should().Be(HttpStatusCode.OK, await dispatched.Content.ReadAsStringAsync());
     }
+
+    private Task<IReadOnlyList<TransferShortageAlert>> OpenShortagesAsync()
+        => factory.WithServiceAsync(context => new DiscrepancyAlertRepository(context)
+            .GetOpenTransferShortagesAsync(DateTimeOffset.UtcNow.AddDays(-1), CancellationToken.None));
 
     private async Task<TransferDbo> TransferDboAsync(Guid transferId)
         => await factory.WithServiceAsync(async context =>

@@ -82,6 +82,7 @@ public static class DependencyInjection
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();
         services.TryAddScoped<INotificationWriter, NotificationWriter>();
         services.TryAddScoped<ILowStockRepository, LowStockRepository>();
+        services.TryAddScoped<IDiscrepancyAlertRepository, DiscrepancyAlertRepository>();
         services.TryAddScoped<INotificationReader, NotificationReader>();
         services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 
@@ -112,6 +113,15 @@ public static class DependencyInjection
         if (lowStock.Enabled)
         {
             services.AddHostedService<LowStockWorker>();
+        }
+
+        DiscrepancyAlertOptions discrepancyAlerts = configuration
+            .GetSection(DiscrepancyAlertOptions.SectionName)
+            .Get<DiscrepancyAlertOptions>() ?? new DiscrepancyAlertOptions();
+
+        if (discrepancyAlerts.Enabled)
+        {
+            services.AddHostedService<DiscrepancyAlertWorker>();
         }
 
         ShiftForceCloseOptions shiftForceClose = configuration
@@ -192,6 +202,11 @@ public static class DependencyInjection
 
         services.AddOptions<LowStockOptions>()
             .Bind(configuration.GetSection(LowStockOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<DiscrepancyAlertOptions>()
+            .Bind(configuration.GetSection(DiscrepancyAlertOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

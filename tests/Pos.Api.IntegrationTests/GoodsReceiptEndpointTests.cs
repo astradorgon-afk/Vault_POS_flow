@@ -6,9 +6,12 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Identity;
+using Pos.Application.Notifications;
 using Pos.Domain.Common;
 using Pos.Domain.Identity;
 using Pos.Domain.Locations;
+using Pos.Domain.Purchasing;
+using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.IntegrationTests;
 
@@ -104,6 +107,15 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
         discrepancy.GetProperty("kind").GetString().Should().Be("Shortage");
         discrepancy.GetProperty("quantity").GetDecimal().Should().Be(6m);
         discrepancy.GetProperty("valueImpact").GetDecimal().Should().Be(600m);
+
+        // The unresolved shortage is what the discrepancy alert worker reads.
+        IReadOnlyList<ReceivingDiscrepancyAlert> open = await factory.WithServiceAsync(context =>
+            new DiscrepancyAlertRepository(context)
+                .GetOpenReceivingDiscrepanciesAsync(DateTimeOffset.UtcNow.AddDays(-1), CancellationToken.None));
+        ReceivingDiscrepancyAlert alert = open.Should()
+            .ContainSingle(a => a.ReceiptId == new GoodsReceiptId(receiptId)).Subject;
+        alert.Discrepancies.Should().ContainSingle()
+            .Which.Should().Be(new ReceivingDiscrepancyAlertLine(ReceivingDiscrepancyKind.Shortage, 6m, 600m));
 
         (decimal sum, int legs, _) = await MovementTotalsAsync(receiptId);
         legs.Should().Be(2);
