@@ -37,6 +37,9 @@ public enum SyncEventType
 
     /// <summary>Cash went back to a customer.</summary>
     RefundIssued = 8,
+
+    /// <summary>A cashier closed a shift and counted the drawer.</summary>
+    ShiftClosed = 9,
 }
 
 /// <summary>Where one outbox event has got to.</summary>

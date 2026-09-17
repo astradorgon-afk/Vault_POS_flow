@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, and C43 gives those events somewhere to go
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, and C44 teaches the server what the shift ones mean
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,131 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 255, Security 52, Architecture 25, API 174** (2026-09-17, through C43 the push endpoint). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C35 have not been run against PostgreSQL; they add no PostgreSQL migration. |
+| Tests | **1,140 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 264, Security 52, Architecture 25, API 174** (2026-09-17, through C44 the shift appliers). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C44 have not been run against PostgreSQL; only C43 adds a PostgreSQL migration. |
 | Migrations | 29 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -22,7 +22,7 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    255 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store
+Pos.Infrastructure.Tests    264 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -1146,6 +1146,39 @@ uses `ReconcileShiftCommand` — settling a variance is a manager's decision tak
 centrally — and still asserts the distinction that matters, that the refusal is
 *unavailable here* rather than *forbidden to this user*.
 
+C44 finishes the shift's round trip, and found two faults doing it. The first was
+in the device: `DeviceShiftRepository.UpdateAsync` mapped a closed shift to no
+event at all, so a drawer counted during an outage closed locally and head office
+never learned of it — no closure, no variance, nothing. The mapping was right
+when it was written in C33, where close was not a device use case; it became a
+bug the moment C40 registered `CloseShiftCommand` and nobody revisited the
+switch. `ShiftClosed` now carries the closing instant and the drawer figures.
+
+The three appliers replay each transition through the aggregate rather than
+writing a status column, so a resume of a shift that was never suspended is
+refused centrally by the same rule that would have refused it at the till. A
+device claiming `isForceClosed` is refused outright: force-close is the server
+worker's authority, and the claim is exactly what would suppress the count.
+
+The close re-derives the variance. Declared and counted cash are facts about a
+physical drawer and are taken as entered, but the variance is derived, and the
+figure a manager reconciles must come from the sales the server actually holds —
+one derived from events it refused would balance the books against sales that
+are not there. That is only safe because a device's events are applied in the
+order it produced them, so every sale of the shift has landed by the time its
+close arrives. When the server's figure and the device's disagree, the close is
+still accepted — the money has already moved — and the audit entry records both
+with a reason, so the number on the cashier's Z-report can be explained rather
+than merely contradicted.
+
+The second fault surfaced only because the tests go through the real processor
+rather than straight into an applier: a till locked and unlocked again arrives as
+two events in one batch, and the second collided with the first, because an
+applier reads untracked and attaches what it read. Each event now starts from a
+clean change tracker — a batch is a transport convenience, not a unit of work,
+and that had been true of the transaction but not of the change tracker.
+Commenting the reset back out turns three tests red.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -1405,24 +1438,23 @@ so a device now queues the business events it produces — gaplessly, canonicall
 hashed, and in the same transaction as the records they describe. Nothing moves
 those events yet.
 
-1. **Appliers for the other seven event types.** `ShiftOpenedApplier` sets the
-   pattern and the engine is type-agnostic: an unsupported type is refused with
-   `sync.event_type_unsupported` rather than dropped, so adding one is additive.
-   The sale is the interesting one — it posts to the ledger, and the server
-   re-resolves price and VAT rather than trusting the device's figures.
+1. **Appliers for the five sale event types.** The four shift events land
+   centrally as of C44; `SaleCompleted`, `SaleVoided`, `SaleReceiptReprinted`,
+   `SalesReturnCreated` and `RefundIssued` do not. The engine is type-agnostic —
+   an unsupported type is refused with `sync.event_type_unsupported` rather than
+   dropped — so each is additive. The sale is the interesting one: it posts to
+   the ledger, and the server re-resolves price and VAT rather than trusting the
+   device's figures.
 
 2. **The retry queue**, per OFFLINE_SYNC.md §3.2: exponential backoff with
-   jitter, capped at thirty minutes, eight consecutive failures moving an event
-   to `Failed` — kept forever and escalated, never dropped.
-3. **The retry queue**, per OFFLINE_SYNC.md §3.2: exponential backoff with
    jitter, capped at thirty minutes, eight consecutive failures moving an event
    to `Failed` — kept forever and escalated, never dropped. The outbox already
    carries `AttemptCount`, `NextRetryAtUtc`, `LastError` and
    `ServerResponseJson` for it.
-4. **The pull endpoint and rebaseline.** `ChangeFeedApplier` (C29) is already
+3. **The pull endpoint and rebaseline.** `ChangeFeedApplier` (C29) is already
    the consumer; what is missing is the server side of the feed and the cursor
    negotiation.
-5. **Conflict rules and the sync-failure dashboard**, which also unblocks Phase
+4. **Conflict rules and the sync-failure dashboard**, which also unblocks Phase
    14's last item — the sync-failure alert generator.
 
 Two smaller things outstanding:
@@ -1432,8 +1464,8 @@ Two smaller things outstanding:
   `CommonUtilities.Helpers.UserName must have a valid value`, which a GitHub
   runner should not hit because it sets `USER`. If it does, set it in the job.
 - **`Pos.Client` has not been compiled since C29c.** No MAUI workloads in the
-  cloud environment, so five chunks' worth of DI wiring and one Razor page rest
-  on CI's client jobs.
+  cloud environment, so the DI wiring of C33–C44 and one Razor page rest on CI's
+  client jobs.
 
 Two questions the capability table did not answer were settled on 2026-09-17
 and are now rows in it:

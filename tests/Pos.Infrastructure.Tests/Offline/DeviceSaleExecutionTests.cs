@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -169,6 +170,37 @@ public sealed class DeviceSaleExecutionTests
         CashierShift shift = await context.LocalShifts.SingleAsync(CancellationToken.None);
 
         shift.CashVariance.Should().Be(-5m, "the shortfall is recorded, not hidden");
+    }
+
+    [Fact]
+    public async Task ClosingTheShift_QueuesTheCloseWithTheDrawerFigures()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        (await host.SellAsync(quantity: 3m, unitPaid: 75m)).IsSuccess.Should().BeTrue();
+
+        Result<CashierShiftId> closed = await host.CloseShiftAsync(declared: 2075m, counted: 2075m);
+        closed.IsSuccess.Should().BeTrue(closed.IsFailure ? closed.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        OutboxEvent queued = await context.Outbox
+            .AsNoTracking()
+            .SingleAsync(e => e.Type == SyncEventType.ShiftClosed, CancellationToken.None);
+
+        // Without this event head office never learns the drawer closed, nor
+        // what it held.
+        ShiftSyncPayload payload = JsonSerializer.Deserialize<ShiftSyncPayload>(queued.PayloadJson)!;
+
+        payload.Status.Should().Be(nameof(ShiftStatus.Closed));
+        payload.DeclaredCash.Should().Be(2075m);
+        payload.CountedCash.Should().Be(2075m);
+        payload.CashVariance.Should().Be(0m);
+        payload.ClosedAtUtc.Should().NotBeNull();
+        payload.IsForceClosed.Should().BeFalse();
+
+        (await context.Outbox.CountAsync(e => e.Type == SyncEventType.ShiftClosed, CancellationToken.None))
+            .Should().Be(1, "declaring the cash is a step of the close, not a second event");
     }
 
     [Fact]

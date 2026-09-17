@@ -22,6 +22,15 @@ Open (cashier + opening float)
   `Reconciled` until a manager resolves it with a reason.
 - A shift left open past `MaxShiftHours` (default 16) is force-closed by a worker
   and flagged, so an abandoned shift cannot silently absorb the next day's sales.
+  Force-close is the worker's authority alone: a device uploading a shift it
+  claims to have force-closed is refused, because the claim is what would
+  suppress the count.
+- A shift closed offline uploads its declared and counted cash as the cashier
+  entered them — those are facts about a physical drawer. The server re-derives
+  the variance from the sales and refunds it accepted, since that is the figure
+  `Reconciled` is judged against; when it disagrees with the one printed at the
+  till, the closure is still accepted and the audit entry records both
+  (OFFLINE_SYNC.md §3.1.1).
 
 ---
 

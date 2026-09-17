@@ -15,12 +15,12 @@ namespace Pos.Infrastructure.Offline;
 /// <para>
 /// The port is server-shaped, and three of its members answer questions about
 /// sales — the cash a shift took, what a sale has already been refunded, which
-/// shifts a background worker should force-close. A device has no local sale
-/// tables yet and runs no workers, so those members refuse rather than
-/// improvise: a closing shift that silently reconciled against zero cash sales
-/// would balance a drawer against a lie. They are the reason
-/// <c>CloseShiftCommand</c> is not yet registered on a device while open,
-/// suspend and resume are.
+/// shifts a background worker should force-close. The first two read the
+/// device's own sale, return and refund rows, which is what lets a drawer close
+/// offline against the cash it actually took rather than against zero. The
+/// third refuses: force-close is a background worker's job and a device runs no
+/// workers, so reaching it is a registration mistake rather than a runtime
+/// condition.
 /// </para>
 /// <para>
 /// The device context tracks by default, unlike the server's, so reads that
@@ -74,6 +74,7 @@ public sealed class DeviceShiftRepository(
         {
             ShiftStatus.Suspended => SyncEventType.ShiftSuspended,
             ShiftStatus.Open => SyncEventType.ShiftResumed,
+            ShiftStatus.Closed => SyncEventType.ShiftClosed,
             _ => null,
         };
 
@@ -195,7 +196,12 @@ public sealed class DeviceShiftRepository(
                 shift.OpeningFloat,
                 shift.BusinessDate,
                 shift.OpenedAtUtc,
-                shift.Status.ToString()),
+                shift.Status.ToString(),
+                shift.ClosedAtUtc,
+                shift.DeclaredCash,
+                shift.CountedCash,
+                shift.CashVariance,
+                shift.IsForceClosed),
             shift.LocationId,
             cancellationToken);
 
@@ -218,6 +224,16 @@ public sealed class DeviceShiftRepository(
 /// <param name="BusinessDate">The business date in the location's timezone.</param>
 /// <param name="OpenedAtUtc">The device clock when the drawer opened.</param>
 /// <param name="Status">The shift's status after the event.</param>
+/// <param name="ClosedAtUtc">When the drawer was closed, for a close.</param>
+/// <param name="DeclaredCash">What the cashier said was in the drawer.</param>
+/// <param name="CountedCash">What was actually counted.</param>
+/// <param name="CashVariance">
+/// The variance the device computed from its own sales and refunds, and printed
+/// on the cashier's Z-report. The server derives its own from the events it
+/// accepted and that one stands; this is sent so a disagreement can be shown
+/// rather than merely discovered.
+/// </param>
+/// <param name="IsForceClosed">Whether a worker closed it rather than a cashier.</param>
 public sealed record ShiftSyncPayload(
     Guid ShiftId,
     string Number,
@@ -227,4 +243,9 @@ public sealed record ShiftSyncPayload(
     decimal OpeningFloat,
     DateOnly BusinessDate,
     DateTimeOffset OpenedAtUtc,
-    string Status);
+    string Status,
+    DateTimeOffset? ClosedAtUtc = null,
+    decimal? DeclaredCash = null,
+    decimal? CountedCash = null,
+    decimal? CashVariance = null,
+    bool IsForceClosed = false);

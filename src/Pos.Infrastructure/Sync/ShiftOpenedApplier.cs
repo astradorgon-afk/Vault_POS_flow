@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Common;
@@ -28,11 +27,6 @@ namespace Pos.Infrastructure.Sync;
 /// <param name="clock">The authoritative clock.</param>
 public sealed class ShiftOpenedApplier(PosDbContext context, ISystemClock clock) : ISyncEventApplier
 {
-    private static readonly JsonSerializerOptions JsonDefaults = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
     /// <inheritdoc />
     public string EventType => "ShiftOpened";
 
@@ -42,28 +36,11 @@ public sealed class ShiftOpenedApplier(PosDbContext context, ISystemClock clock)
         string payloadJson,
         CancellationToken cancellationToken)
     {
-        ShiftUpload? upload;
-
-        try
-        {
-            upload = JsonSerializer.Deserialize<ShiftUpload>(payloadJson, JsonDefaults);
-        }
-        catch (JsonException)
-        {
-            upload = null;
-        }
+        (ShiftUpload? upload, SyncApplyResult? refusal) = ShiftUploads.Read(payloadJson, deviceId);
 
         if (upload is null)
         {
-            return SyncApplyResult.Rejected("sync.payload_invalid", "The shift payload could not be read.");
-        }
-
-        // A device may only upload its own work, whatever the payload claims.
-        if (upload.DeviceId != deviceId.Value)
-        {
-            return SyncApplyResult.Rejected(
-                "sync.device_mismatch",
-                "The event names a different device than the one that uploaded it.");
+            return refusal!;
         }
 
         CashierShiftId shiftId = new(upload.ShiftId);
@@ -117,15 +94,4 @@ public sealed class ShiftOpenedApplier(PosDbContext context, ISystemClock clock)
         _ = clock;
         return SyncApplyResult.Accepted(upload.Number);
     }
-
-    private sealed record ShiftUpload(
-        Guid ShiftId,
-        string Number,
-        Guid LocationId,
-        Guid DeviceId,
-        Guid CashierUserId,
-        decimal OpeningFloat,
-        DateOnly BusinessDate,
-        DateTimeOffset OpenedAtUtc,
-        string Status);
 }

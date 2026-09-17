@@ -256,6 +256,41 @@ the effect is committed but the idempotency record is not. A device that retries
 after a network timeout receives the original result, with the original document
 number, and posts nothing twice.
 
+Each event also starts from a clean change tracker. A batch is a transport
+convenience, not a unit of work, and a device sends the lifecycle as a batch —
+a till locked and unlocked again arrives as two events touching one row. Without
+the reset the second event reads that row afresh and collides with the instance
+the first one attached.
+
+### 3.1.1 What each event type means centrally
+
+The processor is type-agnostic: it owns idempotency and ordering, and an applier
+owns only what one event means. An event type the server does not understand is
+refused with `sync.event_type_unsupported` rather than dropped, so a newer device
+is told plainly instead of losing work silently.
+
+| Event | What the server does |
+|---|---|
+| `ShiftOpened` | Creates the shift, **keeping the device's identifier and SHF number**. Re-minting either would orphan the receipts already printed. A shift the server already holds is refused with `sync.shift_already_held`. |
+| `ShiftSuspended` / `ShiftResumed` | Replayed through the aggregate, so a transition that would have been refused at the till is refused here too rather than written as a status column. |
+| `ShiftClosed` | Declared and counted cash are taken as the cashier entered them — they are facts about a physical drawer. The **variance is re-derived** from the sales and refunds the server accepted; see below. A device claiming `isForceClosed` is refused with `sync.force_close_not_permitted`: force-close is the server worker's authority, and the claim is what would suppress the count. |
+
+Every applier refuses a payload naming another device (`sync.device_mismatch`),
+and an update naming a shift the server has never seen (`sync.shift_unknown`) —
+under strict per-device ordering that means the open was refused, so the shift
+will never exist and retrying will never help.
+
+**Why the close re-derives the variance.** The device computes its own from the
+sales it holds and prints it on the Z-report. The server derives its own because
+that is the figure a manager reconciles and the cash report totals; one derived
+from events the server refused would balance the books against sales it does not
+hold. This is only safe because a device's events are applied in the order it
+produced them, so every sale of the shift has landed by the time its close
+arrives. When the two disagree, the close is still **accepted** — the money has
+already moved — and the audit entry records both figures with a reason, so the
+number on the cashier's receipt can be explained rather than merely contradicted.
+The reconcile step is where a human decides what it means.
+
 ### 3.2 Retry strategy
 
 Client-side, per event:

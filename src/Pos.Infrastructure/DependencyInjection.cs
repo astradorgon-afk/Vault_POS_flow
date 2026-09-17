@@ -73,6 +73,9 @@ public static class DependencyInjection
         // The upload engine and the appliers that know what each event means.
         services.TryAddScoped<Sync.SyncPushProcessor>();
         services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftOpenedApplier>();
+        services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftSuspendedApplier>();
+        services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftResumedApplier>();
+        services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftClosedApplier>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
         services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
         services.TryAddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();

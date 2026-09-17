@@ -246,14 +246,20 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 13 — Synchronization
 
-- [~] Outbox, device sequence, canonical payload hashing
+- [x] Outbox, device sequence, canonical payload hashing
       *(C34: `local_outbox_event` and a single-row `device_sequence`, both
       written in the caller's transaction so a rolled-back event releases its
       number; `CanonicalJson` sorts properties at every depth so declaration
-      order cannot change a hash. The shift lifecycle is its first producer.
-      Payload types for the remaining events land with the use cases that
-      produce them)*
-- [ ] Push endpoint with per-event idempotent processing
+      order cannot change a hash. C38–C42 made every POS use case a producer,
+      and C44 added `ShiftClosed`, which C40 had left the device unable to
+      report)*
+- [~] Push endpoint with per-event idempotent processing
+      *(C43: `POST /api/v1/sync/push` — one transaction and one verdict per
+      event, the idempotency record committed with the effect, a reused
+      identifier carrying a different hash refused as tampering, a per-device
+      checkpoint deferring gaps. C44 applies the four shift events centrally,
+      replaying each transition through the aggregate. The five sale event
+      types are still refused as unsupported)*
 - [ ] Pull endpoint, change feed, cursors, rebaseline
 - [ ] Retry queue with exponential backoff
 - [ ] Conflict rules implementation

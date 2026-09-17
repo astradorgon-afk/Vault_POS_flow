@@ -127,6 +127,12 @@ public sealed class SyncPushProcessor(
         SyncPushEvent uploaded,
         CancellationToken cancellationToken)
     {
+        // Every event is its own unit of work, so it starts from a clean change
+        // tracker. Two events touching the same row in one batch — a till locked
+        // and unlocked again — would otherwise collide on the second, because an
+        // applier reads untracked and attaches what it read.
+        context.ChangeTracker.Clear();
+
         EventId eventId = new(uploaded.EventId);
         byte[] uploadedHash = SHA256.HashData(Encoding.UTF8.GetBytes(uploaded.PayloadJson));
 
