@@ -116,10 +116,29 @@ public sealed class DeviceShiftRepository(
     }
 
     /// <inheritdoc />
-    public Task<ShiftCashTotals> GetShiftCashTotalsAsync(
+    /// <remarks>
+    /// Refunds are zero, and that is a real statement rather than a placeholder:
+    /// a device cannot refund, because returns and refunds are not registered on
+    /// one. If that changes, this has to change with it — a drawer reconciled
+    /// against cash that went out but was not counted would report a shortfall
+    /// the cashier did not cause. Petty-cash payouts do not exist yet on either
+    /// side.
+    /// </remarks>
+    public async Task<ShiftCashTotals> GetShiftCashTotalsAsync(
         CashierShiftId shiftId,
         CancellationToken cancellationToken)
-        => throw NotOnADeviceYet(nameof(GetShiftCashTotalsAsync));
+    {
+        decimal cashSales = await (
+            from sale in context.LocalSales.AsNoTracking()
+            join payment in context.Set<Payment>().AsNoTracking()
+                on sale.Id equals EF.Property<SaleId>(payment, "SaleId")
+            where sale.CashierShiftId == shiftId && payment.Method == PaymentMethod.Cash
+            select payment.Amount)
+            .SumAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new ShiftCashTotals(cashSales, CashRefunds: 0m, Payouts: 0m);
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(

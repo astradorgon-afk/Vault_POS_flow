@@ -130,15 +130,16 @@ public sealed class DeviceShiftExecutionTests
         await using DeviceHost host = await DeviceHost.StartAsync();
         CashierShiftId shiftId = await host.OpenShiftAsync();
 
-        // Closing reconciles against local sales the device does not have, so it
-        // is not registered. It must refuse before reaching the repository member
-        // that would throw.
-        Result<CashierShiftId> closed = await host.SendAsync(
-            new CloseShiftCommand(shiftId, host.LocationId, 2000m, 2000m));
+        // Reconciling a shift's variance is a manager's decision taken centrally,
+        // so it is not in the catalogue. It must refuse before reaching any
+        // repository member, and for the right reason: unavailable here, not
+        // forbidden to this user.
+        Result<CashierShiftId> reconciled = await host.SendAsync(
+            new ReconcileShiftCommand(shiftId, host.LocationId, "counted twice"));
 
-        closed.IsFailure.Should().BeTrue();
-        closed.Error.Code.Should().Be("application.handler_unavailable");
-        closed.Error.Type.Should().Be(ErrorType.Unavailable);
+        reconciled.IsFailure.Should().BeTrue();
+        reconciled.Error.Code.Should().Be("application.handler_unavailable");
+        reconciled.Error.Type.Should().Be(ErrorType.Unavailable);
     }
 
     [Fact]

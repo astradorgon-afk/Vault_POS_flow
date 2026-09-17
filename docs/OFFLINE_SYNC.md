@@ -308,12 +308,11 @@ Permissions a handler checks for itself are not listed and do not need to be;
 and the expired-batch override is unreachable offline by construction.
 
 An entry is `Pending` until the device-side ports its handler needs exist, and
-only a `Registered` entry is added to the container. As of C39 the shift
-lifecycle — open, suspend, resume — and the cash sale are `Registered` and
-execute on a device. Closing a shift is still `Pending`: it reconciles the drawer
-against the shift's cash sales, and balancing against a figure the device cannot
-read would be worse than refusing — though `local_sale` now exists, so it is next
-rather than blocked. The distinction is not
+only a `Registered` entry is added to the container. As of C40 a device can trade: the
+shift lifecycle — open, suspend, resume, close — and the cash sale are
+`Registered` and execute offline, with the drawer reconciled against the shift's
+own cash sales. Void, reprint, returns and refunds are declared offline-capable
+and remain `Pending`. The distinction is not
 bookkeeping: registering a handler whose repositories are unregistered would
 make the container throw on resolve, where the whole point of the boundary is to
 fail closed with a result the UI can explain.

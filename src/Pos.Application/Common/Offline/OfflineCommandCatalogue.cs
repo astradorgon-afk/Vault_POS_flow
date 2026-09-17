@@ -177,10 +177,7 @@ public sealed class OfflineCommandCatalogue
             "Shift resume, part of the terminal's own shift lifecycle.",
             Identity.Permissions.Sales.OpenShift),
 
-        // Closing reconciles the drawer against the shift's cash sales, which a
-        // device cannot read until it carries local sales. Balancing against a
-        // zero it cannot verify would be worse than refusing.
-        Pending<CloseShiftCommand>(
+        OnDevice<CloseShiftCommand>(
             "Shift close; totals are reconciled centrally after sync.",
             Identity.Permissions.Sales.CloseShift),
 

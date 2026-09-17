@@ -130,6 +130,47 @@ public sealed class DeviceSaleExecutionTests
             .Should().Be(17m, "the refused second sale drew nothing");
     }
 
+    [Fact]
+    public async Task ClosingTheShift_ReconcilesTheDrawerAgainstWhatWasSoldForCash()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        (await host.SellAsync(quantity: 3m, unitPaid: 75m)).IsSuccess.Should().BeTrue();
+        (await host.SellAsync(quantity: 1m, unitPaid: 25m)).IsSuccess.Should().BeTrue();
+
+        // Opening float 2000 plus 100 taken in cash: a drawer counted at 2100
+        // balances, and the device worked that out from its own sales.
+        Result<CashierShiftId> closed = await host.CloseShiftAsync(declared: 2100m, counted: 2100m);
+
+        closed.IsSuccess.Should().BeTrue(closed.IsFailure ? closed.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        CashierShift shift = await context.LocalShifts.SingleAsync(CancellationToken.None);
+
+        shift.Status.Should().Be(ShiftStatus.Closed);
+        shift.CountedCash.Should().Be(2100m);
+        shift.CashVariance.Should().Be(0m, "the float and the cash sales account for the drawer");
+    }
+
+    [Fact]
+    public async Task AShortDrawerClosesWithTheVarianceRecorded()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        (await host.SellAsync(quantity: 3m, unitPaid: 75m)).IsSuccess.Should().BeTrue();
+
+        Result<CashierShiftId> closed = await host.CloseShiftAsync(declared: 2070m, counted: 2070m);
+
+        closed.IsSuccess.Should().BeTrue(closed.IsFailure ? closed.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        CashierShift shift = await context.LocalShifts.SingleAsync(CancellationToken.None);
+
+        shift.CashVariance.Should().Be(-5m, "the shortfall is recorded, not hidden");
+    }
+
     /// <summary>A device container as MauiProgram composes one, with stock on the shelf.</summary>
     private sealed class SaleHost : IAsyncDisposable
     {
@@ -167,6 +208,7 @@ public sealed class DeviceSaleExecutionTests
             List<PermissionSnapshotGrant> grants =
             [
                 new(Permissions.Sales.OpenShift, host.StoreId),
+                new(Permissions.Sales.CloseShift, host.StoreId),
                 .. grantSalePermission
                     ? new[] { new PermissionSnapshotGrant(Permissions.Sales.Create, host.StoreId) }
                     : [],
@@ -283,6 +325,9 @@ public sealed class DeviceSaleExecutionTests
             return await scope.ServiceProvider.GetRequiredService<IInventoryLedger>()
                 .GetQuantityAsync(location, ProductId, BatchId.Empty, state, CancellationToken.None);
         }
+
+        public Task<Result<CashierShiftId>> CloseShiftAsync(decimal declared, decimal counted)
+            => SendAsync(new CloseShiftCommand(ShiftId, StoreId, declared, counted));
 
         private async Task<CashierShiftId> OpenShiftAsync()
         {
