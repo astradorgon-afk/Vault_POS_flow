@@ -79,6 +79,8 @@ public static class DependencyInjection
         services.AddScoped<Sync.ISyncEventApplier, Sync.SaleCompletedApplier>();
         services.AddScoped<Sync.ISyncEventApplier, Sync.SaleVoidedApplier>();
         services.AddScoped<Sync.ISyncEventApplier, Sync.SaleReceiptReprintedApplier>();
+        services.AddScoped<Sync.ISyncEventApplier, Sync.SalesReturnCreatedApplier>();
+        services.AddScoped<Sync.ISyncEventApplier, Sync.RefundIssuedApplier>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
         services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
         services.TryAddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();

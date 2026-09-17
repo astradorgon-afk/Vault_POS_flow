@@ -253,7 +253,7 @@ Substantially delivered in Phase 1, because everything else depends on it.
       order cannot change a hash. C38–C42 made every POS use case a producer,
       and C44 added `ShiftClosed`, which C40 had left the device unable to
       report)*
-- [~] Push endpoint with per-event idempotent processing
+- [x] Push endpoint with per-event idempotent processing
       *(C43: `POST /api/v1/sync/push` — one transaction and one verdict per
       event, the idempotency record committed with the effect, a reused
       identifier carrying a different hash refused as tampering, a per-device
@@ -261,8 +261,9 @@ Substantially delivered in Phase 1, because everything else depends on it.
       replaying each transition through the aggregate; C45 applies the sale by
       replaying it through the same handler the online endpoint runs, and C46
       lets a line name the price row it was charged from so a stale price is
-      recorded rather than re-priced; C47 adds void and reprint. Return and
-      refund are still refused as unsupported)*
+      recorded rather than re-priced; C47 adds void and reprint and C48 the
+      return and the refund. Every POS event a device can queue now lands
+      centrally, and a coverage test keeps the two lists from drifting)*
 - [ ] Pull endpoint, change feed, cursors, rebaseline
 - [ ] Retry queue with exponential backoff
 - [ ] Conflict rules implementation

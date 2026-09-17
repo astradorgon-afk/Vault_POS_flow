@@ -308,16 +308,35 @@ public sealed class DeviceSalesRepository(
 
         await context.LocalSalesReturns.AddAsync(salesReturn, cancellationToken).ConfigureAwait(false);
 
+        // The receipt number, not the row id: head office minted its own sale
+        // identifier when it replayed the sale, so the only thing that names the
+        // same sale on both sides is the number printed on the customer's copy.
+        string? saleNumber = salesReturn.SaleId is { } saleId
+            ? await context.LocalSales
+                .AsNoTracking()
+                .Where(s => s.Id == saleId)
+                .Select(s => s.Number)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
         await outbox.EnqueueAsync(
             SyncEventType.SalesReturnCreated,
             new SalesReturnSyncPayload(
                 salesReturn.Id.Value,
                 salesReturn.Number,
                 salesReturn.SaleId?.Value,
+                saleNumber,
                 salesReturn.LocationId.Value,
+                salesReturn.DeviceId.Value,
                 salesReturn.CashierShiftId.Value,
+                salesReturn.CustomerId?.Value,
+                salesReturn.ReturnedByUserId.Value,
                 salesReturn.ReturnedAtUtc,
-                salesReturn.BusinessDate),
+                salesReturn.BusinessDate,
+                [.. salesReturn.Items
+                    .GroupBy(i => i.ProductId)
+                    .Select(g => new SalesReturnLineSyncPayload(g.Key.Value, g.Sum(i => i.Quantity)))]),
             salesReturn.LocationId,
             cancellationToken).ConfigureAwait(false);
 
@@ -363,9 +382,15 @@ public sealed class DeviceSalesRepository(
                 refund.Id.Value,
                 salesReturnId.Value,
                 salesReturn.Number,
+                salesReturn.LocationId.Value,
+                refund.DeviceId.Value,
+                refund.CashierShiftId.Value,
                 refund.Method.ToString(),
                 refund.Amount,
-                refund.RefundedAtUtc),
+                refund.Tendered,
+                refund.ProviderReference,
+                refund.RefundedAtUtc,
+                refund.RefundedByUserId.Value),
             salesReturn.LocationId,
             cancellationToken).ConfigureAwait(false);
 
@@ -545,33 +570,73 @@ public sealed record ReceiptPrintSyncPayload(
     string? Reason);
 
 /// <summary>What the server is told about a return taken offline.</summary>
-/// <param name="ReturnId">The return.</param>
+/// <remarks>
+/// Like the sale, it carries what the cashier accepted — the products and the
+/// quantities — and not the device's valuation of them. The server matches each
+/// product against the original sale's lines and re-derives the price, the VAT
+/// and the refundable amount from the snapshots it holds, so a refund is never
+/// paid out against a figure a register worked out for itself.
+/// </remarks>
+/// <param name="ReturnId">The return, as the device numbered it internally.</param>
 /// <param name="Number">The RET number printed at the till.</param>
-/// <param name="SaleId">The sale it references, when it references one.</param>
+/// <param name="SaleId">The device's identifier for the sale, kept for its own records.</param>
+/// <param name="SaleNumber">
+/// The SAL number of the sale being returned against. This is what the server
+/// resolves, because it minted its own identifier when it replayed the sale.
+/// </param>
 /// <param name="LocationId">Where the goods came back.</param>
+/// <param name="DeviceId">The register that took them.</param>
 /// <param name="ShiftId">The shift that accepted them.</param>
+/// <param name="CustomerId">The named customer, when there was one.</param>
+/// <param name="ReturnedByUserId">The cashier who accepted the goods.</param>
 /// <param name="ReturnedAtUtc">The device clock at acceptance.</param>
 /// <param name="BusinessDate">The business date in the location's timezone.</param>
+/// <param name="Lines">What came back, and how much of it.</param>
 public sealed record SalesReturnSyncPayload(
     Guid ReturnId,
     string Number,
     Guid? SaleId,
+    string? SaleNumber,
     Guid LocationId,
+    Guid DeviceId,
     Guid ShiftId,
+    Guid? CustomerId,
+    Guid ReturnedByUserId,
     DateTimeOffset ReturnedAtUtc,
-    DateOnly BusinessDate);
+    DateOnly BusinessDate,
+    IReadOnlyList<SalesReturnLineSyncPayload> Lines);
+
+/// <summary>One product coming back over the counter.</summary>
+/// <param name="ProductId">What came back.</param>
+/// <param name="Quantity">How much of it.</param>
+public sealed record SalesReturnLineSyncPayload(Guid ProductId, decimal Quantity);
 
 /// <summary>What the server is told about cash that went back to a customer.</summary>
-/// <param name="RefundId">The refund.</param>
-/// <param name="ReturnId">The return it settles.</param>
-/// <param name="ReturnNumber">That return's number.</param>
+/// <param name="RefundId">The refund, as the device numbered it internally.</param>
+/// <param name="ReturnId">The device's identifier for the return it settles.</param>
+/// <param name="ReturnNumber">
+/// That return's RET number, which is what the server resolves: it minted its
+/// own identifier when it replayed the return.
+/// </param>
+/// <param name="LocationId">Where the money went back over the counter.</param>
+/// <param name="DeviceId">The register that paid it out.</param>
+/// <param name="ShiftId">The shift whose drawer it came out of.</param>
 /// <param name="Method">How it was paid back.</param>
 /// <param name="Amount">How much.</param>
+/// <param name="Tendered">What was handed over, for cash.</param>
+/// <param name="ProviderReference">The provider reference, for card and wallet.</param>
 /// <param name="RefundedAtUtc">The device clock at payout.</param>
+/// <param name="RefundedByUserId">The cashier who paid it out.</param>
 public sealed record RefundSyncPayload(
     Guid RefundId,
     Guid ReturnId,
     string ReturnNumber,
+    Guid LocationId,
+    Guid DeviceId,
+    Guid ShiftId,
     string Method,
     decimal Amount,
-    DateTimeOffset RefundedAtUtc);
+    decimal? Tendered,
+    string? ProviderReference,
+    DateTimeOffset RefundedAtUtc,
+    Guid RefundedByUserId);

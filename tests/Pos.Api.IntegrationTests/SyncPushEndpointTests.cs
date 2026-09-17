@@ -282,6 +282,100 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task GoodsTakenBackOffline_ArePricedFromTheSaleTheServerHolds_AndTheCashIsAccountedFor()
+    {
+        Seed seed = await SeedAsync("spa", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        Guid returnId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+        string returnNumber = DocumentNumber.CreateForDevice(DocumentType.SalesReturn, 2026, seed.DeviceCode, 1).Value;
+
+        // Sold three at 45, one comes back, 45 out of the drawer.
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 3m, netTotal: 135m)),
+            Event(3, "SalesReturnCreated", ReturnPayload(seed, shiftId, returnId, returnNumber, saleNumber, 1m)),
+            Event(4, "RefundIssued", RefundPayload(seed, shiftId, returnId, returnNumber, 45m)));
+
+        results.Select(r => r.GetProperty("outcome").GetString())
+            .Should().Equal("Accepted", "Accepted", "Accepted", "Accepted");
+
+        SalesReturn taken = await factory.WithServiceAsync(context => context.SalesReturns
+            .AsNoTracking()
+            .Include(r => r.Items)
+            .Include(r => r.Refunds)
+            .SingleAsync(r => r.Number == returnNumber));
+
+        // The device sent a product and a quantity, nothing more. The 45 is the
+        // server's, matched against the sale line it holds.
+        taken.Items.Should().ContainSingle();
+        taken.Items.Single().Quantity.Should().Be(1m);
+        taken.Items.Single().UnitPrice.Should().Be(45m);
+        taken.RefundableTotal.Should().Be(45m);
+        taken.Refunds.Should().ContainSingle();
+        taken.Refunds.Single().Amount.Should().Be(45m);
+
+        // Returned goods do not go back on the shelf: seven sellable, one held
+        // for inspection (OFFLINE_SYNC.md §1).
+        decimal available = await QuantityAsync(seed, InventoryState.Available);
+        decimal pending = await QuantityAsync(seed, InventoryState.ReturnPending);
+
+        available.Should().Be(7m);
+        pending.Should().Be(1m, "somebody inspects it before it is sold again");
+    }
+
+    [Fact]
+    public async Task ARefundForAReturnTheServerHasNotSeen_PaysOutNothing()
+    {
+        Seed seed = await SeedAsync("spb", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string returnNumber = DocumentNumber.CreateForDevice(DocumentType.SalesReturn, 2026, seed.DeviceCode, 1).Value;
+
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "RefundIssued", RefundPayload(seed, shiftId, Guid.CreateVersion7(), returnNumber, 45m)));
+
+        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
+        results[1].GetProperty("errorCode").GetString().Should().Be("sync.return_unknown");
+
+        bool anyRefund = await factory.WithServiceAsync(context => context.Refunds
+            .AsNoTracking()
+            .AnyAsync());
+
+        anyRefund.Should().BeFalse("money is never recorded as leaving a drawer against nothing");
+    }
+
+    [Fact]
+    public async Task ABlindReturnFromADevice_IsRefused()
+    {
+        Seed seed = await SeedAsync("spc", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string returnNumber = DocumentNumber.CreateForDevice(DocumentType.SalesReturn, 2026, seed.DeviceCode, 1).Value;
+
+        // sale.return_blind is not offline-capable, so it can never reach a
+        // device's snapshot. A payload claiming one is a back door, not a case.
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SalesReturnCreated", ReturnPayload(
+                seed, shiftId, Guid.CreateVersion7(), returnNumber, saleNumber: null, quantity: 1m)));
+
+        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
+        results[1].GetProperty("errorCode").GetString().Should().Be("sync.blind_return_not_permitted");
+    }
+
+    [Fact]
     public async Task ASaleForAShiftTheServerHasNotSeen_IsDeferredWithEverythingBehindIt()
     {
         Seed seed = await SeedAsync("sp3", shelfQty: 10m);
@@ -426,6 +520,47 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
             IsReprint: true,
             "Customer asked for another copy");
 
+    private static SalesReturnSyncPayload ReturnPayload(
+        Seed seed,
+        Guid shiftId,
+        Guid returnId,
+        string returnNumber,
+        string? saleNumber,
+        decimal quantity)
+        => new(
+            returnId,
+            returnNumber,
+            Guid.CreateVersion7(),
+            saleNumber,
+            seed.Store.Value,
+            seed.Device.Value,
+            shiftId,
+            null,
+            seed.CashierId.Value,
+            DateTimeOffset.UtcNow,
+            BusinessDate,
+            [new SalesReturnLineSyncPayload(seed.Product.Value, quantity)]);
+
+    private static RefundSyncPayload RefundPayload(
+        Seed seed,
+        Guid shiftId,
+        Guid returnId,
+        string returnNumber,
+        decimal amount)
+        => new(
+            Guid.CreateVersion7(),
+            returnId,
+            returnNumber,
+            seed.Store.Value,
+            seed.Device.Value,
+            shiftId,
+            nameof(PaymentMethod.Cash),
+            amount,
+            amount,
+            null,
+            DateTimeOffset.UtcNow,
+            seed.CashierId.Value);
+
     private static object Event<TPayload>(long sequence, string type, TPayload payload)
     {
         string json = CanonicalJson.Serialize(payload);
@@ -498,6 +633,13 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
         return doc.RootElement.GetProperty("accessToken").GetString()!;
     }
 
+    private Task<decimal> QuantityAsync(Seed seed, InventoryState state)
+        => factory.WithServiceAsync(context => context.InventoryBalances
+            .AsNoTracking()
+            .Where(b => b.LocationId == seed.Store && b.ProductId == seed.Product && b.State == state)
+            .Select(b => b.Quantity)
+            .SumAsync());
+
     private static async Task<string> SignInAsync(HttpClient client, Seed seed)
     {
         using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/api/v1/auth/login/pin", UriKind.Relative))
@@ -523,6 +665,11 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
         string employeeCode = $"sy{suffix}";
         UserId cashierId = await factory.CreateUserAsync(
             $"sync-{suffix}-sm", Roles.StoreManager, locations: [store], employeeCode: employeeCode);
+
+        // One character of the suffix becomes the device short code, and two
+        // seeds sharing a code would enrol the same register twice. Asserting it
+        // here turns a puzzling failure in an unrelated test into a plain one.
+        suffix.Should().HaveLength(3, "the seed suffix contributes its last character to a unique device code");
 
         string deviceCode = $"SY{suffix[^1]}";
         DeviceId device = await factory.CreateDeviceAsync(deviceCode, store);

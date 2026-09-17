@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, and C47 brings the void and the reprint with it
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, and C48 the return and the refund — the upload is complete
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,151 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 266, Security 52, Architecture 25, API 183** (2026-09-17, through C47 the void and reprint appliers). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C47 have not been run against PostgreSQL; only C43 adds a PostgreSQL migration. |
+| Tests | **1,157 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 269, Security 52, Architecture 25, API 186** (2026-09-17, through C48, which completes the upload). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C48 have not been run against PostgreSQL; only C43 adds a PostgreSQL migration. |
 | Migrations | 29 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -22,11 +22,11 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    266 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally
+Pos.Infrastructure.Tests    269 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally, with a coverage test tying every queueable event to an applier
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    183 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided
+Pos.Api.IntegrationTests    186 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -1250,6 +1250,29 @@ why it has to arrive: a second copy of a receipt can leave the shop and come
 back as a return, and a print log that silently skips the offline copies is
 worse than none, because it is trusted.
 
+C48 finishes the upload. The return replays through its own handler and carries
+only the products and quantities the cashier accepted, so the server matches each
+against the original sale's lines and prices them from the snapshots it holds —
+which is what stops a refund being paid out against a figure a register worked
+out for itself. A blind return is refused outright: `sale.return_blind` is not
+offline-capable, so it can never have reached a device's snapshot, and a payload
+claiming one is a back door rather than a case. The refund finds its return by
+RET number, and its handler re-checks against the server's own rows that the sale
+is not being refunded past what it was paid — the device checked the same rule
+but could only see the returns it holds, so a second register refunding the same
+sale during one outage is caught here and nowhere else.
+
+**Every POS event a device can queue now lands centrally**, and a coverage test
+keeps it that way. `SyncEventType` and the appliers are connected by nothing in
+the type system, so an event type added on the device side would ship happily and
+be refused as unsupported — with the device's queue stalled behind it until
+somebody read a log. The test reads each applier's declared `EventType` through
+an uninitialized instance (every one is a constant that touches no state) and
+compares the set to the enum, then compares the appliers to the container's own
+service descriptors. The first draft of that second check searched
+`DependencyInjection.cs` for the registration line, and passed happily when I
+commented the line out to test it; reading the descriptors instead is exact.
+
 **Reviewing the handler for C46 turned up a second engine fault.** An applier can
 get several steps in before it refuses — the sale handler writes a price-variance
 note and can then hit the stock rule — and the processor was committing whatever
@@ -1539,21 +1562,15 @@ so a device now queues the business events it produces — gaplessly, canonicall
 hashed, and in the same transaction as the records they describe. Nothing moves
 those events yet.
 
-1. **Appliers for the return and the refund.** `SalesReturnCreated` and
-   `RefundIssued` are the last two refused as unsupported. The return needs its
-   items carried the way C45 carried the sale's lines, and the refund needs the
-   return it pays out against — which, like a sale, will be found by its RET
-   number rather than by the identifier the device minted.
-
-2. **The retry queue**, per OFFLINE_SYNC.md §3.2: exponential backoff with
+1. **The retry queue**, per OFFLINE_SYNC.md §3.2: exponential backoff with
    jitter, capped at thirty minutes, eight consecutive failures moving an event
    to `Failed` — kept forever and escalated, never dropped. The outbox already
    carries `AttemptCount`, `NextRetryAtUtc`, `LastError` and
    `ServerResponseJson` for it.
-3. **The pull endpoint and rebaseline.** `ChangeFeedApplier` (C29) is already
+2. **The pull endpoint and rebaseline.** `ChangeFeedApplier` (C29) is already
    the consumer; what is missing is the server side of the feed and the cursor
    negotiation.
-4. **Conflict rules and the sync-failure dashboard**, which also unblocks Phase
+3. **Conflict rules and the sync-failure dashboard**, which also unblocks Phase
    14's last item — the sync-failure alert generator.
 
 Two smaller things outstanding:
@@ -1563,7 +1580,7 @@ Two smaller things outstanding:
   `CommonUtilities.Helpers.UserName must have a valid value`, which a GitHub
   runner should not hit because it sets `USER`. If it does, set it in the job.
 - **`Pos.Client` has not been compiled since C29c.** No MAUI workloads in the
-  cloud environment, so the DI wiring of C33–C47 and one Razor page rest on CI's
+  cloud environment, so the DI wiring of C33–C48 and one Razor page rest on CI's
   client jobs.
 
 Two questions the capability table did not answer were settled on 2026-09-17

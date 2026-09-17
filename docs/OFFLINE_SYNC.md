@@ -292,9 +292,12 @@ is told plainly instead of losing work silently.
 | `SaleCompleted` | **Replayed through `CompleteSaleCommandHandler`** — the same handler the online endpoint runs. The event carries the lines and payments the cashier rang up, not the device's own resolution of them, so the server re-derives the effective price, the VAT class, the FEFO allocation and the cash rounding from its own data. The device's `eventId` goes back into the ledger, which is what makes the movements post once. A receipt number the server already holds is refused with `sync.sale_already_held`. |
 | `SaleVoided` | Replayed through `VoidSaleCommandHandler`, so the reversing ledger post and the same-shift rule come from the one implementation. The void's idempotency key is the **sync event identifier**, which is stable across retries where a freshly minted one would not be. |
 | `SaleReceiptReprinted` | Replayed through `ReprintSaleReceiptCommandHandler`. It moves no money and no stock, which is exactly why it has to arrive: a second copy of a receipt can leave the shop and come back as a return, and a print log that silently skips the offline copies is worse than none because it is trusted. |
+| `SalesReturnCreated` | Replayed through `CreateSalesReturnCommandHandler`. Like the sale, it carries the products and quantities the cashier accepted and nothing else: the server matches each against the original sale's lines and re-derives the price, the VAT and the refundable amount from the snapshots it holds. A **blind return is refused** (`sync.blind_return_not_permitted`) — `sale.return_blind` is not offline-capable, so it can never have reached a device's snapshot, and letting one through here would open by the back door what the till itself cannot do. |
+| `RefundIssued` | Replayed through `RefundSalesReturnCommandHandler`, which re-checks against the server's rows that the sale is not refunded past what it was paid. The device checked the same rule and could only see the returns it holds, so a second register refunding the same sale during the same outage is caught here and nowhere else. The return is found by its **RET number**, for the same reason a sale is found by its SAL number. |
 
 A follow-up event whose sale the server does not hold is refused with
-`sync.sale_unknown`, never quietly dropped. Under per-device ordering the sale
+`sync.sale_unknown` — or `sync.return_unknown`, for a refund — never quietly
+dropped. Under per-device ordering the sale
 was uploaded first, so a missing one means that upload was refused — and a void
 floating free of the sale it reverses would put stock back on a shelf against
 nothing.
@@ -413,7 +416,9 @@ own cash sales. Void, reprint, returns and refunds are
 `Registered` too, so as of C42 every POS row in the table above executes on a
 device. What remains `Pending` is the non-POS work: stock counts and
 adjustments, transfer requests and receipts, quarantine incidents, goods
-receipts and customer records. The distinction is not
+receipts and customer records. As of C48 every one of those POS events also
+lands centrally, and a test compares `SyncEventType` against the appliers'
+own declared types so a new event cannot ship with nothing to answer it. The distinction is not
 bookkeeping: registering a handler whose repositories are unregistered would
 make the container throw on resolve, where the whole point of the boundary is to
 fail closed with a result the UI can explain.
