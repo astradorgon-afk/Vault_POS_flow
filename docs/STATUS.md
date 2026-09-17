@@ -781,7 +781,7 @@ C30 draws the device command boundary. `Pos.Client` references
 `Pos.Application` and executes the same handlers as the server (ADR-0008), so
 the only thing between a disconnected terminal and a use case that needs central
 authority is which handlers are registered. `OfflineCommandCatalogue` makes that
-an explicit list of 22 command types — the executable form of the capability
+an explicit list of 24 command types — the executable form of the capability
 table in OFFLINE_SYNC.md §1 — and `AddOfflineClientApplication` is the device's
 composition root: the same dispatcher and the same five behaviours in the same
 order as the server, but only the whitelisted commands' handlers and validators,
@@ -1092,18 +1092,18 @@ boundary (C30). Continue in this order:
    idempotent processing, retry policy and conflict handling. Its failure
    records will feed the remaining sync-failure notification.
 
-Two questions the capability table does not answer, worth settling before the
-entries flip:
+Two questions the capability table did not answer were settled on 2026-09-17
+and are now rows in it:
 
-- **Transfer pick, dispatch and verify offline.** `transfer.pick`,
-  `transfer.dispatch` and `transfer.verify` are all offline-capable
-  permissions, but OFFLINE_SYNC.md §1 lists only "transfer request" and
-  receiving against a pre-authorized transfer. C30 follows the table and leaves
-  them off; a source store dispatching a transfer while offline is plausible
-  and needs a decision, not an assumption.
-- **Customer records offline.** `customer.manage` is offline-capable and the
-  device caches `customer_lite`, but the table does not mention creating a
-  customer offline. Left off for the same reason.
+- **Transfer pick, dispatch and verify stay online.** The permissions are
+  offline-capable, but a device may not use them. A dispatch creates stock in
+  transit that nobody else can see until the device syncs, and the receiving
+  store would be counting against a transfer the server has never heard of.
+- **Customer create and edit go offline; deactivate and reactivate do not.**
+  Refusing a walk-in an account at the till during an outage is the worse
+  failure, and the new PII lands in the encrypted device store like every other
+  local record. Deactivation is administrative and nothing at a till depends on
+  it, so it waits for the link.
 
 ---
 

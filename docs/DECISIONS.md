@@ -172,7 +172,7 @@ registering it are separate states: an entry stays `Pending` until the device
 carries the tables its handler writes, because registering a handler whose ports
 are missing would throw on resolve instead of failing closed with
 `application.handler_unavailable`. `Pos.Architecture.Tests` asserts the
-catalogue against the OFFLINE_SYNC.md §1 table, asserts every declared
+catalogue against the OFFLINE_SYNC.md §1 table (24 use cases), asserts every declared
 permission is offline-capable, and asserts that nothing outside the list
 resolves in the device container.
 

@@ -35,6 +35,7 @@ public sealed class OfflineCommandBoundaryTests
         "CancelInventoryCountCommand",
         "CloseShiftCommand",
         "CompleteSaleCommand",
+        "CreateCustomerCommand",
         "CreateGoodsReceiptCommand",
         "CreateQuarantineIncidentCommand",
         "CreateSalesReturnCommand",
@@ -52,6 +53,7 @@ public sealed class OfflineCommandBoundaryTests
         "SubmitStockAdjustmentCommand",
         "SubmitTransferCommand",
         "SuspendShiftCommand",
+        "UpdateCustomerCommand",
         "VoidSaleCommand",
     ];
 

@@ -223,7 +223,7 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Cache tables + read-only enforcement: change-feed applier with a
   same-transaction cursor, interceptor and trigger write guards (C29)
 - [~] Client DI container with whitelisted command set
-      *(C30 declares the 22 offline use cases of OFFLINE_SYNC.md §1 in
+      *(C30 declares the 24 offline use cases of OFFLINE_SYNC.md §1 in
       `OfflineCommandCatalogue` and registers only those in
       `AddOfflineClientApplication`; every entry stays `Pending` until the
       device carries the `local_*` tables its handlers write to, so a device

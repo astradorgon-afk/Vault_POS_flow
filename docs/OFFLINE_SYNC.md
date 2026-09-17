@@ -26,8 +26,11 @@ downloads a scoped, versioned change feed.
 | Unknown barcode | quarantine only | raises an incident; never becomes Available |
 | Transfer request | yes | queued as `Requested`, approved centrally later |
 | Transfer approval | **no** | except via a valid pre-approval token |
+| Transfer pick / dispatch / verify | **no** | the source side of a transfer stays online, so stock in transit is never created from a device |
 | Emergency transfer | yes | `PendingCentralReview`, dual manager auth |
 | Stock adjustment | create only | approval never happens offline |
+| Customer record create / edit | yes | a walk-in account opened at the till; new PII originates on the device and syncs up |
+| Customer deactivate / reactivate | no | administrative, and it can wait for the link |
 | Product creation / price change | **no** | central authority only |
 | Reports beyond the local location and retention window | no | |
 
@@ -35,6 +38,15 @@ The rule behind the table: **offline never widens authority.** If an action
 required approval online, it still requires approval offline — it just gets
 parked in a reviewable state instead of being blocked outright when the goods
 have physically moved.
+
+Two rows were added on 2026-09-17, after C30 found that the permissions allowed
+both but the table named neither. Transfer pick, dispatch and verify are
+offline-capable permissions, but a device may not use them: a dispatch creates
+stock in transit that no one else can see until the device syncs, and the
+receiving store would be counting against a transfer the server has never heard
+of. Creating and editing a customer is allowed, because the alternative is
+refusing a customer at the till during an outage; deactivation is not, because
+nothing at a till depends on it.
 
 ---
 

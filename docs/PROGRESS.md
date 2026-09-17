@@ -141,7 +141,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
   - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
   - [x] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. The Linux Android Release build is still unverified — the first CI run on the branch is its real test (STATUS.md §4).
-  - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 22 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
+  - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
@@ -938,7 +938,7 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 
 ### C30 — client command boundary (`feat(offline-c30)`)
 
-- **`OfflineCommandCatalogue`** is the whitelist: an explicit list of 22 command
+- **`OfflineCommandCatalogue`** is the whitelist: an explicit list of 24 command
   types, one per offline capability in OFFLINE_SYNC.md §1. A command cannot opt
   itself in with an attribute, and the constructor refuses a type that is not an
   `ICommand<>` or a command declared twice.
@@ -974,6 +974,15 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   a registered command resolves, reaches the pipeline, and is refused by the
   authorization behaviour rather than by the dispatcher. Registering every
   handler instead of the whitelisted ones turns 2 of them red.
+- **Two capability decisions (2026-09-17), now rows in OFFLINE_SYNC.md §1.**
+  C30 found two use cases the permission catalogue allowed offline but the table
+  named neither way. Transfer pick, dispatch and verify stay online: a dispatch
+  would create stock in transit nobody else can see, and the receiving store
+  would count against a transfer the server has never heard of. Customer create
+  and edit go offline, because refusing a walk-in an account at the till during
+  an outage is the worse failure and the new PII lands in the encrypted device
+  store like any other local record; deactivate and reactivate stay online,
+  being administrative.
 - **Verification:** 1,024 passing without PostgreSQL (Domain 378, Application
   247, Infrastructure 148, Security 52, Architecture 25, API 174); 18
   PostgreSQL Infrastructure tests skipped, no Docker in the session container.

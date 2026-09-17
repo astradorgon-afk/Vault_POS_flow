@@ -180,6 +180,15 @@ public sealed class OfflineCommandCatalogue
             "Shift close; totals are reconciled centrally after sync.",
             Identity.Permissions.Sales.CloseShift),
 
+        // A walk-in account opened at the till. Deactivation is administrative
+        // and waits for the link, so it is not on the list.
+        Pending<CreateCustomerCommand>(
+            "Customer record created at the till; the new PII syncs up from the encrypted device store.",
+            Identity.Permissions.Sales.ManageCustomers),
+        Pending<UpdateCustomerCommand>(
+            "Customer record corrected at the till.",
+            Identity.Permissions.Sales.ManageCustomers),
+
         // Inventory: create and submit only. Approval never happens offline.
         Pending<CreateStockAdjustmentCommand>(
             "Stock adjustment, create only; approval never happens offline.",
