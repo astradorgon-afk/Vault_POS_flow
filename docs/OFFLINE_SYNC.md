@@ -458,7 +458,7 @@ fail closed with a result the UI can explain.
 ## 5. Download: the change feed
 
 ```
-GET /api/sync/pull?cursor=1902334&limit=500
+GET /api/v1/sync/pull?cursor=1902334&limit=500
 ```
 
 Server returns changes with `change_sequence > cursor` where
@@ -483,6 +483,34 @@ from the stored cursor is refused with `sync.feed_cursor_mismatch`; a malformed
 page is refused whole, before anything is written, with `sync.feed_page_invalid`.
 Changes are saved one at a time inside the transaction, so a later change always
 sees an earlier one to the same row exactly as the server ordered them.
+
+The scope is the **device's own**, taken from its registration and never from
+the query string: a register asking for another store's catalogue is not a case
+the route needs to support, and making the scope a parameter would turn one into
+a way of asking. A caller that is not a device is refused outright — there is no
+register to scope the feed to, and guessing one would hand somebody a store's
+catalogue.
+
+`nextCursor` is the server's answer, not something the device infers. A page that
+filled stops at its last change, because more may be behind it. A page that did
+not fill has reached the end of the feed, so the cursor moves to the feed's end —
+past everything skipped for being another store's business. A device that stopped
+at the last change it was *given* would rescan that gap on every pull for ever.
+
+The same entity can appear more than once in a page: creating a product and
+pricing it both stamp the aggregate. That is how the feed is meant to read — the
+changes are applied in order and the last one wins.
+
+`410 Gone { "action": "rebaseline" }` has two causes, and both mean the cursor is
+no longer a thing this feed can honour:
+
+- The device's cursor is **ahead of the feed**. Its cursor came from a server
+  since restored from a backup, or from another feed entirely. Serving from zero
+  would silently replay changes it has already applied.
+- The changes it missed are **gone**. Once the feed is pruned, a device dark for
+  longer than the retention window asks for changes the server threw away, and a
+  page with a hole in it would leave the register quietly wrong about its own
+  catalogue.
 
 ### 5.1 How the server records it
 

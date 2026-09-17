@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Pos.Shared.Sync;
@@ -94,3 +95,26 @@ public sealed record SyncPushResponse(
     DateTimeOffset ServerReceivedAtUtc,
     double ClockSkewSeconds,
     IReadOnlyList<SyncEventResult> Results);
+
+/// <summary>One change from the server's feed, as a device receives it.</summary>
+/// <remarks>
+/// The change travels under its kind rather than as a tagged union, so a device
+/// running an older build can skip a kind it does not know without failing to
+/// read the page around it.
+/// </remarks>
+/// <param name="Kind">The change type, matching the device's change records.</param>
+/// <param name="Change">The change itself, exactly as the server recorded it.</param>
+public sealed record SyncPullChange(string Kind, JsonElement Change);
+
+/// <summary>One page of the download feed (OFFLINE_SYNC.md §5).</summary>
+/// <param name="FromCursor">The cursor the page was requested from.</param>
+/// <param name="NextCursor">
+/// The cursor to store once the page is applied. It can exceed the last change's
+/// sequence, because the server skips changes outside the device's scope and a
+/// device that did not move past them would rescan them on every pull for ever.
+/// </param>
+/// <param name="Changes">The changes after <paramref name="FromCursor"/>, in feed order.</param>
+public sealed record SyncPullResponse(
+    long FromCursor,
+    long NextCursor,
+    IReadOnlyList<SyncPullChange> Changes);

@@ -264,10 +264,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       recorded rather than re-priced; C47 adds void and reprint and C48 the
       return and the refund. Every POS event a device can queue now lands
       centrally, and a coverage test keeps the two lists from drifting)*
-- [~] Pull endpoint, change feed, cursors, rebaseline
+- [x] Pull endpoint, change feed, cursors, rebaseline
       *(C50: `sync.change_feed` and the interceptor that fills it, ordered by a
       counter row rather than a database identity so a cursor cannot read past a
-      change. The route that serves a page is still to come)*
+      change. C51: the route, scoped from the device's registration, with a
+      server-decided cursor and `410 Gone` for a cursor the feed cannot honour)*
 - [x] Retry queue with exponential backoff
       *(C49: `SyncUploader` and `SyncRetryPolicy` — jittered backoff to a
       thirty-minute ceiling, eight attempts then escalation, nothing deleted;

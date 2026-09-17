@@ -23,6 +23,10 @@ public static class SyncEndpoints
             .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Create))
             .WithSummary("Uploads a batch of business events from a device.");
 
+        group.MapGet("/pull", PullAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Catalog.View))
+            .WithSummary("Downloads one page of the change feed for the calling device.");
+
         return app;
     }
 
@@ -54,5 +58,51 @@ public static class SyncEndpoints
             .ConfigureAwait(false);
 
         return Results.Ok(response);
+    }
+
+    /// <summary>
+    /// Serves one page of changes to the calling device.
+    /// </summary>
+    /// <remarks>
+    /// The scope is the device's own, taken from its registration rather than
+    /// from the query string: a register asking for another store's catalogue is
+    /// not a case this route needs to support, and making the scope a parameter
+    /// would turn one into a way of asking.
+    /// </remarks>
+    private static async Task<IResult> PullAsync(
+        SyncPullProcessor processor,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        long cursor = 0,
+        int limit = SyncPullProcessor.MaxPageSize)
+    {
+        if (currentUser.DeviceId is not { } deviceId)
+        {
+            return Results.Problem(
+                title: "Only an enrolled device can download the change feed.",
+                statusCode: StatusCodes.Status403Forbidden,
+                type: "https://vaultflow/errors/sync.device_required");
+        }
+
+        SyncPullResult result = await processor
+            .PullAsync(deviceId, cursor, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.Refusal switch
+        {
+            SyncPullRefusal.DeviceUnknown => Results.Problem(
+                title: "This device is not registered.",
+                statusCode: StatusCodes.Status403Forbidden,
+                type: "https://vaultflow/errors/sync.device_unknown"),
+
+            // 410 rather than a 4xx the device might retry: what it asked for is
+            // genuinely gone, and the remedy is a fresh baseline rather than a
+            // smaller page or a wait.
+            SyncPullRefusal.RebaselineRequired => Results.Json(
+                new { action = "rebaseline" },
+                statusCode: StatusCodes.Status410Gone),
+
+            _ => Results.Ok(result.Page),
+        };
     }
 }

@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, and C50 the server's own feed for what comes back down
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, and C51 the route that serves it
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,195 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 307, Security 52, Architecture 25, API 186** (2026-09-17, through C50 the server change feed). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C50 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,203 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 307, Security 52, Architecture 25, API 194** (2026-09-17, through C51 the pull endpoint). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C51 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -22,11 +22,11 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    307 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally, with a coverage test tying every queueable event to an applier, the retry queue that drains the outbox, the register's own container resolving every use case it is allowed to run, and the server feed recording what those registers download
+Pos.Infrastructure.Tests    307 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally, with a coverage test tying every queueable event to an applier, the retry queue that drains the outbox, the register's own container resolving every use case it is allowed to run, the server feed recording what those registers download, and the route that serves them a page of it
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    186 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
+Pos.Api.IntegrationTests    194 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -1339,6 +1339,27 @@ have needed a matching wrapper to read its own catalogue, and the feed's JSON
 would have been unreadable to anyone looking at it in an incident. Both are now
 pinned by tests.
 
+C51 serves it. `GET /api/v1/sync/pull` gives a device the changes that are
+everybody's and its own store's, scoped from the device's registration and never
+from the query string: a register asking for another store's catalogue is not a
+case the route needs to support, and making the scope a parameter would turn one
+into a way of asking. A caller that is not a device is refused outright.
+
+`nextCursor` is the server's answer, not something the device works out. A page
+that filled stops at its last change, because more may be behind it; a page that
+did not fill has reached the end of the feed, so the cursor moves past everything
+skipped for being another store's business. A device that stopped at the last
+change it was *given* would rescan that gap on every pull for ever — which is
+exactly what OFFLINE_SYNC.md meant by "it may exceed the last change's sequence".
+
+`410 Gone { "action": "rebaseline" }` has two causes, and both mean the cursor is
+not one this feed can honour: a cursor **ahead** of the feed, which came from a
+server since restored from a backup, where serving from zero would silently
+replay changes the device already applied; and a cursor whose **missed changes
+are gone**, where a page with a hole in it would leave the register quietly wrong
+about its own catalogue. The second never fires until the feed is pruned, and the
+test proves it by pruning.
+
 **Reviewing the handler for C46 turned up a second engine fault.** An applier can
 get several steps in before it refuses — the sale handler writes a price-variance
 note and can then hit the stock rule — and the processor was committing whatever
@@ -1633,11 +1654,9 @@ those events yet.
    tested; what is missing is a background service that runs one when the
    connectivity probe says the line is back, and a configured `HttpClient` that
    knows the server's address and carries this register's token.
-2. **The pull endpoint and rebaseline.** The feed now exists and fills itself
-   (C50); `ChangeFeedApplier` (C29) is already the consumer. What is missing is
-   the route that serves a page — scope filtering, the cursor that may run ahead
-   of the last change served, and the `410 Gone` that sends a long-dark device
-   for a fresh baseline.
+2. **The baseline route and feed retention.** `/api/v1/sync/baseline`, which a
+   device fetches after a `410`, and the pruning that makes the `410` reachable
+   in the first place.
 3. **Conflict rules and the sync-failure dashboard**, which also unblocks Phase
    14's last item — the sync-failure alert generator.
 
