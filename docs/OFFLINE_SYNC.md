@@ -370,7 +370,37 @@ after 8 consecutive failures -> Status = Failed, surfaced in the UI, kept foreve
 Retries are **never** abandoned automatically; a permanently failing event is
 escalated to HQ as a `SyncFailure` with the full server response. Events are
 uploaded in batches of at most 100 or 512 KB, whichever comes first, always in
-`deviceSequence` order, and a batch stops at the first `Deferred`.
+`deviceSequence` order, and a batch stops at the first `Deferred`. An event
+larger than the byte limit still goes on its own, because dropping it from every
+batch forever would strand the whole queue behind something that can never be
+sent.
+
+The jitter is not decoration. When every register in the estate is failing for
+the same reason, an un-jittered backoff brings them all back on the same tick and
+into the server together — a thundering herd of exactly the shape that caused the
+outage.
+
+`SyncUploader` turns each verdict into a resting place:
+
+| Verdict | What the device does |
+|---|---|
+| `Accepted`, `Duplicate` | `Synchronized`. Never sent again; the row is kept for the audit trail. |
+| `Deferred` | Stays `Pending` with a backoff. The server said "not yet", not "no". |
+| `Rejected` | `Rejected`, and never retried — the answer would not change. Kept with the server's own words, because a refused event is exactly the one somebody has to look at. |
+| `RequiresReview`, `Conflict` | Their own statuses, kept and surfaced. Head office has the event; a person decides what it means. |
+| No answer at all | A retry is scheduled. This covers an unreachable server, a timeout, a 5xx, **and a 401 or 403**: a revoked device keeps its queue, because re-enrolling it is how that is fixed and the trading it did must still be there afterwards. |
+
+An event the response did not mention is treated as unsent rather than assumed
+either way. The next attempt gets the server's original verdict back, because the
+identifier did not change.
+
+Nothing is ever deleted. The refused, the flagged and the exhausted are the
+sync-failure queue, and a queue that tidies away its worst entries is one nobody
+can act on. The register's own banner separates them from work still on its way:
+`UnsentEvents` waits for a line to come back, `EscalatedEvents` never resolves
+itself, and only the second raises `SyncNeedsAttention`. It is a **warning**, not
+a block — the events are safe on the device, and refusing to sell would turn a
+bookkeeping problem into a closed shop.
 
 ---
 

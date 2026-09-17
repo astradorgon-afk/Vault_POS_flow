@@ -64,6 +64,33 @@ public sealed class DeviceStatusViewTests
         status.NeedsAttention.Should().BeFalse();
     }
 
+    [Fact]
+    public void AStuckEventAsksForAttention_ButNeverStopsTheTill()
+    {
+        DeviceStatusView status = View(
+            DeviceStorageState.Ready, DeviceEnrolmentState.Enrolled,
+            DeviceSyncState.Synchronised, DeviceAuthorityState.Active, DeviceConnectivityState.Online,
+            escalated: 3);
+
+        status.Concern.Should().Be(DeviceStatusConcern.SyncNeedsAttention);
+        status.NeedsAttention.Should().BeTrue();
+        status.CanTrade.Should().BeTrue(
+            "the events are safe on the register; refusing to sell would turn a bookkeeping problem into a closed shop");
+    }
+
+    [Fact]
+    public void AnythingThatStopsTheTill_IsSaidBeforeAStuckEvent()
+    {
+        DeviceStatusView status = View(
+            DeviceStorageState.Ready, DeviceEnrolmentState.Enrolled,
+            DeviceSyncState.Synchronised, DeviceAuthorityState.Expired, DeviceConnectivityState.Online,
+            escalated: 3);
+
+        status.Concern.Should().Be(
+            DeviceStatusConcern.AuthorityExpired,
+            "one thing is said at a time, and the one that stops the queue moving comes first");
+    }
+
     [Theory]
     [InlineData(DeviceStatusConcern.Ready, DeviceStatusSeverity.Normal)]
     [InlineData(DeviceStatusConcern.WorkingOffline, DeviceStatusSeverity.Normal)]
@@ -73,6 +100,7 @@ public sealed class DeviceStatusViewTests
     [InlineData(DeviceStatusConcern.AwaitingStoreData, DeviceStatusSeverity.Blocked)]
     [InlineData(DeviceStatusConcern.NotEnrolled, DeviceStatusSeverity.Blocked)]
     [InlineData(DeviceStatusConcern.StorageNotReady, DeviceStatusSeverity.Blocked)]
+    [InlineData(DeviceStatusConcern.SyncNeedsAttention, DeviceStatusSeverity.Warning)]
     public void EveryConcern_HasASeverity(DeviceStatusConcern concern, DeviceStatusSeverity expected)
     {
         // Walks the enum rather than a sample, so a concern added later without
@@ -127,6 +155,10 @@ public sealed class DeviceStatusViewTests
         DeviceStatusConcern.Ready => View(
             DeviceStorageState.Ready, DeviceEnrolmentState.Enrolled,
             DeviceSyncState.Synchronised, DeviceAuthorityState.Active, DeviceConnectivityState.Online),
+        DeviceStatusConcern.SyncNeedsAttention => View(
+            DeviceStorageState.Ready, DeviceEnrolmentState.Enrolled,
+            DeviceSyncState.Synchronised, DeviceAuthorityState.Active, DeviceConnectivityState.Online,
+            escalated: 1),
         _ => throw new ArgumentOutOfRangeException(
             nameof(concern), concern, "A new concern needs a case here and a severity."),
     };
@@ -136,7 +168,8 @@ public sealed class DeviceStatusViewTests
         DeviceEnrolmentState enrolment,
         DeviceSyncState sync,
         DeviceAuthorityState authority,
-        DeviceConnectivityState connectivity)
+        DeviceConnectivityState connectivity,
+        int escalated = 0)
         => new(
             storage,
             enrolment,
@@ -146,5 +179,7 @@ public sealed class DeviceStatusViewTests
             sync,
             sync == DeviceSyncState.Synchronised ? TemporaryDeviceDatabase.Now : null,
             authority,
-            authority == DeviceAuthorityState.None ? null : TemporaryDeviceDatabase.Now.AddHours(40));
+            authority == DeviceAuthorityState.None ? null : TemporaryDeviceDatabase.Now.AddHours(40),
+            UnsentEvents: 0,
+            EscalatedEvents: escalated);
 }

@@ -29,36 +29,20 @@ public static class MauiProgram
         // running a server use case against a device database.
         builder.Services.AddOfflineClientApplication();
 
+        // What only the platform can answer: where the store lives, where its
+        // key is kept, what time it is, and whether there is a network.
         builder.Services.AddSingleton(new DeviceDatabaseOptions(
             Path.Combine(FileSystem.Current.AppDataDirectory, "device.db")));
         builder.Services.AddSingleton<IDeviceDatabaseKeyProvider, SecureStorageDeviceDatabaseKeyProvider>();
-        builder.Services.AddSingleton<DeviceDatabaseInitializer>();
         builder.Services.AddSingleton<ISystemClock, SystemClock>();
-        builder.Services.AddSingleton<ChangeFeedApplier>();
-
-        // The device adapters behind the ports the shared handlers resolve:
-        // its own document counter instead of the central one, and the cached
-        // permission snapshot instead of a live database.
-        builder.Services.AddSingleton<IDeviceProfileAccessor, DeviceProfileAccessor>();
-        builder.Services.AddSingleton<IPermissionEvaluator, DeviceSnapshotPermissionEvaluator>();
-        builder.Services.AddScoped(sp => sp.GetRequiredService<DeviceDatabaseInitializer>().CreateDbContext());
-        builder.Services.AddScoped<IDocumentNumberGenerator, DeviceDocumentNumberGenerator>();
-
-        // What the register shows about itself. The probe is here rather than in
-        // infrastructure because reachability is a platform question.
         builder.Services.AddSingleton<IDeviceConnectivityProbe, NetworkConnectivityProbe>();
-        builder.Services.AddSingleton<DeviceStatusProvider>();
 
-        // What a whitelisted use case executes inside: one session per register,
-        // the device's own unit of work, its append-only local audit, and the
-        // repositories for the records it keeps until they sync.
-        builder.Services.AddSingleton<DeviceSession>();
-        builder.Services.AddSingleton<ICurrentUser, DeviceCurrentUser>();
-        builder.Services.AddSingleton<INegativeStockAttemptRecorder, DeviceNegativeStockAttemptRecorder>();
-        builder.Services.AddScoped<IUnitOfWork, DeviceUnitOfWork>();
-        builder.Services.AddScoped<IAuditWriter, DeviceAuditWriter>();
-        builder.Services.AddScoped<IDeviceOutbox, DeviceOutbox>();
-        builder.Services.AddScoped<IShiftRepository, DeviceShiftRepository>();
+        // Everything the device's use cases run against: its store, its ledger,
+        // its local records, its outbox and its uploader. One list, in
+        // AddDeviceInfrastructure, and a test resolves every whitelisted handler
+        // against it — this file used to hold a hand-copied one that fell behind
+        // by five chunks' worth of repositories.
+        builder.Services.AddDeviceInfrastructure();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

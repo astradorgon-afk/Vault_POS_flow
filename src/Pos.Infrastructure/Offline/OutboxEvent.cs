@@ -62,6 +62,12 @@ public enum OutboxStatus
 
     /// <summary>The server's state disagrees with the device's.</summary>
     Conflict = 5,
+
+    /// <summary>
+    /// The server refused it outright. Never retried — the answer would not
+    /// change — and never dropped: it is escalated with the server's own words.
+    /// </summary>
+    Rejected = 6,
 }
 
 /// <summary>
@@ -168,6 +174,64 @@ public sealed class OutboxEvent
 
     /// <summary>Gets the server's last response, kept verbatim for escalation.</summary>
     public string? ServerResponseJson { get; private set; }
+
+    /// <summary>Whether the event is waiting to be sent at or after the given instant.</summary>
+    /// <param name="now">The device clock.</param>
+    /// <returns><see langword="true"/> when it may be included in a batch.</returns>
+    public bool IsDue(DateTimeOffset now)
+        => Status is OutboxStatus.Pending or OutboxStatus.Sending
+           && (NextRetryAtUtc is null || NextRetryAtUtc <= now);
+
+    /// <summary>Marks the event as handed to the server.</summary>
+    /// <param name="now">The device clock.</param>
+    public void MarkSending(DateTimeOffset now)
+    {
+        Status = OutboxStatus.Sending;
+        AttemptCount++;
+        LastAttemptAtUtc = now;
+    }
+
+    /// <summary>Records the verdict the server gave.</summary>
+    /// <param name="status">Where the event has now got to.</param>
+    /// <param name="error">The server's refusal code, when it refused.</param>
+    /// <param name="responseJson">The server's answer, kept verbatim.</param>
+    /// <remarks>
+    /// The row is kept whatever the verdict. A refused event is the one a person
+    /// has to look at, so destroying it would destroy the only evidence of
+    /// something that happened at the till.
+    /// </remarks>
+    public void MarkAnswered(OutboxStatus status, string? error, string? responseJson)
+    {
+        Status = status;
+        LastError = error;
+        ServerResponseJson = responseJson;
+        NextRetryAtUtc = null;
+    }
+
+    /// <summary>
+    /// Records an attempt that did not get an answer, and when to try again.
+    /// </summary>
+    /// <param name="now">The device clock.</param>
+    /// <param name="nextRetryAtUtc">When the next attempt is due.</param>
+    /// <param name="error">What went wrong.</param>
+    public void MarkAttemptFailed(DateTimeOffset now, DateTimeOffset nextRetryAtUtc, string error)
+    {
+        Status = OutboxStatus.Pending;
+        LastAttemptAtUtc = now;
+        NextRetryAtUtc = nextRetryAtUtc;
+        LastError = error;
+    }
+
+    /// <summary>
+    /// Gives up retrying, keeping the event forever for escalation.
+    /// </summary>
+    /// <param name="error">The failure that exhausted the retries.</param>
+    public void MarkRetriesExhausted(string error)
+    {
+        Status = OutboxStatus.Failed;
+        NextRetryAtUtc = null;
+        LastError = error;
+    }
 }
 
 /// <summary>

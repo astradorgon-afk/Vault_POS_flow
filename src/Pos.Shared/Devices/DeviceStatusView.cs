@@ -91,6 +91,13 @@ public enum DeviceStatusConcern
 
     /// <summary>The local store has not opened.</summary>
     StorageNotReady = 7,
+
+    /// <summary>
+    /// Work this register did could not be delivered and nobody can deliver it
+    /// without help. The register keeps trading — the events are safe on it —
+    /// but somebody has to look before they mean anything to head office.
+    /// </summary>
+    SyncNeedsAttention = 8,
 }
 
 /// <summary>How loudly the register is asking to be looked at.</summary>
@@ -135,6 +142,13 @@ public enum DeviceStatusSeverity
 /// is a count, not a queue: a cashier needs to know whether anything would be
 /// lost if the device were wiped, not what the transport is doing.
 /// </param>
+/// <param name="EscalatedEvents">
+/// How much work needs a person. These are not merely undelivered: head office
+/// refused them, flagged them, or stopped being asked after too many failures.
+/// Kept separate from <paramref name="UnsentEvents"/> because the two call for
+/// different things — one waits for a line to come back, the other never
+/// resolves itself.
+/// </param>
 public sealed record DeviceStatusView(
     DeviceStorageState Storage,
     DeviceEnrolmentState Enrolment,
@@ -145,7 +159,8 @@ public sealed record DeviceStatusView(
     DateTimeOffset? LastSynchronisedUtc,
     DeviceAuthorityState Authority,
     DateTimeOffset? AuthorityExpiresUtc,
-    int UnsentEvents = 0)
+    int UnsentEvents = 0,
+    int EscalatedEvents = 0)
 {
     /// <summary>
     /// Gets a value indicating whether the register can take a sale. It is
@@ -165,7 +180,7 @@ public sealed record DeviceStatusView(
     /// now, rather than merely being offline.
     /// </summary>
     public bool NeedsAttention =>
-        !CanTrade || Authority == DeviceAuthorityState.ExpiringSoon;
+        !CanTrade || Authority == DeviceAuthorityState.ExpiringSoon || EscalatedEvents > 0;
 
     /// <summary>
     /// Gets the single thing most worth saying. What blocks trading comes first,
@@ -180,6 +195,11 @@ public sealed record DeviceStatusView(
         { Authority: DeviceAuthorityState.Expired } => DeviceStatusConcern.AuthorityExpired,
         { Authority: DeviceAuthorityState.None } => DeviceStatusConcern.AwaitingSignIn,
         { Authority: DeviceAuthorityState.ExpiringSoon } => DeviceStatusConcern.AuthorityExpiringSoon,
+        // Below everything that stops the register trading, and above the
+        // ordinary offline case: a stuck event is not urgent enough to interrupt
+        // a queue of customers, and not so ordinary that it should be hidden
+        // behind "working offline" until somebody happens to look.
+        { EscalatedEvents: > 0 } => DeviceStatusConcern.SyncNeedsAttention,
         { Connectivity: DeviceConnectivityState.Offline } => DeviceStatusConcern.WorkingOffline,
         _ => DeviceStatusConcern.Ready,
     };
@@ -188,7 +208,8 @@ public sealed record DeviceStatusView(
     public DeviceStatusSeverity Severity => Concern switch
     {
         DeviceStatusConcern.Ready or DeviceStatusConcern.WorkingOffline => DeviceStatusSeverity.Normal,
-        DeviceStatusConcern.AuthorityExpiringSoon => DeviceStatusSeverity.Warning,
+        DeviceStatusConcern.AuthorityExpiringSoon or DeviceStatusConcern.SyncNeedsAttention
+            => DeviceStatusSeverity.Warning,
         _ => DeviceStatusSeverity.Blocked,
     };
 }

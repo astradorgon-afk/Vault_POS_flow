@@ -86,6 +86,7 @@
         DeviceStatusConcern.AuthorityExpired => "Sign-in has expired",
         DeviceStatusConcern.AuthorityExpiringSoon => "Sign-in expires soon",
         DeviceStatusConcern.WorkingOffline => "Selling offline",
+        DeviceStatusConcern.SyncNeedsAttention => "Some sales need checking",
         _ => "Ready",
     };
 
@@ -106,6 +107,12 @@
         DeviceStatusConcern.WorkingOffline => Status.UnsentEvents == 0
             ? "Everything so far has been sent. New sales will be recorded here until the connection returns."
             : "Sales are being recorded here and will be sent when the connection returns.",
+
+        // Says what to do and never what went wrong. A cashier cannot resolve a
+        // refused event and should not be reading error codes between customers;
+        // keep selling, and tell a manager.
+        DeviceStatusConcern.SyncNeedsAttention =>
+            "Keep selling as normal. Nothing has been lost, but a manager needs to look at this register.",
         _ => "Connected, up to date and taking sales.",
     };
 }

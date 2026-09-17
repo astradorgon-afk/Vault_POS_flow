@@ -265,7 +265,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       return and the refund. Every POS event a device can queue now lands
       centrally, and a coverage test keeps the two lists from drifting)*
 - [ ] Pull endpoint, change feed, cursors, rebaseline
-- [ ] Retry queue with exponential backoff
+- [x] Retry queue with exponential backoff
+      *(C49: `SyncUploader` and `SyncRetryPolicy` — jittered backoff to a
+      thirty-minute ceiling, eight attempts then escalation, nothing deleted;
+      `HttpSyncTransport` treats every non-answer as one, a revoked device
+      included. The scheduling loop that calls it is the client's)*
 - [ ] Conflict rules implementation
 - [ ] Sync failure dashboard and manual retry
 - [ ] Full sync test matrix

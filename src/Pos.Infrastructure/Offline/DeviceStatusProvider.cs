@@ -108,10 +108,24 @@ public sealed class DeviceStatusProvider(
         (DeviceAuthorityState authority, DateTimeOffset? expiresAt) =
             await ReadAuthorityAsync(context, signedInUser, cancellationToken).ConfigureAwait(false);
 
+        // Still on its way versus stuck. A refused, flagged, conflicted or
+        // exhausted event has reached head office's attention one way or another
+        // and will not move on its own; counting it as "unsent" would tell a
+        // cashier to wait for a line that is already back.
         int unsent = await context.Outbox
             .AsNoTracking()
             .CountAsync(
-                e => e.Status != OutboxStatus.Synchronized && e.Status != OutboxStatus.Conflict,
+                e => e.Status == OutboxStatus.Pending || e.Status == OutboxStatus.Sending,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        int escalated = await context.Outbox
+            .AsNoTracking()
+            .CountAsync(
+                e => e.Status == OutboxStatus.Failed
+                     || e.Status == OutboxStatus.Rejected
+                     || e.Status == OutboxStatus.RequiresReview
+                     || e.Status == OutboxStatus.Conflict,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -125,7 +139,8 @@ public sealed class DeviceStatusProvider(
             lastSynchronised,
             authority,
             expiresAt,
-            unsent);
+            unsent,
+            escalated);
     }
 
     private async Task<(DeviceAuthorityState State, DateTimeOffset? ExpiresAt)> ReadAuthorityAsync(
