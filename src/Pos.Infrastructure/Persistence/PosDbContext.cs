@@ -258,6 +258,14 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     public DbSet<Pos.Infrastructure.Sync.SyncCheckpoint> SyncCheckpoints
         => Set<Pos.Infrastructure.Sync.SyncCheckpoint>();
 
+    /// <summary>Gets the change feed devices download, in server order.</summary>
+    public DbSet<Pos.Infrastructure.Sync.ChangeFeedEntry> ChangeFeed
+        => Set<Pos.Infrastructure.Sync.ChangeFeedEntry>();
+
+    /// <summary>Gets the change feed's counter row.</summary>
+    public DbSet<Pos.Infrastructure.Sync.ChangeFeedSequence> ChangeFeedSequence
+        => Set<Pos.Infrastructure.Sync.ChangeFeedSequence>();
+
     /// <summary>Gets the append-only sale receipt print log.</summary>
     public DbSet<SaleReceiptPrint> ReceiptPrints => Set<SaleReceiptPrint>();
 

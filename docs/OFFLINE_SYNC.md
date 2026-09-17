@@ -484,6 +484,37 @@ page is refused whole, before anything is written, with `sync.feed_page_invalid`
 Changes are saved one at a time inside the transaction, so a later change always
 sees an earlier one to the same row exactly as the server ordered them.
 
+### 5.1 How the server records it
+
+`sync.change_feed` is append-only: one row per change, carrying the change
+exactly as a device will receive it. Serving a page is then a read, not a
+re-derivation from rows that have since changed again — a device asking for last
+week's change gets what was true last week.
+
+Rows are written by `ChangeFeedRecorder`, a `SaveChanges` interceptor, for the
+same reason the ledger uses one: a feed that depends on somebody remembering is a
+feed that silently stops carrying the thing nobody remembered. It writes in the
+caller's transaction, so a change that rolls back takes its feed row with it and
+there is no window in which a device can be told about a price that does not
+exist. What it records is a deliberate list — products, prices, batches,
+barcodes and locations — not a reflective rule, because a device's cache is a
+deliberate subset and a reflective rule would start shipping whatever was added
+next. A deletion is recorded only for a cancelled future price, the one thing a
+device caches that is removed rather than deactivated; a register that never
+heard it would go on selling at a price the server no longer holds.
+
+**The sequence is not a database identity column.** Identities can be handed out
+in one order and committed in another, and the feed is read as "everything after
+my cursor": a row numbered 40 committing before one numbered 39 would let a
+device store 40 and never see 39 again. The number comes from a single counter
+row incremented inside the writing transaction, which serialises feed appends
+against each other. That costs concurrency on master-data writes, which are rare;
+a sale never touches the table.
+
+Identifiers travel as bare GUIDs. Left alone the serializer writes each
+strongly-typed id as `{"value":"..."}`, which a device would need a matching
+wrapper to read and nobody could read at three in the morning.
+
 Full re-baseline: when `master_data_version` on the server exceeds the device's
 by more than the retained feed window (or the device has been offline beyond
 `FeedRetentionDays`, default 30), the server answers with

@@ -295,6 +295,16 @@ public static class DependencyInjection
 
         services.AddSingleton<AppendOnlyInterceptor>();
 
+        // Appends a change-feed row for anything a register caches, in the same
+        // transaction as the change. Singleton because it holds nothing but the
+        // clock, and the context it writes to arrives with each call.
+        //
+        // The clock is added here rather than left to AddInfrastructure: this
+        // method now needs one, and a caller who composes persistence on its own
+        // — as the registration tests do — should not have to know that.
+        services.TryAddSingleton<ISystemClock, SystemClock>();
+        services.TryAddSingleton<Sync.ChangeFeedRecorder>();
+
         services.AddDbContext<PosDbContext>((sp, options) =>
         {
             if (provider == PersistenceProvider.Postgres)
@@ -313,7 +323,9 @@ public static class DependencyInjection
                     sqlite.MigrationsHistoryTable("__migrations_history"));
             }
 
-            options.AddInterceptors(sp.GetRequiredService<AppendOnlyInterceptor>());
+            options.AddInterceptors(
+                sp.GetRequiredService<AppendOnlyInterceptor>(),
+                sp.GetRequiredService<Sync.ChangeFeedRecorder>());
 
             // Tracked entities are the exception, not the rule: reads are
             // projections and should never accidentally write back.
