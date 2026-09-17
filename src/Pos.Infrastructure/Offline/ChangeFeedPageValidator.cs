@@ -78,7 +78,8 @@ internal static class ChangeFeedPageValidator
             ?? Text(l.Name, 160, "location name")
             ?? (Enum.IsDefined(l.Kind) ? null : "The location kind is not recognised.")
             ?? Text(l.TimeZoneId, 128, "time zone")
-            ?? Currency(l.CurrencyCode),
+            ?? Currency(l.CurrencyCode)
+            ?? (l.SettingsJson is { Length: > 4000 } ? "The location settings are too long." : null),
         UserChanged u => Id(u.UserId, "user")
             ?? Text(u.UserName, 128, "user name")
             ?? Text(u.DisplayName, 160, "display name")

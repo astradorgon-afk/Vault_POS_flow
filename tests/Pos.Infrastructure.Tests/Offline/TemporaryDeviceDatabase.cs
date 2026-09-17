@@ -59,12 +59,15 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
         => Initializer.CreateDbContextAsync(CancellationToken.None);
 
     /// <summary>Writes the device profile that enrolment would write.</summary>
-    public async Task EnrolAsync(string shortCode, LocationId? locationId = null)
+    /// <returns>The enrolled device identity.</returns>
+    public async Task<DeviceId> EnrolAsync(string shortCode, LocationId? locationId = null)
     {
+        DeviceId deviceId = DeviceId.New();
         await using PosDeviceDbContext context = await OpenContextAsync();
         context.DeviceProfiles.Add(new DeviceStoreProfile(
-            DeviceId.New(), locationId ?? LocationId.New(), shortCode, Now));
+            deviceId, locationId ?? LocationId.New(), shortCode, Now));
         await context.SaveChangesAsync(CancellationToken.None);
+        return deviceId;
     }
 
     /// <summary>Creates a generator bound to a fresh context, as a scope would.</summary>

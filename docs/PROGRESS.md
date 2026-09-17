@@ -136,11 +136,12 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C26 — 15-minute `DiscrepancyAlertWorker` alerts posted goods receipts with unresolved receiving discrepancies (Warning, receiving location) and short transfer arrivals (Critical, source and destination), each linked to its document; 7-day lookback; no migration.
   - [x] C27 — 5-minute `EmergencyTransferAlertWorker` announces committed emergency transfers as Critical alerts to both endpoint stores (and all-location HQ users), linked to the transfer; durable per-location deduplication and 30-day restart lookback; no migration.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
-- [~] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
+- [x] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots, status surface and the first executable device use cases
   - [x] C28 — Windows/Android MAUI Blazor Hybrid client; dedicated seven-table device schema; SQLCipher encryption with a 256-bit key held in platform `SecureStorage`; initial SQLite migration; cached product/barcode/price/location/user and permission-snapshot entities; money and UTC text converters; global/store snapshot uniqueness; architecture and encrypted-file regression tests.
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
   - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
   - [x] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. The Linux Android Release build is still unverified — the first CI run on the branch is its real test (STATUS.md §4).
+  - [x] C33 — the first executable device use case: `local_cashier_shift` and `local_audit` (migration `DeviceLocalShiftAndAudit`); `DeviceUnitOfWork`, `DeviceSession`/`DeviceCurrentUser`, `DeviceAuditWriter`, `DeviceNegativeStockAttemptRecorder` and `DeviceShiftRepository`; cached locations now carry their settings through the feed; shift open, suspend and resume flip to `Registered` while close stays `Pending` (it reconciles against local sales a device does not carry). 8 end-to-end tests through a real container.
   - [x] C32 — offline status surface: `DeviceStatusProvider` reports storage, enrolment, connectivity, last-received store data and cached-authority expiry; the `DeviceStatusView` contract lives in `Pos.Shared` (which references nothing), so it cannot carry a path, key, address or feed position; `DeviceStatusBanner` in `Pos.SharedUI` renders one concern at a time, offline never counting as a warning. 27 new tests.
   - [x] C31 — device numbering and permission expiry: `document_counter` on the device (migration `DeviceDocumentCounter`), an atomic upsert joining the caller's transaction, refusing central types and any short code but its own; `DeviceSnapshotPermissionEvaluator` re-checks expiry at every evaluation, scopes grants, and refuses anything the catalogue does not mark offline-capable; the feed refuses a widening snapshot (`sync.feed_page_invalid`) and a policy-version rollback (`sync.snapshot_policy_rollback`). 24 new tests.
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
@@ -937,6 +938,44 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Docker Desktop** crashed at start on the known stale socket
   (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
   to `*.stale-20260917` fixed it again.
+
+### C33 — the first executable device use case (`feat(offline-c33)`)
+
+- **Two local tables.** `local_cashier_shift` maps the same `CashierShift`
+  aggregate the server maps (ADR-0008) — one aggregate, two adapters — and
+  `local_audit` is append-only, because the device is the only witness to what
+  happened on it while it was offline. Migration `DeviceLocalShiftAndAudit`.
+- **The execution substrate**, which every later use case reuses:
+  `DeviceUnitOfWork` (the server's contract over the device's SQLite file),
+  `DeviceSession` (one drawer, one cashier; grants nothing on its own),
+  `DeviceCurrentUser` (no IP, no user agent, no role snapshot, never
+  `HasAllLocations` — a device acts at its own location, the same rule the
+  permission catalogue states by not marking `location.all` offline-capable),
+  `DeviceAuditWriter` and `DeviceNegativeStockAttemptRecorder`.
+- **`DeviceShiftRepository`** backs the server's own handlers. Three port
+  members answer questions about sales and refuse outright rather than
+  improvising, which is precisely why `CloseShiftCommand` stays `Pending`: a
+  closing shift that reconciled against a zero it could not verify would balance
+  a drawer against a lie.
+- **Cached locations carry their settings.** `LocationChanged` gained
+  `SettingsJson`, so a device applies its owner's VAT rate, cash rounding,
+  negative-stock policy and shift caps. Null reads as `LocationSettings.Default`,
+  which the domain already defines as the strictest configuration — a register
+  must not become more permissive by losing its connection.
+- **Three catalogue entries flip to `Registered`:** open, suspend and resume.
+- **8 end-to-end tests** through a container composed the way `MauiProgram`
+  composes one, over one encrypted store: the shift opens under
+  `SHF-2026-D03-0001`, a number the device minted itself; a second open on the
+  same drawer is refused; a number carrying another device's code is refused;
+  suspend and resume round-trip; without `shift.open` in the snapshot nothing
+  opens; thirteen hours later, snapshot expired, the same command is refused
+  again; a close still answers `application.handler_unavailable` rather than
+  reaching the repository member that would throw; and a failed open leaves
+  neither a shift nor an audit row behind.
+- **Verification:** 1,083 passing without PostgreSQL (Domain 378, Application
+  247, Infrastructure 207, Security 52, Architecture 25, API 174); no pending
+  model changes in either context. `Pos.Client` not compiled locally — no MAUI
+  workloads — so its new registrations rest on CI's client jobs.
 
 ### C32 — offline status surface (`feat(offline-c32)`)
 

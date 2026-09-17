@@ -60,16 +60,18 @@ device.db (SQLite, encrypted)
 ├── snapshot_permission   user -> permission set, policy_version, expires_at_utc
 ├── snapshot_token        pre-approval tokens (signed, scoped, expiring)
 ├── local_*        authoritative-until-synced local records
-│    sale, sale_item, payment, cashier_shift, sales_return,
+│    cashier_shift, audit                               (built, C33)
+│    sale, sale_item, payment, sales_return,
 │    inventory_movement, inventory_balance, transfer_order (local),
-│    quarantine_incident, inventory_count
+│    quarantine_incident, inventory_count               (not built yet)
 ├── document_counter  the device's own SAL/RET/SHF sequences
 ├── outbox_event   the upload queue
 ├── sync_cursor    feed positions, advanced with the page they follow
 └── sync_state     checkpoints, failures
 ```
 
-`document_counter` is the mirror image of the cache tables: the change feed never
+The `local_*` tables and `document_counter` are the mirror image of the cache
+tables: the change feed never
 writes it, and application code must. It is what lets a sale rung up with no
 network keep the number printed on its receipt. The allocation is one atomic
 upsert that joins the caller's transaction, so a sale that rolls back releases
@@ -253,7 +255,12 @@ Permissions a handler checks for itself are not listed and do not need to be;
 and the expired-batch override is unreachable offline by construction.
 
 An entry is `Pending` until the device-side ports its handler needs exist, and
-only a `Registered` entry is added to the container. The distinction is not
+only a `Registered` entry is added to the container. As of C33 the shift
+lifecycle — open, suspend, resume — is `Registered` and executes on a device;
+everything else is still `Pending` for want of local sale and movement tables.
+Closing a shift stays `Pending` on purpose: it reconciles the drawer against the
+shift's cash sales, and balancing against a figure the device cannot read would
+be worse than refusing. The distinction is not
 bookkeeping: registering a handler whose repositories are unregistered would
 make the container throw on resolve, where the whole point of the boundary is to
 fail closed with a result the UI can explain.

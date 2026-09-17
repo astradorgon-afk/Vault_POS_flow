@@ -175,11 +175,12 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 if (location is null)
                 {
                     context.Locations.Add(new DeviceCachedLocation(
-                        l.LocationId, l.Code, l.Name, l.Kind, l.TimeZoneId, l.CurrencyCode, l.IsActive));
+                        l.LocationId, l.Code, l.Name, l.Kind, l.TimeZoneId, l.CurrencyCode, l.IsActive,
+                        l.SettingsJson));
                 }
                 else
                 {
-                    location.Refresh(l.Code, l.Name, l.Kind, l.TimeZoneId, l.CurrencyCode, l.IsActive);
+                    location.Refresh(l.Code, l.Name, l.Kind, l.TimeZoneId, l.CurrencyCode, l.IsActive, l.SettingsJson);
                 }
 
                 break;

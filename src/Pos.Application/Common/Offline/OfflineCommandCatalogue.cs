@@ -167,15 +167,19 @@ public sealed class OfflineCommandCatalogue
         Pending<RefundSalesReturnCommand>(
             "Cash refund against a locally held return.",
             Identity.Permissions.Sales.Refund),
-        Pending<OpenShiftCommand>(
+        OnDevice<OpenShiftCommand>(
             "Shift open; totals are reconciled centrally after sync.",
             Identity.Permissions.Sales.OpenShift),
-        Pending<SuspendShiftCommand>(
+        OnDevice<SuspendShiftCommand>(
             "Shift suspend, part of the terminal's own shift lifecycle.",
             Identity.Permissions.Sales.OpenShift),
-        Pending<ResumeShiftCommand>(
+        OnDevice<ResumeShiftCommand>(
             "Shift resume, part of the terminal's own shift lifecycle.",
             Identity.Permissions.Sales.OpenShift),
+
+        // Closing reconciles the drawer against the shift's cash sales, which a
+        // device cannot read until it carries local sales. Balancing against a
+        // zero it cannot verify would be worse than refusing.
         Pending<CloseShiftCommand>(
             "Shift close; totals are reconciled centrally after sync.",
             Identity.Permissions.Sales.CloseShift),
@@ -237,4 +241,7 @@ public sealed class OfflineCommandCatalogue
 
     private static OfflineCommandDefinition Pending<TCommand>(string note, params string[] permissions)
         => new(typeof(TCommand), OfflineCommandState.Pending, permissions, note);
+
+    private static OfflineCommandDefinition OnDevice<TCommand>(string note, params string[] permissions)
+        => new(typeof(TCommand), OfflineCommandState.Registered, permissions, note);
 }

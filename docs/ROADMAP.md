@@ -222,12 +222,13 @@ Substantially delivered in Phase 1, because everything else depends on it.
   initial device migration (C28); the key applied as a raw key (C29b)
 - [x] Cache tables + read-only enforcement: change-feed applier with a
   same-transaction cursor, interceptor and trigger write guards (C29)
-- [~] Client DI container with whitelisted command set
+- [x] Client DI container with whitelisted command set
       *(C30 declares the 24 offline use cases of OFFLINE_SYNC.md §1 in
       `OfflineCommandCatalogue` and registers only those in
-      `AddOfflineClientApplication`; every entry stays `Pending` until the
-      device carries the `local_*` tables its handlers write to, so a device
-      refuses every command with `application.handler_unavailable` today)*
+      `AddOfflineClientApplication`. C33 makes the first three live — shift
+      open, suspend and resume execute on a device against `local_cashier_shift`
+      — and the rest stay `Pending` until the device carries the local sale and
+      movement tables their handlers write to)*
 - [x] Local document numbering (device-scoped)
       *(C31: `document_counter` on the device, an atomic upsert that joins the
       caller's transaction; a device numbers only under its own enrolled short

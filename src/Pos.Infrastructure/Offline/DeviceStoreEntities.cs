@@ -207,7 +207,8 @@ public sealed class DeviceCachedLocation : IChangeFeedOwned
         LocationKind kind,
         string timeZoneId,
         string currencyCode,
-        bool isActive)
+        bool isActive,
+        string? settingsJson = null)
     {
         Id = id;
         Code = code;
@@ -216,6 +217,7 @@ public sealed class DeviceCachedLocation : IChangeFeedOwned
         TimeZoneId = timeZoneId;
         CurrencyCode = currencyCode;
         IsActive = isActive;
+        SettingsJson = settingsJson;
     }
 
     public LocationId Id { get; private init; }
@@ -226,13 +228,22 @@ public sealed class DeviceCachedLocation : IChangeFeedOwned
     public string CurrencyCode { get; private set; }
     public bool IsActive { get; private set; }
 
+    /// <summary>
+    /// Gets this location's operational settings as stored JSON, or
+    /// <see langword="null"/> when the feed has not carried them. Null means the
+    /// strictest configuration, never a permissive guess
+    /// (<see cref="Pos.Domain.Organizations.LocationSettings.FromJson"/>).
+    /// </summary>
+    public string? SettingsJson { get; private set; }
+
     internal void Refresh(
         string code,
         string name,
         LocationKind kind,
         string timeZoneId,
         string currencyCode,
-        bool isActive)
+        bool isActive,
+        string? settingsJson)
     {
         Code = code;
         Name = name;
@@ -240,7 +251,59 @@ public sealed class DeviceCachedLocation : IChangeFeedOwned
         TimeZoneId = timeZoneId;
         CurrencyCode = currencyCode;
         IsActive = isActive;
+        SettingsJson = settingsJson;
     }
+}
+
+/// <summary>
+/// An audit entry written on the device. The device is the only witness to what
+/// happened on it while it was offline, so entries are appended here and travel
+/// with the events they describe; nothing rewrites or deletes one.
+/// </summary>
+public sealed class DeviceLocalAudit
+{
+    private DeviceLocalAudit() { Action = string.Empty; EntityType = string.Empty; }
+
+    /// <summary>Records one audited action.</summary>
+    public DeviceLocalAudit(
+        Guid id,
+        string action,
+        string entityType,
+        Guid? entityId,
+        UserId? userId,
+        DeviceId? deviceId,
+        LocationId? locationId,
+        string? previousValueJson,
+        string? newValueJson,
+        string? reason,
+        DateTimeOffset recordedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(action);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityType);
+        Id = id;
+        Action = action;
+        EntityType = entityType;
+        EntityId = entityId;
+        UserId = userId;
+        DeviceId = deviceId;
+        LocationId = locationId;
+        PreviousValueJson = previousValueJson;
+        NewValueJson = newValueJson;
+        Reason = reason;
+        RecordedAtUtc = recordedAtUtc;
+    }
+
+    public Guid Id { get; private init; }
+    public string Action { get; private init; }
+    public string EntityType { get; private init; }
+    public Guid? EntityId { get; private init; }
+    public UserId? UserId { get; private init; }
+    public DeviceId? DeviceId { get; private init; }
+    public LocationId? LocationId { get; private init; }
+    public string? PreviousValueJson { get; private init; }
+    public string? NewValueJson { get; private init; }
+    public string? Reason { get; private init; }
+    public DateTimeOffset RecordedAtUtc { get; private init; }
 }
 
 /// <summary>A minimal user mirror used for offline sign-in and display.</summary>

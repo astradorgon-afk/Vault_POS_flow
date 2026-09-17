@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Pos.Domain.Common;
+using Pos.Domain.Sales;
 using Pos.Infrastructure.Persistence.Conversions;
 
 namespace Pos.Infrastructure.Offline;
@@ -28,6 +29,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<DeviceCachedUser> Users => Set<DeviceCachedUser>();
     public DbSet<DevicePermissionSnapshot> PermissionSnapshots => Set<DevicePermissionSnapshot>();
     public DbSet<DeviceSyncCursor> SyncCursors => Set<DeviceSyncCursor>();
+    public DbSet<DeviceLocalAudit> LocalAudit => Set<DeviceLocalAudit>();
+    public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
 
     /// <summary>Gets the applier's write window for this context instance.</summary>
     internal ChangeFeedWriteScope ChangeFeedWrites { get; } = new();
@@ -138,6 +141,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.TimeZoneId).HasColumnName("time_zone_id").HasMaxLength(128).IsRequired();
             entity.Property(x => x.CurrencyCode).HasColumnName("currency_code").HasMaxLength(3).IsRequired();
             entity.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            entity.Property(x => x.SettingsJson).HasColumnName("settings_json").HasMaxLength(4000);
             entity.HasIndex(x => x.Code).IsUnique().HasDatabaseName("ux_cache_location_code");
         });
 
@@ -182,6 +186,52 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.Feed).HasColumnName("feed").HasMaxLength(64);
             entity.Property(x => x.Position).HasColumnName("position").IsRequired();
             entity.Property(x => x.AdvancedAtUtc).HasColumnName("advanced_at_utc").IsRequired();
+        });
+
+        // Authoritative until synced. These are the device's own records, so
+        // nothing about them is applier-owned: application code writes them and
+        // the change feed never does.
+        builder.Entity<DeviceLocalAudit>(entity =>
+        {
+            entity.ToTable("local_audit");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(x => x.Action).HasColumnName("action").HasMaxLength(160).IsRequired();
+            entity.Property(x => x.EntityType).HasColumnName("entity_type").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.EntityId).HasColumnName("entity_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.DeviceId).HasColumnName("device_id");
+            entity.Property(x => x.LocationId).HasColumnName("location_id");
+            entity.Property(x => x.PreviousValueJson).HasColumnName("previous_value_json").HasMaxLength(4000);
+            entity.Property(x => x.NewValueJson).HasColumnName("new_value_json").HasMaxLength(4000);
+            entity.Property(x => x.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(x => x.RecordedAtUtc).HasColumnName("recorded_at_utc").IsRequired();
+            entity.HasIndex(x => x.RecordedAtUtc).HasDatabaseName("ix_local_audit_recorded");
+        });
+
+        // The same CashierShift aggregate the server maps, against the device's
+        // own table. One aggregate, two adapters (ADR-0008): an offline shift and
+        // an online one are the same business record.
+        builder.Entity<CashierShift>(entity =>
+        {
+            entity.ToTable("local_cashier_shift");
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(s => s.Number).HasColumnName("number").HasMaxLength(DocumentNumber.MaxLength).IsRequired();
+            entity.Property(s => s.LocationId).HasColumnName("location_id").IsRequired();
+            entity.Property(s => s.DeviceId).HasColumnName("device_id").IsRequired();
+            entity.Property(s => s.CashierUserId).HasColumnName("cashier_user_id").IsRequired();
+            entity.Property(s => s.OpenedAtUtc).HasColumnName("opened_at_utc").IsRequired();
+            entity.Property(s => s.BusinessDate).HasColumnName("business_date").IsRequired();
+            entity.Property(s => s.Status).HasColumnName("status").HasConversion<short>().IsRequired();
+            entity.Property(s => s.OpeningFloat).HasColumnName("opening_float").HasPrecision(19, Money.StorageScale).IsRequired();
+            entity.Property(s => s.ClosedAtUtc).HasColumnName("closed_at_utc");
+            entity.Property(s => s.DeclaredCash).HasColumnName("declared_cash").HasPrecision(19, Money.StorageScale);
+            entity.Property(s => s.CountedCash).HasColumnName("counted_cash").HasPrecision(19, Money.StorageScale);
+            entity.Property(s => s.CashVariance).HasColumnName("cash_variance").HasPrecision(19, Money.StorageScale);
+            entity.Property(s => s.IsForceClosed).HasColumnName("is_force_closed").IsRequired();
+            entity.HasIndex(s => s.Number).IsUnique().HasDatabaseName("ux_local_cashier_shift_number");
+            entity.HasIndex(s => s.Status).HasDatabaseName("ix_local_cashier_shift_status");
         });
 
         ApplySqliteTypeMappings(builder);

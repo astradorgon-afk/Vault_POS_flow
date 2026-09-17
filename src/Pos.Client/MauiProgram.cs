@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 #endif
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Offline;
+using Pos.Application.Sales;
 using Pos.Client.Storage;
 using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Offline;
@@ -47,6 +48,16 @@ public static class MauiProgram
         // infrastructure because reachability is a platform question.
         builder.Services.AddSingleton<IDeviceConnectivityProbe, NetworkConnectivityProbe>();
         builder.Services.AddSingleton<DeviceStatusProvider>();
+
+        // What a whitelisted use case executes inside: one session per register,
+        // the device's own unit of work, its append-only local audit, and the
+        // repositories for the records it keeps until they sync.
+        builder.Services.AddSingleton<DeviceSession>();
+        builder.Services.AddSingleton<ICurrentUser, DeviceCurrentUser>();
+        builder.Services.AddSingleton<INegativeStockAttemptRecorder, DeviceNegativeStockAttemptRecorder>();
+        builder.Services.AddScoped<IUnitOfWork, DeviceUnitOfWork>();
+        builder.Services.AddScoped<IAuditWriter, DeviceAuditWriter>();
+        builder.Services.AddScoped<IShiftRepository, DeviceShiftRepository>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

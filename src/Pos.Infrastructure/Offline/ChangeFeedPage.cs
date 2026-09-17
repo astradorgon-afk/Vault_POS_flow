@@ -51,6 +51,14 @@ public sealed record ProductPriceChanged(
 public sealed record ProductPriceRemoved(long Sequence, ProductPriceId PriceId) : ChangeFeedChange(Sequence);
 
 /// <summary>A location was created or changed.</summary>
+/// <remarks>
+/// <paramref name="SettingsJson"/> carries the location's operational settings —
+/// the VAT rate, cash rounding, the negative-stock policy and the shift caps —
+/// because a device applies its owner's configuration offline, not a guess.
+/// Null means the feed did not carry them, which
+/// <see cref="Pos.Domain.Organizations.LocationSettings.FromJson"/> reads as the
+/// strictest configuration rather than a permissive default.
+/// </remarks>
 public sealed record LocationChanged(
     long Sequence,
     LocationId LocationId,
@@ -59,7 +67,8 @@ public sealed record LocationChanged(
     LocationKind Kind,
     string TimeZoneId,
     string CurrencyCode,
-    bool IsActive) : ChangeFeedChange(Sequence);
+    bool IsActive,
+    string? SettingsJson = null) : ChangeFeedChange(Sequence);
 
 /// <summary>A user the device may sign in was created or changed.</summary>
 public sealed record UserChanged(
