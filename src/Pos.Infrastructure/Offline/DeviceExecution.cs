@@ -17,8 +17,20 @@ public sealed class DeviceUnitOfWork(PosDeviceDbContext context) : IUnitOfWork
     public bool HasActiveTransaction => context.Database.CurrentTransaction is not null;
 
     /// <inheritdoc />
-    public Task<int> SaveChangesAsync(CancellationToken cancellationToken)
-        => context.SaveChangesAsync(cancellationToken);
+    /// <remarks>
+    /// The save happens inside the ledger's write window. A command that posted
+    /// to the ledger staged its rows on this context and left the writing to the
+    /// unit of work, so this is where the device's balance triggers see the
+    /// ledger identify itself. Nothing else can open the window: it is internal
+    /// to infrastructure, so client code cannot reach it.
+    /// </remarks>
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        using (context.BeginLedgerWrite())
+        {
+            return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
     public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)

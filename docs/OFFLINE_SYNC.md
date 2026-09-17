@@ -60,10 +60,11 @@ device.db (SQLite, encrypted)
 ├── snapshot_permission   user -> permission set, policy_version, expires_at_utc
 ├── snapshot_token        pre-approval tokens (signed, scoped, expiring)
 ├── local_*        authoritative-until-synced local records
-│    cashier_shift, audit                               (built, C33)
+│    cashier_shift, audit, inventory_movement,
+│    inventory_balance, outbox_event                    (built, C33–C35)
 │    sale, sale_item, payment, sales_return,
-│    inventory_movement, inventory_balance, transfer_order (local),
-│    quarantine_incident, inventory_count               (not built yet)
+│    transfer_order (local), quarantine_incident,
+│    inventory_count                                    (not built yet)
 ├── document_counter  the device's own SAL/RET/SHF sequences
 ├── outbox_event   the upload queue
 ├── sync_cursor    feed positions, advanced with the page they follow
@@ -96,6 +97,36 @@ The write scope is internal to `Pos.Infrastructure`, so client code cannot open
 it. The guards stop application code from widening its own permissions or
 rewriting cached prices; they do not defend against code holding the database
 key, which could drop the triggers.
+
+### 2.2 The ledger on a device
+
+The device runs **the same** `InventoryLedger` the server runs, pointed at its
+encrypted SQLite file through `ILedgerStore` (ADR-0008). There is no second
+ledger: two implementations of double-entry stock would drift, and the drift
+would be invisible until inventory disagreed.
+
+Of the four layers that stop `product.StockQuantity = 100`, three carry to the
+device and one cannot:
+
+| Layer | On the server | On the device |
+|---|---|---|
+| Domain types with no setters | yes | the same types |
+| EF interceptor | yes | yes |
+| Database triggers | arithmetic: a **deferred** constraint trigger checks at commit that every balance change is backed by movements in the same transaction | identity: SQLite has no deferred triggers, so a `BEFORE` trigger cannot see movements EF has not inserted yet. It asks *who* is writing instead, through `vf_ledger_writer()` — the mechanism that already protects the downloaded caches |
+| Least-privilege database role | the application role holds only `SELECT, INSERT` on the ledger tables | **no SQLite equivalent.** What stands in its place is the encryption key, which is why it lives in the platform secure store and never in the file |
+
+The ledger identifies itself by opening a write window (`BeginLedgerWrite`). On
+the server that handle does nothing. On the device it is opened by the unit of
+work, because a command that posted to the ledger stages its rows and leaves the
+writing to the unit of work; the window is internal to infrastructure, so client
+code cannot open it. A connection opened outside a device context has no
+`vf_ledger_writer()` at all, so a statement touching a balance cannot even be
+prepared — the guard fails closed.
+
+Movement immutability and the balance no-delete rule need no window: they are
+refused unconditionally, exactly as on the server.
+
+---
 
 ### 2.1 The outbox
 

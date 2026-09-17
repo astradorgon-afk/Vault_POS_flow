@@ -65,6 +65,10 @@ public static class DependencyInjection
         // provider remains for tests that need the conservative baseline.
         services.TryAddScoped<ILedgerPolicyProvider, LocationSettingsLedgerPolicyProvider>();
         services.TryAddScoped<INegativeStockAttemptRecorder, NegativeStockAttemptRecorder>();
+        // One ledger, two databases (ADR-0008). On a server it runs against
+        // PostgreSQL; the device container points the same type at its encrypted
+        // SQLite file.
+        services.TryAddScoped<ILedgerStore>(sp => sp.GetRequiredService<PosDbContext>());
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
         services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
         services.TryAddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();

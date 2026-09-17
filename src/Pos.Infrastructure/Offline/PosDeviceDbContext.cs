@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
 using Pos.Domain.Sales;
 using Pos.Infrastructure.Persistence.Conversions;
+using Pos.Infrastructure.Persistence.Configurations;
+using Pos.Infrastructure.Inventory;
 
 namespace Pos.Infrastructure.Offline;
 
@@ -18,7 +21,7 @@ namespace Pos.Infrastructure.Offline;
 /// consult, so raw SQL is refused as well.
 /// </remarks>
 /// <param name="options">SQLite options for the encrypted device file.</param>
-public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> options) : DbContext(options)
+public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> options) : DbContext(options), ILedgerStore
 {
     public DbSet<DeviceStoreProfile> DeviceProfiles => Set<DeviceStoreProfile>();
     public DbSet<DeviceDocumentCounter> DocumentCounters => Set<DeviceDocumentCounter>();
@@ -33,9 +36,22 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
     public DbSet<OutboxEvent> Outbox => Set<OutboxEvent>();
     public DbSet<DeviceSequence> Sequences => Set<DeviceSequence>();
+    public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
+    public DbSet<InventoryBalance> InventoryBalances => Set<InventoryBalance>();
+
+    /// <summary>Gets this context as its base type, for <see cref="ILedgerStore"/>.</summary>
+    /// <returns>This context.</returns>
+    public DbContext AsDbContext() => this;
 
     /// <summary>Gets the applier's write window for this context instance.</summary>
     internal ChangeFeedWriteScope ChangeFeedWrites { get; } = new();
+
+    /// <summary>Gets the ledger's write window for this context instance.</summary>
+    internal ChangeFeedWriteScope LedgerWrites { get; } = new();
+
+    /// <inheritdoc cref="ILedgerStore.BeginLedgerWrite" />
+    /// <returns>The handle that closes the window.</returns>
+    public IDisposable BeginLedgerWrite() => LedgerWrites.Open();
 
     /// <inheritdoc />
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -43,7 +59,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
         ArgumentNullException.ThrowIfNull(optionsBuilder);
         optionsBuilder.AddInterceptors(
             ChangeFeedWriteGuardInterceptor.Instance,
-            ChangeFeedWriterFunctionInterceptor.Instance);
+            ChangeFeedWriterFunctionInterceptor.Instance,
+            LedgerWriterFunctionInterceptor.Instance);
         base.OnConfiguring(optionsBuilder);
     }
 
@@ -271,6 +288,28 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.HasIndex(e => e.DeviceSequence).IsUnique().HasDatabaseName("ux_local_outbox_sequence");
             entity.HasIndex(e => new { e.Status, e.DeviceSequence }).HasDatabaseName("ix_local_outbox_status_sequence");
         });
+
+        // The server's own ledger mappings, applied verbatim so the two
+        // databases cannot drift in column shape, index or concurrency token,
+        // then renamed to the device's local_* convention. A change to the
+        // server's mapping reaches the device with it.
+        builder.ApplyConfiguration(new InventoryMovementConfiguration());
+        builder.ApplyConfiguration(new InventoryBalanceConfiguration());
+        builder.Entity<InventoryMovement>(entity => entity.ToTable(
+            "local_inventory_movement",
+            t =>
+            {
+                t.HasTrigger("trg_local_inventory_movement_immutable_update");
+                t.HasTrigger("trg_local_inventory_movement_immutable_delete");
+            }));
+        builder.Entity<InventoryBalance>(entity => entity.ToTable(
+            "local_inventory_balance",
+            t =>
+            {
+                t.HasTrigger("trg_local_inventory_balance_ledger_only_insert");
+                t.HasTrigger("trg_local_inventory_balance_ledger_only_update");
+                t.HasTrigger("trg_local_inventory_balance_ledger_only_delete");
+            }));
 
         ApplySqliteTypeMappings(builder);
     }

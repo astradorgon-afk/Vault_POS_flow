@@ -147,6 +147,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
 - [~] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
   - [x] C34 — device outbox: `local_outbox_event` plus a single-row `device_sequence`, both allocated in the caller's transaction so a rolled-back event releases its number; `CanonicalJson` sorts object properties at every depth so declaration order cannot change a payload hash; `Environment.TickCount64` recorded as clock-tamper evidence; the device repositories enqueue business events, not row changes; the status banner now reports unsent work (POS.md §6). 18 new tests.
+  - [x] C35 — the ledger on the device: `InventoryLedger` runs against `ILedgerStore`, implemented by both contexts, so there is one ledger rather than two; `local_inventory_movement` and `local_inventory_balance` reuse the server's own EF configurations; SQLite guards refuse rewriting history, deleting a balance, and writing a quantity outside the ledger's write window (migration `DeviceLedger`). 8 tests.
   - [ ] Push endpoint with per-event idempotent processing
   - [ ] Pull endpoint, change feed, cursors, rebaseline
   - [ ] Retry queue with exponential backoff
@@ -943,6 +944,37 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Docker Desktop** crashed at start on the known stale socket
   (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
   to `*.stale-20260917` fixed it again.
+
+### C35 — the ledger on the device (`feat(sync-c35)`)
+
+- **One ledger, two databases.** `InventoryLedger` takes `ILedgerStore`, which
+  `PosDbContext` and `PosDeviceDbContext` both implement. ADR-0008 exists because
+  two implementations of double-entry stock would drift invisibly; a second
+  ledger would have been exactly that. Every existing ledger, balance and API
+  test passed unchanged.
+- **The device maps the server's own configurations.** `local_inventory_movement`
+  and `local_inventory_balance` apply `InventoryMovementConfiguration` and
+  `InventoryBalanceConfiguration` verbatim and then rename the tables, so column
+  shape, indexes and the concurrency token cannot drift.
+- **The guards differ, and the difference is documented.** PostgreSQL's balance
+  guard is a *deferred* constraint trigger checking arithmetic at commit. SQLite
+  has no deferred triggers — the first version of the device guard failed every
+  post, because the ledger's balance insert arrived before its movements — so the
+  device trigger asks who is writing, via `vf_ledger_writer()`, the mechanism C29
+  proved on the caches. The fourth server layer, a least-privilege role, has no
+  SQLite equivalent; the encryption key stands in its place, now stated in
+  OFFLINE_SYNC.md §2.2 rather than implied.
+- **The write window** is opened by the device unit of work, since a posting
+  command stages its rows and leaves the writing to it. It is internal to
+  infrastructure, so client code cannot open it. Movement immutability and the
+  balance no-delete rule are unconditional.
+- **8 tests** against a real encrypted device file: receipt, sale, refusal to
+  sell stock that is not there, replay of a repeated event, and three raw-SQL
+  attacks (set a quantity, delete a balance, rewrite a movement) all refused.
+  Every movement group sums to zero.
+- **Verification:** 1,109 passing without PostgreSQL (Domain 378, Application
+  247, Infrastructure 233, Security 52, Architecture 25, API 174); no pending
+  model changes in either context.
 
 ### C34 — the device outbox (`feat(sync-c34)`)
 

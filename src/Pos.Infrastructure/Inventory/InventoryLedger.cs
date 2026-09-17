@@ -6,7 +6,6 @@ using Npgsql;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
-using Pos.Infrastructure.Persistence;
 
 namespace Pos.Infrastructure.Inventory;
 
@@ -44,6 +43,47 @@ public sealed class StrictLedgerPolicyProvider : ILedgerPolicyProvider
 }
 
 /// <summary>
+/// The two tables the ledger writes, on whichever database it is running
+/// against.
+/// </summary>
+/// <remarks>
+/// The ledger is the one piece of this system that must behave identically on a
+/// server and on a device — a sale rung up offline and the same sale rung up
+/// online are the same business event, and a second implementation would drift
+/// invisibly until inventory disagreed (ADR-0008). So there is one ledger, and
+/// this is what it runs against: PostgreSQL through <c>PosDbContext</c>, the
+/// device's encrypted SQLite file through <c>PosDeviceDbContext</c>.
+/// </remarks>
+public interface ILedgerStore
+{
+    /// <summary>Gets the append-only movement legs.</summary>
+    DbSet<InventoryMovement> InventoryMovements { get; }
+
+    /// <summary>Gets the balance projection the legs are applied to.</summary>
+    DbSet<InventoryBalance> InventoryBalances { get; }
+
+    /// <summary>Gets this store as its context, for transactions and saves.</summary>
+    /// <returns>The underlying context.</returns>
+    DbContext AsDbContext();
+
+    /// <summary>
+    /// Opens the window in which this store accepts ledger writes, until the
+    /// handle is disposed.
+    /// </summary>
+    /// <returns>The handle that closes the window.</returns>
+    /// <remarks>
+    /// PostgreSQL does not need this: its balance guard is a deferred constraint
+    /// trigger that checks the arithmetic at commit, when every row is in place,
+    /// and a least-privilege role stops anything else writing. SQLite has neither
+    /// deferred triggers nor roles, so the device's triggers instead ask who is
+    /// writing — the same mechanism that protects its downloaded caches — and
+    /// this is how the ledger identifies itself. The server's store returns a
+    /// handle that does nothing.
+    /// </remarks>
+    IDisposable BeginLedgerWrite();
+}
+
+/// <summary>
 /// The only component in the system that writes stock.
 /// </summary>
 /// <remarks>
@@ -65,7 +105,7 @@ public sealed class StrictLedgerPolicyProvider : ILedgerPolicyProvider
 /// does the caller see <see cref="InventoryErrors.BalanceContention"/>.
 /// </para>
 /// </remarks>
-/// <param name="context">The database context.</param>
+/// <param name="store">The ledger tables, on whichever database this is.</param>
 /// <param name="clock">The authoritative clock.</param>
 /// <param name="policies">Per-location inventory policies.</param>
 /// <param name="logger">Logger, supplied by the container; tests may pass none.</param>
@@ -74,7 +114,7 @@ public sealed class StrictLedgerPolicyProvider : ILedgerPolicyProvider
 /// supplied by the container, tests may pass none.
 /// </param>
 public sealed class InventoryLedger(
-    PosDbContext context,
+    ILedgerStore store,
     ISystemClock clock,
     ILedgerPolicyProvider policies,
     ILogger<InventoryLedger>? logger = null,
@@ -96,7 +136,7 @@ public sealed class InventoryLedger(
     {
         ArgumentNullException.ThrowIfNull(spec);
 
-        if (context.Database.CurrentTransaction is not null)
+        if (store.AsDbContext().Database.CurrentTransaction is not null)
         {
             // Ambient transaction (unit-of-work behaviour, synchronization
             // processor): stage once, and let the caller own durability,
@@ -112,7 +152,7 @@ public sealed class InventoryLedger(
         for (int attempt = 1; ; attempt++)
         {
             await using IDbContextTransaction transaction =
-                await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+                await store.AsDbContext().Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
             Result<PostedMovementGroup> staged = await StageAsync(spec, cancellationToken).ConfigureAwait(false);
 
@@ -124,7 +164,11 @@ public sealed class InventoryLedger(
 
             try
             {
-                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                using (store.BeginLedgerWrite())
+                {
+                    await store.AsDbContext().SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return staged;
             }
@@ -135,7 +179,7 @@ public sealed class InventoryLedger(
                 // on the primary key. Forget everything this context read and try
                 // again against the projection as it now stands.
                 await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                context.ChangeTracker.Clear();
+                store.AsDbContext().ChangeTracker.Clear();
 
                 logger?.LogWarning(
                     "Ledger posting for event {EventId} contended with a concurrent writer; retrying (attempt {Attempt} of {Max}).",
@@ -146,7 +190,7 @@ public sealed class InventoryLedger(
             catch (DbUpdateException ex) when (attempt >= MaxStandaloneAttempts && IsBalanceCompetition(ex))
             {
                 await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                context.ChangeTracker.Clear();
+                store.AsDbContext().ChangeTracker.Clear();
 
                 logger?.LogError(
                     "Ledger posting for event {EventId} exhausted {Max} attempts under balance contention.",
@@ -192,7 +236,7 @@ public sealed class InventoryLedger(
         InventoryState state,
         CancellationToken cancellationToken)
     {
-        InventoryBalance? balance = await context.InventoryBalances
+        InventoryBalance? balance = await store.InventoryBalances
             .AsNoTracking()
             .FirstOrDefaultAsync(
                 b => b.LocationId == locationId
@@ -219,7 +263,7 @@ public sealed class InventoryLedger(
     {
         // 1. Idempotency. A device that retried after a network timeout must get
         //    the original outcome, not a second posting.
-        InventoryMovement? existing = await context.InventoryMovements
+        InventoryMovement? existing = await store.InventoryMovements
             .AsNoTracking()
             .Where(m => m.EventId == spec.EventId)
             .OrderBy(m => m.LegNumber)
@@ -228,7 +272,7 @@ public sealed class InventoryLedger(
 
         if (existing is not null)
         {
-            int legCount = await context.InventoryMovements
+            int legCount = await store.InventoryMovements
                 .AsNoTracking()
                 .CountAsync(m => m.MovementGroupId == existing.MovementGroupId, cancellationToken)
                 .ConfigureAwait(false);
@@ -268,7 +312,7 @@ public sealed class InventoryLedger(
         //    they were read with so a concurrent writer cannot be overwritten.
         foreach (InventoryMovement movement in group.Movements)
         {
-            context.InventoryMovements.Add(movement);
+            store.InventoryMovements.Add(movement);
 
             BucketKey key = BucketKey.From(movement);
 
@@ -277,7 +321,7 @@ public sealed class InventoryLedger(
                 balance = InventoryBalance.CreateEmpty(
                     movement.LocationId, movement.ProductId, movement.BatchKey, movement.State);
 
-                context.InventoryBalances.Add(balance);
+                store.InventoryBalances.Add(balance);
                 buckets[key] = balance;
             }
 
@@ -299,7 +343,7 @@ public sealed class InventoryLedger(
         LocationId[] locations = [.. group.Movements.Select(m => m.LocationId).Distinct()];
         ProductId[] products = [.. group.Movements.Select(m => m.ProductId).Distinct()];
 
-        List<InventoryBalance> loaded = await context.InventoryBalances
+        List<InventoryBalance> loaded = await store.InventoryBalances
             .AsTracking()
             .Where(b => locations.Contains(b.LocationId) && products.Contains(b.ProductId))
             .ToListAsync(cancellationToken)

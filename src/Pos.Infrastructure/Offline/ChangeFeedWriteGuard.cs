@@ -174,3 +174,53 @@ internal sealed class ChangeFeedWriterFunctionInterceptor : DbConnectionIntercep
         sqlite.CreateFunction(FunctionName, () => scope.IsOpen ? 1L : 0L, isDeterministic: false);
     }
 }
+
+/// <summary>
+/// Registers the SQL function the device's ledger triggers consult, bound to the
+/// ledger write window of the context that opened the connection.
+/// </summary>
+/// <remarks>
+/// It is the same mechanism that protects the downloaded caches, for the same
+/// reason: SQLite has no deferred triggers, so the device's balance guard cannot
+/// check the arithmetic at commit the way PostgreSQL's does, and it asks who is
+/// writing instead. A connection opened outside a device context has no such
+/// function, so a trigger that calls it fails the statement — the guard fails
+/// closed.
+/// </remarks>
+internal sealed class LedgerWriterFunctionInterceptor : DbConnectionInterceptor
+{
+    /// <summary>The SQL function name used by the ledger triggers.</summary>
+    public const string FunctionName = "vf_ledger_writer";
+
+    /// <summary>Gets the shared stateless instance.</summary>
+    public static LedgerWriterFunctionInterceptor Instance { get; } = new();
+
+    /// <inheritdoc />
+    public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
+    {
+        Register(connection, eventData);
+        base.ConnectionOpened(connection, eventData);
+    }
+
+    /// <inheritdoc />
+    public override Task ConnectionOpenedAsync(
+        DbConnection connection,
+        ConnectionEndEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        Register(connection, eventData);
+        return base.ConnectionOpenedAsync(connection, eventData, cancellationToken);
+    }
+
+    private static void Register(DbConnection connection, ConnectionEndEventData eventData)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (connection is not SqliteConnection sqlite || eventData.Context is not PosDeviceDbContext device)
+        {
+            return;
+        }
+
+        ChangeFeedWriteScope scope = device.LedgerWrites;
+        sqlite.CreateFunction(FunctionName, () => scope.IsOpen ? 1L : 0L, isDeterministic: false);
+    }
+}

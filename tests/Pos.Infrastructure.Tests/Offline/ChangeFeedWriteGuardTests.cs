@@ -179,7 +179,10 @@ public sealed class ChangeFeedWriteGuardTests
         {
             await connection.OpenAsync();
             await using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'trigger';";
+            // Scoped to the applier's own guards: the device also carries the
+            // ledger's triggers, which DeviceLedgerTests owns.
+            command.CommandText =
+                "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%feed_only%';";
             await using SqliteDataReader reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {

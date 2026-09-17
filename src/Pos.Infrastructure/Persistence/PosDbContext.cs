@@ -17,6 +17,8 @@ using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
 
+using Pos.Infrastructure.Inventory;
+
 namespace Pos.Infrastructure.Persistence;
 
 /// <summary>
@@ -26,7 +28,7 @@ namespace Pos.Infrastructure.Persistence;
 /// </summary>
 /// <param name="options">Context options, including the provider.</param>
 public class PosDbContext(DbContextOptions<PosDbContext> options)
-    : IdentityDbContext<AppUser, AppRole, Guid>(options)
+    : IdentityDbContext<AppUser, AppRole, Guid>(options), ILedgerStore
 {
     /// <summary>Schema holding inventory tables.</summary>
     public const string InventorySchema = "inventory";
@@ -59,6 +61,29 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// Gets the append-only inventory ledger. Insert only: the interceptor and
     /// the database triggers both reject updates and deletes.
     /// </summary>
+    /// <summary>Gets this context as its base type, for <see cref="ILedgerStore"/>.</summary>
+    /// <returns>This context.</returns>
+    public DbContext AsDbContext() => this;
+
+    /// <inheritdoc cref="ILedgerStore.BeginLedgerWrite" />
+    /// <returns>A handle that does nothing.</returns>
+    /// <remarks>
+    /// PostgreSQL identifies the ledger by privilege, not by a window: the
+    /// balance guard is a deferred constraint trigger that checks the arithmetic
+    /// at commit, and the application's role holds only SELECT and INSERT on the
+    /// ledger tables. There is nothing to open.
+    /// </remarks>
+    public IDisposable BeginLedgerWrite() => NullLedgerWrite.Instance;
+
+    private sealed class NullLedgerWrite : IDisposable
+    {
+        public static NullLedgerWrite Instance { get; } = new();
+
+        public void Dispose()
+        {
+        }
+    }
+
     public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
 
     /// <summary>
