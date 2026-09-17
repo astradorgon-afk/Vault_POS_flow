@@ -1,5 +1,4 @@
 using FluentAssertions;
-using Microsoft.EntityFrameworkCore;
 using Pos.Application.Identity;
 using Pos.Domain.Common;
 using Pos.Infrastructure.Offline;

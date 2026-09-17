@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Common;
 using Pos.Infrastructure.Offline;
