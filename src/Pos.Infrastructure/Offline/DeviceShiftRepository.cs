@@ -29,9 +29,11 @@ namespace Pos.Infrastructure.Offline;
 /// </remarks>
 /// <param name="context">The scoped device context.</param>
 /// <param name="profile">This device's enrolled identity.</param>
+/// <param name="outbox">The upload queue this repository enqueues to.</param>
 public sealed class DeviceShiftRepository(
     PosDeviceDbContext context,
-    IDeviceProfileAccessor profile) : IShiftRepository
+    IDeviceProfileAccessor profile,
+    IDeviceOutbox outbox) : IShiftRepository
 {
     /// <inheritdoc />
     public async Task<Result<CashierShiftId>> AddAsync(CashierShift shift, CancellationToken cancellationToken)
@@ -39,6 +41,8 @@ public sealed class DeviceShiftRepository(
         ArgumentNullException.ThrowIfNull(shift);
 
         await context.LocalShifts.AddAsync(shift, cancellationToken).ConfigureAwait(false);
+        await EnqueueAsync(SyncEventType.ShiftOpened, shift, cancellationToken).ConfigureAwait(false);
+
         return Result<CashierShiftId>.Success(shift.Id);
     }
 
@@ -58,13 +62,27 @@ public sealed class DeviceShiftRepository(
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public Task<Result<CashierShiftId>> UpdateAsync(CashierShift shift, CancellationToken cancellationToken)
+    public async Task<Result<CashierShiftId>> UpdateAsync(CashierShift shift, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(shift);
-        cancellationToken.ThrowIfCancellationRequested();
 
-        // Tracked by the read that loaded it; the unit of work writes it.
-        return Task.FromResult(Result<CashierShiftId>.Success(shift.Id));
+        // Tracked by the read that loaded it; the unit of work writes it. What
+        // the outbox needs is which business event this update was, and the
+        // shift's own status is the honest answer — the alternative is a flag
+        // threaded through a port the server shares.
+        SyncEventType? type = shift.Status switch
+        {
+            ShiftStatus.Suspended => SyncEventType.ShiftSuspended,
+            ShiftStatus.Open => SyncEventType.ShiftResumed,
+            _ => null,
+        };
+
+        if (type is { } eventType)
+        {
+            await EnqueueAsync(eventType, shift, cancellationToken).ConfigureAwait(false);
+        }
+
+        return Result<CashierShiftId>.Success(shift.Id);
     }
 
     /// <inheritdoc />
@@ -115,7 +133,55 @@ public sealed class DeviceShiftRepository(
         CancellationToken cancellationToken)
         => throw NotOnADeviceYet(nameof(GetForceCloseCandidatesAsync));
 
+    /// <summary>
+    /// Queues the business event in the same unit of work as the rows it
+    /// describes, so an event never outlives a shift that rolled back.
+    /// </summary>
+    private Task<OutboxEvent> EnqueueAsync(
+        SyncEventType type,
+        CashierShift shift,
+        CancellationToken cancellationToken)
+        => outbox.EnqueueAsync(
+            type,
+            new ShiftSyncPayload(
+                shift.Id.Value,
+                shift.Number,
+                shift.LocationId.Value,
+                shift.DeviceId.Value,
+                shift.CashierUserId.Value,
+                shift.OpeningFloat,
+                shift.BusinessDate,
+                shift.OpenedAtUtc,
+                shift.Status.ToString()),
+            shift.LocationId,
+            cancellationToken);
+
     private static NotSupportedException NotOnADeviceYet(string member)
         => new(FormattableString.Invariant(
             $"{member} reads local sales, which a device does not carry yet. The use cases that need it are not registered on a device; reaching this is a registration mistake, not a runtime condition."));
 }
+
+/// <summary>
+/// What the server is told about a shift that happened offline. It is the
+/// business event, not the row: the server replays it through the same use case
+/// it would have run online.
+/// </summary>
+/// <param name="ShiftId">The shift the device created.</param>
+/// <param name="Number">The device-scoped SHF number printed at the till.</param>
+/// <param name="LocationId">Where the shift was opened.</param>
+/// <param name="DeviceId">The register.</param>
+/// <param name="CashierUserId">The cashier.</param>
+/// <param name="OpeningFloat">The float counted into the drawer.</param>
+/// <param name="BusinessDate">The business date in the location's timezone.</param>
+/// <param name="OpenedAtUtc">The device clock when the drawer opened.</param>
+/// <param name="Status">The shift's status after the event.</param>
+public sealed record ShiftSyncPayload(
+    Guid ShiftId,
+    string Number,
+    Guid LocationId,
+    Guid DeviceId,
+    Guid CashierUserId,
+    decimal OpeningFloat,
+    DateOnly BusinessDate,
+    DateTimeOffset OpenedAtUtc,
+    string Status);

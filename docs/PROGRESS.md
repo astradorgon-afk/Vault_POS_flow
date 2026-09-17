@@ -145,7 +145,12 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C32 — offline status surface: `DeviceStatusProvider` reports storage, enrolment, connectivity, last-received store data and cached-authority expiry; the `DeviceStatusView` contract lives in `Pos.Shared` (which references nothing), so it cannot carry a path, key, address or feed position; `DeviceStatusBanner` in `Pos.SharedUI` renders one concern at a time, offline never counting as a warning. 27 new tests.
   - [x] C31 — device numbering and permission expiry: `document_counter` on the device (migration `DeviceDocumentCounter`), an atomic upsert joining the caller's transaction, refusing central types and any short code but its own; `DeviceSnapshotPermissionEvaluator` re-checks expiry at every evaluation, scopes grants, and refuses anything the catalogue does not mark offline-capable; the feed refuses a widening snapshot (`sync.feed_page_invalid`) and a policy-version rollback (`sync.snapshot_policy_rollback`). 24 new tests.
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
-- [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
+- [~] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
+  - [x] C34 — device outbox: `local_outbox_event` plus a single-row `device_sequence`, both allocated in the caller's transaction so a rolled-back event releases its number; `CanonicalJson` sorts object properties at every depth so declaration order cannot change a payload hash; `Environment.TickCount64` recorded as clock-tamper evidence; the device repositories enqueue business events, not row changes; the status banner now reports unsent work (POS.md §6). 18 new tests.
+  - [ ] Push endpoint with per-event idempotent processing
+  - [ ] Pull endpoint, change feed, cursors, rebaseline
+  - [ ] Retry queue with exponential backoff
+  - [ ] Conflict rules, sync failure dashboard and manual retry
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
@@ -938,6 +943,40 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Docker Desktop** crashed at start on the known stale socket
   (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
   to `*.stale-20260917` fixed it again.
+
+### C34 — the device outbox (`feat(sync-c34)`)
+
+- **`local_outbox_event` and `device_sequence`** (migration `DeviceOutbox`).
+  Both are written in the caller's transaction: an event and the rows it
+  describes commit together or not at all, a refused command queues nothing, and
+  a rolled-back event gives its sequence number back rather than leaving a gap.
+- **The repositories enqueue, not the handlers.** An adapter knows which
+  business event just happened, and keeping the outbox out of the shared
+  handlers is what lets the server keep running the same code without one. What
+  is queued is "a shift opened", never "a row changed".
+- **`CanonicalJson`** re-emits a payload with object properties sorted by ordinal
+  name at every depth, no whitespace, array order untouched. The server compares
+  a repeated event identifier against the hash of what it first stored and treats
+  a different hash as tampering (ADR-0007); `JsonSerializer` writes properties in
+  declaration order, so without this, moving a property on a payload type would
+  silently change every hash and turn honest retries into tamper reports.
+- **`DeviceUptimeTicks`** is `Environment.TickCount64`, monotonic across a
+  wall-clock change, so a device whose clock was moved backwards still produces
+  events in an order the server can see through.
+- **The status banner reports unsent work**, closing the POS.md §6 gap C32
+  recorded. A count, not a queue. `Failed` and `RequiresReview` still count —
+  retries are never abandoned — while `Synchronized` and `Conflict` have been
+  decided.
+- **18 new tests**, including: the sequence is gapless and strictly increasing;
+  a rolled-back event releases its number; the two property orders of the same
+  content produce identical JSON; opening a shift queues exactly one
+  `ShiftOpened` whose payload carries the SHF number and not a table name;
+  suspend and resume queue their own events in order; a permission-denied open
+  queues nothing.
+- **Verification:** 1,101 passing without PostgreSQL (Domain 378, Application
+  247, Infrastructure 225, Security 52, Architecture 25, API 174); no pending
+  model changes in either context. No PostgreSQL change — the server side of
+  sync is the next chunk.
 
 ### C33 — the first executable device use case (`feat(offline-c33)`)
 

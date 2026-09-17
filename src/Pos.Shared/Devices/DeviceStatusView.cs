@@ -130,6 +130,11 @@ public enum DeviceStatusSeverity
 /// <param name="LastSynchronisedUtc">When store data last arrived.</param>
 /// <param name="Authority">How much cached authority is left.</param>
 /// <param name="AuthorityExpiresUtc">When cached authority runs out.</param>
+/// <param name="UnsentEvents">
+/// How much work this register has done that head office has not seen yet. It
+/// is a count, not a queue: a cashier needs to know whether anything would be
+/// lost if the device were wiped, not what the transport is doing.
+/// </param>
 public sealed record DeviceStatusView(
     DeviceStorageState Storage,
     DeviceEnrolmentState Enrolment,
@@ -139,7 +144,8 @@ public sealed record DeviceStatusView(
     DeviceSyncState Sync,
     DateTimeOffset? LastSynchronisedUtc,
     DeviceAuthorityState Authority,
-    DateTimeOffset? AuthorityExpiresUtc)
+    DateTimeOffset? AuthorityExpiresUtc,
+    int UnsentEvents = 0)
 {
     /// <summary>
     /// Gets a value indicating whether the register can take a sale. It is

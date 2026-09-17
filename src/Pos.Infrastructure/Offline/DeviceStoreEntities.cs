@@ -62,6 +62,31 @@ public sealed class DeviceDocumentCounter
     public long NextValue { get; private set; }
 }
 
+/// <summary>
+/// The device's outbox sequence. One row, incremented in the same transaction as
+/// the event it numbers, which is what makes the per-device order gapless.
+/// </summary>
+public sealed class DeviceSequence
+{
+    private DeviceSequence() { Name = string.Empty; }
+
+    /// <summary>Creates a named counter.</summary>
+    /// <param name="name">The counter name.</param>
+    /// <param name="nextValue">The next value to hand out.</param>
+    internal DeviceSequence(string name, long nextValue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Name = name;
+        NextValue = nextValue;
+    }
+
+    /// <summary>Gets the counter name.</summary>
+    public string Name { get; private init; }
+
+    /// <summary>Gets the next value this counter will hand out.</summary>
+    public long NextValue { get; private set; }
+}
+
 /// <summary>A product mirror downloaded from the server change feed.</summary>
 public sealed class DeviceCachedProduct : IChangeFeedOwned
 {

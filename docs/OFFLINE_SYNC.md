@@ -129,6 +129,27 @@ retry — that is what makes retries safe.
 `DeviceSequence` comes from a single-row counter table incremented in the same
 transaction, giving a gapless per-device order.
 
+**Built in C34.** The device repositories enqueue, not the handlers: an adapter
+knows which business event just happened, and keeping the outbox out of the
+shared handlers is what lets the server run the same code without one. What is
+queued is "a shift opened", never "a row changed".
+
+`PayloadJson` is written by `CanonicalJson`, which re-emits the payload with
+object properties sorted by ordinal name at every depth and no whitespace. That
+matters because the server compares a repeated event identifier against the hash
+of what it first stored and treats a different hash as tampering (ADR-0007):
+`JsonSerializer` writes properties in declaration order, so moving a property on
+a payload type would otherwise change every hash and turn honest retries into
+tamper reports. Array order is left alone — it is data, not layout.
+
+`DeviceUptimeTicks` is `Environment.TickCount64`, which keeps increasing across a
+wall-clock change, so a device whose clock was moved backwards still produces
+events in an order the server can see through.
+
+An event and the rows it describes commit together or not at all: a command the
+device refused queues nothing, and a rolled-back event gives its sequence number
+back rather than leaving a gap.
+
 ---
 
 ## 3. Upload protocol

@@ -108,6 +108,13 @@ public sealed class DeviceStatusProvider(
         (DeviceAuthorityState authority, DateTimeOffset? expiresAt) =
             await ReadAuthorityAsync(context, signedInUser, cancellationToken).ConfigureAwait(false);
 
+        int unsent = await context.Outbox
+            .AsNoTracking()
+            .CountAsync(
+                e => e.Status != OutboxStatus.Synchronized && e.Status != OutboxStatus.Conflict,
+                cancellationToken)
+            .ConfigureAwait(false);
+
         return new DeviceStatusView(
             DeviceStorageState.Ready,
             profile is null ? DeviceEnrolmentState.NotEnrolled : DeviceEnrolmentState.Enrolled,
@@ -117,7 +124,8 @@ public sealed class DeviceStatusProvider(
             lastSynchronised is null ? DeviceSyncState.NeverSynchronised : DeviceSyncState.Synchronised,
             lastSynchronised,
             authority,
-            expiresAt);
+            expiresAt,
+            unsent);
     }
 
     private async Task<(DeviceAuthorityState State, DateTimeOffset? ExpiresAt)> ReadAuthorityAsync(

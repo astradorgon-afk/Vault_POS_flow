@@ -31,6 +31,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<DeviceSyncCursor> SyncCursors => Set<DeviceSyncCursor>();
     public DbSet<DeviceLocalAudit> LocalAudit => Set<DeviceLocalAudit>();
     public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
+    public DbSet<OutboxEvent> Outbox => Set<OutboxEvent>();
+    public DbSet<DeviceSequence> Sequences => Set<DeviceSequence>();
 
     /// <summary>Gets the applier's write window for this context instance.</summary>
     internal ChangeFeedWriteScope ChangeFeedWrites { get; } = new();
@@ -232,6 +234,42 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(s => s.IsForceClosed).HasColumnName("is_force_closed").IsRequired();
             entity.HasIndex(s => s.Number).IsUnique().HasDatabaseName("ux_local_cashier_shift_number");
             entity.HasIndex(s => s.Status).HasDatabaseName("ix_local_cashier_shift_status");
+        });
+
+        builder.Entity<DeviceSequence>(entity =>
+        {
+            entity.ToTable("device_sequence");
+            entity.HasKey(x => x.Name);
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(32);
+            entity.Property(x => x.NextValue).HasColumnName("next_value").IsRequired();
+        });
+
+        builder.Entity<OutboxEvent>(entity =>
+        {
+            entity.ToTable("local_outbox_event");
+            entity.HasKey(e => e.EventId);
+            entity.Property(e => e.EventId).HasColumnName("event_id").ValueGeneratedNever();
+            entity.Property(e => e.DeviceSequence).HasColumnName("device_sequence").IsRequired();
+            entity.Property(e => e.Type).HasColumnName("type").HasConversion<short>().IsRequired();
+            entity.Property(e => e.PayloadJson).HasColumnName("payload_json").HasMaxLength(64000).IsRequired();
+            entity.Property(e => e.PayloadHash).HasColumnName("payload_hash").IsRequired();
+            entity.Property(e => e.DeviceId).HasColumnName("device_id").IsRequired();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.LocationId).HasColumnName("location_id").IsRequired();
+            entity.Property(e => e.OccurredAtUtc).HasColumnName("occurred_at_utc").IsRequired();
+            entity.Property(e => e.DeviceUptimeTicks).HasColumnName("device_uptime_ticks").IsRequired();
+            entity.Property(e => e.CorrelationId).HasColumnName("correlation_id").IsRequired();
+            entity.Property(e => e.Status).HasColumnName("status").HasConversion<short>().IsRequired();
+            entity.Property(e => e.AttemptCount).HasColumnName("attempt_count").IsRequired();
+            entity.Property(e => e.LastAttemptAtUtc).HasColumnName("last_attempt_at_utc");
+            entity.Property(e => e.NextRetryAtUtc).HasColumnName("next_retry_at_utc");
+            entity.Property(e => e.LastError).HasColumnName("last_error").HasMaxLength(2000);
+            entity.Property(e => e.ServerResponseJson).HasColumnName("server_response_json").HasMaxLength(8000);
+
+            // Uploads go in device order and a batch stops at the first deferral,
+            // so the queue is always read by sequence within status.
+            entity.HasIndex(e => e.DeviceSequence).IsUnique().HasDatabaseName("ux_local_outbox_sequence");
+            entity.HasIndex(e => new { e.Status, e.DeviceSequence }).HasDatabaseName("ix_local_outbox_status_sequence");
         });
 
         ApplySqliteTypeMappings(builder);

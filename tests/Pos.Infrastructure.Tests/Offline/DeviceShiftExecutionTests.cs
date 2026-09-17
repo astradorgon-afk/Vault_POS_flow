@@ -142,6 +142,77 @@ public sealed class DeviceShiftExecutionTests
     }
 
     [Fact]
+    public async Task OpeningAShift_QueuesTheBusinessEventInTheSameTransaction()
+    {
+        await using DeviceHost host = await DeviceHost.StartAsync();
+        CashierShiftId shiftId = await host.OpenShiftAsync();
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        OutboxEvent queued = await context.Outbox.SingleAsync(CancellationToken.None);
+
+        queued.Type.Should().Be(SyncEventType.ShiftOpened);
+        queued.DeviceSequence.Should().Be(1);
+        queued.Status.Should().Be(OutboxStatus.Pending);
+        queued.DeviceId.Should().Be(host.DeviceId);
+        queued.LocationId.Should().Be(host.LocationId);
+
+        // The business event, not the row: what the server replays.
+        queued.PayloadJson.Should().Contain(shiftId.Value.ToString());
+        queued.PayloadJson.Should().Contain("SHF-2026-D03-0001");
+        queued.PayloadJson.Should().NotContain("local_cashier_shift");
+    }
+
+    [Fact]
+    public async Task SuspendAndResume_EachQueueTheirOwnEvent()
+    {
+        await using DeviceHost host = await DeviceHost.StartAsync();
+        CashierShiftId shiftId = await host.OpenShiftAsync();
+
+        await host.SendAsync(new SuspendShiftCommand(shiftId, host.LocationId));
+        await host.SendAsync(new ResumeShiftCommand(shiftId, host.LocationId));
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        List<SyncEventType> queued = await context.Outbox
+            .AsNoTracking()
+            .OrderBy(e => e.DeviceSequence)
+            .Select(e => e.Type)
+            .ToListAsync(CancellationToken.None);
+
+        queued.Should().Equal(
+            SyncEventType.ShiftOpened, SyncEventType.ShiftSuspended, SyncEventType.ShiftResumed);
+    }
+
+    [Fact]
+    public async Task ARefusedCommand_QueuesNothing()
+    {
+        await using DeviceHost host = await DeviceHost.StartAsync(grantShiftPermission: false);
+
+        await host.SendAsync(new OpenShiftCommand(
+            await host.AllocateShiftNumberAsync(), host.LocationId, new DateOnly(2026, 9, 17), 2000m));
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        (await context.Outbox.AnyAsync(CancellationToken.None))
+            .Should().BeFalse("an event the device never committed must never reach head office");
+    }
+
+    [Fact]
+    public async Task TheStatusBanner_ReportsWorkHeadOfficeHasNotSeen()
+    {
+        await using DeviceHost host = await DeviceHost.StartAsync();
+
+        DeviceStatusProvider status = new(
+            host.Database.Initializer, new AssumeOfflineConnectivityProbe(), host.Database.Clock);
+
+        (await status.GetAsync(host.CashierId, CancellationToken.None))
+            .UnsentEvents.Should().Be(0);
+
+        await host.OpenShiftAsync();
+
+        (await status.GetAsync(host.CashierId, CancellationToken.None))
+            .UnsentEvents.Should().Be(1, "the cashier can see nothing would be lost silently");
+    }
+
+    [Fact]
     public async Task AFailedCommand_LeavesNothingBehind()
     {
         await using DeviceHost host = await DeviceHost.StartAsync();
@@ -153,6 +224,8 @@ public sealed class DeviceShiftExecutionTests
         (await context.LocalShifts.AnyAsync(CancellationToken.None)).Should().BeFalse();
         (await context.LocalAudit.AnyAsync(CancellationToken.None))
             .Should().BeFalse("the unit of work rolled the audit entry back with the shift");
+        (await context.Outbox.AnyAsync(CancellationToken.None))
+            .Should().BeFalse("and the outbox event with them");
     }
 
     /// <summary>
@@ -212,6 +285,7 @@ public sealed class DeviceShiftExecutionTests
             services.AddScoped(sp => sp.GetRequiredService<DeviceDatabaseInitializer>().CreateDbContext());
             services.AddScoped<IUnitOfWork, DeviceUnitOfWork>();
             services.AddScoped<IAuditWriter, DeviceAuditWriter>();
+            services.AddScoped<IDeviceOutbox, DeviceOutbox>();
             services.AddScoped<IShiftRepository, DeviceShiftRepository>();
             services.AddScoped<IDocumentNumberGenerator, DeviceDocumentNumberGenerator>();
 

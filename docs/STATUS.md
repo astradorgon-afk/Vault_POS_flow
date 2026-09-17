@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) complete (C28–C33). A device executes its first real use cases — shift open, suspend and resume — against its own encrypted store; the remaining catalogue entries wait on local sale and movement tables, which belong with Phase 13
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) started with C34, the device outbox. A device now queues the business events it produces, gaplessly and in the same transaction as the records they describe
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,16 +13,16 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
-| Tests | **1,083 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 207, Security 52, Architecture 25, API 174** (2026-09-17, through C33 the first executable device use case). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
-| Migrations | 28 PostgreSQL migrations plus 4 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
+| Tests | **1,101 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 225, Security 52, Architecture 25, API 174** (2026-09-17, through C34 the device outbox). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
+| Migrations | 28 PostgreSQL migrations plus 5 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
-| Phases remaining | 12–18 — see §5 |
+| Phases remaining | 13–18 — see §5 |
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    207 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface and the device shift lifecycle end to end
+Pos.Infrastructure.Tests    207 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end and the upload queue
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -925,6 +925,42 @@ still answers `application.handler_unavailable` rather than reaching the
 repository member that would throw; and a failed open leaves neither a shift nor
 an audit row behind.
 
+### Phase 13 — synchronization
+
+C34 builds the upload queue. `local_outbox_event` holds the business events a
+device has produced but head office has not seen, and a single-row
+`device_sequence` numbers them. Both are written in the caller's transaction, so
+an event and the rows it describes commit together or not at all: a command the
+device refused queues nothing, and a rolled-back event gives its sequence number
+back rather than leaving a gap.
+
+The device repositories enqueue, not the handlers. An adapter knows which
+business event just happened, and keeping the outbox out of the shared handlers
+is exactly what lets the server keep running the same code without one. What is
+queued is "a shift opened", never "a row changed" — a device is an event
+producer, not a database replica, and the payload is shaped so the server can
+replay it through the same use case it would have run online.
+
+`CanonicalJson` is the part worth being careful about. The server compares a
+repeated event identifier against the hash of what it first stored and treats a
+different hash as tampering rather than as an update (ADR-0007). That comparison
+only means anything if the bytes are canonical, and `JsonSerializer` writes
+properties in declaration order — so moving a property on a payload type would
+silently change every hash and turn honest retries into tamper reports. The
+payload is therefore written, re-read as a tree, and re-emitted with object
+properties sorted by ordinal name at every depth. Array order is left alone: it
+is data, not layout.
+
+`DeviceUptimeTicks` is `Environment.TickCount64`, which keeps increasing across a
+wall-clock change. A device whose clock was moved backwards still produces events
+in an order the server can see through.
+
+The status banner now shows what is waiting, which closes the gap C32 recorded
+against POS.md §6. It is a count, not a queue: a cashier needs to know whether
+anything would be lost if the register were wiped, not what the transport is
+doing. `Failed` and `RequiresReview` still count as unsent, because retries are
+never abandoned; only `Synchronized` and `Conflict` have been decided.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -1179,36 +1215,31 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-**Phase 12 is complete.** C28–C33: the Windows/Android client and encrypted
-device database, protected change-feed application, raw-key device keying, the
-split client CI jobs, the declared command boundary, device numbering and
-snapshot expiry, the offline status surface, and the first use cases a device
-can actually execute.
+Phase 12 is complete (C28–C33). **Phase 13 is under way:** C34 built the outbox,
+so a device now queues the business events it produces — gaplessly, canonically
+hashed, and in the same transaction as the records they describe. Nothing moves
+those events yet.
 
-A device today opens its encrypted store, enrols, receives a scoped change feed,
-mints its own document numbers, evaluates cached permissions with expiry,
-reports its own state honestly, and runs the shift lifecycle — open, suspend,
-resume — against its own tables, audited locally and rolled back as one unit
-when it fails. What it cannot yet do is sell, because selling needs local sale,
-payment and movement tables and a device ledger. That work belongs with Phase
-13, not behind it: an offline sale is only useful once it can be uploaded.
-
-**Phase 13 — synchronization** is next, and the order matters:
-
-1. **The outbox and device sequence.** `outbox_event` with canonical payload
-   hashing and a gapless per-device counter, written in the same local
-   transaction as the business record it describes (OFFLINE_SYNC.md §2.1). The
-   shift lifecycle is the natural first producer — it already writes local rows
-   inside a unit of work, so the outbox slots in beside them.
-2. **The local sale, payment and movement tables, and the device ledger.** The
-   rest of the C30 catalogue turns on these. The sale handler and the ledger are
-   the same types the server runs (ADR-0008), so this is adapters, not a second
+1. **The local sale, payment and movement tables, and the device ledger.** The
+   rest of the C30 catalogue turns on these, and the outbox is ready for them:
+   a new use case needs a `SyncEventType`, a payload record and one `EnqueueAsync`
+   call in its device repository. The sale handler and the ledger are the same
+   types the server runs (ADR-0008), so this is adapters, not a second
    implementation.
-3. **Push and pull endpoints** with per-event idempotent processing, the retry
-   policy from OFFLINE_SYNC.md §3.2, and the conflict rules.
-4. **The sync-failure dashboard and manual retry**, which is also what unblocks
-   Phase 14's last item — the sync-failure alert generator — and the
-   pending-upload count POS.md §6 asks the status banner to show.
+2. **The push endpoint** — `POST /api/sync/push`, per-event idempotent
+   processing keyed on the event identifier, with a repeated identifier carrying
+   a different payload hash treated as tampering rather than as an update
+   (ADR-0007). This is where the outbox's hashing earns its keep.
+3. **The retry queue**, per OFFLINE_SYNC.md §3.2: exponential backoff with
+   jitter, capped at thirty minutes, eight consecutive failures moving an event
+   to `Failed` — kept forever and escalated, never dropped. The outbox already
+   carries `AttemptCount`, `NextRetryAtUtc`, `LastError` and
+   `ServerResponseJson` for it.
+4. **The pull endpoint and rebaseline.** `ChangeFeedApplier` (C29) is already
+   the consumer; what is missing is the server side of the feed and the cursor
+   negotiation.
+5. **Conflict rules and the sync-failure dashboard**, which also unblocks Phase
+   14's last item — the sync-failure alert generator.
 
 Two smaller things outstanding:
 
@@ -1217,7 +1248,7 @@ Two smaller things outstanding:
   `CommonUtilities.Helpers.UserName must have a valid value`, which a GitHub
   runner should not hit because it sets `USER`. If it does, set it in the job.
 - **`Pos.Client` has not been compiled since C29c.** No MAUI workloads in the
-  cloud environment, so four chunks' worth of DI wiring and one Razor page rest
+  cloud environment, so five chunks' worth of DI wiring and one Razor page rest
   on CI's client jobs.
 
 Two questions the capability table did not answer were settled on 2026-09-17

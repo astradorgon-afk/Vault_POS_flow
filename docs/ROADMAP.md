@@ -246,7 +246,13 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 13 — Synchronization
 
-- [ ] Outbox, device sequence, canonical payload hashing
+- [~] Outbox, device sequence, canonical payload hashing
+      *(C34: `local_outbox_event` and a single-row `device_sequence`, both
+      written in the caller's transaction so a rolled-back event releases its
+      number; `CanonicalJson` sorts properties at every depth so declaration
+      order cannot change a hash. The shift lifecycle is its first producer.
+      Payload types for the remaining events land with the use cases that
+      produce them)*
 - [ ] Push endpoint with per-event idempotent processing
 - [ ] Pull endpoint, change feed, cursors, rebaseline
 - [ ] Retry queue with exponential backoff

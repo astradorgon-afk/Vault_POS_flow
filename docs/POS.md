@@ -147,7 +147,9 @@ then the ordinary offline case — and it says nothing about how the device stor
 or moves anything: its contract lives in `Pos.Shared`, which references nothing,
 so there is no field on it that could carry a path, a key, a server address or a
 feed position. Being offline is not a warning; expired cached authority is.
-Pending event count waits for the Phase 13 outbox.
+Since C34 it also shows how much work head office has not seen — a count, not a
+queue: a cashier needs to know whether anything would be lost if the device were
+wiped, not what the transport is doing.
 
 ---
 

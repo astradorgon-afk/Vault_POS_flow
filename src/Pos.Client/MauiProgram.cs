@@ -57,6 +57,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<INegativeStockAttemptRecorder, DeviceNegativeStockAttemptRecorder>();
         builder.Services.AddScoped<IUnitOfWork, DeviceUnitOfWork>();
         builder.Services.AddScoped<IAuditWriter, DeviceAuditWriter>();
+        builder.Services.AddScoped<IDeviceOutbox, DeviceOutbox>();
         builder.Services.AddScoped<IShiftRepository, DeviceShiftRepository>();
 
 #if DEBUG
