@@ -240,6 +240,7 @@ try
 
     app.MapAuthEndpoints();
     app.MapDeviceEndpoints();
+    app.MapSyncEndpoints();
     app.MapLocationEndpoints();
     app.MapCatalogEndpoints();
     app.MapProductCurationEndpoints();

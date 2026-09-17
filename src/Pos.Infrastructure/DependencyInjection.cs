@@ -69,6 +69,10 @@ public static class DependencyInjection
         // PostgreSQL; the device container points the same type at its encrypted
         // SQLite file.
         services.TryAddScoped<ILedgerStore>(sp => sp.GetRequiredService<PosDbContext>());
+
+        // The upload engine and the appliers that know what each event means.
+        services.TryAddScoped<Sync.SyncPushProcessor>();
+        services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftOpenedApplier>();
         services.TryAddScoped<IInventoryLedger, InventoryLedger>();
         services.TryAddScoped<IBalanceReconciler, BalanceReconciler>();
         services.TryAddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();

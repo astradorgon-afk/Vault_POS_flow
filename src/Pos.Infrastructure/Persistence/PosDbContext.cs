@@ -252,6 +252,12 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the refunds issued against customer returns.</summary>
     public DbSet<Refund> Refunds => Set<Refund>();
 
+    public DbSet<Pos.Infrastructure.Sync.ProcessedEvent> ProcessedEvents
+        => Set<Pos.Infrastructure.Sync.ProcessedEvent>();
+
+    public DbSet<Pos.Infrastructure.Sync.SyncCheckpoint> SyncCheckpoints
+        => Set<Pos.Infrastructure.Sync.SyncCheckpoint>();
+
     /// <summary>Gets the append-only sale receipt print log.</summary>
     public DbSet<SaleReceiptPrint> ReceiptPrints => Set<SaleReceiptPrint>();
 
