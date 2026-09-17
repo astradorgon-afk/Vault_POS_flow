@@ -78,6 +78,60 @@ public sealed class ChangeFeedApplierTests
     }
 
     [Fact]
+    public async Task ApplyAsync_ReopensARefusedEvent_ButLeavesTheRestOfTheQueueAlone()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+        LocationId store = LocationId.New();
+        DeviceId deviceId = await database.EnrolAsync("D03", store);
+
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+
+        DeviceSession session = new();
+        session.SignIn(UserId.New(), deviceId, store);
+
+        DeviceOutbox outbox = new(context, new DeviceCurrentUser(session), database.Profiles, database.Clock);
+
+        OutboxEvent refused = await outbox.EnqueueAsync(
+            SyncEventType.SaleVoided, new { Reason = "wrong item" }, store, CancellationToken.None);
+        OutboxEvent waiting = await outbox.EnqueueAsync(
+            SyncEventType.SaleCompleted, new { Total = 45m }, store, CancellationToken.None);
+        OutboxEvent accepted = await outbox.EnqueueAsync(
+            SyncEventType.ShiftOpened, new { Float = 2000m }, store, CancellationToken.None);
+
+        refused.MarkAnswered(OutboxStatus.Rejected, "sync.sale_unknown", "No such sale.");
+        waiting.MarkAttemptFailed(
+            TemporaryDeviceDatabase.Now, TemporaryDeviceDatabase.Now.AddMinutes(5), "sync.unreachable");
+        accepted.MarkAnswered(OutboxStatus.Synchronized, null, "SAL-2026-D03-000001");
+        await context.SaveChangesAsync(CancellationToken.None);
+
+        Result<ChangeFeedApplyOutcome> applied = await database.Applier.ApplyAsync(new ChangeFeedPage(0, 3,
+        [
+            new SyncRetryRequested(1, deviceId, refused.EventId),
+            new SyncRetryRequested(2, deviceId, waiting.EventId),
+            new SyncRetryRequested(3, deviceId, accepted.EventId),
+        ]));
+
+        applied.IsSuccess.Should().BeTrue(applied.IsFailure ? applied.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext after = await database.OpenContextAsync();
+        Dictionary<EventId, OutboxEvent> queue = await after.Outbox
+            .AsNoTracking()
+            .ToDictionaryAsync(e => e.EventId, CancellationToken.None);
+
+        queue[refused.EventId].Status.Should().Be(
+            OutboxStatus.Pending, "somebody changed what made the server refuse it");
+        queue[refused.EventId].NextRetryAtUtc.Should().BeNull("it goes on the next batch, not after a backoff");
+
+        queue[waiting.EventId].Status.Should().Be(OutboxStatus.Pending);
+        queue[waiting.EventId].NextRetryAtUtc.Should().NotBeNull(
+            "it had not stopped; resetting it would throw away a backoff it is in the middle of");
+
+        queue[accepted.EventId].Status.Should().Be(
+            OutboxStatus.Synchronized,
+            "asking a register to send a sale head office already holds is how a day's takings get counted twice");
+    }
+
+    [Fact]
     public async Task ApplyAsync_RefusesABatchThatExpiresBeforeItWasReceived()
     {
         await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();

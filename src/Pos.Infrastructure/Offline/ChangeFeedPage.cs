@@ -107,6 +107,25 @@ public sealed record PermissionSnapshotIssued(
 /// <summary>One permission in a snapshot, global when <paramref name="LocationId"/> is null.</summary>
 public sealed record PermissionSnapshotGrant(string Permission, LocationId? LocationId);
 
+/// <summary>
+/// Head office asked a register to send one refused event again.
+/// </summary>
+/// <remarks>
+/// A refused event is never retried on its own, because the answer would not
+/// change. It changes when a person changes it — re-enabling a product, giving
+/// a cashier back their authority, fixing a price — and this is how they say so.
+/// It travels on the feed rather than as a separate call because a register that
+/// is offline cannot be told anything at all, and the feed is already the thing
+/// it comes back to.
+/// </remarks>
+/// <param name="Sequence">The server change sequence.</param>
+/// <param name="DeviceId">The register holding the event.</param>
+/// <param name="EventId">The event to send again.</param>
+public sealed record SyncRetryRequested(
+    long Sequence,
+    DeviceId DeviceId,
+    EventId EventId) : ChangeFeedChange(Sequence);
+
 /// <summary>A user's offline permission snapshot was invalidated.</summary>
 public sealed record PermissionSnapshotRevoked(long Sequence, UserId UserId) : ChangeFeedChange(Sequence);
 

@@ -1,11 +1,7 @@
-using System.Data;
-using System.Data.Common;
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Storage;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Catalog;
 using Pos.Domain.Inventory;
@@ -42,9 +38,6 @@ namespace Pos.Infrastructure.Sync;
 /// <param name="clock">The authoritative clock.</param>
 public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesInterceptor
 {
-    /// <summary>The counter row the feed's order comes from.</summary>
-    public const string SequenceName = "change_feed";
-
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -107,7 +100,9 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
             return;
         }
 
-        long first = await AllocateAsync(context, pending.Count, cancellationToken).ConfigureAwait(false);
+        long first = await ChangeFeedSequenceAllocator
+            .NextAsync(context, pending.Count, cancellationToken)
+            .ConfigureAwait(false);
         DateTimeOffset now = clock.UtcNow;
 
         for (int index = 0; index < pending.Count; index++)
@@ -229,64 +224,6 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
             _ => null,
         };
     }
-
-    /// <summary>
-    /// Takes the next <paramref name="count"/> sequence values in the caller's
-    /// transaction, so a rolled-back change releases its numbers.
-    /// </summary>
-    private static async Task<long> AllocateAsync(
-        PosDbContext context,
-        int count,
-        CancellationToken cancellationToken)
-    {
-        DbConnection connection = context.Database.GetDbConnection();
-
-        if (connection.State != ConnectionState.Open)
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await using DbCommand command = connection.CreateCommand();
-        command.Transaction = context.Database.CurrentTransaction?.GetDbTransaction();
-
-        // Assigned from a constant on each branch rather than through a variable,
-        // so it is visibly not built from anything a caller supplied. The count
-        // and the name travel as parameters.
-        if (context.Database.IsSqlite())
-        {
-            command.CommandText = SqliteUpsert;
-        }
-        else
-        {
-            command.CommandText = PostgresUpsert;
-        }
-
-        DbParameter name = command.CreateParameter();
-        name.ParameterName = "name";
-        name.Value = SequenceName;
-        command.Parameters.Add(name);
-
-        DbParameter take = command.CreateParameter();
-        take.ParameterName = "count";
-        take.Value = count;
-        command.Parameters.Add(take);
-
-        object? allocated = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-
-        // The row starts one past what it hands out, as the document counters
-        // do, so the first sequence ever allocated is one.
-        return Convert.ToInt64(allocated, CultureInfo.InvariantCulture) - count;
-    }
-
-    private const string PostgresUpsert =
-        "INSERT INTO sync.feed_sequence (name, next_value) VALUES (@name, 1 + @count) " +
-        "ON CONFLICT (name) DO UPDATE SET next_value = f.next_value + @count " +
-        "WHERE f.name = @name RETURNING next_value";
-
-    private const string SqliteUpsert =
-        "INSERT INTO feed_sequence (name, next_value) VALUES (@name, 1 + @count) " +
-        "ON CONFLICT (name) DO UPDATE SET next_value = next_value + @count " +
-        "RETURNING next_value";
 
     /// <summary>A change waiting for its number.</summary>
     private sealed record PendingChange(

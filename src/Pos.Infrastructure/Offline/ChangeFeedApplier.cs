@@ -248,12 +248,44 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 await DeleteSnapshotAsync(context, r.UserId, cancellationToken).ConfigureAwait(false);
                 break;
 
+            case SyncRetryRequested retry:
+                await ReopenAsync(context, retry, cancellationToken).ConfigureAwait(false);
+                break;
+
             default:
                 throw new NotSupportedException("Validated pages contain only supported change kinds.");
         }
 
         return Result.Success();
     }
+
+    /// <summary>
+    /// Puts one refused event back in the queue, because somebody changed the
+    /// thing that made the server refuse it.
+    /// </summary>
+    /// <remarks>
+    /// Only an event that stopped moving is reopened. One still waiting its turn
+    /// is left alone: resetting its attempt count would throw away a backoff the
+    /// device is in the middle of, and one already accepted is not reopened at
+    /// all — asking a register to send a sale head office already holds is how a
+    /// day's takings get counted twice.
+    /// </remarks>
+    private static async Task<int> ReopenAsync(
+        PosDeviceDbContext context,
+        SyncRetryRequested retry,
+        CancellationToken cancellationToken)
+        => await context.Outbox
+            .Where(e => e.EventId == retry.EventId
+                        && e.DeviceId == retry.DeviceId
+                        && (e.Status == OutboxStatus.Rejected
+                            || e.Status == OutboxStatus.Failed
+                            || e.Status == OutboxStatus.Conflict))
+            .ExecuteUpdateAsync(
+                set => set
+                    .SetProperty(e => e.Status, OutboxStatus.Pending)
+                    .SetProperty(e => e.NextRetryAtUtc, (DateTimeOffset?)null),
+                cancellationToken)
+            .ConfigureAwait(false);
 
     private static Task<int> DeleteSnapshotAsync(
         PosDeviceDbContext context,

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Pos.Api.Authorization;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
+using Pos.Domain.Common;
 using Pos.Infrastructure.Sync;
 using Pos.Shared.Sync;
 
@@ -22,6 +23,14 @@ public static class SyncEndpoints
         group.MapPost("/push", PushAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Sales.Create))
             .WithSummary("Uploads a batch of business events from a device.");
+
+        group.MapGet("/failures", FailuresAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageSync))
+            .WithSummary("Lists the uploaded events head office turned away or set aside.");
+
+        group.MapPost("/failures/{eventId:guid}/retry", RetryAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageSync))
+            .WithSummary("Asks the register holding a refused event to send it again.");
 
         group.MapGet("/pull", PullAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Catalog.View))
@@ -105,4 +114,34 @@ public static class SyncEndpoints
             _ => Results.Ok(result.Page),
         };
     }
+
+    /// <summary>Lists what still needs a person.</summary>
+    private static async Task<IResult> FailuresAsync(
+        SyncFailureService failures,
+        CancellationToken cancellationToken,
+        Guid? locationId = null,
+        int limit = 100)
+        => Results.Ok(await failures
+            .ListAsync(locationId is { } id ? new LocationId(id) : null, limit, cancellationToken)
+            .ConfigureAwait(false));
+
+    /// <summary>
+    /// Asks the register holding a refused event to send it again.
+    /// </summary>
+    /// <remarks>
+    /// It does not re-apply anything here. The event is on the register, and the
+    /// answer only changes because a person changed what made the server refuse
+    /// it — so this records the ask on that register's feed and the register acts
+    /// on it when it next comes back.
+    /// </remarks>
+    private static async Task<IResult> RetryAsync(
+        Guid eventId,
+        SyncFailureService failures,
+        CancellationToken cancellationToken)
+        => await failures.RequestRetryAsync(new Pos.Domain.Common.EventId(eventId), cancellationToken).ConfigureAwait(false)
+            ? Results.Accepted()
+            : Results.Problem(
+                title: "No refused event with that identifier is recorded.",
+                statusCode: StatusCodes.Status404NotFound,
+                type: "https://vaultflow/errors/sync.failure_unknown");
 }

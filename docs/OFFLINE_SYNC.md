@@ -551,6 +551,34 @@ from `/api/sync/baseline`. Its outbox is preserved and uploaded first.
 
 ---
 
+### 3.3 The failure queue, and the one thing to do about it
+
+`GET /api/v1/sync/failures` lists the uploaded events head office turned away or
+set aside — `Rejected`, `RequiresReview`, `Conflict` — with the register's short
+code, the one printed on its receipts, so whoever reads it can walk to the till.
+It reads `sync.processed_event` rather than a second table devices report into:
+everything on it is something the server itself decided, so the record already
+exists and a reporting round-trip could only add a way for the two to disagree.
+What the server genuinely cannot see are the events that never reached it; those
+are on the register, and its own banner counts them.
+
+`POST /api/v1/sync/failures/{eventId}/retry` does **not** re-apply anything. A
+refused event is refused because of something true at the time — a withdrawn
+product, a cashier without authority, a price that did not settle — and asking
+again unchanged earns the same answer. It becomes worth asking when a person
+changes that thing, and this records that they did, as a `SyncRetryRequested`
+directive on that register's own feed. It travels on the feed because a register
+that is offline cannot be told anything at all, and the feed is already what it
+comes back to.
+
+The register reopens only an event that had actually stopped — `Rejected`,
+`Failed` or `Conflict`. One still waiting its turn is left alone, because
+resetting it would throw away a backoff it is in the middle of; one already
+accepted is never reopened, because asking a register to send a sale head office
+already holds is how a day's takings get counted twice.
+
+---
+
 ## 6. Clocks
 
 - The device clock is **never** trusted for ordering, business dates, pricing

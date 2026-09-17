@@ -93,6 +93,8 @@ internal static class ChangeFeedPageValidator
             ?? (u.SecurityVersion < 0 ? "A security version cannot be negative." : null),
         PermissionSnapshotIssued s => Snapshot(s),
         PermissionSnapshotRevoked r => Id(r.UserId, "user"),
+        SyncRetryRequested retry => Id(retry.DeviceId, "device")
+            ?? (retry.EventId.Value == Guid.Empty ? "A retry request names no event." : null),
         _ => "The change kind is not supported by this client.",
     };
 

@@ -477,6 +477,77 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task ARefusedEventIsListedForAPerson_AndCanBeAskedForAgain()
+    {
+        Seed seed = await SeedAsync("spg", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        // A void with no sale behind it: refused, and exactly the sort of thing
+        // somebody has to look at.
+        object refused = Event(2, "SaleVoided", VoidPayload(seed, shiftId, saleNumber));
+
+        await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            refused);
+
+        string manager = await OwnerTokenAsync(client, seed);
+
+        using HttpResponseMessage listed = await GetAsync(client, manager, "/api/v1/sync/failures?limit=500");
+        listed.StatusCode.Should().Be(HttpStatusCode.OK, await listed.Content.ReadAsStringAsync());
+
+        string json = await listed.Content.ReadAsStringAsync();
+        using JsonDocument body = JsonDocument.Parse(json);
+        body.RootElement.EnumerateArray().Should().Contain(
+            f => string.Equals(f.GetProperty("deviceCode").GetString(), seed.DeviceCode, StringComparison.OrdinalIgnoreCase),
+            json);
+
+        JsonElement failure = body.RootElement.EnumerateArray()
+            .Single(f => string.Equals(
+                f.GetProperty("deviceCode").GetString(), seed.DeviceCode, StringComparison.OrdinalIgnoreCase));
+
+        failure.GetProperty("outcome").GetString().Should().Be("Rejected");
+        failure.GetProperty("type").GetString().Should().Be("SaleVoided");
+        failure.GetProperty("locationId").GetGuid().Should().Be(seed.Store.Value);
+        failure.GetProperty("deviceSequence").GetInt64().Should().Be(2);
+
+        // Asking for it again does not re-apply anything here: it records the
+        // ask on that register's own feed, because a register that is offline
+        // cannot be told anything at all.
+        Guid eventId = failure.GetProperty("eventId").GetGuid();
+
+        using HttpResponseMessage asked = await PostAsync(
+            client, manager, $"/api/v1/sync/failures/{eventId}/retry");
+
+        asked.StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        bool directed = await factory.WithServiceAsync(context => context.ChangeFeed
+            .AsNoTracking()
+            .AnyAsync(e => e.Kind == "SyncRetryRequested"
+                           && e.LocationScopeId == seed.Store.Value
+                           && e.PayloadJson.Contains(eventId.ToString())));
+
+        directed.Should().BeTrue("the ask travels on the feed the register already comes back to");
+    }
+
+    [Fact]
+    public async Task AskingAgainForAnEventNobodyRefused_IsANotFound()
+    {
+        Seed seed = await SeedAsync("sph", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string manager = await OwnerTokenAsync(client, seed);
+
+        using HttpResponseMessage asked = await PostAsync(
+            client, manager, $"/api/v1/sync/failures/{Guid.CreateVersion7()}/retry");
+
+        asked.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task ASaleForAShiftTheServerHasNotSeen_IsDeferredWithEverythingBehindIt()
     {
         Seed seed = await SeedAsync("sp3", shelfQty: 10m);
@@ -741,6 +812,20 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
             location.UpdateSettings(location.Settings with { NegativeStockPolicy = policy });
             await context.SaveChangesAsync();
         });
+
+    private static async Task<HttpResponseMessage> GetAsync(HttpClient client, string token, string path)
+    {
+        using HttpRequestMessage request = new(HttpMethod.Get, new Uri(path, UriKind.Relative));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request, CancellationToken.None);
+    }
+
+    private static async Task<HttpResponseMessage> PostAsync(HttpClient client, string token, string path)
+    {
+        using HttpRequestMessage request = new(HttpMethod.Post, new Uri(path, UriKind.Relative));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request, CancellationToken.None);
+    }
 
     private Task<decimal> QuantityAsync(Seed seed, InventoryState state)
         => factory.WithServiceAsync(context => context.InventoryBalances
