@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,8 @@ using Pos.Domain.Devices;
 using Pos.Domain.Identity;
 using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Persistence;
+using Pos.Infrastructure.Sync;
+using ChangeFeedContract = Pos.Infrastructure.Offline;
 
 namespace Pos.Infrastructure.Identity;
 
@@ -567,6 +570,13 @@ public sealed class AuthenticationService(
         context.LoginAttempts.Add(LoginAttempt.Success(
             identifierHash, userId, method, now, device?.Id, ipAddress, userAgent));
 
+        if (offlineOnly && device is not null)
+        {
+            await IssueOfflineSnapshotAsync(
+                userId, device, authorization, version, now, refreshLifetime, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         await audit.WriteAsync(
             new AuditEntry(
                 AuditActions.Authentication.LoginSucceeded,
@@ -580,6 +590,74 @@ public sealed class AuthenticationService(
         return Result<AuthenticationResult>.Success(Build(
             access, material.Value, refresh.ExpiresAtUtc, user, authorization, version, offlineOnly));
     }
+
+    /// <summary>
+    /// Puts the cashier's offline authority on the register's feed, so the
+    /// register can still answer permission questions when it cannot ask.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only what the catalogue marks offline-capable is sent. A permission a
+    /// device may not cache cannot be in a snapshot, which is what makes the
+    /// exception paths — an expired-batch override, say — unreachable offline by
+    /// construction rather than by a check somebody has to remember.
+    /// </para>
+    /// <para>
+    /// It expires with the session that bought it. Cached authority is
+    /// deliberately time-bounded: a register that cannot reach head office must
+    /// not keep a cashier's permissions indefinitely, and the alternative to an
+    /// expiry is a till that a dismissed employee can still use.
+    /// </para>
+    /// <para>
+    /// It goes on the feed rather than in the sign-in response because the
+    /// register must already hold it before the link goes down, and the feed is
+    /// what it applies transactionally against its own store.
+    /// </para>
+    /// </remarks>
+    private async Task IssueOfflineSnapshotAsync(
+        UserId userId,
+        Device device,
+        UserAuthorization authorization,
+        long policyVersion,
+        DateTimeOffset now,
+        TimeSpan lifetime,
+        CancellationToken cancellationToken)
+    {
+        HashSet<string> cacheable =
+        [
+            .. Permissions.OfflineCapable
+                .Select(p => p.Code)
+                .Where(authorization.Permissions.Contains),
+        ];
+
+        List<ChangeFeedContract.PermissionSnapshotGrant> grants =
+        [
+            .. cacheable.Select(code => new ChangeFeedContract.PermissionSnapshotGrant(
+                code,
+                authorization.HasAllLocations ? null : device.LocationId)),
+        ];
+
+        long sequence = await ChangeFeedSequenceAllocator
+            .NextAsync(context, cancellationToken)
+            .ConfigureAwait(false);
+
+        context.ChangeFeed.Add(new ChangeFeedEntry(
+            sequence,
+            nameof(ChangeFeedContract.PermissionSnapshotIssued),
+            device.LocationId.Value,
+            JsonSerializer.Serialize(
+                new ChangeFeedContract.PermissionSnapshotIssued(
+                    sequence, userId, policyVersion, now, now + lifetime, grants),
+                SnapshotJson),
+            now));
+    }
+
+    private static readonly JsonSerializerOptions SnapshotJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+        Converters = { new StronglyTypedIdJsonConverter() },
+    };
 
     private static AuthenticationResult Build(
         AccessToken access,

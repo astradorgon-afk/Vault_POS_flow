@@ -543,6 +543,20 @@ Identifiers travel as bare GUIDs. Left alone the serializer writes each
 strongly-typed id as `{"value":"..."}`, which a device would need a matching
 wrapper to read and nobody could read at three in the morning.
 
+**The feed carries changes, not a starting state.** Anything that existed before
+the feed did — a counterparty location provisioned at start-up, a catalogue
+loaded by a seeder — has no row for a new register to read, and a register that
+pulls from cursor zero will not receive it. That is the gap
+`/api/v1/sync/baseline` exists to fill, and it is **not built**: the round-trip
+test stands in for it by touching the rows it needs. A register provisioned
+today therefore needs its baseline supplied some other way.
+
+A change about a **counterparty** location is global, not scoped to itself. Every
+register posts the other leg of a sale against `EXT-CUSTOMER`, and scoping it the
+way a store's own details are scoped meant no register ever heard of it and none
+could sell. Found by running a real device against a real server; neither side's
+own tests could see it.
+
 Full re-baseline: when `master_data_version` on the server exceeds the device's
 by more than the retained feed window (or the device has been offline beyond
 `FeedRetentionDays`, default 30), the server answers with

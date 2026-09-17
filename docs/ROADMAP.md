@@ -281,7 +281,10 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Sync failure dashboard and manual retry
       *(C53: the failure list reads the server's own verdicts, and a retry is a
       directive on the register's feed rather than a re-apply here)*
-- [ ] Full sync test matrix
+- [~] Full sync test matrix
+      *(C54: a register downloads its catalogue, trades through an outage,
+      uploads and catches up, against the real server over HTTP. The baseline
+      route a new register needs is still to come)*
 
 ## Phase 14 — Notifications
 

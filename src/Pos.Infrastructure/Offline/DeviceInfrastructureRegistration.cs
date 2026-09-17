@@ -78,6 +78,7 @@ public static class DeviceInfrastructureRegistration
         // server address and this register's credentials.
         services.TryAddSingleton<SyncRetryPolicy>();
         services.TryAddScoped<SyncUploader>();
+        services.TryAddSingleton<ChangeFeedDownloader>();
 
         return services;
     }

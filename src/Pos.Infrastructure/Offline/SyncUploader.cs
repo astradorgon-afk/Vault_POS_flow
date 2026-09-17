@@ -21,6 +21,17 @@ public interface ISyncTransport
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The server's answer, or why there wasn't one.</returns>
     Task<Result<SyncPushResponse>> PushAsync(SyncPushRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Asks for one page of the change feed.</summary>
+    /// <param name="cursor">The sequence this device last stored.</param>
+    /// <param name="limit">How many changes it will take.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The page, or a failure. <c>sync.rebaseline_required</c> is the one failure
+    /// that is not a transport problem: the server can no longer serve this
+    /// cursor and the device has to start from a fresh baseline.
+    /// </returns>
+    Task<Result<SyncPullResponse>> PullAsync(long cursor, int limit, CancellationToken cancellationToken);
 }
 
 /// <summary>What one upload run did.</summary>

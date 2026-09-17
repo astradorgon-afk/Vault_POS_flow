@@ -14,6 +14,14 @@ namespace Pos.Domain.Common;
 public readonly record struct Money : IComparable<Money>
 {
     /// <summary>Decimal places retained in storage and intermediate arithmetic.</summary>
+    /// <summary>
+    /// The currency every amount in this system is held in. Prices, costs and
+    /// totals are stored in it by configuration, and the change feed carries it
+    /// down so a register states its currency rather than assuming one. It lives
+    /// here, on money, because that is what it is a fact about.
+    /// </summary>
+    public const string DefaultCurrency = "PHP";
+
     public const int StorageScale = 4;
 
     /// <summary>Decimal places used when presenting or settling an amount.</summary>

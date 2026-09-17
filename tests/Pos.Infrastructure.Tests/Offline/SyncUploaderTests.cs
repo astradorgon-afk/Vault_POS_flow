@@ -333,6 +333,12 @@ public sealed class SyncUploaderTests
 
         public SyncPushRequest? LastRequest { get; private set; }
 
+        public Task<Result<SyncPullResponse>> PullAsync(
+            long cursor,
+            int limit,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException("These tests only push.");
+
         public Task<Result<SyncPushResponse>> PushAsync(
             SyncPushRequest request,
             CancellationToken cancellationToken)

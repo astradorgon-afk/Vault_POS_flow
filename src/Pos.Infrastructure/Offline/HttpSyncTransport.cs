@@ -35,6 +35,77 @@ public sealed class HttpSyncTransport(HttpClient client) : ISyncTransport
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>The download route.</summary>
+    public const string PullPath = "api/v1/sync/pull";
+
+    /// <summary>
+    /// The server says the cursor cannot be served and a fresh baseline is
+    /// needed. It is a failure, but not one a retry fixes.
+    /// </summary>
+    public const string RebaselineRequired = "sync.rebaseline_required";
+
+    /// <inheritdoc />
+    public async Task<Result<SyncPullResponse>> PullAsync(
+        long cursor,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        string path = FormattableString.Invariant($"{PullPath}?cursor={cursor}&limit={limit}");
+
+        HttpResponseMessage response;
+
+        try
+        {
+            response = await client.GetAsync(new Uri(path, UriKind.Relative), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            return Result<SyncPullResponse>.Failure(Error.Unavailable("sync.unreachable", ex.Message));
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Result<SyncPullResponse>.Failure(Error.Unavailable("sync.timeout", ex.Message));
+        }
+
+        using (response)
+        {
+            // Told apart from every other refusal, because the remedy is not a
+            // retry: the device has to fetch a fresh baseline and start again.
+            if (response.StatusCode == System.Net.HttpStatusCode.Gone)
+            {
+                return Result<SyncPullResponse>.Failure(Error.Conflict(
+                    RebaselineRequired,
+                    "The server can no longer serve this device's cursor."));
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Result<SyncPullResponse>.Failure(Error.Unavailable(
+                    "sync.http_" + ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    FormattableString.Invariant($"The server answered {(int)response.StatusCode} {response.StatusCode}.")));
+            }
+
+            try
+            {
+                SyncPullResponse? page = await response.Content
+                    .ReadFromJsonAsync<SyncPullResponse>(ReadOptions, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return page is null || page.Changes is null
+                    ? Result<SyncPullResponse>.Failure(Error.Unavailable(
+                        "sync.response_unreadable",
+                        "The server answered with something this device could not read."))
+                    : Result<SyncPullResponse>.Success(page);
+            }
+            catch (JsonException ex)
+            {
+                return Result<SyncPullResponse>.Failure(
+                    Error.Unavailable("sync.response_unreadable", ex.Message));
+            }
+        }
+    }
+
     /// <inheritdoc />
     public async Task<Result<SyncPushResponse>> PushAsync(
         SyncPushRequest request,

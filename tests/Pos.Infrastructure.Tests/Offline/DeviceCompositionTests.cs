@@ -64,6 +64,7 @@ public sealed class DeviceCompositionTests
         using IServiceScope scope = provider.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<SyncUploader>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<ChangeFeedDownloader>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IDeviceOutbox>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<DeviceStatusProvider>().Should().NotBeNull();
     }
@@ -118,5 +119,11 @@ public sealed class DeviceCompositionTests
             Pos.Shared.Sync.SyncPushRequest request,
             CancellationToken cancellationToken)
             => throw new NotSupportedException("The composition check never sends anything.");
+
+        public Task<Result<Pos.Shared.Sync.SyncPullResponse>> PullAsync(
+            long cursor,
+            int limit,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException("The composition check never asks for anything.");
     }
 }

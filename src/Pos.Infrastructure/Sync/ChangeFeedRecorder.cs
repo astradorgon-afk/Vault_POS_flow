@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Catalog;
 using Pos.Domain.Inventory;
+using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 using Pos.Infrastructure.Offline;
 using Pos.Infrastructure.Persistence;
@@ -74,20 +75,11 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
             return;
         }
 
-        // Read only when there is something to record, which for master data is
-        // rare. The currency lives on the organization, not on each location, so
-        // the feed carries it down rather than each register assuming one.
-        string currency = await context.Organizations
-            .AsNoTracking()
-            .Select(o => o.CurrencyCode)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false) ?? string.Empty;
-
         List<PendingChange> pending = [];
 
         foreach (EntityEntry entry in changed)
         {
-            PendingChange? change = Describe(entry, currency);
+            PendingChange? change = Describe(entry);
 
             if (change is not null)
             {
@@ -128,7 +120,7 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
     /// deliberate subset — it holds products and prices, not purchase orders —
     /// and a reflective rule would start shipping whatever was added next.
     /// </remarks>
-    private static PendingChange? Describe(EntityEntry entry, string currency)
+    private static PendingChange? Describe(EntityEntry entry)
     {
         // A deletion tells a register to forget something, which is a different
         // message from a change. Only a cancelled future price is ever deleted —
@@ -178,7 +170,12 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
                     price.ProductId,
                     price.LocationId,
                     price.Amount,
-                    currency,
+
+                    // The price's own currency, not a lookup. It is a fact about
+                    // this money, and reading it from an organization row meant
+                    // the feed carried nothing wherever that row is not written —
+                    // which a real device found by refusing the page.
+                    price.Price.Currency,
                     price.EffectiveFromUtc,
                     price.EffectiveToUtc)),
 
@@ -208,7 +205,12 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
 
             Location location => new PendingChange(
                 nameof(LocationChanged),
-                location.Id.Value,
+
+                // A store's details are that store's business. A counterparty —
+                // EXT-CUSTOMER and its kind — is everybody's: every register
+                // posts the other leg of a sale against it, and scoping it to
+                // itself meant no register ever heard of it and none could sell.
+                location.Kind == LocationKind.External ? null : location.Id.Value,
                 typeof(LocationChanged),
                 sequence => new LocationChanged(
                     sequence,
@@ -217,7 +219,7 @@ public sealed class ChangeFeedRecorder(ISystemClock clock) : SaveChangesIntercep
                     location.Name,
                     location.Kind,
                     location.TimeZoneId,
-                    currency,
+                    Pos.Domain.Common.Money.DefaultCurrency,
                     location.IsActive,
                     (location.Settings ?? LocationSettings.Default).ToJson())),
 

@@ -101,6 +101,17 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
         return Result.Success(new ChangeFeedApplyOutcome(page.NextCursor, page.Changes.Count, AlreadyApplied: false));
     }
 
+    /// <summary>Reads the device's stored feed position.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The cursor, or zero when nothing has been applied yet.</returns>
+    public async Task<long> ReadCursorAsync(CancellationToken cancellationToken = default)
+    {
+        await using PosDeviceDbContext context =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        return await ReadCursorAsync(context, cancellationToken).ConfigureAwait(false);
+    }
+
     private static async Task<long> ReadCursorAsync(PosDeviceDbContext context, CancellationToken cancellationToken)
         => await context.SyncCursors
             .AsNoTracking()
