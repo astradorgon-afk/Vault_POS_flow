@@ -21,6 +21,7 @@ public sealed class DeviceDatabaseInitializerTests : IAsyncLifetime
         await initializer.InitializeAsync(CancellationToken.None);
 
         await using (PosDeviceDbContext context = await initializer.CreateDbContextAsync(CancellationToken.None))
+        using (context.ChangeFeedWrites.Open())
         {
             ProductId productId = ProductId.New();
             context.Products.Add(new DeviceCachedProduct(
@@ -57,6 +58,7 @@ public sealed class DeviceDatabaseInitializerTests : IAsyncLifetime
             "cache_user",
             "device_profile",
             "snapshot_permission",
+            "sync_cursor",
         ]);
         tables.Should().NotContain(["AspNetUsers", "audit_log", "purchase_order"]);
 
@@ -98,6 +100,7 @@ public sealed class DeviceDatabaseInitializerTests : IAsyncLifetime
 
         await using PosDeviceDbContext context =
             await initializer.CreateDbContextAsync(CancellationToken.None);
+        using IDisposable writes = context.ChangeFeedWrites.Open();
         UserId userId = UserId.New();
         DateTimeOffset issuedAt = new(2026, 9, 17, 1, 30, 0, TimeSpan.Zero);
         context.PermissionSnapshots.AddRange(

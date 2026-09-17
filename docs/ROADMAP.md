@@ -219,7 +219,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 - [x] SQLite schema, SQLCipher encryption with a platform-secure key, and the
   initial device migration (C28)
-- [ ] Cache tables + read-only enforcement
+- [x] Cache tables + read-only enforcement: change-feed applier with a
+  same-transaction cursor, interceptor and trigger write guards (C29)
 - [ ] Client DI container with whitelisted command set
 - [ ] Local document numbering (device-scoped)
 - [ ] Permission snapshot storage and expiry

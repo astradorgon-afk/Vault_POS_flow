@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C28 device database foundation complete
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application complete
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,8 +13,8 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
-| Tests | **967 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 102, Security 52, Architecture 14, API 174** (2026-09-17, through C28 device storage). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
-| Migrations | 28 PostgreSQL migrations plus 1 independent SQLite device migration, all forward-only. The device migration is exercised against encrypted SQLCipher storage. |
+| Tests | **1,006 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 141, Security 52, Architecture 14, API 174** (2026-09-17, through C29 change-feed application). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Migrations | 28 PostgreSQL migrations plus 2 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
@@ -22,7 +22,7 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    102 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications and encrypted device-store coverage
+Pos.Infrastructure.Tests    141 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store, change-feed application and its write guards
 Pos.Architecture.Tests       14 passing   layering, ledger isolation, permission catalogue and client reference boundary
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -733,9 +733,21 @@ Money remains exact decimal text and UTC timestamps use round-trip text.
 The initial SQLite migration is separate from the PostgreSQL history. Tests
 apply it to an encrypted file, prove the file cannot be queried without its key,
 verify the scoped table set and exact decimal storage, and enforce unique global
-permission grants despite SQLite's treatment of `NULL` in unique indexes. The
-next batch (C29) will make cache writes exclusive to the change-feed applier and
-persist its transactional cursor.
+permission grants despite SQLite's treatment of `NULL` in unique indexes.
+
+C29 makes `ChangeFeedApplier` the only writer of the caches, permission
+snapshots and the new `sync_cursor` table. A page is validated whole, then every
+change and the cursor commit in one `BEGIN IMMEDIATE` transaction: a replayed
+page is recognised and writes nothing, two appliers racing one page apply it once, a page that skips ahead is refused
+`sync.feed_cursor_mismatch`, a malformed one `sync.feed_page_invalid`, and a
+database fault rolls back the page and the cursor together. Two guards refuse
+writes from anywhere else: an EF interceptor for tracked changes, and
+`BEFORE INSERT/UPDATE/DELETE` triggers that call a per-connection SQL function
+returning 1 only inside the applier's internal write scope. Raw SQL and bulk
+statements are refused, and a keyed connection with no device context fails
+closed because the function does not exist there (migration
+`DeviceChangeFeedGuards`). Disabling both guards turns exactly the 15
+guard-dependent tests red.
 
 ---
 
@@ -975,22 +987,24 @@ Stated plainly so they are not mistaken for finished work:
 | A scheduled price cannot be cancelled once it has taken effect | Phase 3 | Past prices are history; change an effective price by scheduling a replacement. Pre-effective cancellation is implemented (C19): `catalog.price_cancel_successor` / `catalog.price_cancel_chain` refuse rewinds that would renumber another plan. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
+| Every device connection open re-derives the SQLCipher key | Phase 12 (C28) | Measured 650–800 ms per keyed open on a desktop; queries on an open connection take under 1 ms. `Pooling = false` makes EF open a fresh connection per operation, so each offline cache read (a barcode scan) pays it, more on Android. The key is already 256 random bits, so SQLCipher's raw-key form (skipping PBKDF2) or one held connection per context would remove it. The per-connection pragmas in `DeviceDatabaseInitializer` (`cipher_memory_security`, `synchronous`, `busy_timeout`) also reach only its verification connection. |
+| CI cannot build the solution since `Pos.Client` joined it | CI (C28) | `build-and-test` restores `VaultFlow.slnx` on Ubuntu without the MAUI Android workload, which `net10.0-android` requires. Nothing is pushed yet; the job needs the workload installed, or the client built in its own job. |
 
 ---
 
 ## 5. What to do next
 
-Phase 11 is complete. Phase 12 started with C28: the Windows/Android client,
-encrypted device database, scoped cache entities and permission-snapshot
-storage now exist. Continue in this order:
+Phase 11 is complete. Phase 12 has the Windows/Android client, the encrypted
+device database (C28) and protected change-feed application (C29). Continue in
+this order:
 
-1. **C29 — protected cache application:** persist the pull cursor, apply one
-   change-feed page and its cursor in one SQLite transaction, and reject cache
-   entity writes outside that applier.
+1. **Device connection cost and CI (from §4):** remove the per-open key
+   derivation before any UI reads the cache, and let CI build the client.
 2. **C30 — client command boundary:** register only the offline-safe command
    handlers and prove server-only use cases cannot resolve in the client.
 3. **C31 — device numbering and permission expiry:** allocate stable
-   device-scoped document numbers and deny expired or widened snapshots.
+   device-scoped document numbers and deny expired or widened snapshots
+   (including a snapshot whose policy version is older than the stored one).
 4. **C32 — offline status UI:** show database, enrolment, connectivity and sync
    state without exposing storage or transport details.
 5. **Phase 13 — synchronization:** add the outbox, push/pull endpoints,

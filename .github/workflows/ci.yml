@@ -63,12 +63,16 @@ jobs:
         run: dotnet tool install --global dotnet-ef --version 10.0.9
 
       # A model change without a matching migration is the classic way a schema
-      # drifts from the code that assumes it.
+      # drifts from the code that assumes it. The server and device databases
+      # have separate contexts and migration sets, so each is checked.
       - name: Fail if the model has uncommitted migrations
         run: |
-          dotnet ef migrations has-pending-model-changes \
-            --project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
-            --startup-project src/Pos.Infrastructure/Pos.Infrastructure.csproj
+          for context in PosDbContext PosDeviceDbContext; do
+            dotnet ef migrations has-pending-model-changes \
+              --context "$context" \
+              --project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
+              --startup-project src/Pos.Infrastructure/Pos.Infrastructure.csproj
+          done
 
   secret-scan:
     runs-on: ubuntu-latest

@@ -29,7 +29,7 @@ public sealed class DeviceStoreProfile
 }
 
 /// <summary>A product mirror downloaded from the server change feed.</summary>
-public sealed class DeviceCachedProduct
+public sealed class DeviceCachedProduct : IChangeFeedOwned
 {
     private DeviceCachedProduct() { Sku = string.Empty; Name = string.Empty; }
 
@@ -61,10 +61,28 @@ public sealed class DeviceCachedProduct
     public bool TracksExpiry { get; private set; }
     public long SourceVersion { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
+
+    internal void Refresh(
+        string sku,
+        string name,
+        bool isActive,
+        bool tracksBatches,
+        bool tracksExpiry,
+        long sourceVersion,
+        DateTimeOffset updatedAtUtc)
+    {
+        Sku = sku;
+        Name = name;
+        IsActive = isActive;
+        TracksBatches = tracksBatches;
+        TracksExpiry = tracksExpiry;
+        SourceVersion = sourceVersion;
+        UpdatedAtUtc = updatedAtUtc;
+    }
 }
 
 /// <summary>A barcode mirror used by offline product lookup.</summary>
-public sealed class DeviceCachedProductBarcode
+public sealed class DeviceCachedProductBarcode : IChangeFeedOwned
 {
     private DeviceCachedProductBarcode() { Barcode = string.Empty; }
 
@@ -80,10 +98,17 @@ public sealed class DeviceCachedProductBarcode
     public ProductId ProductId { get; private set; }
     public bool IsPrimary { get; private set; }
     public bool IsActive { get; private set; }
+
+    internal void Refresh(ProductId productId, bool isPrimary, bool isActive)
+    {
+        ProductId = productId;
+        IsPrimary = isPrimary;
+        IsActive = isActive;
+    }
 }
 
 /// <summary>An effective-dated selling-price mirror for offline resolution.</summary>
-public sealed class DeviceCachedProductPrice
+public sealed class DeviceCachedProductPrice : IChangeFeedOwned
 {
     private DeviceCachedProductPrice() { Currency = string.Empty; }
 
@@ -112,10 +137,26 @@ public sealed class DeviceCachedProductPrice
     public string Currency { get; private set; }
     public DateTimeOffset EffectiveFromUtc { get; private set; }
     public DateTimeOffset? EffectiveToUtc { get; private set; }
+
+    internal void Refresh(
+        ProductId productId,
+        LocationId? locationId,
+        decimal amount,
+        string currency,
+        DateTimeOffset effectiveFromUtc,
+        DateTimeOffset? effectiveToUtc)
+    {
+        ProductId = productId;
+        LocationId = locationId;
+        Amount = amount;
+        Currency = currency;
+        EffectiveFromUtc = effectiveFromUtc;
+        EffectiveToUtc = effectiveToUtc;
+    }
 }
 
 /// <summary>A location mirror containing only fields needed by the device.</summary>
-public sealed class DeviceCachedLocation
+public sealed class DeviceCachedLocation : IChangeFeedOwned
 {
     private DeviceCachedLocation()
     {
@@ -150,10 +191,26 @@ public sealed class DeviceCachedLocation
     public string TimeZoneId { get; private set; }
     public string CurrencyCode { get; private set; }
     public bool IsActive { get; private set; }
+
+    internal void Refresh(
+        string code,
+        string name,
+        LocationKind kind,
+        string timeZoneId,
+        string currencyCode,
+        bool isActive)
+    {
+        Code = code;
+        Name = name;
+        Kind = kind;
+        TimeZoneId = timeZoneId;
+        CurrencyCode = currencyCode;
+        IsActive = isActive;
+    }
 }
 
 /// <summary>A minimal user mirror used for offline sign-in and display.</summary>
-public sealed class DeviceCachedUser
+public sealed class DeviceCachedUser : IChangeFeedOwned
 {
     private DeviceCachedUser() { UserName = string.Empty; DisplayName = string.Empty; }
 
@@ -171,10 +228,51 @@ public sealed class DeviceCachedUser
     public string DisplayName { get; private set; }
     public bool IsActive { get; private set; }
     public long SecurityVersion { get; private set; }
+
+    internal void Refresh(string userName, string displayName, bool isActive, long securityVersion)
+    {
+        UserName = userName;
+        DisplayName = displayName;
+        IsActive = isActive;
+        SecurityVersion = securityVersion;
+    }
+}
+
+/// <summary>
+/// The position of a downloaded feed. It advances only inside the transaction
+/// that applies the page it follows, so an interrupted pull replays harmlessly.
+/// </summary>
+public sealed class DeviceSyncCursor : IChangeFeedOwned
+{
+    private DeviceSyncCursor() { Feed = string.Empty; }
+
+    internal DeviceSyncCursor(string feed, long position, DateTimeOffset advancedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(feed);
+        ArgumentOutOfRangeException.ThrowIfNegative(position);
+        Feed = feed;
+        Position = position;
+        AdvancedAtUtc = advancedAtUtc;
+    }
+
+    public string Feed { get; private init; }
+    public long Position { get; private set; }
+    public DateTimeOffset AdvancedAtUtc { get; private set; }
+
+    internal void Advance(long position, DateTimeOffset advancedAtUtc)
+    {
+        if (position < Position)
+        {
+            throw new InvalidOperationException("A feed cursor never moves backwards.");
+        }
+
+        Position = position;
+        AdvancedAtUtc = advancedAtUtc;
+    }
 }
 
 /// <summary>A time-bounded cached permission; offline checks may only narrow it.</summary>
-public sealed class DevicePermissionSnapshot
+public sealed class DevicePermissionSnapshot : IChangeFeedOwned
 {
     private DevicePermissionSnapshot() { Permission = string.Empty; }
 

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using Pos.Application.Common.Abstractions;
 using Pos.Client.Storage;
+using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Offline;
 
 namespace Pos.Client;
@@ -21,6 +23,8 @@ public static class MauiProgram
             Path.Combine(FileSystem.Current.AppDataDirectory, "device.db")));
         builder.Services.AddSingleton<IDeviceDatabaseKeyProvider, SecureStorageDeviceDatabaseKeyProvider>();
         builder.Services.AddSingleton<DeviceDatabaseInitializer>();
+        builder.Services.AddSingleton<ISystemClock, SystemClock>();
+        builder.Services.AddSingleton<ChangeFeedApplier>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Pos.Domain.Common;
 using Pos.Infrastructure.Persistence.Conversions;
 
@@ -9,6 +10,12 @@ namespace Pos.Infrastructure.Offline;
 /// identity plus downloaded caches and snapshots; server identity, audit,
 /// purchasing and reporting tables are deliberately absent.
 /// </summary>
+/// <remarks>
+/// Downloaded caches, permission snapshots and the feed cursor are written only
+/// by <see cref="ChangeFeedApplier"/>. Every context carries an interceptor that
+/// refuses tracked writes to them and registers the SQL function their triggers
+/// consult, so raw SQL is refused as well.
+/// </remarks>
 /// <param name="options">SQLite options for the encrypted device file.</param>
 public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> options) : DbContext(options)
 {
@@ -19,6 +26,20 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<DeviceCachedLocation> Locations => Set<DeviceCachedLocation>();
     public DbSet<DeviceCachedUser> Users => Set<DeviceCachedUser>();
     public DbSet<DevicePermissionSnapshot> PermissionSnapshots => Set<DevicePermissionSnapshot>();
+    public DbSet<DeviceSyncCursor> SyncCursors => Set<DeviceSyncCursor>();
+
+    /// <summary>Gets the applier's write window for this context instance.</summary>
+    internal ChangeFeedWriteScope ChangeFeedWrites { get; } = new();
+
+    /// <inheritdoc />
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+        optionsBuilder.AddInterceptors(
+            ChangeFeedWriteGuardInterceptor.Instance,
+            ChangeFeedWriterFunctionInterceptor.Instance);
+        base.OnConfiguring(optionsBuilder);
+    }
 
     /// <inheritdoc />
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -54,7 +75,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
 
         builder.Entity<DeviceCachedProduct>(entity =>
         {
-            entity.ToTable("cache_product");
+            OwnedByChangeFeed(entity, "cache_product");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(x => x.Sku).HasColumnName("sku").HasMaxLength(64).IsRequired();
@@ -69,7 +90,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
 
         builder.Entity<DeviceCachedProductBarcode>(entity =>
         {
-            entity.ToTable("cache_product_barcode");
+            OwnedByChangeFeed(entity, "cache_product_barcode");
             entity.HasKey(x => x.Barcode);
             entity.Property(x => x.Barcode).HasColumnName("barcode").HasMaxLength(64);
             entity.Property(x => x.ProductId).HasColumnName("product_id").IsRequired();
@@ -80,7 +101,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
 
         builder.Entity<DeviceCachedProductPrice>(entity =>
         {
-            entity.ToTable("cache_product_price");
+            OwnedByChangeFeed(entity, "cache_product_price");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(x => x.ProductId).HasColumnName("product_id").IsRequired();
@@ -95,7 +116,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
 
         builder.Entity<DeviceCachedLocation>(entity =>
         {
-            entity.ToTable("cache_location");
+            OwnedByChangeFeed(entity, "cache_location");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(x => x.Code).HasColumnName("code").HasMaxLength(32).IsRequired();
@@ -109,7 +130,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
 
         builder.Entity<DeviceCachedUser>(entity =>
         {
-            entity.ToTable("cache_user");
+            OwnedByChangeFeed(entity, "cache_user");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(x => x.UserName).HasColumnName("user_name").HasMaxLength(128).IsRequired();
@@ -121,7 +142,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
 
         builder.Entity<DevicePermissionSnapshot>(entity =>
         {
-            entity.ToTable("snapshot_permission");
+            OwnedByChangeFeed(entity, "snapshot_permission");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
@@ -141,8 +162,31 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.HasIndex(x => x.ExpiresAtUtc).HasDatabaseName("ix_snapshot_permission_expiry");
         });
 
+        builder.Entity<DeviceSyncCursor>(entity =>
+        {
+            OwnedByChangeFeed(entity, "sync_cursor");
+            entity.HasKey(x => x.Feed);
+            entity.Property(x => x.Feed).HasColumnName("feed").HasMaxLength(64);
+            entity.Property(x => x.Position).HasColumnName("position").IsRequired();
+            entity.Property(x => x.AdvancedAtUtc).HasColumnName("advanced_at_utc").IsRequired();
+        });
+
         ApplySqliteTypeMappings(builder);
     }
+
+    /// <summary>
+    /// Maps an applier-owned table and declares its guard triggers, which the
+    /// migration creates. Declaring them also stops EF relying on
+    /// <c>RETURNING</c> for these tables.
+    /// </summary>
+    private static void OwnedByChangeFeed<TEntity>(EntityTypeBuilder<TEntity> entity, string table)
+        where TEntity : class
+        => entity.ToTable(table, t =>
+        {
+            t.HasTrigger("trg_" + table + "_feed_only_insert");
+            t.HasTrigger("trg_" + table + "_feed_only_update");
+            t.HasTrigger("trg_" + table + "_feed_only_delete");
+        });
 
     private static void ApplySqliteTypeMappings(ModelBuilder modelBuilder)
     {

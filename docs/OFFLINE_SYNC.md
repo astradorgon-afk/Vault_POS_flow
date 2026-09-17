@@ -52,12 +52,26 @@ device.db (SQLite, encrypted)
 │    inventory_movement, inventory_balance, transfer_order (local),
 │    quarantine_incident, inventory_count
 ├── outbox_event   the upload queue
-└── sync_state     cursors, checkpoints, failures
+├── sync_cursor    feed positions, advanced with the page they follow
+└── sync_state     checkpoints, failures
 ```
 
-`cache_*` tables are **read-only to application code**; the only writer is
-`ChangeFeedApplier`. This is enforced by a SQLite trigger and by an interceptor
-that rejects tracked changes to cache entities outside the applier's scope.
+`cache_*`, `snapshot_permission` and `sync_cursor` are **read-only to application
+code**; the only writer is `ChangeFeedApplier`. Two independent guards enforce it:
+
+- An EF interceptor refuses tracked inserts, updates and deletes of those
+  entities outside the applier's write scope, before any SQL is sent.
+- `BEFORE INSERT/UPDATE/DELETE` triggers on each table call
+  `vf_change_feed_writer()`. The device context registers that function on every
+  connection it opens, and it returns 1 only while that context's write scope is
+  open, so raw SQL and `ExecuteUpdate`/`ExecuteDelete` are refused too. A keyed
+  connection opened outside a device context has no such function, so its
+  writes fail closed.
+
+The write scope is internal to `Pos.Infrastructure`, so client code cannot open
+it. The guards stop application code from widening its own permissions or
+rewriting cached prices; they do not defend against code holding the database
+key, which could drop the triggers.
 
 ### 2.1 The outbox
 
@@ -222,8 +236,15 @@ location, ordered by `change_sequence`. The feed carries:
 - pre-approval tokens issued to the location,
 - device directives (`revoke`, `force-resync`, `purge-cache`).
 
-The client applies a page in one SQLite transaction and advances the cursor
-**after** the transaction commits, so an interrupted pull replays harmlessly.
+The client applies a page and advances its cursor **in the same** SQLite
+transaction (`BEGIN IMMEDIATE`, so a second applier waits and then sees the new
+cursor). An interrupted pull leaves no trace. A replayed page, one whose commit
+the client never observed, is recognised because its `nextCursor` does not
+exceed the stored cursor, and nothing is written. A page that does not continue
+from the stored cursor is refused with `sync.feed_cursor_mismatch`; a malformed
+page is refused whole, before anything is written, with `sync.feed_page_invalid`.
+Changes are saved one at a time inside the transaction, so a later change always
+sees an earlier one to the same row exactly as the server ordered them.
 
 Full re-baseline: when `master_data_version` on the server exceeds the device's
 by more than the retained feed window (or the device has been offline beyond

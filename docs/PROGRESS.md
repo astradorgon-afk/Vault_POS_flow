@@ -35,7 +35,7 @@ cancellation — `Product.CancelScheduledPrice`, the cancel endpoint under
 `Permissions.Catalog.ManagePrices`, the `catalog.price_cancel_*` refusals and
 the `product.price.cancelled` audit) are
 complete; details are in the log below.
-**Last commits:** C28 (device SQLite foundation), C27 (emergency-transfer alerts), C26 (receiving and transfer discrepancy alerts), C25 (low-stock alerts), C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
+**Last commits:** C29 (protected change-feed application), C28 (device SQLite foundation), C27 (emergency-transfer alerts), C26 (receiving and transfer discrepancy alerts), C25 (low-stock alerts), C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -138,7 +138,8 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
 - [~] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
   - [x] C28 — Windows/Android MAUI Blazor Hybrid client; dedicated seven-table device schema; SQLCipher encryption with a 256-bit key held in platform `SecureStorage`; initial SQLite migration; cached product/barcode/price/location/user and permission-snapshot entities; money and UTC text converters; global/store snapshot uniqueness; architecture and encrypted-file regression tests.
-  - [ ] C29 — cache writes restricted to the change-feed applier, transactional feed-page application and cursor storage
+  - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
+  - [ ] C30 — client command boundary: only offline-safe handlers resolve in the client
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
@@ -848,3 +849,33 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - Tests apply the encrypted migration, verify its limited schema and decimal
   representation, prove an unkeyed connection cannot read the file, and cover
   the global permission uniqueness edge case.
+
+### C29 — protected change-feed application (`feat(offline-c29)`)
+
+- `ChangeFeedApplier` is the only writer of `cache_*`, `snapshot_permission` and
+  the new `sync_cursor`. It validates a `ChangeFeedPage` whole (cursor and
+  sequence order, required fields and column lengths, decimal scale, ISO
+  currency, price periods, snapshot expiry and repeated grants), then applies
+  every change and the cursor in one `BEGIN IMMEDIATE` transaction. A page whose
+  `NextCursor` does not exceed the stored cursor is reported as already applied
+  and writes nothing; any other page not starting at the cursor is refused
+  `sync.feed_cursor_mismatch`. A snapshot issue replaces the user's whole
+  snapshot; a revoke deletes it; a cancelled price is removed.
+- Two write guards: an EF interceptor refuses tracked changes to applier-owned
+  entities outside the internal write scope, and migration
+  `DeviceChangeFeedGuards` installs `BEFORE INSERT/UPDATE/DELETE` triggers that
+  call `vf_change_feed_writer()`, registered per connection by the device
+  context. Raw SQL and bulk statements are refused, and a keyed connection
+  without a device context fails closed.
+- 39 new infrastructure tests: every change kind, updates/removals/snapshot
+  replacement, in-page ordering, replay, two appliers racing one page, cursor gap, mid-page rollback, 13
+  malformed pages, 9 tracked writes, 5 raw statements, bulk statements, a raw
+  keyed connection, trigger installation checked against the model, and the
+  scope's visibility. Disabling both guards turns exactly the 15 guard-dependent
+  tests red.
+- CI's migration-drift step named no context and has failed with "More than one
+  DbContext" since C28; it now checks `PosDbContext` and `PosDeviceDbContext`
+  separately (both verified clean locally).
+- Found while testing: each keyed connection open costs 650–800 ms (SQLCipher
+  PBKDF2 with pooling disabled), and CI cannot build `Pos.Client` on Ubuntu
+  without the MAUI Android workload. Both are recorded in STATUS.md §4.
