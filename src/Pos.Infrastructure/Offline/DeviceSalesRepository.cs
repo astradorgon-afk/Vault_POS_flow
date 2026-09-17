@@ -76,8 +76,9 @@ public sealed class DeviceSalesRepository(
     /// </para>
     /// <para>
     /// One line becomes several items when FEFO splits it across batches, and
-    /// every item of a split shares each fact below while differing only in
-    /// batch, so grouping restores the line exactly. Two lines identical in all
+    /// every item of a split shares each fact below — the price row included,
+    /// since a split is about stock and not about pricing — while differing only
+    /// in batch, so grouping restores the line exactly. Two lines identical in all
     /// of them merge into one, which changes how many lines a re-printed receipt
     /// would show and no number the server computes: the quantities and
     /// discounts add up, and a discount spread across a longer line is
@@ -103,6 +104,7 @@ public sealed class DeviceSalesRepository(
                     OverriddenPrice = i.PriceWasOverridden ? i.UnitPrice : 0m,
                     i.PriceOverrideAuthorizedByUserId,
                     i.DiscountAuthorizedByUserId,
+                    i.PriceVersion,
                 })
                 .Select(group => new SaleLineSyncPayload(
                     group.Key.ProductId.Value,
@@ -112,7 +114,8 @@ public sealed class DeviceSalesRepository(
                     group.Key.PriceWasOverridden ? group.Key.OverriddenPrice : null,
                     group.Key.PriceOverrideAuthorizedByUserId?.Value,
                     group.Sum(i => i.Discount),
-                    group.Key.DiscountAuthorizedByUserId?.Value)),
+                    group.Key.DiscountAuthorizedByUserId?.Value,
+                    group.Key.PriceVersion.IsEmpty ? null : group.Key.PriceVersion.Value)),
         ];
 
     /// <inheritdoc />
@@ -166,6 +169,35 @@ public sealed class DeviceSalesRepository(
         return cached is null
             ? null
             : new SaleLocationFacts(cached.Kind, LocationSettings.FromJson(cached.SettingsJson));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A device answers from its own cached price rows. It only ever quotes one
+    /// it holds, so this is the same question asked of a smaller catalogue —
+    /// and it has to be answered honestly rather than refused, because the
+    /// device runs the same handler the server does.
+    /// </remarks>
+    public async Task<IReadOnlyList<QuotedPrice>> GetQuotedPricesAsync(
+        IReadOnlyCollection<ProductPriceId> priceIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(priceIds);
+
+        if (priceIds.Count == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. await context.ProductPrices
+                .AsNoTracking()
+                .Where(p => priceIds.Contains(p.Id))
+                .Select(p => new QuotedPrice(p.Id, p.ProductId, p.LocationId, p.Amount))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false),
+        ];
     }
 
     /// <inheritdoc />
@@ -438,6 +470,11 @@ public sealed record SaleSyncPayload(
 /// <param name="PriceOverrideAuthorizedByUserId">Who authorized that override.</param>
 /// <param name="Discount">The manual discount on the line.</param>
 /// <param name="DiscountAuthorizedByUserId">Who authorized the discount.</param>
+/// <param name="QuotedPriceVersion">
+/// The price row the device charged from, so head office records the number the
+/// customer agreed to pay even when that row has since been superseded. The
+/// amount is deliberately not sent: the server reads it back from the row.
+/// </param>
 public sealed record SaleLineSyncPayload(
     Guid ProductId,
     decimal Quantity,
@@ -446,7 +483,8 @@ public sealed record SaleLineSyncPayload(
     decimal? UnitPriceOverride,
     Guid? PriceOverrideAuthorizedByUserId,
     decimal Discount,
-    Guid? DiscountAuthorizedByUserId);
+    Guid? DiscountAuthorizedByUserId,
+    Guid? QuotedPriceVersion = null);
 
 /// <summary>One payment that settled a sale rung up offline.</summary>
 /// <param name="Method">The payment method, by name.</param>

@@ -296,6 +296,14 @@ public static class AuditActions
         /// <summary>An expired batch was sold through the exception path.</summary>
         public const string ExpiredOverride = "sale.expired.override";
 
+        /// <summary>
+        /// A line was sold from a price row that is no longer the effective one,
+        /// so the receipt total does not match what the current price would
+        /// produce. Recorded rather than re-priced: the customer paid what the
+        /// receipt said (OFFLINE_SYNC.md §7).
+        /// </summary>
+        public const string PriceVariance = "sale.price.variance";
+
         /// <summary>A receipt was reprinted.</summary>
         public const string ReceiptReprinted = "sale.receipt.reprinted";
 

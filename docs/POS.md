@@ -46,7 +46,13 @@ Scan / search  ->  Cart  ->  (discounts, overrides)  ->  Payment  ->  Complete
 2. **Price resolution** uses the effective-dated price for the product at the
    device's location at the sale timestamp. The resolved price and the
    `PriceVersion` are stamped on the line so the receipt and the audit agree
-   forever, even if prices change later.
+   forever, even if prices change later. A line may instead name the
+   `QuotedPriceVersion` it was priced from — the case a register that priced
+   before a change and synced after it depends on. The server reads the amount
+   off that row rather than taking one from the caller, refuses a row that does
+   not price this product here, and records a `sale.price.variance` entry when
+   the row is no longer the effective one. It is not an override: no person keyed
+   the number in, and none is recorded as having authorized it.
 3. **Batch allocation** for batch-tracked products is FEFO at the location,
    skipping expired batches. The allocated `BatchId` is stored on the sale item,
    which is what makes recall traceability work down to the customer receipt.

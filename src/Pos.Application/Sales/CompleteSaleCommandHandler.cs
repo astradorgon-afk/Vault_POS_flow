@@ -198,6 +198,25 @@ public sealed class CompleteSaleCommandHandler(
             .ConfigureAwait(false);
 
         // ------------------------------------------------------------------
+        // 3b. Read back the price rows the lines say they were quoted from.
+        //     The caller sends identifiers; the amounts come from here, so a
+        //     terminal can say which of our prices it charged and never what
+        //     that price was.
+        // ------------------------------------------------------------------
+        List<ProductPriceId> quotedIds =
+        [
+            .. command.Lines
+                .Where(l => l.UnitPriceOverride is null && l.QuotedPriceVersion is not null)
+                .Select(l => l.QuotedPriceVersion!.Value)
+                .Distinct(),
+        ];
+
+        Dictionary<ProductPriceId, QuotedPrice> quotedById = (await repository
+            .GetQuotedPricesAsync(quotedIds, cancellationToken)
+            .ConfigureAwait(false))
+            .ToDictionary(q => q.Id);
+
+        // ------------------------------------------------------------------
         // 4. Resolve each line: price, VAT, FEFO, split multi-slice.
         // ------------------------------------------------------------------
         List<ItemSpec> itemSpecs = [];
@@ -233,6 +252,54 @@ public sealed class CompleteSaleCommandHandler(
                 // Still record which row *would* have been effective, or Empty
                 // when no price row exists yet for the product.
                 priceVersion = product.EffectivePriceId ?? ProductPriceId.Empty;
+            }
+            else if (line.QuotedPriceVersion is { } quotedVersion)
+            {
+                // The caller quoted one of our own rows. It is honoured, because
+                // it is what the customer agreed to pay, but only after it is
+                // shown to be a price for this product that could apply here: a
+                // row belonging to another product, or scoped to another store,
+                // would let a crafted line pay biscuit money for a watch.
+                if (!quotedById.TryGetValue(quotedVersion, out QuotedPrice? quoted))
+                {
+                    return Result<SaleId>.Failure(SaleCommandErrors.QuotedPriceUnknown(quotedVersion));
+                }
+
+                if (quoted.ProductId != line.ProductId
+                    || (quoted.LocationId is { } scope && scope != command.LocationId))
+                {
+                    return Result<SaleId>.Failure(
+                        SaleCommandErrors.QuotedPriceNotApplicable(quotedVersion, line.ProductId));
+                }
+
+                unitPrice = quoted.Amount;
+                priceVersion = quoted.Id;
+
+                if (product.EffectivePriceId != quoted.Id)
+                {
+                    // Not re-priced and not refused: the goods went out at this
+                    // number and the customer paid it. The difference from the
+                    // row now in effect is recorded so it can be reported
+                    // (OFFLINE_SYNC.md §7) rather than discovered in a total.
+                    await audit.WriteAsync(new AuditEntry(
+                        AuditActions.Sales.PriceVariance,
+                        "sale_line",
+                        line.ProductId.Value,
+                        NewValueJson: JsonSerializer.Serialize(
+                            new
+                            {
+                                ProductId = line.ProductId.Value,
+                                LocationId = command.LocationId.Value,
+                                Quantity = line.Quantity,
+                                QuotedPriceVersion = quoted.Id.Value,
+                                QuotedUnitPrice = quoted.Amount,
+                                EffectivePriceVersion = product.EffectivePriceId?.Value,
+                                EffectiveUnitPrice = product.EffectiveUnitPrice,
+                            },
+                            JsonDefaults),
+                        LocationId: command.LocationId),
+                        cancellationToken).ConfigureAwait(false);
+                }
             }
             else
             {

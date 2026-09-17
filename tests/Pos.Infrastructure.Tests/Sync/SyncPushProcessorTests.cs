@@ -4,6 +4,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
+using Pos.Domain.Auditing;
 using Pos.Domain.Common;
 using Pos.Infrastructure.Persistence;
 using Pos.Infrastructure.Sync;
@@ -42,7 +43,7 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
         this.context = new PosDbContext(options);
         await this.context.Database.EnsureCreatedAsync();
 
-        this.applier = new CountingApplier();
+        this.applier = new CountingApplier { Context = this.context };
         this.processor = new SyncPushProcessor(this.context, new FixedClock(Now), [this.applier]);
     }
 
@@ -148,6 +149,34 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhatARefusedEventTouchedBeforeItRefused_IsThrownAway()
+    {
+        this.applier.RejectSequence = 1;
+        this.applier.StageBeforeAnswering = true;
+
+        SyncPushResponse response = await Push(Event(1, "{\"a\":1}"), Event(2, "{\"a\":2}"));
+
+        response.Results[0].Outcome.Should().Be(SyncOutcome.Rejected);
+        response.Results[1].Outcome.Should().Be(SyncOutcome.Accepted);
+
+        // The refused event staged an audit entry before it gave its verdict, as
+        // a real applier does when it writes a note and then hits a rule several
+        // steps later. Committing that alongside the refusal would leave the
+        // audit trail describing something that never happened.
+        List<string> recorded = await this.context.AuditLog
+            .AsNoTracking()
+            .Select(e => e.Action)
+            .ToListAsync(CancellationToken.None);
+
+        recorded.Should().ContainSingle(
+            "only the event that took effect left a trace")
+            .Which.Should().Be("test.applied");
+
+        // And the refusal is still answered for, so the queue behind it moves.
+        (await this.context.ProcessedEvents.AsNoTracking().CountAsync(CancellationToken.None)).Should().Be(2);
+    }
+
+    [Fact]
     public async Task ClockSkewIsReportedRatherThanCorrected()
     {
         SyncPushResponse response = await Push(
@@ -195,6 +224,11 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
 
         public long? RejectSequence { get; set; }
 
+        /// <summary>Writes a row before answering, as a real applier does.</summary>
+        public bool StageBeforeAnswering { get; set; }
+
+        public PosDbContext? Context { get; set; }
+
         public Task<SyncApplyResult> ApplyAsync(
             DeviceId deviceId,
             string payloadJson,
@@ -202,7 +236,30 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
         {
             Applications++;
 
-            return Task.FromResult(this.RejectSequence is not null && Applications == this.RejectSequence
+            bool refusing = this.RejectSequence is not null && Applications == this.RejectSequence;
+
+            if (this.StageBeforeAnswering && this.Context is { } context)
+            {
+                context.AuditLog.Add(AuditLogEntry.Record(
+                    refusing ? "test.refused" : "test.applied",
+                    "test",
+                    Guid.CreateVersion7(),
+                    Now,
+                    CorrelationId.New(),
+                    null,
+                    null,
+                    deviceId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null));
+            }
+
+            return Task.FromResult(refusing
                 ? SyncApplyResult.Rejected("test.refused", "Refused by the test.")
                 : SyncApplyResult.Accepted("DOC-1"));
         }

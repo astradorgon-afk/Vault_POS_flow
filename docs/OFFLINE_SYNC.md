@@ -256,6 +256,19 @@ the effect is committed but the idempotency record is not. A device that retries
 after a network timeout receives the original result, with the original document
 number, and posts nothing twice.
 
+**A refused event has no business effect, and that means none at all.** An
+applier can get several steps in before it refuses — writing a note, then hitting
+a rule — so a refusal rolls its transaction back and discards everything it
+staged before the verdict is recorded in a transaction of its own. Committing the
+two together would leave the audit trail describing something that never
+happened.
+
+One refusal is deliberately different: `sync.event_type_unsupported` records
+nothing and does **not** advance the checkpoint. The event is not wrong — this
+server is behind the device that sent it — so answering for it would destroy a
+business record an upgraded server could still apply. The device keeps retrying,
+and its queue stays behind that event until somebody notices.
+
 Each event also starts from a clean change tracker. A batch is a transport
 convenience, not a unit of work, and a device sends the lifecycle as a batch —
 a till locked and unlocked again arrives as two events touching one row. Without
@@ -298,15 +311,27 @@ for exactly this reason: the pipeline's authorization behaviour would evaluate
 the principal that *uploaded* the batch, where what matters is the cashier who
 rang the sale up, and it would refuse where the rule says flag.
 
-**Known gap: a sale the server prices differently is refused.** §7 says such a
-sale is accepted at the price actually charged with a `PriceVarianceRecorded`
-note. Today the server re-prices the line and the payments no longer settle the
-re-priced total, so the handler refuses with `sale.payment_mismatch`. Closing it
-means carrying the price row the device quoted, so the line is recorded against
-that version — not re-priced, and not dressed up as a manual override, which
-would put an unauthorized entry on the price-override report. Until then the
-record is parked rather than lost: the device escalates a refused event as a
-`SyncFailure` and keeps it forever (§3.2).
+**A sale is recorded at the price it was charged at, from the row it was charged
+from.** Each line carries `quotedPriceVersion` — the `ProductPriceId` the till
+priced from. The device sends the identifier and never the amount: the server
+reads the amount back off its own row, so a register can say *which* of head
+office's prices it charged but can never assert *what* that price was. A quoted
+row is honoured only once it is shown to price that product and to be either
+global or scoped to this location; anything else is refused with
+`sale.item.quoted_price_not_applicable`, which is what stops a crafted line
+paying biscuit money for a watch. A row the server does not hold at all is
+`sale.item.quoted_price_unknown`.
+
+This is deliberately **not** a price override. An override says a person keyed in
+a number and another person authorized it, and recording a stale price that way
+would put an entry nobody authorized on the price-override report. A quoted
+version says the amount came from one of the server's own rows — which it did.
+
+When the quoted row is no longer the effective one, the sale is accepted, the
+line is recorded at what was charged against the version it was charged from,
+and a `sale.price.variance` audit entry records both sides for the
+price-variance report. Never re-priced, never refused: the goods went out at
+that number and the customer paid it.
 
 **Why the close re-derives the variance.** The device computes its own from the
 sales it holds and prints it on the Z-report. The server derives its own because
@@ -452,7 +477,7 @@ has a defined rule:
 | Same event, different payload hash | `Rejected` + `SyncFailure('idempotency-key-reuse')` + security alert. |
 | Device offline for days, then floods events | Accepted in sequence order; each validated against *current* server state; business dates preserved. |
 | Product changed while device offline (name, category) | Server state wins for master data; the sale keeps the **historical** name/price it printed, stored on `sale_item`. |
-| Price changed while device offline | Sale is accepted at the price actually charged; a `PriceVarianceRecorded` note is attached when it differs from the server's effective price, and it appears on the price-variance report. No silent re-pricing. |
+| Price changed while device offline | Sale is accepted at the price actually charged, recorded against the `quotedPriceVersion` the line names; a `sale.price.variance` audit entry is written when that row is no longer the effective one, and it appears on the price-variance report. No silent re-pricing, and not recorded as a manual override. |
 | Product disabled while device offline | Sale **accepted** (goods left the shelf, the ledger must reflect reality) but flagged `RequiresReview`; the product stays disabled and no further sales are possible once the feed reaches the device. |
 | Product deleted | Impossible — products are never deleted, only deactivated. |
 | User permission reduced while offline | Evaluated at processing time: if the user lacks the permission **now**, the event is `RequiresReview` (not silently accepted, not destroyed). Cash-sale events are always accepted and flagged, because the money already changed hands. |

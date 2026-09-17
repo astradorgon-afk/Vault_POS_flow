@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Identity;
 using Pos.Domain.Auditing;
+using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
@@ -79,41 +80,85 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
-    public async Task ASaleSettledAtAPriceTheServerDoesNotHold_IsRefusedForNow_NotSilentlyRePriced()
+    public async Task ASalePricedFromASupersededRow_IsKeptAtWhatWasCharged_AndTheDifferenceReported()
     {
         Seed seed = await SeedAsync("sp2", shelfQty: 10m);
         using HttpClient client = factory.CreateClient();
         string token = await SignInAsync(client, seed);
 
+        // Head office raised the price to 60 while the register was offline. The
+        // device was still charging 45 a unit from the row it had cached, and
+        // the customer paid 90 for two and walked out.
+        Guid quoted = await factory.WithServiceAsync(context => context.Set<ProductPrice>()
+            .AsNoTracking()
+            .Where(p => p.ProductId == seed.Product)
+            .Select(p => p.Id.Value)
+            .FirstAsync());
+
+        await RepriceAsync(client, seed, 60m);
+
         Guid shiftId = Guid.CreateVersion7();
         string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
         string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
 
-        // The device's cached price was stale: it charged 80 for two where the
-        // server's effective row now says 90. The customer paid 80 and left.
         IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
             Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
-            Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 2m, netTotal: 80m)));
+            Event(2, "SaleCompleted", SalePayload(
+                seed, shiftId, saleNumber, quantity: 2m, netTotal: 90m, quotedPriceVersion: quoted)));
 
-        // This is a known gap, pinned here so it cannot change unnoticed.
-        // OFFLINE_SYNC.md §7 says such a sale is accepted at the price actually
-        // charged with the difference noted, and the server currently refuses it
-        // instead: it re-prices the line to 90, and the 80 that was tendered no
-        // longer settles the sale. Closing it means carrying the price row the
-        // device quoted, so the line is recorded against that version rather
-        // than re-priced or dressed up as a manual override.
-        //
-        // The record is parked, not destroyed: the device escalates a refused
-        // event as a SyncFailure and keeps it forever (OFFLINE_SYNC.md §3.2).
+        results[1].GetProperty("outcome").GetString().Should().Be(
+            "Accepted", "the goods are gone and the money is in the drawer");
+
+        Sale sale = await factory.WithServiceAsync(context => context.Sales
+            .AsNoTracking()
+            .Include(s => s.Items)
+            .SingleAsync(s => s.Number == saleNumber));
+
+        // Recorded at what was charged, against the row it was charged from —
+        // not re-priced to 60, and not marked as a manual override, which would
+        // put an entry nobody authorized on the price-override report.
+        sale.NetTotal.Should().Be(90m);
+        sale.Items.Single().UnitPrice.Should().Be(45m);
+        sale.Items.Single().PriceVersion.Value.Should().Be(quoted);
+        sale.Items.Single().PriceWasOverridden.Should().BeFalse();
+
+        bool reported = await factory.WithServiceAsync(context => context.AuditLog
+            .AsNoTracking()
+            .AnyAsync(e => e.Action == AuditActions.Sales.PriceVariance));
+
+        reported.Should().BeTrue("the difference is reported, never silently absorbed");
+    }
+
+    [Fact]
+    public async Task ALineQuotingAnotherProductsPriceRow_IsRefused()
+    {
+        Seed seed = await SeedAsync("sp7", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        // A cheap product's price row, aimed at an expensive product's line.
+        ProductId other = await factory.CreateProductAsync("SY-sp7-P2", "Sync Product sp7b", "610sp7b0001");
+        await RepriceAsync(client, seed, 5m, other);
+
+        Guid foreign = await factory.WithServiceAsync(context => context.Set<ProductPrice>()
+            .AsNoTracking()
+            .Where(p => p.ProductId == other)
+            .Select(p => p.Id.Value)
+            .FirstAsync());
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", SalePayload(
+                seed, shiftId, saleNumber, quantity: 1m, netTotal: 5m, quotedPriceVersion: foreign)));
+
         results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
         results[1].GetProperty("errorCode").GetString().Should().Be(
-            "sale.payment_mismatch", "the refusal names the re-pricing, not the sale");
-
-        bool held = await factory.WithServiceAsync(context => context.Sales
-            .AsNoTracking()
-            .AnyAsync(s => s.Number == saleNumber));
-
-        held.Should().BeFalse("nothing half-applied: the refusal rolled its transaction back");
+            "sale.item.quoted_price_not_applicable",
+            "naming one of our price rows is not the same as being priced by it");
     }
 
     [Fact]
@@ -259,7 +304,8 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
         string number,
         decimal quantity,
         decimal netTotal,
-        UserId? cashier = null)
+        UserId? cashier = null,
+        Guid? quotedPriceVersion = null)
         => new(
             Guid.CreateVersion7(),
             Guid.CreateVersion7(),
@@ -272,7 +318,8 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
             netTotal,
             DateTimeOffset.UtcNow,
             BusinessDate,
-            [new SaleLineSyncPayload(seed.Product.Value, quantity, seed.UnitId.Value, seed.Barcode, null, null, 0m, null)],
+            [new SaleLineSyncPayload(
+                seed.Product.Value, quantity, seed.UnitId.Value, seed.Barcode, null, null, 0m, null, quotedPriceVersion)],
             [new SalePaymentSyncPayload(nameof(PaymentMethod.Cash), netTotal, netTotal, null)]);
 
     private static object Event<TPayload>(long sequence, string type, TPayload payload)
@@ -317,6 +364,34 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
 
         using JsonDocument doc = JsonDocument.Parse(body);
         return [.. doc.RootElement.GetProperty("results").EnumerateArray().Select(e => e.Clone())];
+    }
+
+    private static async Task RepriceAsync(HttpClient client, Seed seed, decimal amount, ProductId? product = null)
+    {
+        string owner = await OwnerTokenAsync(client, seed);
+
+        using HttpRequestMessage request = new(
+            HttpMethod.Post,
+            new Uri($"/api/v1/catalog/products/{(product ?? seed.Product).Value}/prices", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new { amount, reason = "Sync test reprice", locationId = seed.Store.Value }),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", owner);
+
+        using HttpResponseMessage response = await client.SendAsync(request, CancellationToken.None);
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+    }
+
+    private static async Task<string> OwnerTokenAsync(HttpClient client, Seed seed)
+    {
+        using HttpResponseMessage signedIn = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { userName = seed.OwnerUserName, password = PosApiFactory.TestPassword },
+            CancellationToken.None);
+        signedIn.StatusCode.Should().Be(HttpStatusCode.OK, await signedIn.Content.ReadAsStringAsync());
+
+        using JsonDocument doc = JsonDocument.Parse(await signedIn.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("accessToken").GetString()!;
     }
 
     private static async Task<string> SignInAsync(HttpClient client, Seed seed)
@@ -382,7 +457,9 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
 
         await InventoryControlTestSupport.SetBucketAsync(factory, store, product, shelfQty, 30m);
 
-        return new Seed(store, cashierId, employeeCode, deviceCode, device, product, unitId, $"6100{suffix}0001");
+        return new Seed(
+            store, cashierId, employeeCode, deviceCode, device, product, unitId, $"6100{suffix}0001",
+            $"sync-{suffix}-owner");
     }
 
     private sealed record Seed(
@@ -393,5 +470,6 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
         DeviceId Device,
         ProductId Product,
         UnitOfMeasureId UnitId,
-        string Barcode);
+        string Barcode,
+        string OwnerUserName);
 }

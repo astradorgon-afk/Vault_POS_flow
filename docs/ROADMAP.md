@@ -259,8 +259,10 @@ Substantially delivered in Phase 1, because everything else depends on it.
       identifier carrying a different hash refused as tampering, a per-device
       checkpoint deferring gaps. C44 applies the four shift events centrally,
       replaying each transition through the aggregate; C45 applies the sale by
-      replaying it through the same handler the online endpoint runs. Void,
-      reprint, return and refund are still refused as unsupported)*
+      replaying it through the same handler the online endpoint runs, and C46
+      lets a line name the price row it was charged from so a stale price is
+      recorded rather than re-priced. Void, reprint, return and refund are still
+      refused as unsupported)*
 - [ ] Pull endpoint, change feed, cursors, rebaseline
 - [ ] Retry queue with exponential backoff
 - [ ] Conflict rules implementation

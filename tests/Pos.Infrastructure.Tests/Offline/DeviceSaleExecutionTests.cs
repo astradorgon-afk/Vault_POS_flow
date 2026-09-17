@@ -58,6 +58,24 @@ public sealed class DeviceSaleExecutionTests
             .Where(e => e.Type == SyncEventType.SaleCompleted)
             .SingleAsync(CancellationToken.None);
         queued.PayloadJson.Should().Contain("SAL-2026-D03-000001");
+
+        // The event carries what the cashier asked for, so head office can run
+        // it through the same handler rather than trust the device's arithmetic:
+        // the line, the payment, the price row it charged from, and the event
+        // identifier the ledger deduplicates on.
+        SaleSyncPayload payload = JsonSerializer.Deserialize<SaleSyncPayload>(queued.PayloadJson)!;
+        Sale local = await context.LocalSales
+            .Include(s => s.Items)
+            .SingleAsync(CancellationToken.None);
+
+        payload.EventId.Should().Be(local.EventId.Value);
+        payload.Lines.Should().ContainSingle();
+        payload.Lines[0].Quantity.Should().Be(3m);
+        payload.Lines[0].UnitPriceOverride.Should().BeNull("nobody keyed in a price");
+        payload.Lines[0].QuotedPriceVersion.Should().Be(
+            local.Items.Single().PriceVersion.Value,
+            "the row the till charged from is what lets the server record a stale price honestly");
+        payload.Payments.Should().ContainSingle();
     }
 
     [Fact]

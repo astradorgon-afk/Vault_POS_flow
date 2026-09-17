@@ -228,7 +228,12 @@ public sealed class SaleCompletedApplier(
                 // a device (OFFLINE_SYNC.md §4). Passing it through would let a
                 // crafted payload reach a path the till itself cannot.
                 AllowExpiredOverride: false,
-                ExpiredOverrideReason: null));
+                ExpiredOverrideReason: null,
+
+                // The row the till charged from. The server reads the amount
+                // back off it, so a stale price is recorded as what it was
+                // rather than re-priced or passed off as a manual override.
+                line.QuotedPriceVersion is { } quotedVersion ? new ProductPriceId(quotedVersion) : null));
         }
 
         return Result<CompleteSaleCommand>.Success(new CompleteSaleCommand(

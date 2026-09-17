@@ -73,6 +73,32 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<QuotedPrice>> GetQuotedPricesAsync(
+        IReadOnlyCollection<ProductPriceId> priceIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(priceIds);
+
+        if (priceIds.Count == 0)
+        {
+            return [];
+        }
+
+        // No effective-date filter: a superseded row is precisely what a device
+        // that priced before the change will name, and hiding it would turn a
+        // reportable variance into an unexplained refusal.
+        return
+        [
+            .. await context.Set<ProductPrice>()
+                .AsNoTracking()
+                .Where(p => priceIds.Contains(p.Id))
+                .Select(p => new QuotedPrice(p.Id, p.ProductId, p.LocationId, p.Amount))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false),
+        ];
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<SaleProduct>> GetSaleProductsAsync(
         IReadOnlyCollection<ProductId> productIds,
         LocationId locationId,

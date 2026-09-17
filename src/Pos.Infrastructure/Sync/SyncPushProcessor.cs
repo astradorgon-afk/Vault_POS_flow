@@ -205,6 +205,12 @@ public sealed class SyncPushProcessor(
 
         if (!this.byType.TryGetValue(uploaded.Type, out ISyncEventApplier? applier))
         {
+            // Deliberately without a processed-event record or a checkpoint
+            // advance, unlike every other refusal. The event is not wrong — this
+            // server is behind the device that sent it — so recording an answer
+            // would destroy a business record that an upgraded server could
+            // still apply. The device keeps retrying, and its queue stays behind
+            // this event until somebody notices.
             return new SyncEventResult(
                 uploaded.EventId,
                 SyncOutcome.Rejected,
@@ -219,6 +225,79 @@ public sealed class SyncPushProcessor(
 
         SyncApplyResult applied = await applier
             .ApplyAsync(deviceId, uploaded.PayloadJson, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (applied.Outcome is SyncOutcome.Rejected or SyncOutcome.Conflict)
+        {
+            // A refused event has no business effect, and "no effect" has to
+            // mean none at all. An applier that got several steps in before
+            // refusing may have written rows already, or left an audit entry
+            // staged describing something that did not happen; committing the
+            // verdict alongside them would make the audit trail claim otherwise.
+            // So the work is thrown away and the verdict recorded on its own.
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            context.ChangeTracker.Clear();
+
+            return await RecordRefusalAsync(deviceId, uploaded, eventId, uploadedHash, applied, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        DateTimeOffset appliedAt = clock.UtcNow;
+
+        context.ProcessedEvents.Add(new ProcessedEvent(
+            eventId,
+            deviceId,
+            uploaded.DeviceSequence,
+            uploaded.Type,
+            uploadedHash,
+            applied.Outcome.ToString(),
+            applied.ServerDocumentNumber,
+            appliedAt));
+
+        // A refused event still advances the checkpoint. It has been answered
+        // for, and leaving it behind would stall every event after it forever.
+        if (checkpoint is null)
+        {
+            context.SyncCheckpoints.Add(new SyncCheckpoint(deviceId, uploaded.DeviceSequence, appliedAt));
+        }
+        else
+        {
+            checkpoint.Advance(uploaded.DeviceSequence, appliedAt);
+        }
+
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        return new SyncEventResult(
+            uploaded.EventId,
+            applied.Outcome,
+            applied.ServerDocumentNumber,
+            appliedAt,
+            applied.ErrorCode,
+            applied.Message);
+    }
+
+    /// <summary>
+    /// Records that a refused event was answered for, in a transaction of its
+    /// own, after everything the applier touched has been discarded.
+    /// </summary>
+    private async Task<SyncEventResult> RecordRefusalAsync(
+        DeviceId deviceId,
+        SyncPushEvent uploaded,
+        EventId eventId,
+        byte[] uploadedHash,
+        SyncApplyResult applied,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await context.Database
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Re-read: the rollback discarded the instance the checkpoint was
+        // tracked on, and advancing a stale copy would save nothing.
+        SyncCheckpoint? checkpoint = await context.SyncCheckpoints
+            .AsTracking()
+            .FirstOrDefaultAsync(c => c.DeviceId == deviceId, cancellationToken)
             .ConfigureAwait(false);
 
         DateTimeOffset appliedAt = clock.UtcNow;

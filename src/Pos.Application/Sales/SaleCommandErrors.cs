@@ -58,6 +58,32 @@ internal static class SaleCommandErrors
         "sale.price_override_not_authorized",
         "The user recorded as price-override authorizer does not hold the sale.price_override permission.");
 
+    /// <summary>The line names a price row this server does not hold.</summary>
+    /// <param name="priceVersion">The row that was named.</param>
+    /// <returns>The error.</returns>
+    public static Error QuotedPriceUnknown(ProductPriceId priceVersion) => Error.Conflict(
+        "sale.item.quoted_price_unknown",
+        FormattableString.Invariant(
+            $"Price row {priceVersion.Value} is not one this server holds, so the amount charged cannot be verified."),
+        new Dictionary<string, object?>
+        {
+            ["quotedPriceVersion"] = priceVersion.Value,
+        });
+
+    /// <summary>The quoted price row could never have applied to this line.</summary>
+    /// <param name="priceVersion">The row that was named.</param>
+    /// <param name="productId">The product the line sells.</param>
+    /// <returns>The error.</returns>
+    public static Error QuotedPriceNotApplicable(ProductPriceId priceVersion, ProductId productId) => Error.Conflict(
+        "sale.item.quoted_price_not_applicable",
+        FormattableString.Invariant(
+            $"Price row {priceVersion.Value} does not price product {productId.Value} at this location."),
+        new Dictionary<string, object?>
+        {
+            ["quotedPriceVersion"] = priceVersion.Value,
+            ["productId"] = productId.Value,
+        });
+
     /// <summary>The cashier lacks the authority to sell from an expired batch.</summary>
     public static Error ExpiredOverrideDenied => Error.Forbidden(
         "sale.expired_override_denied",

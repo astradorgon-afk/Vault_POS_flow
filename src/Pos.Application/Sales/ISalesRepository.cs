@@ -41,6 +41,24 @@ public interface ISalesRepository
     Task<Result<SaleId>> UpdateAsync(Sale sale, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Loads the price rows a sale's lines say they were quoted from.
+    /// </summary>
+    /// <remarks>
+    /// The device sends identifiers and the server reads the amounts, so a
+    /// register can name which of head office's own prices it charged but can
+    /// never assert what that price was. A row that is superseded or expired is
+    /// still returned: that a quoted price is no longer effective is exactly the
+    /// case the caller has to recognise, and it cannot recognise what it is not
+    /// given.
+    /// </remarks>
+    /// <param name="priceIds">The price rows named by the lines that name one.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The rows found, possibly fewer than were asked for.</returns>
+    Task<IReadOnlyList<QuotedPrice>> GetQuotedPricesAsync(
+        IReadOnlyCollection<ProductPriceId> priceIds,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Loads the facts a sale depends on for a location.
     /// </summary>
     /// <param name="locationId">The location.</param>
@@ -204,3 +222,16 @@ public sealed record SaleProduct(
     bool TracksBatches,
     ProductPriceId? EffectivePriceId,
     decimal? EffectiveUnitPrice);
+
+/// <summary>
+/// A price row a sale line was quoted from, read back by identifier.
+/// </summary>
+/// <param name="Id">The price row.</param>
+/// <param name="ProductId">The product it prices, checked against the line.</param>
+/// <param name="LocationId">The location it is scoped to, or null for every location.</param>
+/// <param name="Amount">The amount, as the server holds it.</param>
+public sealed record QuotedPrice(
+    ProductPriceId Id,
+    ProductId ProductId,
+    LocationId? LocationId,
+    decimal Amount);

@@ -72,6 +72,17 @@ public sealed record CompleteSaleCommand(
 /// <param name="AllowExpiredOverride">Whether an expired batch may cover the line when sellable stock runs short.</param>
 /// <param name="ExpiredOverrideReason">The reason for selling from an expired batch; required and limited to
 /// <see cref="CompleteSaleLine.ExpiredOverrideReasonMaxLength"/> characters when <paramref name="AllowExpiredOverride"/> is set.</param>
+/// <param name="QuotedPriceVersion">
+/// The price row the terminal quoted to the customer, when it names one. It is
+/// not an override: it says which of the server's own price rows produced the
+/// number the customer agreed to pay, which is the difference between recording
+/// a stale price honestly and dressing it up as a manual entry nobody
+/// authorized. The server still re-reads the row — the device sends an
+/// identifier, never an amount — and refuses one that does not belong to the
+/// product or to the location's pricing scope. A quoted row that is no longer
+/// the effective one is recorded and reported as a price variance, never
+/// silently re-priced (OFFLINE_SYNC.md §7).
+/// </param>
 public sealed record CompleteSaleLine(
     ProductId ProductId,
     decimal Quantity,
@@ -82,7 +93,8 @@ public sealed record CompleteSaleLine(
     decimal Discount,
     UserId? DiscountAuthorizedByUserId,
     bool AllowExpiredOverride,
-    string? ExpiredOverrideReason)
+    string? ExpiredOverrideReason,
+    ProductPriceId? QuotedPriceVersion = null)
 {
     /// <summary>The maximum length of an expired-override reason.</summary>
     public const int ExpiredOverrideReasonMaxLength = 500;
