@@ -368,6 +368,11 @@ to build. The reference rules for `Pos.Client` are already asserted in
 ARCHITECTURE.md and will be enforced by an architecture test when the project
 appears.
 
+**Follow-up (2026-09-17).** The project arrived in C28 with that architecture
+test, but C28 left CI restoring the whole solution on a runner without the MAUI
+workloads, which fails. Since C29c the server job leaves the client out and
+dedicated Android and Windows jobs build it (DEPLOYMENT.md §8).
+
 ---
 
 ## ADR-0020 — The balance guard is a deferred constraint trigger

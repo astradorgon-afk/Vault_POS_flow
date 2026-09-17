@@ -35,7 +35,8 @@ Last updated: 2026-09-16
 
 - [x] Create solution and the server/web projects with correct references
       (`Pos.Client` is created in Phase 12 with the rest of the device work, so
-      CI does not need the Android SDK before there is anything to build)
+      CI does not need the Android SDK before there is anything to build; since
+      C29c CI builds it in its own Android and Windows jobs)
 - [x] Central package management (`Directory.Packages.props`) and build props
 - [x] `.editorconfig`, nullable + warnings-as-errors, analyzers
 - [x] Transitive package pins for published advisories, enforced by NU1903

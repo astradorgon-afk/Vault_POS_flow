@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application and C29b device keying complete
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application and C29b device keying complete; C29c CI repair in progress (uncommitted)
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
-| Tests | **1,013 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 148, Security 52, Architecture 14, API 174** (2026-09-17, through C29b device keying). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **1,013 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 148, Security 52, Architecture 14, API 174** (2026-09-17, through C29b device keying). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
 | Migrations | 28 PostgreSQL migrations plus 2 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -1013,7 +1013,8 @@ Stated plainly so they are not mistaken for finished work:
 | A scheduled price cannot be cancelled once it has taken effect | Phase 3 | Past prices are history; change an effective price by scheduling a replacement. Pre-effective cancellation is implemented (C19): `catalog.price_cancel_successor` / `catalog.price_cancel_chain` refuse rewinds that would renumber another plan. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
-| CI cannot build the solution since `Pos.Client` joined it | CI (C28) | `build-and-test` restores `VaultFlow.slnx` on Ubuntu without the MAUI Android workload, which `net10.0-android` requires. Nothing is pushed yet; the job needs the workload installed, or the client built in its own job. |
+| CI cannot build the solution since `Pos.Client` joined it | CI (C28); fix in progress (C29c) | Reproduced in a clean `sdk:10.0.301` Linux container: restore fails with `NETSDK1147` (needs `maui-android`). The uncommitted C29c workflow fixes the server job and adds client jobs; the Android job is not yet verified (see §5). Nothing is pushed. |
+| PostgreSQL suites turn any container start-up failure into a skip | Tests (Phase 1) | The Infrastructure PostgreSQL classes catch every exception from starting the container and skip, as if Docker were absent. On 2026-09-17, under heavy Docker load, all 18 skipped while Docker was running; alone, they all ran and passed. In CI, where Docker is guaranteed, a broken start would pass green without exercising the triggers and grants. Skipping should happen only when no Docker endpoint exists, or CI should fail on skips. |
 
 ---
 
@@ -1023,8 +1024,34 @@ Phase 11 is complete. Phase 12 has the Windows/Android client, the encrypted
 device database (C28), protected change-feed application (C29) and raw-key
 device keying (C29b). Continue in this order:
 
-1. **CI (from §4):** install the MAUI Android workload, or build the client in
-   its own job, so CI can build the solution again.
+1. **Finish C29c, the CI repair (uncommitted; work stopped 2026-09-17).**
+   Changed so far: `.github/workflows/ci.yml`, `src/Pos.Client/MauiProgram.cs`,
+   DEPLOYMENT.md §8, ROADMAP.md, and DECISIONS.md (ADR-0019 follow-up).
+   - `build-and-test` now removes `Pos.Client` from its checkout's solution
+     first. **Verified** in a clean `sdk:10.0.301` Linux container from a fresh
+     clone: restore and Release build succeeded with 0 warnings, and every
+     non-PostgreSQL suite passed. The same container without that step
+     reproduces CI's `NETSDK1147` failure.
+   - New `build-client-windows` job (`windows-latest`, workload set `10.0.301`,
+     Release, Windows target only). **Verified** except the workload install:
+     the Release build from a fresh clone found a real error. `MauiProgram.cs`
+     imported `Microsoft.Extensions.Logging` for a Debug-only call, so Release
+     failed on IDE0005. The directive is now under `#if DEBUG`, and Release and
+     Debug both build with 0 warnings. The workload install was not run here
+     because it would change this machine's Visual Studio-managed workloads.
+   - New `build-client-android` job (`ubuntu-latest`, .NET under the runner's
+     temp directory, Microsoft JDK 17, workload set `10.0.301`,
+     `InstallAndroidDependencies`, then a Release build). **Partly verified.**
+     The pinned `dotnet workload install maui-android --version 10.0.301`
+     succeeds in a clean Ubuntu 24.04 container, and on Windows the dependency
+     target fills an empty SDK directory (android-36, build-tools 36.0.0). On
+     Linux the dependency step failed inside the container with
+     `CommonUtilities.Helpers.UserName must have a valid value`: the container
+     runs as root with no `USER` variable, which GitHub runners do set. Next:
+     rerun with `USER` set (the `vf-ci-android-state` image holds the installed
+     workload and JDK), then run the Release build, which has not run on Linux
+     yet. If the variable matters, set it in the job.
+   - Then commit C29c. Nothing in it is pushed.
 2. **C30 — client command boundary:** register only the offline-safe command
    handlers and prove server-only use cases cannot resolve in the client.
 3. **C31 — device numbering and permission expiry:** allocate stable

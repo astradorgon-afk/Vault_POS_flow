@@ -1,4 +1,6 @@
+#if DEBUG
 using Microsoft.Extensions.Logging;
+#endif
 using Pos.Application.Common.Abstractions;
 using Pos.Client.Storage;
 using Pos.Infrastructure.Common;

@@ -140,6 +140,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C28 — Windows/Android MAUI Blazor Hybrid client; dedicated seven-table device schema; SQLCipher encryption with a 256-bit key held in platform `SecureStorage`; initial SQLite migration; cached product/barcode/price/location/user and permission-snapshot entities; money and UTC text converters; global/store snapshot uniqueness; architecture and encrypted-file regression tests.
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
   - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
+  - [~] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. Uncommitted: the Linux Android job is not fully verified (STATUS.md §5).
   - [ ] C30 — client command boundary: only offline-safe handlers resolve in the client
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
@@ -901,3 +902,36 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   Reverting to passphrase keying or rebuilding the key per call turns the
   matching tests red. The 49 device tests now run in 17 s (C29's 43 took 3 min
   27 s). No device database existed to migrate: nothing is deployed.
+
+### C29c — CI repair (in progress, uncommitted)
+
+- **Diagnosis, reproduced:** in a clean `mcr.microsoft.com/dotnet/sdk:10.0.301`
+  Linux container, `dotnet restore VaultFlow.slnx` from a fresh clone fails with
+  `NETSDK1147` (needs `maui-android`), exactly as `build-and-test` would.
+- **`build-and-test`** now removes `Pos.Client` from its checkout's solution
+  first. Verified in the same clean container: restore and Release build
+  succeed with 0 warnings; Domain 378, Application 247, Architecture 14,
+  Security 52, Infrastructure 147 and API 174 pass. That includes the 49
+  SQLCipher device tests, so the encrypted SQLite library works on Linux.
+- **`build-client-windows`** (new): Release build of the Windows target. From a
+  fresh clone it failed on a real error: `MauiProgram.cs` imported
+  `Microsoft.Extensions.Logging` for a call made only in Debug, so Release
+  failed on IDE0005. Every earlier build had been Debug. The directive is now
+  under `#if DEBUG`; Release and Debug build with 0 warnings. The workload
+  install step was not run locally, because it would change this machine's
+  Visual Studio-managed workloads.
+- **`build-client-android`** (new): pinned workload install verified in a clean
+  Ubuntu 24.04 container; `InstallAndroidDependencies` verified on Windows
+  against an empty SDK directory. On Linux the container run failed with
+  `CommonUtilities.Helpers.UserName must have a valid value` (root, no `USER`
+  variable). The Release Android build has not run on Linux yet.
+- **Workload pin:** every published set in the 10.0.300 band ships MAUI
+  10.0.20, the version `Directory.Packages.props` pins. Set `10.0.301` matches
+  `global.json`, and DEPLOYMENT.md §8 says to move the two together.
+- **PostgreSQL suites:** with Docker restarted, all 21 passed. A first run under
+  heavy Docker load silently skipped the 18 Infrastructure tests; a probe showed
+  the container starts fine alone. Recorded as a known gap: the skip check
+  treats any start-up failure as "no Docker".
+- **Docker Desktop** crashed at start on the known stale socket
+  (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
+  to `*.stale-20260917` fixed it again.

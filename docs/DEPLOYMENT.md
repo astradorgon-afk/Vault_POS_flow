@@ -168,3 +168,18 @@ locally and never transmits a private key.
 The MAUI client is built on Windows runners for the Windows target and Linux
 runners for Android. Client builds are gated on the shared projects compiling and
 the shared UI tests passing.
+
+How that is wired (since C29c):
+
+- `build-and-test` runs on Ubuntu without the MAUI workloads, so its first step
+  removes `Pos.Client` from that checkout's copy of `VaultFlow.slnx`. Everything
+  else in the solution, including projects added later, is restored, built and
+  tested as before.
+- `build-client-android` (Ubuntu) and `build-client-windows` (Windows) run only
+  after `build-and-test` passes, and build the client in Release, which runs the
+  Android trimmer under warnings-as-errors. The Android job installs .NET under
+  the runner's temp directory so the workload install needs no elevated rights,
+  and tops up the Android SDK with `InstallAndroidDependencies`.
+- Both install their workloads from workload set `10.0.301`, the set matching
+  the SDK in `global.json`. When `global.json` moves to another SDK band, move
+  the workload set with it (`dotnet workload search version` lists them).
