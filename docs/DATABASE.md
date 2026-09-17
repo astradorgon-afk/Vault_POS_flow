@@ -599,8 +599,10 @@ Differences:
 - Partitioning, `EXCLUDE` constraints, `jsonb`, and `inet` are unavailable; the
   equivalents are `TEXT` + application validation. The overlapping-price rule is
   enforced by the sync writer, which only ever inserts server-vetted rows.
-- The file is encrypted at rest (SQLCipher-style key from the platform secure
-  store: DPAPI/Windows Credential Locker, Android Keystore).
+- The file is encrypted at rest with SQLCipher. The key is 256 random bits held
+  in the platform secure store (DPAPI/Windows Credential Locker, Android
+  Keystore) and applied as a raw key, so no passphrase derivation runs when a
+  connection opens.
 - Retention job prunes synced sales and movements older than 90 days, keeping
   aggregate shift totals for offline reporting.
 

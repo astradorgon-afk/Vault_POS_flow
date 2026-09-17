@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application complete
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application and C29b device keying complete
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
-| Tests | **1,006 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 141, Security 52, Architecture 14, API 174** (2026-09-17, through C29 change-feed application). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Tests | **1,013 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 148, Security 52, Architecture 14, API 174** (2026-09-17, through C29b device keying). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
 | Migrations | 28 PostgreSQL migrations plus 2 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -22,7 +22,7 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    141 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store, change-feed application and its write guards
+Pos.Infrastructure.Tests    148 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards
 Pos.Architecture.Tests       14 passing   layering, ledger isolation, permission catalogue and client reference boundary
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -725,7 +725,9 @@ wrong string (`sale.external_customer_missing`).
 C28 creates the Windows and Android `Pos.Client` MAUI Blazor Hybrid application
 and the first independently migrated device database. The SQLCipher file uses a
 random 256-bit key held in platform `SecureStorage`, private connections and no
-pooling. `PosDeviceDbContext` exposes only device profile, product, barcode,
+pooling. Since C29b the key is applied as a SQLCipher raw key, so opening a
+connection runs no passphrase derivation, and it is read from the secure store
+once per process. `PosDeviceDbContext` exposes only device profile, product, barcode,
 price, location, user and time-bounded permission-snapshot tables; server
 identity, purchasing, audit and reporting tables cannot enter this database.
 Money remains exact decimal text and UTC timestamps use round-trip text.
@@ -749,12 +751,36 @@ closed because the function does not exist there (migration
 `DeviceChangeFeedGuards`). Disabling both guards turns exactly the 15
 guard-dependent tests red.
 
+C29b fixes the cost of opening the device database, found while testing C29.
+Keyed as a passphrase, every connection open ran SQLCipher's PBKDF2 and took
+650–800 ms; with pooling off, EF opens a connection per operation, so every
+offline cache read would have paid it. The key provider now returns the 256 key
+bits, the initializer refuses any other length, clears the array, and passes
+the bits as a raw key: an open costs about 2 ms and the 49 device tests run in
+17 s, where C29's 43 took 3 min 27 s. The key and the context options are
+built once per process; a failed secure-store read is retried rather than
+remembered. The initializer's pragmas were corrected at the same time:
+`cipher_memory_security` is process-wide and the WAL journal mode is stored in
+the file, so both reach every connection, but `synchronous = NORMAL` and
+`busy_timeout` had only ever applied to the discarded verification connection.
+They are removed rather than spread to every connection, so writes stay at
+`synchronous = FULL`, the behavior every test has exercised, and a committed
+sale survives power loss.
+
 ---
 
 ## 3. Bugs the tests caught this session
 
 Worth recording, because each was invisible in review and would have been
 expensive in production.
+
+**Every offline cache read would have cost most of a second.** The device
+database was keyed with its 256-bit random key as a passphrase, so SQLCipher ran
+PBKDF2 on every connection open (650–800 ms measured), and connections are not
+pooled. Nothing failed; C29's device tests were just slow, 3.7 seconds each,
+which is what gave it away. On a register every barcode lookup would have paid
+it, more on Android. The key is now applied as a raw key (C29b); a test proves
+the same bits as a passphrase are refused, so derivation cannot creep back.
 
 **The API had never started on PostgreSQL.** Every endpoint test hosts the API
 on SQLite, and the PostgreSQL suites build their own context. Running the real
@@ -987,7 +1013,6 @@ Stated plainly so they are not mistaken for finished work:
 | A scheduled price cannot be cancelled once it has taken effect | Phase 3 | Past prices are history; change an effective price by scheduling a replacement. Pre-effective cancellation is implemented (C19): `catalog.price_cancel_successor` / `catalog.price_cancel_chain` refuse rewinds that would renumber another plan. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
-| Every device connection open re-derives the SQLCipher key | Phase 12 (C28) | Measured 650–800 ms per keyed open on a desktop; queries on an open connection take under 1 ms. `Pooling = false` makes EF open a fresh connection per operation, so each offline cache read (a barcode scan) pays it, more on Android. The key is already 256 random bits, so SQLCipher's raw-key form (skipping PBKDF2) or one held connection per context would remove it. The per-connection pragmas in `DeviceDatabaseInitializer` (`cipher_memory_security`, `synchronous`, `busy_timeout`) also reach only its verification connection. |
 | CI cannot build the solution since `Pos.Client` joined it | CI (C28) | `build-and-test` restores `VaultFlow.slnx` on Ubuntu without the MAUI Android workload, which `net10.0-android` requires. Nothing is pushed yet; the job needs the workload installed, or the client built in its own job. |
 
 ---
@@ -995,11 +1020,11 @@ Stated plainly so they are not mistaken for finished work:
 ## 5. What to do next
 
 Phase 11 is complete. Phase 12 has the Windows/Android client, the encrypted
-device database (C28) and protected change-feed application (C29). Continue in
-this order:
+device database (C28), protected change-feed application (C29) and raw-key
+device keying (C29b). Continue in this order:
 
-1. **Device connection cost and CI (from §4):** remove the per-open key
-   derivation before any UI reads the cache, and let CI build the client.
+1. **CI (from §4):** install the MAUI Android workload, or build the client in
+   its own job, so CI can build the solution again.
 2. **C30 — client command boundary:** register only the offline-safe command
    handlers and prove server-only use cases cannot resolve in the client.
 3. **C31 — device numbering and permission expiry:** allocate stable

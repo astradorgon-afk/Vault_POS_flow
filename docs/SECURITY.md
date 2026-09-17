@@ -195,7 +195,10 @@ endpoints are audited.
 - Connection strings use a least-privilege role (`pos_app`), never the owner.
 - Client-side: API base URL and enrolment code are configuration; the refresh
   token and SQLite encryption key live in the platform secure store
-  (Windows Credential Locker / DPAPI, Android Keystore).
+  (Windows Credential Locker / DPAPI, Android Keystore). The database key is
+  256 random bits applied as a SQLCipher raw key: key stretching protects
+  guessable passphrases and adds nothing to a random key, while costing
+  hundreds of milliseconds on every connection open.
 
 ---
 

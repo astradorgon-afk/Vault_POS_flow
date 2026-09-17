@@ -9,26 +9,30 @@ public sealed class SecureStorageDeviceDatabaseKeyProvider : IDeviceDatabaseKeyP
     private const string KeyName = "vaultflow.device.database.key.v1";
 
     /// <inheritdoc />
-    public async ValueTask<string> GetDatabaseKeyAsync(CancellationToken cancellationToken)
+    /// <remarks>
+    /// A stored key that no longer decodes is never replaced: a new key would
+    /// silently orphan the encrypted store, so the failure surfaces instead.
+    /// </remarks>
+    public async ValueTask<byte[]> GetDatabaseKeyAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         string? existing = await SecureStorage.Default.GetAsync(KeyName).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(existing))
         {
-            return existing;
+            return Convert.FromBase64String(existing);
         }
 
-        byte[] bytes = RandomNumberGenerator.GetBytes(32);
+        byte[] created = RandomNumberGenerator.GetBytes(DeviceDatabaseInitializer.KeyLengthBytes);
         try
         {
-            string created = Convert.ToBase64String(bytes);
-            await SecureStorage.Default.SetAsync(KeyName, created).ConfigureAwait(false);
+            await SecureStorage.Default.SetAsync(KeyName, Convert.ToBase64String(created)).ConfigureAwait(false);
             return created;
         }
-        finally
+        catch
         {
-            CryptographicOperations.ZeroMemory(bytes);
+            CryptographicOperations.ZeroMemory(created);
+            throw;
         }
     }
 }

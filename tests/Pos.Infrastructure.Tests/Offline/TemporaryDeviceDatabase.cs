@@ -7,7 +7,8 @@ namespace Pos.Infrastructure.Tests.Offline;
 /// <summary>A migrated, encrypted device database in its own temporary directory.</summary>
 internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
 {
-    public const string EncryptionKey = "test-only-32-byte-device-key-value";
+    /// <summary>A fixed 256-bit test key: bytes 1 to 32.</summary>
+    public static readonly byte[] EncryptionKey = [.. Enumerable.Range(1, DeviceDatabaseInitializer.KeyLengthBytes).Select(i => (byte)i)];
 
     public static readonly DateTimeOffset Now = new(2026, 9, 17, 2, 0, 0, TimeSpan.Zero);
 
@@ -32,7 +33,7 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
     {
         DataSource = DatabasePath,
         Mode = SqliteOpenMode.ReadWrite,
-        Password = EncryptionKey,
+        Password = DeviceDatabaseInitializer.RawKey(EncryptionKey),
         ForeignKeys = true,
         Pooling = false,
     }.ToString();
@@ -58,10 +59,11 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    private sealed class FixedKeyProvider(string key) : IDeviceDatabaseKeyProvider
+    /// <summary>Hands out a copy each time, because the initializer clears the key it receives.</summary>
+    private sealed class FixedKeyProvider(byte[] key) : IDeviceDatabaseKeyProvider
     {
-        public ValueTask<string> GetDatabaseKeyAsync(CancellationToken cancellationToken)
-            => ValueTask.FromResult(key);
+        public ValueTask<byte[]> GetDatabaseKeyAsync(CancellationToken cancellationToken)
+            => ValueTask.FromResult(key.ToArray());
     }
 
     private sealed class FixedClock(DateTimeOffset now) : ISystemClock

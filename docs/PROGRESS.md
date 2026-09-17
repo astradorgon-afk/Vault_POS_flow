@@ -35,7 +35,7 @@ cancellation — `Product.CancelScheduledPrice`, the cancel endpoint under
 `Permissions.Catalog.ManagePrices`, the `catalog.price_cancel_*` refusals and
 the `product.price.cancelled` audit) are
 complete; details are in the log below.
-**Last commits:** C29 (protected change-feed application), C28 (device SQLite foundation), C27 (emergency-transfer alerts), C26 (receiving and transfer discrepancy alerts), C25 (low-stock alerts), C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
+**Last commits:** C29b (raw-key device keying), C29 (protected change-feed application), C28 (device SQLite foundation), C27 (emergency-transfer alerts), C26 (receiving and transfer discrepancy alerts), C25 (low-stock alerts), C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -139,6 +139,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
 - [~] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
   - [x] C28 — Windows/Android MAUI Blazor Hybrid client; dedicated seven-table device schema; SQLCipher encryption with a 256-bit key held in platform `SecureStorage`; initial SQLite migration; cached product/barcode/price/location/user and permission-snapshot entities; money and UTC text converters; global/store snapshot uniqueness; architecture and encrypted-file regression tests.
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
+  - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
   - [ ] C30 — client command boundary: only offline-safe handlers resolve in the client
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
@@ -879,3 +880,24 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - Found while testing: each keyed connection open costs 650–800 ms (SQLCipher
   PBKDF2 with pooling disabled), and CI cannot build `Pos.Client` on Ubuntu
   without the MAUI Android workload. Both are recorded in STATUS.md §4.
+
+### C29b — raw-key device keying (`perf(offline-c29b)`)
+
+- `IDeviceDatabaseKeyProvider` now returns the key's 256 bits. The initializer
+  refuses any other length before touching the file, clears the array, and
+  passes the bits to SQLCipher as a raw key, so opening a connection runs no
+  PBKDF2. Measured: 650–800 ms per open as a passphrase, about 2 ms as a raw key.
+- The keyed connection string and EF options are built once per process, so the
+  platform secure store is read once; a failed read is retried on the next call.
+  The secure-storage provider never replaces a stored key that fails to decode,
+  since a new key would orphan the encrypted store.
+- Initializer pragmas: `cipher_memory_security` (process-wide) and
+  `journal_mode = WAL` (stored in the file) stay; `synchronous = NORMAL` and
+  `busy_timeout`, which never reached any connection but the discarded
+  verification one, are removed. Writes keep the tested `synchronous = FULL`.
+- 7 new tests: raw keying (the same bits as a passphrase are refused with
+  `SQLITE_NOTADB`), three wrong key lengths, one key read with the handed array
+  cleared, a failed read retried, and the pragmas a context connection sees.
+  Reverting to passphrase keying or rebuilding the key per call turns the
+  matching tests red. The 49 device tests now run in 17 s (C29's 43 took 3 min
+  27 s). No device database existed to migrate: nothing is deployed.
