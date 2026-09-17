@@ -141,6 +141,14 @@ or before the local retention window, price changes, and anything requiring
 approval. The status bar always shows connection state, pending event count, and
 the time of the last successful sync.
 
+`DeviceStatusBanner` (C32) is that surface. It reports one thing at a time — the
+earliest state that stops the register trading, then what will stop it soon,
+then the ordinary offline case — and it says nothing about how the device stores
+or moves anything: its contract lives in `Pos.Shared`, which references nothing,
+so there is no field on it that could carry a path, a key, a server address or a
+feed position. Being offline is not a warning; expired cached authority is.
+Pending event count waits for the Phase 13 outbox.
+
 ---
 
 ## 7. UI requirements (touch-first)

@@ -60,6 +60,21 @@ public sealed class DeviceDatabaseInitializer(
     }
 
     /// <summary>
+    /// Gets a value indicating whether the store is open, so a status screen can
+    /// ask without opening it or catching an exception.
+    /// </summary>
+    public bool IsOpen
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _store is { IsCompletedSuccessfully: true };
+            }
+        }
+    }
+
+    /// <summary>
     /// Creates a context for the already-initialized store without awaiting, so
     /// the device container can resolve one per scope.
     /// </summary>

@@ -1,0 +1,105 @@
+@namespace Pos.SharedUI.Components
+@using Pos.Shared.Devices
+
+@*
+    The register's state, in the words a cashier would use. Every line answers
+    "can I sell, and if not what do I do"; none of them says how the device
+    stores or moves anything.
+
+    It is in Pos.SharedUI so the same banner can front a device and a browser
+    terminal, and because Pos.SharedUI cannot reference infrastructure — the
+    component is handed a finished view and has nothing else it could show.
+*@
+
+<section class="device-status @StateClass" aria-live="polite">
+    <header class="device-status-head">
+        <span class="device-status-lamp" aria-hidden="true"></span>
+        <div>
+            <strong>@Headline</strong>
+            <p class="device-status-detail">@Detail</p>
+        </div>
+    </header>
+
+    <dl class="device-status-facts">
+        @if (Status.DeviceCode is { Length: > 0 } register)
+        {
+            <div>
+                <dt>Register</dt>
+                <dd>@register@(Status.LocationName is { Length: > 0 } store ? $" · {store}" : string.Empty)</dd>
+            </div>
+        }
+
+        <div>
+            <dt>Head office</dt>
+            <dd>@(Status.Connectivity == DeviceConnectivityState.Online ? "Connected" : "Not connected")</dd>
+        </div>
+
+        <div>
+            <dt>Store data</dt>
+            <dd>
+                @if (Status.LastSynchronisedUtc is { } received)
+                {
+                    <text>Received @received.ToLocalTime().ToString("d MMM, HH:mm")</text>
+                }
+                else
+                {
+                    <text>Not received yet</text>
+                }
+            </dd>
+        </div>
+
+        @if (Status.AuthorityExpiresUtc is { } expires)
+        {
+            <div>
+                <dt>Sign-in valid until</dt>
+                <dd>@expires.ToLocalTime().ToString("d MMM, HH:mm")</dd>
+            </div>
+        }
+    </dl>
+</section>
+
+@code {
+    /// <summary>The status to render.</summary>
+    [Parameter]
+    [EditorRequired]
+    public DeviceStatusView Status { get; set; } = default!;
+
+    private string StateClass => Status.Severity switch
+    {
+        DeviceStatusSeverity.Blocked => "device-status-blocked",
+        DeviceStatusSeverity.Warning => "device-status-warning",
+        _ when Status.Connectivity == DeviceConnectivityState.Offline => "device-status-offline",
+        _ => "device-status-ready",
+    };
+
+    private string Headline => Status.Concern switch
+    {
+        DeviceStatusConcern.StorageNotReady => "This register is still starting",
+        DeviceStatusConcern.NotEnrolled => "This register is not set up yet",
+        DeviceStatusConcern.AwaitingStoreData => "Waiting for store data",
+        DeviceStatusConcern.AwaitingSignIn => "Ready to sign in",
+        DeviceStatusConcern.AuthorityExpired => "Sign-in has expired",
+        DeviceStatusConcern.AuthorityExpiringSoon => "Sign-in expires soon",
+        DeviceStatusConcern.WorkingOffline => "Selling offline",
+        _ => "Ready",
+    };
+
+    private string Detail => Status.Concern switch
+    {
+        DeviceStatusConcern.StorageNotReady =>
+            "Give it a moment. If this stays here, restart the app.",
+        DeviceStatusConcern.NotEnrolled =>
+            "A manager needs to enrol it before it can take sales.",
+        DeviceStatusConcern.AwaitingStoreData =>
+            "Connect to head office once so this register can load its products and prices.",
+        DeviceStatusConcern.AwaitingSignIn =>
+            "Sign in to start a shift.",
+        DeviceStatusConcern.AuthorityExpired =>
+            "Connect to head office to sign in again. Until then this register can only look things up.",
+        DeviceStatusConcern.AuthorityExpiringSoon =>
+            "Connect to head office before the end of this shift, or the register will stop taking sales.",
+        DeviceStatusConcern.WorkingOffline =>
+            "Sales are being recorded here and will be sent when the connection returns.",
+        _ => "Connected, up to date and taking sales.",
+    };
+}

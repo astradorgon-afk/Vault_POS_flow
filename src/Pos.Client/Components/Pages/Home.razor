@@ -1,9 +1,9 @@
 @page "/"
 @inject DeviceDatabaseInitializer Database
+@inject DeviceStatusProvider Status
 
 <section class="startup-card" aria-live="polite">
     <div class="eyebrow">VaultFlow device</div>
-    <h1>Preparing this register</h1>
 
     @if (_error is not null)
     {
@@ -15,7 +15,7 @@
             </div>
         </div>
     }
-    else if (!_ready)
+    else if (_status is null)
     {
         <div class="status">
             <span class="status-dot status-dot-working"></span>
@@ -27,18 +27,12 @@
     }
     else
     {
-        <div class="status status-ready">
-            <span class="status-dot"></span>
-            <div>
-                <strong>Encrypted store ready</strong>
-                <p>This device can now be enrolled and receive its store data.</p>
-            </div>
-        </div>
+        <DeviceStatusBanner Status="_status" />
     }
 </section>
 
 @code {
-    private bool _ready;
+    private DeviceStatusView? _status;
     private string? _error;
 
     protected override async Task OnInitializedAsync()
@@ -46,11 +40,16 @@
         try
         {
             await Database.InitializeAsync();
-            _ready = true;
         }
         catch (Exception)
         {
             _error = "Restart the app. If the problem continues, re-enrol this device.";
+            return;
         }
+
+        // Read after the store is open, so the banner reports the device rather
+        // than the moment before it was ready. Nobody is signed in on this
+        // screen yet, so there is no authority to report.
+        _status = await Status.GetAsync(null);
     }
 }

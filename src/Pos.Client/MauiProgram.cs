@@ -43,6 +43,11 @@ public static class MauiProgram
         builder.Services.AddScoped(sp => sp.GetRequiredService<DeviceDatabaseInitializer>().CreateDbContext());
         builder.Services.AddScoped<IDocumentNumberGenerator, DeviceDocumentNumberGenerator>();
 
+        // What the register shows about itself. The probe is here rather than in
+        // infrastructure because reachability is a platform question.
+        builder.Services.AddSingleton<IDeviceConnectivityProbe, NetworkConnectivityProbe>();
+        builder.Services.AddSingleton<DeviceStatusProvider>();
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();

@@ -237,7 +237,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       evaluation, scopes a grant to its location, and refuses any permission the
       catalogue does not mark offline-capable; the feed refuses a snapshot that
       widens one and a policy version older than the stored one)*
-- [ ] Offline indicators, sync status UI
+- [x] Offline indicators, sync status UI
+      *(C32: `DeviceStatusProvider` reads storage, enrolment, connectivity,
+      last-received store data and cached-authority expiry; `DeviceStatusBanner`
+      in `Pos.SharedUI` renders one concern at a time. Pending-upload count
+      waits for the Phase 13 outbox)*
 
 ## Phase 13 — Synchronization
 

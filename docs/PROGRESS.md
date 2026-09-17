@@ -141,6 +141,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
   - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
   - [x] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. The Linux Android Release build is still unverified — the first CI run on the branch is its real test (STATUS.md §4).
+  - [x] C32 — offline status surface: `DeviceStatusProvider` reports storage, enrolment, connectivity, last-received store data and cached-authority expiry; the `DeviceStatusView` contract lives in `Pos.Shared` (which references nothing), so it cannot carry a path, key, address or feed position; `DeviceStatusBanner` in `Pos.SharedUI` renders one concern at a time, offline never counting as a warning. 27 new tests.
   - [x] C31 — device numbering and permission expiry: `document_counter` on the device (migration `DeviceDocumentCounter`), an atomic upsert joining the caller's transaction, refusing central types and any short code but its own; `DeviceSnapshotPermissionEvaluator` re-checks expiry at every evaluation, scopes grants, and refuses anything the catalogue does not mark offline-capable; the feed refuses a widening snapshot (`sync.feed_page_invalid`) and a policy-version rollback (`sync.snapshot_policy_rollback`). 24 new tests.
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
@@ -936,6 +937,45 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Docker Desktop** crashed at start on the known stale socket
   (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
   to `*.stale-20260917` fixed it again.
+
+### C32 — offline status surface (`feat(offline-c32)`)
+
+- **`DeviceStatusView`** in `Pos.Shared` is the contract, and its location is
+  the enforcement of "no storage or transport details": `Pos.Shared` references
+  nothing, so no field on it could carry the database path, cipher settings, a
+  server address or the feed position. A test still checks the produced view
+  against the path, the directory, `device.db`, `sqlite`, `cipher`, `http`,
+  `cursor` and the raw location and user identifiers, because a string field can
+  always be filled in badly.
+- **One concern at a time.** `Concern` resolves the earliest state that stops
+  the register trading, then what will stop it soon, then the ordinary offline
+  case; `Severity` maps that to normal, warning or blocked. Being offline is
+  explicitly normal — selling offline is what the device is for — while
+  authority expiring inside a shift is a warning. Putting the priority on the
+  contract rather than in the component is what makes it testable without
+  rendering: 18 of the new tests walk every concern, and one fails if a concern
+  is added later without a severity.
+- **`DeviceStatusProvider`** never throws for a device that is simply not ready.
+  An unopened store, an unenrolled register and nobody signed in are ordinary
+  states with something useful to say, and a status screen that threw on them
+  would go blank exactly when someone needed to read it. It reports the
+  *earliest* expiry in a snapshot, because that is when a user starts losing
+  permissions rather than when the last one goes.
+- **Connectivity is a port.** `IDeviceConnectivityProbe` is answered in
+  `Pos.Client` from MAUI's network access, because reachability is a platform
+  question; infrastructure ships `AssumeOfflineConnectivityProbe`, reporting
+  offline, which is the safe answer for a device with no adapter wired up.
+- **`DeviceStatusBanner`** is in `Pos.SharedUI`, which references only
+  `Pos.Shared` — so the component is handed a finished view and has nothing else
+  it *could* show. It builds on Linux, unlike `Pos.Client`, so the markup is
+  actually compiled here.
+- **`DeviceDatabaseInitializer.IsOpen`** lets the status screen ask whether the
+  store is open without opening it or catching an exception.
+- **Verification:** 1,075 passing without PostgreSQL (Domain 378, Application
+  247, Infrastructure 199, Security 52, Architecture 25, API 174); `Pos.Web` and
+  `Pos.SharedUI` build clean. `Pos.Client` was not compiled — no MAUI workloads
+  in this environment — so `Home.razor`, `NetworkConnectivityProbe` and the new
+  registrations rest on CI's client jobs. No migration.
 
 ### C31 — device numbering and permission expiry (`feat(offline-c31)`)
 
