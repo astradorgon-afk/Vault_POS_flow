@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38 building the device sale's tables and adapters — the sale is not registered yet
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38/C39 making a device able to sell: the cash sale is registered and executes offline
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,112 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 236, Security 52, Architecture 25, API 174** (2026-09-17, through C38 the device sale adapters). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C35 have not been run against PostgreSQL; they add no PostgreSQL migration. |
+| Tests | **1,117 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 241, Security 52, Architecture 25, API 174** (2026-09-17, through C39 the offline cash sale). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C35 have not been run against PostgreSQL; they add no PostgreSQL migration. |
 | Migrations | 28 PostgreSQL migrations plus 8 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -22,7 +22,7 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    236 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store
+Pos.Infrastructure.Tests    241 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -1040,34 +1040,44 @@ not an offline-capable permission, so a blind return only ever runs on the
 server. Splitting the two is what lets the sale path stay inside what a device
 can mirror without dragging the return path down to it.
 
-C38 builds everything a device sale needs and stops one step short of turning it
-on. `local_sale`, `local_sale_item` and `local_payment` map the server's own
-`Sale` configurations, renamed — the same trick C35 used for the ledger, so the
-two databases cannot drift in shape. `DeviceSalesRepository` projects
-`SaleProduct` from the cache with the same precedence the aggregate applies (a
-location price row beats a global one, latest start wins within each), finds the
-external customer location, reports expired batches from the cache joined to the
-device's own balances, and enqueues a `SaleCompleted` event.
-`DeviceCustomerRepository` answers null, so a named-customer sale is refused
-offline while an anonymous cash sale is not; `DeviceExpiryService` offers
-first-expiry-first-out from stock the register actually holds. The members
-belonging to returns, refunds, reprints and the expiry run refuse outright, the
-`DeviceShiftRepository` pattern.
+C38 built everything a device sale needs; C39 found why it did not work and
+turned it on. `local_sale`, `local_sale_item` and `local_payment` map the
+server's own `Sale` configurations, renamed — the C35 trick, so the two databases
+cannot drift in shape. `DeviceSalesRepository` projects `SaleProduct` from the
+cache with the same precedence the aggregate applies, finds the external customer
+location, and enqueues a `SaleCompleted` event. `DeviceCustomerRepository`
+answers null, so a named-customer sale is refused offline while an anonymous cash
+sale is not. The members belonging to returns, refunds, reprints and the expiry
+run refuse outright, the `DeviceShiftRepository` pattern.
 
-**`CompleteSaleCommand` is still `Pending`, deliberately.** Driving it end to end
-through the container, the sale was refused `inventory.insufficient_stock` —
-available 0 — against a register that demonstrably held twenty units: a fresh
-scope read 20.000 for the same bucket a moment earlier. Flipping the catalogue
-entry on that would have claimed a device can sell when the only evidence says
-otherwise.
+The bug was in `DeviceExpiryService`. Driven end to end, a sale was refused
+`inventory.insufficient_stock` — available 0 — against a register that
+demonstrably held twenty units. The first suspicion was the ledger's enlisted
+path, where a command's unit of work owns the transaction and the ledger only
+stages, because that is the one path C35's tests did not cover. Covering it
+exonerated it: a receipt committed before a transaction is visible to a sale
+posted inside it, and that test is now permanent.
 
-The investigation narrowed it usefully rather than settling it. The first
-suspicion was the ledger's enlisted path — where a command's unit of work owns
-the transaction and the ledger only stages — because that is the one path C35's
-tests did not cover. It is now covered, and it passes: a receipt committed
-before a transaction is visible to a sale posted inside it. So the ledger is
-exonerated and the fault is in the sale wiring, which is a much better-defined
-place to start than where this began.
+The actual cause was a structural mistake in the device adapter. The sale handler
+FEFO-allocates **every** line, batch-tracked or not, so `GetSellableBatchesAsync`
+has to return untracked stock too — as the single bucket it lives in, with an
+empty batch key. The device version had been written as an inner join from
+`cache_batch` to the balances, which for an untracked product returns nothing at
+all and reads, to the ledger, as no stock. The server's implementation drives off
+*balances* and adds the no-batch item when the product is not batch-tracked; the
+device now does the same. Inverting that one condition reproduces the original
+failure in three of the five sale tests.
+
+Two smaller things the work settled. A batch the register holds but has never
+been told about is not sellable — without its expiry date there is no way to know
+it is safe. And ringing up the same numbered sale twice is not a retry: an upload
+retry is what the event identifier makes safe, while a second sale wearing the
+first one's receipt number is stopped by the unique index, before the drawer can
+disagree with the ledger.
+
+`CompleteSaleCommand` is now `Registered`. A device opens a shift, sells for
+cash, posts to its own ledger, audits locally and queues the sale for upload —
+all in one transaction that either happened or did not.
 
 ---
 
@@ -1328,32 +1338,12 @@ so a device now queues the business events it produces — gaplessly, canonicall
 hashed, and in the same transaction as the records they describe. Nothing moves
 those events yet.
 
-1. **Finish the cash sale (C38 is built but not live).** The tables, the three
-   device adapters and the outbox event all exist; `CompleteSaleCommand` stays
-   `Pending` because driving it end to end refused with
-   `inventory.insufficient_stock` against stock the register provably held. The
-   ledger is not the cause — its enlisted path is now covered by
-   `DeviceLedgerTests.APostInsideTheCallersTransaction_SeesStockCommittedBeforeIt`
-   and passes. Next probe: compare the draw's bucket key with the balance's, in
-   the same run — product, batch key and state, not just location. The receipt
-   leg writes `BatchId.Empty`, and if the handler's allocation puts a different
-   batch key on the sale leg the two buckets would never meet, which fits the
-   symptom exactly. Then flip the entry and `CloseShiftCommand` with it.
+1. **`CloseShiftCommand`, which now has what it needs.** It was left `Pending`
+   because it reconciles the drawer against the shift's cash sales and a device
+   could not read them. `local_sale` and `local_payment` exist now, so
+   `DeviceShiftRepository.GetShiftCashTotalsAsync` can be written and the entry
+   flipped. That leaves void, return and refund as the remaining POS entries.
 
-   *(Superseded plan, kept for context:)* The ledger is done (C35), the
-   catalogue a sale reads is cached (C36), and the sale's catalogue port is now
-   something a device can satisfy (C37). What is left for `CompleteSaleCommand`
-   is `local_sale`, `local_sale_item`, `local_payment`, a device
-   `ISalesRepository` (projecting `SaleProduct` from `cache_product` and
-   `cache_product_price`), and the two other ports its handler resolves:
-   `ICustomerRepository` (only `GetByIdAsync` is on the sale path, and with no
-   customer cache yet it answers null, so a named-customer sale is refused
-   offline while an anonymous cash sale is not) and `IExpiryService` (only
-   `GetSellableBatchesAsync`, over `cache_batch` and the local balances). Both
-   ports are server-shaped, so expect the `DeviceShiftRepository` pattern: what a
-   device cannot answer refuses outright rather than improvising. Then the entry
-   flips to `Registered` and a device can sell, with `CloseShiftCommand` right
-   behind it: it waits only on local sales for its cash totals.
 2. **The push endpoint** — `POST /api/sync/push`, per-event idempotent
    processing keyed on the event identifier, with a repeated identifier carrying
    a different payload hash treated as tampering rather than as an update

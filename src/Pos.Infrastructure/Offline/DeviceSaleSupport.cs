@@ -72,27 +72,93 @@ public sealed class DeviceExpiryService(
     {
         DateOnly today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime);
 
+        // Driven by what the register holds, not by what the batch cache knows.
+        // The handler allocates every line first-expiry-first-out, batch-tracked
+        // or not, so untracked stock has to come back too — as the one bucket it
+        // lives in, with an empty batch key. Joining the batch cache instead
+        // would silently return nothing for untracked products and read, to the
+        // ledger, as no stock at all.
+        List<InventoryBalance> balances = await context.InventoryBalances
+            .AsNoTracking()
+            .Where(b => b.LocationId == locationId
+                        && b.ProductId == productId
+                        && b.State == InventoryState.Available
+                        && b.Quantity > 0m)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (balances.Count == 0)
+        {
+            return [];
+        }
+
+        bool tracksBatches = await context.Products
+            .AsNoTracking()
+            .Where(p => p.Id == productId)
+            .Select(p => p.TracksBatches)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        BatchId[] batchKeys = [.. balances.Where(b => !b.BatchKey.IsEmpty).Select(b => b.BatchKey).Distinct()];
+
+        Dictionary<BatchId, DeviceCachedBatch> batchById = await context.Batches
+            .AsNoTracking()
+            .Where(b => batchKeys.Contains(b.Id))
+            .ToDictionaryAsync(b => b.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        List<SellableBatchItem> items = [];
+
+        foreach (InventoryBalance balance in balances)
+        {
+            if (balance.BatchKey.IsEmpty)
+            {
+                // A batch-tracked product always carries a batch bucket, so an
+                // empty key on one is stock that cannot be identified and is not
+                // offered for sale.
+                if (!tracksBatches)
+                {
+                    items.Add(new SellableBatchItem(
+                        balance.ProductId,
+                        balance.BatchKey,
+                        string.Empty,
+                        balance.Quantity,
+                        null,
+                        balance.AverageUnitCost));
+                }
+
+                continue;
+            }
+
+            // A batch the register holds but has never been told about cannot be
+            // sold: without its expiry date there is no way to know it is safe.
+            if (!batchById.TryGetValue(balance.BatchKey, out DeviceCachedBatch? batch))
+            {
+                continue;
+            }
+
+            // Expired stock is the override path, which needs a permission a
+            // device snapshot cannot carry.
+            if (batch.ExpiresOn is { } expires && expires < today)
+            {
+                continue;
+            }
+
+            items.Add(new SellableBatchItem(
+                balance.ProductId,
+                batch.Id,
+                batch.LotNumber,
+                balance.Quantity,
+                batch.ExpiresOn,
+                batch.UnitCost));
+        }
+
+        // First expiry first out; undated stock last, oldest receipt first.
         return
         [
-            .. await (from batch in context.Batches.AsNoTracking()
-                      join balance in context.InventoryBalances.AsNoTracking()
-                        on batch.Id equals balance.BatchKey
-                      where batch.ProductId == productId
-                            && balance.LocationId == locationId
-                            && balance.ProductId == productId
-                            && balance.State == InventoryState.Available
-                            && balance.Quantity > 0
-                            && (batch.ExpiresOn == null || batch.ExpiresOn >= today)
-                      orderby batch.ExpiresOn ?? DateOnly.MaxValue, batch.ReceivedOn
-                      select new SellableBatchItem(
-                          batch.ProductId,
-                          batch.Id,
-                          batch.LotNumber,
-                          balance.Quantity,
-                          batch.ExpiresOn,
-                          batch.UnitCost))
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false),
+            .. items
+                .OrderBy(i => i.ExpiresOn ?? DateOnly.MaxValue)
+                .ThenBy(i => i.LotNumber, StringComparer.Ordinal),
         ];
     }
 

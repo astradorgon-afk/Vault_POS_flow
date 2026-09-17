@@ -152,7 +152,7 @@ public sealed class OfflineCommandCatalogue
     private static OfflineCommandDefinition[] DefaultEntries() =>
     [
         // POS sale (cash). The card path is refused by the payment port, not here.
-        Pending<CompleteSaleCommand>(
+        OnDevice<CompleteSaleCommand>(
             "POS sale: the device rings up and posts the sale locally.",
             Identity.Permissions.Sales.Create),
         Pending<VoidSaleCommand>(
