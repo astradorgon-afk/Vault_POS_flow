@@ -157,6 +157,41 @@ public sealed class SaleCompletedApplier(
             return SyncApplyResult.Rejected(applied.Error.Code, applied.Error.Message);
         }
 
+        // Recorded whether the ledger refused it or let it through, so this
+        // finds the oversells that actually happened, not the ones that did not.
+        bool soldIntoNegativeStock = await context.NegativeStockAttempts
+            .AsNoTracking()
+            .AnyAsync(a => a.EventId == new EventId(upload.EventId), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (soldIntoNegativeStock)
+        {
+            return SyncApplyResult.RequiresReview(
+                upload.Number,
+                "sync.sold_into_negative_stock",
+                "The sale was recorded, and it took the shelf below zero. Somebody has to count it.");
+        }
+
+        // A product withdrawn while the register was dark. The sale stands — the
+        // goods left the shelf — and the product stays withdrawn, so the till
+        // stops offering it as soon as the feed reaches it. What is left is to
+        // tell somebody it went out after the decision to stop selling it
+        // (OFFLINE_SYNC.md §7).
+        List<ProductId> soldProducts = [.. upload.Lines.Select(l => new ProductId(l.ProductId)).Distinct()];
+
+        bool soldSomethingWithdrawn = await context.Products
+            .AsNoTracking()
+            .AnyAsync(p => soldProducts.Contains(p.Id) && !p.IsActive, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (soldSomethingWithdrawn)
+        {
+            return SyncApplyResult.RequiresReview(
+                upload.Number,
+                "sync.sold_a_withdrawn_product",
+                "The sale was recorded, and it includes a product that has since been withdrawn from sale.");
+        }
+
         if (!mayStillSell)
         {
             // The audit writer stamps the actor from the request context, which
@@ -248,6 +283,12 @@ public sealed class SaleCompletedApplier(
             upload.BusinessDate,
             upload.CompletedAtUtc,
             lines,
-            payments));
+            payments,
+
+            // The goods left the shelf at a till that could not ask us. The
+            // ledger post is marked for review, so a location configured for it
+            // accepts a draw its shelf cannot cover rather than refusing a sale
+            // that is already a fact.
+            ReplayedOffline: true));
     }
 }

@@ -13,6 +13,8 @@ using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Sales;
+using Pos.Domain.Organizations;
+using Pos.Infrastructure.Persistence;
 using Pos.Infrastructure.Offline;
 
 namespace Pos.Api.IntegrationTests;
@@ -376,6 +378,105 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task ASaleThatTookTheShelfBelowZero_StopsAtAllocation_NotAtThePolicy()
+    {
+        Seed seed = await SeedAsync("spd", shelfQty: 1m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        // The store is configured to let an offline till oversell and have it
+        // looked at, and the replay now posts for review, which is what that
+        // policy waits for.
+        await SetNegativeStockPolicyAsync(seed, NegativeStockPolicy.AllowOfflineWithReview);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 3m, netTotal: 135m)));
+
+        // A known gap, pinned so it cannot change unnoticed. OFFLINE_SYNC.md §7
+        // says a sale that drove stock negative is kept and flagged, never
+        // deleted. It is refused today, and not by the negative-stock policy:
+        // FEFO allocation fails first, because three units cannot be drawn from
+        // batches holding one. Closing it means deciding which batch carries a
+        // shortfall — and for a batch-tracked product, inventing units in a batch
+        // that does not have them is a traceability lie, so it is a decision
+        // about the allocator rather than about sync.
+        //
+        // Nothing is lost meanwhile: the device escalates the refusal as a
+        // SyncFailure and keeps the event for ever (§3.2).
+        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
+        results[1].GetProperty("errorCode").GetString().Should().Be("inventory.insufficient_stock");
+    }
+
+    [Fact]
+    public async Task AStoreThatForbidsOverselling_RefusesTooAndSaysSo()
+    {
+        Seed seed = await SeedAsync("spe", shelfQty: 1m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        // The default policy is Prohibit, and a store that set it means it. The
+        // device escalates the refusal rather than the server quietly reversing
+        // a decision the store made about its own shelves.
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 3m, netTotal: 135m)));
+
+        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
+        results[1].GetProperty("errorCode").GetString().Should().Be("inventory.insufficient_stock");
+    }
+
+    [Fact]
+    public async Task ASaleOfAProductWithdrawnWhileTheTillWasDark_StandsAndIsFlagged()
+    {
+        Seed seed = await SeedAsync("spf", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        // Head office stopped selling it while the register was offline. The
+        // register had already sold one.
+        await factory.WithServiceAsync<PosDbContext>(async context =>
+        {
+            // AsTracking: the server context reads no-tracking by default, and a
+            // change made to a detached entity saves nothing at all.
+            Product product = await context.Products.AsTracking().SingleAsync(p => p.Id == seed.Product);
+            product.Deactivate(new DateOnly(2026, 9, 16));
+            await context.SaveChangesAsync();
+        });
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 1m, netTotal: 45m)));
+
+        results[1].GetProperty("outcome").GetString().Should().Be("RequiresReview");
+        results[1].GetProperty("errorCode").GetString().Should().Be("sync.sold_a_withdrawn_product");
+
+        bool held = await factory.WithServiceAsync(context => context.Sales
+            .AsNoTracking()
+            .AnyAsync(s => s.Number == saleNumber));
+
+        held.Should().BeTrue("the goods left the shelf, whatever head office decided afterwards");
+
+        bool stillWithdrawn = await factory.WithServiceAsync(context => context.Products
+            .AsNoTracking()
+            .AnyAsync(p => p.Id == seed.Product && !p.IsActive));
+
+        stillWithdrawn.Should().BeTrue("accepting the sale does not undo the decision to stop selling it");
+    }
+
+    [Fact]
     public async Task ASaleForAShiftTheServerHasNotSeen_IsDeferredWithEverythingBehindIt()
     {
         Seed seed = await SeedAsync("sp3", shelfQty: 10m);
@@ -632,6 +733,14 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
         using JsonDocument doc = JsonDocument.Parse(await signedIn.Content.ReadAsStringAsync());
         return doc.RootElement.GetProperty("accessToken").GetString()!;
     }
+
+    private Task SetNegativeStockPolicyAsync(Seed seed, NegativeStockPolicy policy)
+        => factory.WithServiceAsync<PosDbContext>(async context =>
+        {
+            Location location = await context.Locations.AsTracking().SingleAsync(l => l.Id == seed.Store);
+            location.UpdateSettings(location.Settings with { NegativeStockPolicy = policy });
+            await context.SaveChangesAsync();
+        });
 
     private Task<decimal> QuantityAsync(Seed seed, InventoryState state)
         => factory.WithServiceAsync(context => context.InventoryBalances

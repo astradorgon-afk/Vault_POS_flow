@@ -38,6 +38,13 @@ namespace Pos.Application.Sales;
 /// <param name="CompletedAtUtc">When the sale was completed, by the device clock.</param>
 /// <param name="Lines">The lines to sell.</param>
 /// <param name="Payments">The payments that settle the sale.</param>
+/// <param name="ReplayedOffline">
+/// Whether this sale already happened at a till that could not reach the server.
+/// It is not a permission: it says the goods have left the shelf, so the ledger
+/// post is marked for review and a location whose policy is
+/// <c>AllowOfflineWithReview</c> lets it run its stock negative rather than
+/// refusing a sale that is already a fact (OFFLINE_SYNC.md §7).
+/// </param>
 public sealed record CompleteSaleCommand(
     DocumentNumber Number,
     EventId EventId,
@@ -49,7 +56,8 @@ public sealed record CompleteSaleCommand(
     DateOnly BusinessDate,
     DateTimeOffset CompletedAtUtc,
     IReadOnlyList<CompleteSaleLine> Lines,
-    IReadOnlyList<CompleteSalePayment> Payments)
+    IReadOnlyList<CompleteSalePayment> Payments,
+    bool ReplayedOffline = false)
     : ICommand<SaleId>, IIdempotentCommand, ILocationScoped, IAuthorizedMessage
 {
     /// <inheritdoc />

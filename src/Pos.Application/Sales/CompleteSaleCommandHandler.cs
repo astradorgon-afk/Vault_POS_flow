@@ -593,7 +593,15 @@ public sealed class CompleteSaleCommandHandler(
                 Device: currentUser.DeviceId,
                 Correlation: currentUser.CorrelationId),
             OccurredAtUtc: command.CompletedAtUtc,
-            BusinessDate: command.BusinessDate);
+            BusinessDate: command.BusinessDate,
+
+            // A replayed sale is posted for review. That is what lets a location
+            // configured AllowOfflineWithReview accept a draw its shelf cannot
+            // cover: the goods went out at the till, and refusing the record now
+            // does not put them back.
+            ServerProcessingStatus: command.ReplayedOffline
+                ? Domain.Sync.ServerProcessingStatus.RequiresReview
+                : Domain.Sync.ServerProcessingStatus.Accepted);
 
         Result<PostedMovementGroup> posted = await ledger
             .PostAsync(movementGroup, cancellationToken)

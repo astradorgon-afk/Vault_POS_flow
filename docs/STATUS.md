@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, and C51 the route that serves it
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, and C52 the conflict rules that decide what a replay means
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,203 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 307, Security 52, Architecture 25, API 194** (2026-09-17, through C51 the pull endpoint). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C51 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,206 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 307, Security 52, Architecture 25, API 197** (2026-09-17, through C52 the conflict rules). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C51 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -26,7 +26,7 @@ Pos.Infrastructure.Tests    307 passing   non-PostgreSQL ledger, numbering, cata
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    194 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
+Pos.Api.IntegrationTests    197 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -1359,6 +1359,33 @@ replay changes the device already applied; and a cursor whose **missed changes
 are gone**, where a page with a hole in it would leave the register quietly wrong
 about its own catalogue. The second never fires until the feed is pruned, and the
 test proves it by pruning.
+
+C52 works the conflict table in OFFLINE_SYNC.md §7. A replayed sale now posts to
+the ledger **marked for review**, which is what `NegativeStockPolicy.AllowOfflineWithReview`
+was written to wait for — a policy value that existed, was carefully reasoned
+about, and that nothing had ever set. A `NegativeStockAttempt` is now recorded
+whether the draw was permitted or refused: a permitted oversell is the one
+somebody most needs to find, because it is the shelf that is now wrong, and
+recording only refusals meant the report showed every draw that did not happen
+and none that did. A sale of a product withdrawn while the till was dark lands
+and is flagged `sync.sold_a_withdrawn_product`, and the product stays withdrawn —
+accepting the sale does not undo the decision to stop selling it.
+
+**Accepting an oversell end to end is pinned as not done, and the reason is not
+where I expected.** §7 says such a sale is kept and flagged. It is refused today,
+and not by the negative-stock policy: **FEFO allocation refuses first**, because
+three units cannot be drawn from batches holding one. Closing it means deciding
+which batch carries a shortfall, and for a batch-tracked product inventing units
+in a batch that does not have them is a traceability lie. That is a decision
+about the allocator, not about sync, and it is not mine to make in passing. The
+test now sets the permissive policy and still asserts the refusal, so it pins
+where the sale actually stops rather than where I assumed.
+
+Two of the new test helpers were mutating **detached** entities and passing for
+the wrong reason — the server context's no-tracking default, for the third time
+this phase. The policy-setting helper was a silent no-op, and its test passed
+because it asserted the default behaviour anyway. Both now read `AsTracking()`,
+and the negative-stock test is only meaningful because of it.
 
 **Reviewing the handler for C46 turned up a second engine fault.** An applier can
 get several steps in before it refuses — the sale handler writes a price-variance

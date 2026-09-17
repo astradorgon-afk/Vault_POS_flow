@@ -408,18 +408,23 @@ public sealed class InventoryLedger(
             {
                 errors.Add(InventoryErrors.InsufficientStock(
                     draw.Key.ProductId, draw.Key.LocationId, available, requested));
-
-                attempts?.Record(NegativeStockAttempt.Record(
-                    group.Spec,
-                    draw.Key.LocationId,
-                    draw.Key.ProductId,
-                    draw.Key.BatchKey,
-                    draw.Key.State,
-                    requested,
-                    available,
-                    policy,
-                    clock.UtcNow));
             }
+
+            // Recorded whether or not it was let through. A permitted oversell is
+            // the one somebody most needs to find later — it is the shelf that is
+            // now wrong — and leaving only the refusals on record would mean the
+            // report shows every draw that did not happen and none that did. The
+            // policy is stored alongside, so the two are still told apart.
+            attempts?.Record(NegativeStockAttempt.Record(
+                group.Spec,
+                draw.Key.LocationId,
+                draw.Key.ProductId,
+                draw.Key.BatchKey,
+                draw.Key.State,
+                requested,
+                available,
+                policy,
+                clock.UtcNow));
         }
 
         return errors.Count > 0 ? Result.Failure(errors) : Result.Success();
