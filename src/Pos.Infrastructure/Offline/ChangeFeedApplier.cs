@@ -66,7 +66,15 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
             // the page always sees the earlier one exactly as the server ordered them.
             foreach (ChangeFeedChange change in page.Changes)
             {
-                await ApplyChangeAsync(context, change, cancellationToken).ConfigureAwait(false);
+                Result applied = await ApplyChangeAsync(context, change, cancellationToken).ConfigureAwait(false);
+
+                if (applied.IsFailure)
+                {
+                    // Leaving the transaction uncommitted rolls the whole page
+                    // back, including any change already written before this one.
+                    return Result.Failure<ChangeFeedApplyOutcome>(applied.Error);
+                }
+
                 await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 context.ChangeTracker.Clear();
             }
@@ -101,7 +109,7 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
             .SingleOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false) ?? 0;
 
-    private static async Task ApplyChangeAsync(
+    private static async Task<Result> ApplyChangeAsync(
         PosDeviceDbContext context,
         ChangeFeedChange change,
         CancellationToken cancellationToken)
@@ -191,6 +199,24 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 break;
 
             case PermissionSnapshotIssued s:
+                // Policy versions only ever increase. An older one is a replayed
+                // or forged page trying to restore authority the server has since
+                // narrowed, so it fails the page rather than replacing what is
+                // stored. An equal version is the ordinary re-issue — a refreshed
+                // expiry on the same policy — and is applied.
+                long? held = await context.PermissionSnapshots
+                    .AsNoTracking()
+                    .Where(x => x.UserId == s.UserId)
+                    .Select(x => (long?)x.PolicyVersion)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (held is { } stored && s.PolicyVersion < stored)
+                {
+                    return Result.Failure(
+                        ChangeFeedErrors.SnapshotRollback(stored, s.PolicyVersion, s.Sequence));
+                }
+
                 await DeleteSnapshotAsync(context, s.UserId, cancellationToken).ConfigureAwait(false);
                 foreach (PermissionSnapshotGrant grant in s.Grants)
                 {
@@ -208,6 +234,8 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
             default:
                 throw new NotSupportedException("Validated pages contain only supported change kinds.");
         }
+
+        return Result.Success();
     }
 
     private static Task<int> DeleteSnapshotAsync(

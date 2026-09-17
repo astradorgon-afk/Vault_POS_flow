@@ -35,6 +35,14 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISystemClock, SystemClock>();
         builder.Services.AddSingleton<ChangeFeedApplier>();
 
+        // The device adapters behind the ports the shared handlers resolve:
+        // its own document counter instead of the central one, and the cached
+        // permission snapshot instead of a live database.
+        builder.Services.AddSingleton<IDeviceProfileAccessor, DeviceProfileAccessor>();
+        builder.Services.AddSingleton<IPermissionEvaluator, DeviceSnapshotPermissionEvaluator>();
+        builder.Services.AddScoped(sp => sp.GetRequiredService<DeviceDatabaseInitializer>().CreateDbContext());
+        builder.Services.AddScoped<IDocumentNumberGenerator, DeviceDocumentNumberGenerator>();
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();

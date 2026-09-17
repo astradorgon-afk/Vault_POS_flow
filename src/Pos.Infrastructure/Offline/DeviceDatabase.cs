@@ -59,6 +59,33 @@ public sealed class DeviceDatabaseInitializer(
         return new PosDeviceDbContext(store.ContextOptions);
     }
 
+    /// <summary>
+    /// Creates a context for the already-initialized store without awaiting, so
+    /// the device container can resolve one per scope.
+    /// </summary>
+    /// <returns>A context over the encrypted store.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="InitializeAsync"/> has not completed. Blocking on the key read
+    /// here would block whatever scope asked for the context, so this refuses
+    /// instead: the database is opened and migrated at start-up, once.
+    /// </exception>
+    public PosDeviceDbContext CreateDbContext()
+    {
+        Task<KeyedStore>? store;
+        lock (_gate)
+        {
+            store = _store;
+        }
+
+        if (store is not { IsCompletedSuccessfully: true })
+        {
+            throw new InvalidOperationException(
+                "The device database is not open yet; InitializeAsync must complete before a context is resolved.");
+        }
+
+        return new PosDeviceDbContext(store.Result.ContextOptions);
+    }
+
     private Task<KeyedStore> GetStoreAsync(CancellationToken cancellationToken)
     {
         Task<KeyedStore> store;

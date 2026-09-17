@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
+using Pos.Domain.Common;
 using Pos.Infrastructure.Offline;
 
 namespace Pos.Infrastructure.Tests.Offline;
@@ -19,7 +21,9 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
     {
         Initializer = new DeviceDatabaseInitializer(
             new DeviceDatabaseOptions(DatabasePath), new FixedKeyProvider(EncryptionKey));
-        Applier = new ChangeFeedApplier(Initializer, new FixedClock(Now));
+        Clock = new MovableClock(Now);
+        Applier = new ChangeFeedApplier(Initializer, Clock);
+        Profiles = new DeviceProfileAccessor(Initializer);
     }
 
     public string DatabasePath => Path.Combine(_directory, "device.db");
@@ -27,6 +31,12 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
     public DeviceDatabaseInitializer Initializer { get; }
 
     public ChangeFeedApplier Applier { get; }
+
+    /// <summary>The device clock, movable so expiry can be crossed without waiting.</summary>
+    public MovableClock Clock { get; }
+
+    /// <summary>Reads the enrolled profile, as the numbering adapter does.</summary>
+    public IDeviceProfileAccessor Profiles { get; }
 
     /// <summary>A keyed connection with no device context behind it, as raw tooling would open.</summary>
     public string EncryptedConnectionString => new SqliteConnectionStringBuilder
@@ -48,6 +58,26 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
     public Task<PosDeviceDbContext> OpenContextAsync()
         => Initializer.CreateDbContextAsync(CancellationToken.None);
 
+    /// <summary>Writes the device profile that enrolment would write.</summary>
+    public async Task EnrolAsync(string shortCode, LocationId? locationId = null)
+    {
+        await using PosDeviceDbContext context = await OpenContextAsync();
+        context.DeviceProfiles.Add(new DeviceStoreProfile(
+            DeviceId.New(), locationId ?? LocationId.New(), shortCode, Now));
+        await context.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>Creates a generator bound to a fresh context, as a scope would.</summary>
+    public async Task<(DeviceDocumentNumberGenerator Generator, PosDeviceDbContext Context)> OpenGeneratorAsync()
+    {
+        PosDeviceDbContext context = await OpenContextAsync();
+        return (new DeviceDocumentNumberGenerator(context, Profiles, Clock), context);
+    }
+
+    /// <summary>Creates a permission evaluator over this device's snapshot.</summary>
+    public DeviceSnapshotPermissionEvaluator CreateEvaluator()
+        => new(Initializer, Clock);
+
     public ValueTask DisposeAsync()
     {
         SqliteConnection.ClearAllPools();
@@ -66,10 +96,11 @@ internal sealed class TemporaryDeviceDatabase : IAsyncDisposable
             => ValueTask.FromResult(key.ToArray());
     }
 
-    private sealed class FixedClock(DateTimeOffset now) : ISystemClock
+    /// <summary>A clock the test moves, so snapshot expiry is crossed deliberately.</summary>
+    internal sealed class MovableClock(DateTimeOffset now) : ISystemClock
     {
-        public DateTimeOffset UtcNow => now;
+        public DateTimeOffset UtcNow { get; set; } = now;
 
-        public DateOnly BusinessDateFor(string timeZoneId) => DateOnly.FromDateTime(now.UtcDateTime);
+        public DateOnly BusinessDateFor(string timeZoneId) => DateOnly.FromDateTime(UtcNow.UtcDateTime);
     }
 }

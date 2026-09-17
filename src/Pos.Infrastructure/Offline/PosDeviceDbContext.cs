@@ -20,6 +20,7 @@ namespace Pos.Infrastructure.Offline;
 public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> options) : DbContext(options)
 {
     public DbSet<DeviceStoreProfile> DeviceProfiles => Set<DeviceStoreProfile>();
+    public DbSet<DeviceDocumentCounter> DocumentCounters => Set<DeviceDocumentCounter>();
     public DbSet<DeviceCachedProduct> Products => Set<DeviceCachedProduct>();
     public DbSet<DeviceCachedProductBarcode> ProductBarcodes => Set<DeviceCachedProductBarcode>();
     public DbSet<DeviceCachedProductPrice> ProductPrices => Set<DeviceCachedProductPrice>();
@@ -71,6 +72,18 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.ShortCode).HasColumnName("short_code").HasMaxLength(6).IsRequired();
             entity.Property(x => x.EnrolledAtUtc).HasColumnName("enrolled_at_utc").IsRequired();
             entity.HasIndex(x => x.ShortCode).IsUnique().HasDatabaseName("ux_device_profile_short_code");
+        });
+
+        // Not applier-owned: the device is the authority for its own document
+        // numbers, so this is the one table the change feed never writes and
+        // application code may.
+        builder.Entity<DeviceDocumentCounter>(entity =>
+        {
+            entity.ToTable("document_counter");
+            entity.HasKey(x => new { x.DocumentType, x.PeriodKey });
+            entity.Property(x => x.DocumentType).HasColumnName("document_type").HasConversion<short>();
+            entity.Property(x => x.PeriodKey).HasColumnName("period_key").HasMaxLength(8);
+            entity.Property(x => x.NextValue).HasColumnName("next_value").IsRequired();
         });
 
         builder.Entity<DeviceCachedProduct>(entity =>

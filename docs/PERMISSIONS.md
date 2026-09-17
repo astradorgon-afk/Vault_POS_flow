@@ -332,3 +332,26 @@ Rules:
 - `policyVersion` bumps on any role/permission/user change; the next successful
   pull refreshes affected snapshots, and the change feed can push an immediate
   invalidation while the device is online.
+
+### 5.1 How the device enforces it (C31)
+
+Three independent checks, because a cached answer is the one place a device
+could grant what the server would not:
+
+| Check | Where | What it stops |
+|---|---|---|
+| The permission must be `IsOfflineCapable` | `DeviceSnapshotPermissionEvaluator`, before the database is read | A stored row naming approval authority — however it got there — authorizing anything |
+| Expiry, re-checked at every evaluation | the same evaluator | A device left in a drawer keeping its authority; a cleanup that never ran extending it silently |
+| Grant scope | the same evaluator | A store's staff answering for another store; a global grant still answers anywhere |
+
+And two on the way in, so a bad snapshot is never stored at all:
+
+| Check | Where | What it stops |
+|---|---|---|
+| A grant naming a permission that is not offline-capable, or that the client does not know | `ChangeFeedPageValidator` | A feed that widens a device's authority; the whole page is refused, not just the grant |
+| A `policyVersion` older than the stored one | `ChangeFeedApplier` (`sync.snapshot_policy_rollback`) | A replayed or forged page restoring authority the server has since narrowed. An equal version is the ordinary re-issue — a refreshed expiry on the same policy — and is applied |
+
+The evaluator never consults the cached user row. An inactive user is refused at
+sign-in, and a user change invalidates the snapshot through the feed; a
+permission check that also re-read the user would be answering a different
+question.

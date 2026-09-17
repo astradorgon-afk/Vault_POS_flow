@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application, C29b device keying and C29c CI repair complete; C30 declares and enforces the device command boundary
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29/C29b/C29c and C30's command boundary complete; C31 adds device-scoped numbering and snapshot expiry, leaving only the offline status UI and the device's local tables
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,8 +13,8 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
-| Tests | **1,024 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 148, Security 52, Architecture 25, API 174** (2026-09-17, through C30 the device command boundary). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
-| Migrations | 28 PostgreSQL migrations plus 2 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
+| Tests | **1,048 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 172, Security 52, Architecture 25, API 174** (2026-09-17, through C31 device numbering and snapshot expiry). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
+| Migrations | 28 PostgreSQL migrations plus 3 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
@@ -22,7 +22,7 @@ and what to pick up next.
 
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    148 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards
+Pos.Infrastructure.Tests    172 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering and offline permission evaluation
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
@@ -812,6 +812,47 @@ test: a registered command resolves, reaches the pipeline, and is then refused
 by the authorization behaviour rather than by the dispatcher — offline does not
 widen authority.
 
+C31 gives the device the two ports its handlers will resolve. Numbering first:
+`document_counter` is the one device table the change feed never writes and
+application code must. `DeviceDocumentNumberGenerator` allocates from it with a
+single atomic upsert — the same insert-on-conflict-returning shape the server
+uses — and joins the caller's transaction when there is one, so a sale that
+rolls back releases its number rather than leaving a gap. It is the server
+generator's mirror image, and the two refuse opposite halves of the port: the
+server refuses device-scoped types because it cannot know a device's sequence,
+and this refuses central types because a device may never mint a purchase order.
+A device also numbers only under its own enrolled short code; minting under
+another device's would collide with that device's sequence and the server would
+accept it, because the code on the posted number would match a real device.
+Twelve parallel allocations produce twelve distinct numbers, a restart continues
+the sequence rather than restarting it, and a year boundary opens a second
+counter row.
+
+Then authorization. `DeviceSnapshotPermissionEvaluator` answers from the cached
+snapshot and only ever narrows. Expiry is re-checked at every evaluation rather
+than trusted to a cleanup that might not have run, so a device left in a drawer
+loses its authority on the second past expiry. A location grant answers for that
+location only, a global grant anywhere. And the permission must be
+offline-capable in the catalogue, checked before the database is read — which is
+what makes a tampered row useless: the test drops the guard triggers on a raw
+keyed connection, the one attack OFFLINE_SYNC.md §2 says the triggers cannot
+stop, rewrites a grant to `inventory.adjust.approve`, and the evaluator still
+refuses it.
+
+Two more guards keep a bad snapshot from being stored at all. The page validator
+refuses a grant naming a permission that is not offline-capable or that the
+client does not know, and refuses the whole page rather than the grant, so the
+offline-capable grants alongside it do not land either. The applier refuses a
+snapshot whose policy version is older than the one held
+(`sync.snapshot_policy_rollback`): policy versions only increase, so an older one
+is a replay trying to restore authority the server has since narrowed. An equal
+version is the ordinary re-issue — a refreshed expiry on the same policy — and is
+applied. A refused page rolls back everything committed before it in that page.
+
+Every catalogue entry from C30 is still `Pending`. These two ports exist now, but
+a sale handler also needs repositories over `local_sale`, `local_sale_item`,
+`local_inventory_movement` and the rest, and those tables are not built.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -1059,6 +1100,7 @@ Stated plainly so they are not mistaken for finished work:
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
 | The Android client job has never completed a Release build on Linux | CI (C29c) | C29c is committed: the server job drops `Pos.Client` from its checkout and dedicated Windows and Android jobs build it. The Windows job's Release build is verified locally; on Linux `InstallAndroidDependencies` failed in a container with `CommonUtilities.Helpers.UserName must have a valid value` (root, no `USER`), which GitHub runners do set. The first CI run on this branch is the real verification. |
+| The API's two PostgreSQL tests fail rather than skip without Docker | Tests (Phase 1) | `PostgresHostSmokeTests` and `PostgresInventoryControlTests` throw `DockerUnavailableException`, where the Infrastructure PostgreSQL classes skip. The two behaviours are opposite and neither is right: one hides a broken container, the other fails a Docker-less run. Settle on one — preferably failing everywhere, with CI guaranteed to have Docker. |
 | PostgreSQL suites turn any container start-up failure into a skip | Tests (Phase 1) | The Infrastructure PostgreSQL classes catch every exception from starting the container and skip, as if Docker were absent. On 2026-09-17, under heavy Docker load, all 18 skipped while Docker was running; alone, they all ran and passed. In CI, where Docker is guaranteed, a broken start would pass green without exercising the triggers and grants. Skipping should happen only when no Docker endpoint exists, or CI should fail on skips. |
 
 ---
@@ -1067,8 +1109,8 @@ Stated plainly so they are not mistaken for finished work:
 
 Phase 11 is complete. Phase 12 has the Windows/Android client, the encrypted
 device database (C28), protected change-feed application (C29), raw-key device
-keying (C29b), the split client CI jobs (C29c) and the declared command
-boundary (C30). Continue in this order:
+keying (C29b), the split client CI jobs (C29c), the declared command boundary
+(C30) and device numbering plus snapshot expiry (C31). Continue in this order:
 
 1. **Watch the first CI run on this branch.** `build-client-android` has never
    completed a Release build on Linux: locally the dependency step failed in a
@@ -1076,19 +1118,18 @@ boundary (C30). Continue in this order:
    which a GitHub runner should not hit because it sets `USER`. If it does, set
    the variable in the job. `build-client-windows` and `build-and-test` are
    verified from clean containers.
-2. **C31 — device numbering and permission expiry:** allocate stable
-   device-scoped document numbers and deny expired or widened snapshots
-   (including a snapshot whose policy version is older than the stored one).
-   This is the first half of what the whitelisted handlers need before any
-   catalogue entry can move from `Pending` to `Registered`.
-3. **C32 — offline status UI:** show database, enrolment, connectivity and sync
-   state without exposing storage or transport details.
-4. **The device's `local_*` tables.** The other half: a device carries caches,
-   snapshots and the feed cursor, but no local sale, shift, movement or balance
-   tables, so no whitelisted handler's repositories can be satisfied yet. Until
-   they exist, every catalogue entry stays `Pending` and the device correctly
-   refuses every command.
-5. **Phase 13 — synchronization:** add the outbox, push/pull endpoints,
+2. **C32 — offline status UI:** show database, enrolment, connectivity and sync
+   state without exposing storage or transport details. It is the last item in
+   Phase 12 that does not wait on device persistence.
+3. **The device's `local_*` tables.** The remaining blocker on every C30
+   catalogue entry. A device now has its own numbering and its own permission
+   evaluator, but a sale handler also needs repositories over `local_sale`,
+   `local_sale_item`, `local_payment`, `local_cashier_shift`,
+   `local_inventory_movement` and `local_inventory_balance`. Until those exist,
+   every entry stays `Pending` and the device correctly refuses every command.
+   A device unit of work lands with them; the scoped `PosDeviceDbContext` the
+   client resolves today is the beginning of it.
+4. **Phase 13 — synchronization:** add the outbox, push/pull endpoints,
    idempotent processing, retry policy and conflict handling. Its failure
    records will feed the remaining sync-failure notification.
 

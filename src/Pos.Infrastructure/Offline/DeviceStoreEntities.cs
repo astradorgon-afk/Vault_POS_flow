@@ -28,6 +28,40 @@ public sealed class DeviceStoreProfile
     public DateTimeOffset EnrolledAtUtc { get; private init; }
 }
 
+/// <summary>
+/// The device's own document-number counter. It is the one authoritative table
+/// on a device that the change feed never touches: SAL, RET and SHF numbers are
+/// allocated here so a sale rung up offline keeps the number printed on its
+/// receipt (POS.md §11, ADR-0008). The server verifies the device code on a
+/// posted number; it never allocates one.
+/// </summary>
+public sealed class DeviceDocumentCounter
+{
+    private DeviceDocumentCounter() { PeriodKey = string.Empty; }
+
+    /// <summary>Creates a counter for one document type and period.</summary>
+    /// <param name="documentType">The device-scoped document type.</param>
+    /// <param name="periodKey">The four-digit year the sequence restarts on.</param>
+    /// <param name="nextValue">The next value to hand out.</param>
+    internal DeviceDocumentCounter(DocumentType documentType, string periodKey, long nextValue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(periodKey);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(nextValue);
+        DocumentType = documentType;
+        PeriodKey = periodKey;
+        NextValue = nextValue;
+    }
+
+    /// <summary>Gets the document type this counter numbers.</summary>
+    public DocumentType DocumentType { get; private init; }
+
+    /// <summary>Gets the period the sequence belongs to, as a four-digit year.</summary>
+    public string PeriodKey { get; private init; }
+
+    /// <summary>Gets the next sequence value this counter will hand out.</summary>
+    public long NextValue { get; private set; }
+}
+
 /// <summary>A product mirror downloaded from the server change feed.</summary>
 public sealed class DeviceCachedProduct : IChangeFeedOwned
 {

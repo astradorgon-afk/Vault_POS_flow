@@ -16,6 +16,20 @@ public sealed class DeviceDatabaseInitializerTests : IAsyncLifetime
     private string DatabasePath => Path.Combine(_directory, "device.db");
 
     [Fact]
+    public void CreateDbContext_RefusesBeforeTheDatabaseIsOpen()
+    {
+        DeviceDatabaseInitializer initializer = new(
+            new DeviceDatabaseOptions(Path.Combine(Path.GetTempPath(), "never-opened", "device.db")),
+            new UnusedKeyProvider());
+
+        // Blocking on the key read here would block whatever scope asked for the
+        // context, so an unopened database refuses rather than waits.
+        Action resolve = () => initializer.CreateDbContext();
+
+        resolve.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task InitializeAsync_CreatesOnlyTheScopedDeviceSchema_AndStoresDecimalsAsText()
     {
         DeviceDatabaseInitializer initializer = CreateInitializer(new CountingKeyProvider(EncryptionKey));
@@ -58,6 +72,7 @@ public sealed class DeviceDatabaseInitializerTests : IAsyncLifetime
             "cache_product_price",
             "cache_user",
             "device_profile",
+            "document_counter",
             "snapshot_permission",
             "sync_cursor",
         ]);
@@ -263,5 +278,11 @@ public sealed class DeviceDatabaseInitializerTests : IAsyncLifetime
             Handed.Add(copy);
             return ValueTask.FromResult(copy);
         }
+    }
+
+    private sealed class UnusedKeyProvider : IDeviceDatabaseKeyProvider
+    {
+        public ValueTask<byte[]> GetDatabaseKeyAsync(CancellationToken cancellationToken)
+            => throw new InvalidOperationException("The key must not be read for this test.");
     }
 }

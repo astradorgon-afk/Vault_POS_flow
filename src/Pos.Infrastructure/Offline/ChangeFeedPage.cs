@@ -104,6 +104,21 @@ public static class ChangeFeedErrors
             ["fromCursor"] = fromCursor,
         });
 
+    /// <summary>
+    /// An issued snapshot is older than the one already stored for that user.
+    /// Policy versions only ever increase, so this is a replayed or forged page
+    /// trying to restore authority the server has since narrowed.
+    /// </summary>
+    public static Error SnapshotRollback(long storedVersion, long offeredVersion, long? sequence = null) => Error.Conflict(
+        "sync.snapshot_policy_rollback",
+        "The permission snapshot is older than the one this device already holds.",
+        new Dictionary<string, object?>
+        {
+            ["storedPolicyVersion"] = storedVersion,
+            ["offeredPolicyVersion"] = offeredVersion,
+            ["sequence"] = sequence,
+        });
+
     /// <summary>The page is malformed and nothing in it was applied.</summary>
     public static Error PageInvalid(string reason, long? sequence = null) => Error.Validation(
         "sync.feed_page_invalid",

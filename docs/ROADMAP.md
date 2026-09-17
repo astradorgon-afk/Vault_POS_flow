@@ -228,8 +228,15 @@ Substantially delivered in Phase 1, because everything else depends on it.
       `AddOfflineClientApplication`; every entry stays `Pending` until the
       device carries the `local_*` tables its handlers write to, so a device
       refuses every command with `application.handler_unavailable` today)*
-- [ ] Local document numbering (device-scoped)
-- [ ] Permission snapshot storage and expiry
+- [x] Local document numbering (device-scoped)
+      *(C31: `document_counter` on the device, an atomic upsert that joins the
+      caller's transaction; a device numbers only under its own enrolled short
+      code and refuses every centrally numbered type)*
+- [x] Permission snapshot storage and expiry
+      *(C31: `DeviceSnapshotPermissionEvaluator` checks expiry at every
+      evaluation, scopes a grant to its location, and refuses any permission the
+      catalogue does not mark offline-capable; the feed refuses a snapshot that
+      widens one and a policy version older than the stored one)*
 - [ ] Offline indicators, sync status UI
 
 ## Phase 13 — Synchronization

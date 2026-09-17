@@ -63,10 +63,20 @@ device.db (SQLite, encrypted)
 │    sale, sale_item, payment, cashier_shift, sales_return,
 │    inventory_movement, inventory_balance, transfer_order (local),
 │    quarantine_incident, inventory_count
+├── document_counter  the device's own SAL/RET/SHF sequences
 ├── outbox_event   the upload queue
 ├── sync_cursor    feed positions, advanced with the page they follow
 └── sync_state     checkpoints, failures
 ```
+
+`document_counter` is the mirror image of the cache tables: the change feed never
+writes it, and application code must. It is what lets a sale rung up with no
+network keep the number printed on its receipt. The allocation is one atomic
+upsert that joins the caller's transaction, so a sale that rolls back releases
+its number instead of leaving a gap, and a device allocates only under its own
+enrolled short code — minting under another device's would collide with that
+device's sequence and the server would accept it, because the code on the posted
+number would match a real device.
 
 `cache_*`, `snapshot_permission` and `sync_cursor` are **read-only to application
 code**; the only writer is `ChangeFeedApplier`. Two independent guards enforce it:

@@ -141,6 +141,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
   - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
   - [x] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. The Linux Android Release build is still unverified — the first CI run on the branch is its real test (STATUS.md §4).
+  - [x] C31 — device numbering and permission expiry: `document_counter` on the device (migration `DeviceDocumentCounter`), an atomic upsert joining the caller's transaction, refusing central types and any short code but its own; `DeviceSnapshotPermissionEvaluator` re-checks expiry at every evaluation, scopes grants, and refuses anything the catalogue does not mark offline-capable; the feed refuses a widening snapshot (`sync.feed_page_invalid`) and a policy-version rollback (`sync.snapshot_policy_rollback`). 24 new tests.
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
@@ -935,6 +936,48 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Docker Desktop** crashed at start on the known stale socket
   (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
   to `*.stale-20260917` fixed it again.
+
+### C31 — device numbering and permission expiry (`feat(offline-c31)`)
+
+- **`document_counter`** is the device's own sequence table and the mirror image
+  of the caches: the change feed never writes it, application code must. New
+  SQLite migration `DeviceDocumentCounter`; no PostgreSQL change.
+- **`DeviceDocumentNumberGenerator`** allocates with the same
+  insert-on-conflict-returning upsert the server uses, joining the caller's
+  transaction when there is one. It refuses every centrally numbered type, and
+  refuses any short code but the enrolled one — minting under another device's
+  code would collide with that device's sequence, and the server would accept it
+  because the code on the posted number matches a real device.
+- **`DeviceSnapshotPermissionEvaluator`** answers from the cached snapshot and
+  only narrows: expiry re-checked at every evaluation, grants scoped to their
+  location, and the permission required to be offline-capable in the catalogue
+  before the database is read.
+- **Two guards on the way in.** The page validator refuses a grant naming a
+  permission that is not offline-capable or that the client does not know, and
+  refuses the whole page. The applier refuses a snapshot whose policy version is
+  older than the one held (`sync.snapshot_policy_rollback`); an equal version is
+  the ordinary refreshed-expiry re-issue and is applied. `ApplyChangeAsync` now
+  returns a `Result`, so a refused change rolls back the changes committed
+  before it in the same page.
+- **`DeviceDatabaseInitializer.CreateDbContext`** (synchronous) lets the client
+  container resolve a scoped context. It throws rather than blocking when the
+  database has not been opened: blocking on the key read would block whatever
+  scope asked for the context.
+- **24 new tests.** Notable ones: twelve parallel allocations produce twelve
+  distinct numbers; a rolled-back transaction releases the number it took; a
+  year boundary opens a second counter row; a snapshot one second past expiry
+  grants nothing. The tamper test had to drop the guard triggers on a raw keyed
+  connection first — the C29 triggers refused the straight insert, which is the
+  guard working, and the attack they were never meant to stop is exactly what
+  the evaluator's catalogue check covers.
+- **Every C30 catalogue entry is still `Pending`.** These are two of the ports a
+  whitelisted handler needs; the repositories over `local_*` tables are the rest,
+  and those tables are not built.
+- **Verification:** 1,048 passing without PostgreSQL (Domain 378, Application
+  247, Infrastructure 172, Security 52, Architecture 25, API 174). The two
+  PostgreSQL API tests fail for want of Docker in this container, which is a
+  known gap (STATUS.md §4), not a regression. `Pos.Client` was not compiled
+  locally — no MAUI workloads here — so its DI wiring rests on CI's client jobs.
 
 ### C30 — client command boundary (`feat(offline-c30)`)
 

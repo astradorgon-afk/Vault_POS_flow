@@ -1,3 +1,4 @@
+using Pos.Application.Identity;
 using Pos.Domain.Common;
 
 namespace Pos.Infrastructure.Offline;
@@ -112,6 +113,22 @@ internal static class ChangeFeedPageValidator
             if (!seen.Add((grant!.Permission, grant.LocationId)))
             {
                 return "A permission snapshot repeats a grant.";
+            }
+
+            // The server already trims a device's snapshot to offline-capable
+            // permissions. Checking it again here means a feed that widens one —
+            // tampered with, or served by a server running an older catalogue —
+            // is refused whole rather than stored and relied upon.
+            PermissionDefinition? permission = Permissions.Find(grant.Permission);
+
+            if (permission is null)
+            {
+                return "A permission snapshot names a permission this client does not know.";
+            }
+
+            if (!permission.IsOfflineCapable)
+            {
+                return "A permission snapshot carries a permission a device may not hold offline.";
             }
         }
 
