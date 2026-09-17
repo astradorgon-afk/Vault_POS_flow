@@ -25,6 +25,12 @@ public enum SyncEventType
 
     /// <summary>A sale was completed and paid for.</summary>
     SaleCompleted = 4,
+
+    /// <summary>A sale was voided in the shift that rang it up.</summary>
+    SaleVoided = 5,
+
+    /// <summary>A receipt was reprinted, which is an audited act.</summary>
+    SaleReceiptReprinted = 6,
 }
 
 /// <summary>Where one outbox event has got to.</summary>

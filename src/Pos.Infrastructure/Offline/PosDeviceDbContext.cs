@@ -36,6 +36,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<DeviceLocalAudit> LocalAudit => Set<DeviceLocalAudit>();
     public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
     public DbSet<Sale> LocalSales => Set<Sale>();
+    public DbSet<SaleReceiptPrint> LocalReceiptPrints => Set<SaleReceiptPrint>();
     public DbSet<OutboxEvent> Outbox => Set<OutboxEvent>();
     public DbSet<DeviceSequence> Sequences => Set<DeviceSequence>();
     public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
@@ -315,6 +316,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
         builder.Entity<Sale>().ToTable("local_sale");
         builder.Entity<SaleItem>().ToTable("local_sale_item");
         builder.Entity<Payment>().ToTable("local_payment");
+        builder.ApplyConfiguration(new SaleReceiptPrintConfiguration());
+        builder.Entity<SaleReceiptPrint>().ToTable("local_sale_receipt_print");
 
         // The server's own ledger mappings, applied verbatim so the two
         // databases cannot drift in column shape, index or concurrency token,

@@ -68,13 +68,30 @@ public sealed class DeviceSalesRepository(
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public Task<Result<SaleId>> UpdateAsync(Sale sale, CancellationToken cancellationToken)
+    public async Task<Result<SaleId>> UpdateAsync(Sale sale, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(sale);
-        cancellationToken.ThrowIfCancellationRequested();
 
-        // Tracked by the read that loaded it; the unit of work writes it.
-        return Task.FromResult(Result<SaleId>.Success(sale.Id));
+        // Tracked by the read that loaded it; the unit of work writes it. The
+        // only update a device makes to a sale is voiding it, and the sale's own
+        // status is the honest way to know that without a flag threaded through
+        // a port the server shares.
+        if (sale.Status == SaleStatus.Voided)
+        {
+            await outbox.EnqueueAsync(
+                SyncEventType.SaleVoided,
+                new SaleVoidSyncPayload(
+                    sale.Id.Value,
+                    sale.Number,
+                    sale.LocationId.Value,
+                    sale.VoidedByUserId?.Value,
+                    sale.VoidedAtUtc,
+                    sale.VoidReason),
+                sale.LocationId,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return Result<SaleId>.Success(sale.Id);
     }
 
     /// <inheritdoc />
@@ -211,10 +228,39 @@ public sealed class DeviceSalesRepository(
         => throw NotOnADeviceYet(nameof(GetRefundByEventAsync));
 
     /// <inheritdoc />
-    public Task<Result<ReceiptPrintId>> AddReceiptPrintAsync(
+    public async Task<Result<ReceiptPrintId>> AddReceiptPrintAsync(
         SaleReceiptPrint print,
         CancellationToken cancellationToken)
-        => throw NotOnADeviceYet(nameof(AddReceiptPrintAsync));
+    {
+        ArgumentNullException.ThrowIfNull(print);
+
+        await context.LocalReceiptPrints.AddAsync(print, cancellationToken).ConfigureAwait(false);
+
+        // A reprint is an audited act, not a display concern: someone can walk
+        // out with a second copy of a receipt, so head office is told.
+        Sale? sale = await context.LocalSales
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == print.SaleId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (sale is not null)
+        {
+            await outbox.EnqueueAsync(
+                SyncEventType.SaleReceiptReprinted,
+                new ReceiptPrintSyncPayload(
+                    print.Id.Value,
+                    print.SaleId.Value,
+                    sale.Number,
+                    print.PrintedByUserId.Value,
+                    print.PrintedAtUtc,
+                    print.IsReprint,
+                    print.Reason),
+                sale.LocationId,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return Result<ReceiptPrintId>.Success(print.Id);
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<Product>> GetReturnProductsAsync(
@@ -249,3 +295,35 @@ public sealed record SaleSyncPayload(
     decimal NetTotal,
     DateTimeOffset CompletedAtUtc,
     DateOnly BusinessDate);
+
+/// <summary>What the server is told about a sale voided offline.</summary>
+/// <param name="SaleId">The sale.</param>
+/// <param name="Number">The receipt number the void applies to.</param>
+/// <param name="LocationId">Where it was sold.</param>
+/// <param name="VoidedByUserId">Who voided it.</param>
+/// <param name="VoidedAtUtc">When, by the device clock.</param>
+/// <param name="Reason">Why, which a void always requires.</param>
+public sealed record SaleVoidSyncPayload(
+    Guid SaleId,
+    string Number,
+    Guid LocationId,
+    Guid? VoidedByUserId,
+    DateTimeOffset? VoidedAtUtc,
+    string? Reason);
+
+/// <summary>What the server is told about a receipt printed offline.</summary>
+/// <param name="PrintId">The print record.</param>
+/// <param name="SaleId">The sale it belongs to.</param>
+/// <param name="Number">The receipt number.</param>
+/// <param name="PrintedByUserId">Who printed it.</param>
+/// <param name="PrintedAtUtc">When, by the device clock.</param>
+/// <param name="IsReprint">Whether this was a second copy.</param>
+/// <param name="Reason">Why a reprint was needed.</param>
+public sealed record ReceiptPrintSyncPayload(
+    Guid PrintId,
+    Guid SaleId,
+    string Number,
+    Guid PrintedByUserId,
+    DateTimeOffset PrintedAtUtc,
+    bool IsReprint,
+    string? Reason);

@@ -311,8 +311,8 @@ An entry is `Pending` until the device-side ports its handler needs exist, and
 only a `Registered` entry is added to the container. As of C40 a device can trade: the
 shift lifecycle — open, suspend, resume, close — and the cash sale are
 `Registered` and execute offline, with the drawer reconciled against the shift's
-own cash sales. Void, reprint, returns and refunds are declared offline-capable
-and remain `Pending`. The distinction is not
+own cash sales. Void and reprint are `Registered` too. Returns and
+refunds are declared offline-capable and remain `Pending`. The distinction is not
 bookkeeping: registering a handler whose repositories are unregistered would
 make the container throw on resolve, where the whole point of the boundary is to
 fail closed with a result the UI can explain.

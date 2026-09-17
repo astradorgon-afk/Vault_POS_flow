@@ -171,6 +171,74 @@ public sealed class DeviceSaleExecutionTests
         shift.CashVariance.Should().Be(-5m, "the shortfall is recorded, not hidden");
     }
 
+    [Fact]
+    public async Task VoidingASale_ReturnsTheStock_AndQueuesTheVoid()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        Result<SaleId> sold = await host.SellAsync(quantity: 3m, unitPaid: 75m);
+        sold.IsSuccess.Should().BeTrue(sold.IsFailure ? sold.Error.ToString() : string.Empty);
+
+        Result<SaleId> voided = await host.SendCommandAsync(
+            new VoidSaleCommand(
+                EventId.New(),
+                sold.Value,
+                host.StoreId,
+                host.ShiftId,
+                host.DeviceId,
+                DateOnly.FromDateTime(Now.UtcDateTime),
+                host.CashierId,
+                Now,
+                "wrong item scanned"));
+
+        voided.IsSuccess.Should().BeTrue(voided.IsFailure ? voided.Error.ToString() : string.Empty);
+
+        // The goods come back to the shelf by a reversing post, not by editing
+        // history: the ledger is append-only on a device too.
+        (await host.QuantityAsync(host.StoreId, InventoryState.Available)).Should().Be(20m);
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        Sale sale = await context.LocalSales.SingleAsync(CancellationToken.None);
+        sale.Status.Should().Be(SaleStatus.Voided);
+        sale.VoidReason.Should().Be("wrong item scanned");
+
+        (await context.Outbox.CountAsync(e => e.Type == SyncEventType.SaleVoided, CancellationToken.None))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReprintingAReceipt_IsRecordedAndReported()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        Result<SaleId> sold = await host.SellAsync(quantity: 3m, unitPaid: 75m);
+        sold.IsSuccess.Should().BeTrue(sold.IsFailure ? sold.Error.ToString() : string.Empty);
+
+        Result<SaleId> reprinted = await host.SendCommandAsync(
+            new ReprintSaleReceiptCommand(
+                sold.Value,
+                host.StoreId,
+                host.DeviceId,
+                "customer lost the copy",
+                Now,
+                host.CashierId));
+
+        reprinted.IsSuccess.Should().BeTrue(reprinted.IsFailure ? reprinted.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+
+        SaleReceiptPrint print = await context.LocalReceiptPrints.SingleAsync(CancellationToken.None);
+        print.IsReprint.Should().BeTrue();
+        print.Reason.Should().Be("customer lost the copy");
+
+        // A second copy can walk out of the shop, so head office is told.
+        (await context.Outbox.CountAsync(
+                e => e.Type == SyncEventType.SaleReceiptReprinted, CancellationToken.None))
+            .Should().Be(1);
+    }
+
     /// <summary>A device container as MauiProgram composes one, with stock on the shelf.</summary>
     private sealed class SaleHost : IAsyncDisposable
     {
@@ -209,6 +277,8 @@ public sealed class DeviceSaleExecutionTests
             [
                 new(Permissions.Sales.OpenShift, host.StoreId),
                 new(Permissions.Sales.CloseShift, host.StoreId),
+                new(Permissions.Sales.Void, host.StoreId),
+                new(Permissions.Sales.Reprint, host.StoreId),
                 .. grantSalePermission
                     ? new[] { new PermissionSnapshotGrant(Permissions.Sales.Create, host.StoreId) }
                     : [],
@@ -325,6 +395,8 @@ public sealed class DeviceSaleExecutionTests
             return await scope.ServiceProvider.GetRequiredService<IInventoryLedger>()
                 .GetQuantityAsync(location, ProductId, BatchId.Empty, state, CancellationToken.None);
         }
+
+        public Task<Result<TResult>> SendCommandAsync<TResult>(ICommand<TResult> command) => SendAsync(command);
 
         public Task<Result<CashierShiftId>> CloseShiftAsync(decimal declared, decimal counted)
             => SendAsync(new CloseShiftCommand(ShiftId, StoreId, declared, counted));

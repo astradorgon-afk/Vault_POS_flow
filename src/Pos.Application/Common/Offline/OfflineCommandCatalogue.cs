@@ -155,10 +155,10 @@ public sealed class OfflineCommandCatalogue
         OnDevice<CompleteSaleCommand>(
             "POS sale: the device rings up and posts the sale locally.",
             Identity.Permissions.Sales.Create),
-        Pending<VoidSaleCommand>(
+        OnDevice<VoidSaleCommand>(
             "Void of a sale in the same shift and day.",
             Identity.Permissions.Sales.Void),
-        Pending<ReprintSaleReceiptCommand>(
+        OnDevice<ReprintSaleReceiptCommand>(
             "Receipt reprint from local sales history.",
             Identity.Permissions.Sales.Reprint),
         Pending<CreateSalesReturnCommand>(

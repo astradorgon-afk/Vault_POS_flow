@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Pos.Infrastructure.Offline;
 
@@ -10,9 +11,11 @@ using Pos.Infrastructure.Offline;
 namespace Pos.Infrastructure.Persistence.Migrations.Sqlite
 {
     [DbContext(typeof(PosDeviceDbContext))]
-    partial class PosDeviceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917131718_DeviceReceiptPrint")]
+    partial class DeviceReceiptPrint
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
