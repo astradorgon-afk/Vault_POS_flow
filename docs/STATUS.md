@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 11 (POS) complete; Phase 14 (notifications) **C23–C25 in progress**
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C28 device database foundation complete
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -12,21 +12,21 @@ and what to pick up next.
 
 | | |
 |---|---|
-| Solution builds | Clean, warnings-as-errors, analyzers on |
-| Tests | **963 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 99, Security 52, Architecture 13, API 174** (2026-09-17, through C27 emergency-transfer alerts). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
-| Migrations | 28, forward-only. Through C10 applied cleanly against PostgreSQL 17 by Testcontainers, the API host test and the Alpine migrations bundle; C11 model drift is clean, but its migration has not been executed on PostgreSQL because Docker is unavailable. |
+| Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
+| Tests | **967 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 102, Security 52, Architecture 14, API 174** (2026-09-17, through C28 device storage). PostgreSQL tests require Docker; earlier batches verified them against PostgreSQL 17. |
+| Migrations | 28 PostgreSQL migrations plus 1 independent SQLite device migration, all forward-only. The device migration is exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
-| Phases remaining | 11–18 — see §5 |
+| Phases remaining | 12–18 — see §5 |
 
 ```
-Pos.Domain.Tests            376 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests     80 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS and customer repository coverage
-Pos.Architecture.Tests       13 passing   layering, ledger isolation, permission catalogue
+Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
+Pos.Infrastructure.Tests    102 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications and encrypted device-store coverage
+Pos.Architecture.Tests       14 passing   layering, ledger isolation, permission catalogue and client reference boundary
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
-Pos.Application.Tests       245 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    172 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract and scheduled-price cancellation
+Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
+Pos.Api.IntegrationTests    174 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract and scheduled-price cancellation
 ```
 
 (Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
@@ -720,6 +720,25 @@ wrong string (`sale.external_customer_missing`).
 
 ---
 
+### Phase 12 — offline device storage
+
+C28 creates the Windows and Android `Pos.Client` MAUI Blazor Hybrid application
+and the first independently migrated device database. The SQLCipher file uses a
+random 256-bit key held in platform `SecureStorage`, private connections and no
+pooling. `PosDeviceDbContext` exposes only device profile, product, barcode,
+price, location, user and time-bounded permission-snapshot tables; server
+identity, purchasing, audit and reporting tables cannot enter this database.
+Money remains exact decimal text and UTC timestamps use round-trip text.
+
+The initial SQLite migration is separate from the PostgreSQL history. Tests
+apply it to an encrypted file, prove the file cannot be queried without its key,
+verify the scoped table set and exact decimal storage, and enforce unique global
+permission grants despite SQLite's treatment of `NULL` in unique indexes. The
+next batch (C29) will make cache writes exclusive to the change-feed applier and
+persist its transactional cursor.
+
+---
+
 ## 3. Bugs the tests caught this session
 
 Worth recording, because each was invisible in review and would have been
@@ -961,60 +980,22 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 10 (batch and expiration) is committed. Phase 11 POS C1–C19 are committed:
-shift lifecycle, sale completion/read/receipt/void, daily sales summary, and
-referenced/blind returns and refunds have HTTP endpoints. C15 adds the
-server-numbered web-terminal slice (`DevicePlatform.Web`, `/api/v1/terminal`)
-and the checkout orchestration on top of the C14 cart workspace: register
-pick-up, shift start, line discounts, cash payment and atomic sale
-submission; physical terminals stay on their own offline counters
-(`device.not_web`). The follow-up refund
-correction excludes the current return from the database's prior-refund totals;
-the aggregate already counts its own refunds. Partial refunds now reach the
-original payment without double counting, while both refund caps stay enforced.
-Return disposition is implemented in C10: one-line partial inspections route
-goods to Available, Quarantine (with an incident), Damaged, supplier-return
-staging, or EXT-WRITEOFF. Immutable event history supports retries; a per-line
-concurrency token prevents competing requests consuming the same units.
-Customer lookup and optional accounts are implemented in C11: searchable paged
-records, detail and lifecycle routes, separate read/manage permissions, audited
-mutations, and active-customer validation during sale completion. Migration
-`20260916015216_CustomerAccounts` must be applied before running the updated API.
-C16 completes the web sale-lifecycle workflows: sales search with location/date
-filters, receipt text and reprint with reason, void with reason, accept-return
-with per-line quantity, return detail with per-line dispositions and refund
-forms (blind returns cash-locked), and refund history — all gated by the
-server-side permission model and backed by `TerminalBar` register/shift context.
-C17 adds card/e-wallet and split payment mixes to the web checkout. C18 enforces
-the expired-batch override contract end to end: classified `inventory.expired_only`
-refusals, per-line override denial checks, a mandatory recorded reason, and a
-web probe-then-confirm dialog. C19 implements scheduled-price cancellation,
-closing the ADR-0029 gap in POS pricing. The remaining work is:
+Phase 11 is complete. Phase 12 started with C28: the Windows/Android client,
+encrypted device database, scoped cache entities and permission-snapshot
+storage now exist. Continue in this order:
 
-1. **Phase 11 — POS:** the main flow and remaining web surfaces.
-   Checkout orchestration is done (C15), the sale-lifecycle web views are
-   done (C16), card/e-wallet and split payments are done (C17), the
-   expired-batch override is done (C18), and scheduled-price cancellation
-   is done (C19). C20 completes receipt thermal/PDF layouts, and C21 adds the
-   price-schedule workspace for reviewing, scheduling and cancelling future
-   catalogue prices. C22 completes the Phase 10 FEFO allocation extraction.
-   C23 adds durable notifications, per-user receipt state, and deduplicated
-   expiring-soon / expired-run alerts. C24 adds the scoped notification API,
-   authenticated SignalR delivery and the Blazor notification centre. C25
-   starts the remaining generators with low-stock alerts: an hourly worker
-   compares summed Available balances with each stocked product's reorder
-   point and minimum. C26 then adds discrepancy alerts: a 15-minute worker
-   raises one alert per posted goods receipt with unresolved receiving
-   discrepancies, and one per end (source and destination) for each short
-   transfer arrival. C27 adds critical, source-and-destination alerts for every
-   committed emergency transfer. The remaining sync-failure alert waits for the
-   Phase 13 synchronization pipeline that will produce those failures.
-2. **Phase 10 tail:** FEFO allocation extraction (C22), expiring-soon / expired
-   alerts (C23), and the sale-blocking override path (C18) are complete.
-3. **Gap batches** (tracked in [PROGRESS.md](PROGRESS.md)): G1–G5 are done —
-   correctness and deployment, receipts, identity administration, catalog
-   curation, and the negative-stock record with the partitioning decision.
-   Phase 9 followed them.
+1. **C29 — protected cache application:** persist the pull cursor, apply one
+   change-feed page and its cursor in one SQLite transaction, and reject cache
+   entity writes outside that applier.
+2. **C30 — client command boundary:** register only the offline-safe command
+   handlers and prove server-only use cases cannot resolve in the client.
+3. **C31 — device numbering and permission expiry:** allocate stable
+   device-scoped document numbers and deny expired or widened snapshots.
+4. **C32 — offline status UI:** show database, enrolment, connectivity and sync
+   state without exposing storage or transport details.
+5. **Phase 13 — synchronization:** add the outbox, push/pull endpoints,
+   idempotent processing, retry policy and conflict handling. Its failure records
+   will feed the remaining sync-failure notification.
 
 ---
 

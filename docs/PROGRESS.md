@@ -15,8 +15,9 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Phase 10 is committed. **Phase 11 — POS — is underway as the "C" batch
-series** (customer-return and receipt work is being built ahead of the
+**Now:** Phase 10 and the Phase 11 POS flow are committed. **Phase 12 offline
+storage is underway as the C28+ device batch series.** Phase 11 was built as the "C" batch
+series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
 with cash reconciliation), C6 (sale endpoint surface + receipt render), C7
@@ -34,7 +35,7 @@ cancellation — `Product.CancelScheduledPrice`, the cancel endpoint under
 `Permissions.Catalog.ManagePrices`, the `catalog.price_cancel_*` refusals and
 the `product.price.cancelled` audit) are
 complete; details are in the log below.
-**Last commits:** C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
+**Last commits:** C28 (device SQLite foundation), C27 (emergency-transfer alerts), C26 (receiving and transfer discrepancy alerts), C25 (low-stock alerts), C19 (scheduled-price cancellation — 7 new domain tests + 1 new integration test), C18 (expired-batch override contract — 5 new unit tests, 4 new integration tests), C17 (card/e-wallet + split payment checkout — 6 new integration tests, 0 backend changes), C16 (this commit — web sale lifecycle with 9 new backend tests), C15 (this commit — carries the C14 web shell and cart
 workspace, which were never committed separately), `262724e` (C13 — authenticated web shell), `37a804f` (C12 — discount HTTP regressions), `d0f9723` (C11 — customer accounts), `7d9cddd` (C10 — return disposition), `66c419b` (C9 — returns/refunds endpoints), `232af28` (C8 — sale pipeline tests + void route), `7293608` (C7 — daily sales summary), `512269c` (C6 — sale endpoints + receipt), `b4ad864` (C5 — shift lifecycle), `c829307` (C3b — blind customer return),
 `ac46de3` (C3 — receipt reprint with reason), `adf1a65` (C2 — customer returns
 and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`.
@@ -135,7 +136,9 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C26 — 15-minute `DiscrepancyAlertWorker` alerts posted goods receipts with unresolved receiving discrepancies (Warning, receiving location) and short transfer arrivals (Critical, source and destination), each linked to its document; 7-day lookback; no migration.
   - [x] C27 — 5-minute `EmergencyTransferAlertWorker` announces committed emergency transfers as Critical alerts to both endpoint stores (and all-location HQ users), linked to the transfer; durable per-location deduplication and 30-day restart lookback; no migration.
   - [ ] Sale flow: discounts/VAT, payments, shift/device context and atomic completion wiring
-- [ ] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
+- [~] **Phase 12 — Offline storage:** `Pos.Client` SQLite store, cache tables, device numbering, permission snapshots
+  - [x] C28 — Windows/Android MAUI Blazor Hybrid client; dedicated seven-table device schema; SQLCipher encryption with a 256-bit key held in platform `SecureStorage`; initial SQLite migration; cached product/barcode/price/location/user and permission-snapshot entities; money and UTC text converters; global/store snapshot uniqueness; architecture and encrypted-file regression tests.
+  - [ ] C29 — cache writes restricted to the change-feed applier, transactional feed-page application and cursor storage
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
@@ -830,3 +833,18 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - Added factory and worker unit coverage, and the real emergency initiation API
   test now verifies the alert projection after the transfer and ledger post
   commit. No schema change.
+
+### C28 — encrypted device database (`feat(offline-c28)`)
+
+- Created `Pos.Client` as a .NET MAUI Blazor Hybrid app targeting Windows and
+  Android, with an explicit reference-boundary architecture test.
+- Added the dedicated `PosDeviceDbContext`, seven scoped device tables and an
+  independent initial SQLite migration. The client opens the database through
+  SQLCipher with a random 256-bit key held by platform `SecureStorage`.
+- Added device profile, cached product/barcode/price/location/user and
+  permission-snapshot entities. Decimal values and UTC timestamps use exact
+  text converters; partial unique indexes enforce both global and store-scoped
+  permission uniqueness.
+- Tests apply the encrypted migration, verify its limited schema and decimal
+  representation, prove an unkeyed connection cannot read the file, and cover
+  the global permission uniqueness edge case.

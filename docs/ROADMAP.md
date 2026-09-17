@@ -217,7 +217,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 12 — Offline Storage
 
-- [ ] SQLite schema, encryption, migrations
+- [x] SQLite schema, SQLCipher encryption with a platform-secure key, and the
+  initial device migration (C28)
 - [ ] Cache tables + read-only enforcement
 - [ ] Client DI container with whitelisted command set
 - [ ] Local document numbering (device-scoped)

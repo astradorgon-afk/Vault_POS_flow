@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Pos.Infrastructure.Offline;
 
 namespace Pos.Infrastructure.Persistence;
 
@@ -35,7 +36,21 @@ public sealed class PostgresDesignTimeFactory : IDesignTimeDbContextFactory<PosD
     }
 }
 
-// The SQLite migration set is added in Phase 12 alongside the device client.
-// EF Core allows one design-time factory per context type, so the device
-// database gets its own thin context subclass (PosDeviceDbContext) with its own
-// migrations folder rather than a second factory for this one.
+/// <summary>Creates the device-only SQLite context for its independent migration set.</summary>
+public sealed class SqliteDesignTimeFactory : IDesignTimeDbContextFactory<PosDeviceDbContext>
+{
+    /// <inheritdoc />
+    public PosDeviceDbContext CreateDbContext(string[] args)
+    {
+        DbContextOptionsBuilder<PosDeviceDbContext> builder = new();
+        builder.UseSqlite(
+            "Data Source=vaultflow-device-design.db;Password=vaultflow-design-only",
+            sqlite =>
+            {
+                sqlite.MigrationsHistoryTable("__migrations_history");
+                sqlite.MigrationsAssembly(typeof(SqliteDesignTimeFactory).Assembly.FullName);
+            });
+
+        return new PosDeviceDbContext(builder.Options);
+    }
+}

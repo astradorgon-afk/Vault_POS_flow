@@ -1,0 +1,56 @@
+@page "/"
+@inject DeviceDatabaseInitializer Database
+
+<section class="startup-card" aria-live="polite">
+    <div class="eyebrow">VaultFlow device</div>
+    <h1>Preparing this register</h1>
+
+    @if (_error is not null)
+    {
+        <div class="status status-error">
+            <span class="status-dot"></span>
+            <div>
+                <strong>Secure storage could not start</strong>
+                <p>@_error</p>
+            </div>
+        </div>
+    }
+    else if (!_ready)
+    {
+        <div class="status">
+            <span class="status-dot status-dot-working"></span>
+            <div>
+                <strong>Opening encrypted local storage</strong>
+                <p>Applying device schema updates and checking the store.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="status status-ready">
+            <span class="status-dot"></span>
+            <div>
+                <strong>Encrypted store ready</strong>
+                <p>This device can now be enrolled and receive its store data.</p>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _ready;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Database.InitializeAsync();
+            _ready = true;
+        }
+        catch (Exception)
+        {
+            _error = "Restart the app. If the problem continues, re-enrol this device.";
+        }
+    }
+}

@@ -83,6 +83,31 @@ public sealed class LayeringTests
     }
 
     [Fact]
+    public void Client_ProjectReferencesOnlyApprovedLayers()
+    {
+        string root = FindRepositoryRoot();
+        string projectPath = Path.Combine(root, "src", "Pos.Client", "Pos.Client.csproj");
+        string project = File.ReadAllText(projectPath);
+
+        string[] expected =
+        [
+            "Pos.Application",
+            "Pos.Domain",
+            "Pos.Infrastructure",
+            "Pos.Shared",
+            "Pos.SharedUI",
+        ];
+
+        foreach (string dependency in expected)
+        {
+            project.Should().Contain($"..\\{dependency}\\{dependency}.csproj");
+        }
+
+        project.Should().NotContain("Pos.Api.csproj");
+        project.Should().NotContain("Pos.Web.csproj");
+    }
+
+    [Fact]
     public void Domain_UsesNoFloatingPointForBusinessValues()
     {
         // Money and quantities are decimal everywhere. A double on a domain type
@@ -104,4 +129,16 @@ public sealed class LayeringTests
         => result.FailingTypeNames is null
             ? "architecture rule violated"
             : "violating types: " + string.Join(", ", result.FailingTypeNames);
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "VaultFlow.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName
+            ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+    }
 }

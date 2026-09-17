@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Pos.Api/Pos.Api.csproj" />
     <Project Path="src/Pos.Application/Pos.Application.csproj" />
+    <Project Path="src/Pos.Client/Pos.Client.csproj" />
     <Project Path="src/Pos.Domain/Pos.Domain.csproj" />
     <Project Path="src/Pos.Infrastructure/Pos.Infrastructure.csproj" />
     <Project Path="src/Pos.Shared/Pos.Shared.csproj" />

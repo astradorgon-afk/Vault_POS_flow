@@ -49,6 +49,7 @@ src/
   Pos.Infrastructure/  EF Core, the ledger, persistence guards
   Pos.Api/             HTTP surface, composition root
   Pos.Web/             Blazor owner/admin dashboard
+  Pos.Client/          MAUI Blazor Hybrid client for Windows and Android
   Pos.SharedUI/        Razor components shared by Web and the device client
 tests/
   Pos.Domain.Tests/  Pos.Application.Tests/  Pos.Infrastructure.Tests/
@@ -56,12 +57,14 @@ tests/
   Pos.Architecture.Tests/
 ```
 
-`Pos.Client` (.NET MAUI Blazor Hybrid) is created in Phase 12 with the rest of
-the offline device work — see ADR-0019.
+`Pos.Client` is the Phase 12 .NET MAUI Blazor Hybrid application. Its SQLCipher
+device database stores only the scoped offline schema and obtains its key from
+the platform secure store; see ADR-0019 and `docs/OFFLINE_SYNC.md`.
 
 ## Getting started
 
-Requires the .NET 10 SDK (pinned in `global.json`) and Docker.
+Requires the .NET 10 SDK (pinned in `global.json`) and Docker. Building
+`Pos.Client` also requires the .NET MAUI Android and Windows workloads.
 
 ```bash
 cp .env.example .env    # then replace every value
@@ -79,6 +82,12 @@ Generate a migration after changing the model:
 
 ```bash
 dotnet ef migrations add <Name> --project src/Pos.Infrastructure --startup-project src/Pos.Infrastructure --output-dir Persistence/Migrations/Postgres
+```
+
+Device migrations use the dedicated context and migration set:
+
+```bash
+dotnet ef migrations add <Name> --context PosDeviceDbContext --project src/Pos.Infrastructure --startup-project src/Pos.Infrastructure --output-dir Persistence/Migrations/Sqlite
 ```
 
 ## Conventions worth knowing before you commit
