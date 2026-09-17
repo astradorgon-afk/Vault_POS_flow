@@ -161,10 +161,10 @@ public sealed class OfflineCommandCatalogue
         OnDevice<ReprintSaleReceiptCommand>(
             "Receipt reprint from local sales history.",
             Identity.Permissions.Sales.Reprint),
-        Pending<CreateSalesReturnCommand>(
+        OnDevice<CreateSalesReturnCommand>(
             "Customer return referencing a sale held locally; goods land in ReturnPending.",
             Identity.Permissions.Sales.Return),
-        Pending<RefundSalesReturnCommand>(
+        OnDevice<RefundSalesReturnCommand>(
             "Cash refund against a locally held return.",
             Identity.Permissions.Sales.Refund),
         OnDevice<OpenShiftCommand>(

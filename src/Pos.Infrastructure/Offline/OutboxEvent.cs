@@ -31,6 +31,12 @@ public enum SyncEventType
 
     /// <summary>A receipt was reprinted, which is an audited act.</summary>
     SaleReceiptReprinted = 6,
+
+    /// <summary>A customer returned goods against a sale the device holds.</summary>
+    SalesReturnCreated = 7,
+
+    /// <summary>Cash went back to a customer.</summary>
+    RefundIssued = 8,
 }
 
 /// <summary>Where one outbox event has got to.</summary>

@@ -209,23 +209,83 @@ public sealed class DeviceSalesRepository(
     }
 
     /// <inheritdoc />
-    public Task<Result<SalesReturnId>> AddReturnAsync(SalesReturn salesReturn, CancellationToken cancellationToken)
-        => throw NotOnADeviceYet(nameof(AddReturnAsync));
+    public async Task<Result<SalesReturnId>> AddReturnAsync(
+        SalesReturn salesReturn,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(salesReturn);
+
+        await context.LocalSalesReturns.AddAsync(salesReturn, cancellationToken).ConfigureAwait(false);
+
+        await outbox.EnqueueAsync(
+            SyncEventType.SalesReturnCreated,
+            new SalesReturnSyncPayload(
+                salesReturn.Id.Value,
+                salesReturn.Number,
+                salesReturn.SaleId?.Value,
+                salesReturn.LocationId.Value,
+                salesReturn.CashierShiftId.Value,
+                salesReturn.ReturnedAtUtc,
+                salesReturn.BusinessDate),
+            salesReturn.LocationId,
+            cancellationToken).ConfigureAwait(false);
+
+        return Result<SalesReturnId>.Success(salesReturn.Id);
+    }
 
     /// <inheritdoc />
-    public Task<SalesReturn?> GetReturnByIdAsync(SalesReturnId salesReturnId, CancellationToken cancellationToken)
-        => throw NotOnADeviceYet(nameof(GetReturnByIdAsync));
+    public async Task<SalesReturn?> GetReturnByIdAsync(
+        SalesReturnId salesReturnId,
+        CancellationToken cancellationToken)
+        => await context.LocalSalesReturns
+            .Include(r => r.Items)
+            .Include(r => r.Refunds)
+            .FirstOrDefaultAsync(r => r.Id == salesReturnId, cancellationToken)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public Task<Result<RefundId>> AddRefundAsync(
+    public async Task<Result<RefundId>> AddRefundAsync(
         SalesReturnId salesReturnId,
         Refund refund,
         CancellationToken cancellationToken)
-        => throw NotOnADeviceYet(nameof(AddRefundAsync));
+    {
+        ArgumentNullException.ThrowIfNull(refund);
+
+        SalesReturn? salesReturn = await context.LocalSalesReturns
+            .FirstOrDefaultAsync(r => r.Id == salesReturnId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (salesReturn is null)
+        {
+            return Result<RefundId>.Failure(Error.NotFound(
+                "sale.return_not_found",
+                "The return being refunded does not exist on this device."));
+        }
+
+        // Cash leaving the drawer is the thing a shift close has to know about,
+        // so it is written locally and reported, never inferred at sync time.
+        await context.LocalRefunds.AddAsync(refund, cancellationToken).ConfigureAwait(false);
+
+        await outbox.EnqueueAsync(
+            SyncEventType.RefundIssued,
+            new RefundSyncPayload(
+                refund.Id.Value,
+                salesReturnId.Value,
+                salesReturn.Number,
+                refund.Method.ToString(),
+                refund.Amount,
+                refund.RefundedAtUtc),
+            salesReturn.LocationId,
+            cancellationToken).ConfigureAwait(false);
+
+        return Result<RefundId>.Success(refund.Id);
+    }
 
     /// <inheritdoc />
-    public Task<Refund?> GetRefundByEventAsync(EventId eventId, CancellationToken cancellationToken)
-        => throw NotOnADeviceYet(nameof(GetRefundByEventAsync));
+    public async Task<Refund?> GetRefundByEventAsync(EventId eventId, CancellationToken cancellationToken)
+        => await context.LocalRefunds
+            .FirstOrDefaultAsync(r => r.EventId == eventId, cancellationToken)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
     public async Task<Result<ReceiptPrintId>> AddReceiptPrintAsync(
@@ -327,3 +387,35 @@ public sealed record ReceiptPrintSyncPayload(
     DateTimeOffset PrintedAtUtc,
     bool IsReprint,
     string? Reason);
+
+/// <summary>What the server is told about a return taken offline.</summary>
+/// <param name="ReturnId">The return.</param>
+/// <param name="Number">The RET number printed at the till.</param>
+/// <param name="SaleId">The sale it references, when it references one.</param>
+/// <param name="LocationId">Where the goods came back.</param>
+/// <param name="ShiftId">The shift that accepted them.</param>
+/// <param name="ReturnedAtUtc">The device clock at acceptance.</param>
+/// <param name="BusinessDate">The business date in the location's timezone.</param>
+public sealed record SalesReturnSyncPayload(
+    Guid ReturnId,
+    string Number,
+    Guid? SaleId,
+    Guid LocationId,
+    Guid ShiftId,
+    DateTimeOffset ReturnedAtUtc,
+    DateOnly BusinessDate);
+
+/// <summary>What the server is told about cash that went back to a customer.</summary>
+/// <param name="RefundId">The refund.</param>
+/// <param name="ReturnId">The return it settles.</param>
+/// <param name="ReturnNumber">That return's number.</param>
+/// <param name="Method">How it was paid back.</param>
+/// <param name="Amount">How much.</param>
+/// <param name="RefundedAtUtc">The device clock at payout.</param>
+public sealed record RefundSyncPayload(
+    Guid RefundId,
+    Guid ReturnId,
+    string ReturnNumber,
+    string Method,
+    decimal Amount,
+    DateTimeOffset RefundedAtUtc);

@@ -117,12 +117,9 @@ public sealed class DeviceShiftRepository(
 
     /// <inheritdoc />
     /// <remarks>
-    /// Refunds are zero, and that is a real statement rather than a placeholder:
-    /// a device cannot refund, because returns and refunds are not registered on
-    /// one. If that changes, this has to change with it — a drawer reconciled
-    /// against cash that went out but was not counted would report a shortfall
-    /// the cashier did not cause. Petty-cash payouts do not exist yet on either
-    /// side.
+    /// Cash refunds are counted from the device's own refund rows, which is what
+    /// stops a drawer that paid one out from looking short by exactly the amount
+    /// refunded. Petty-cash payouts do not exist yet on either side.
     /// </remarks>
     public async Task<ShiftCashTotals> GetShiftCashTotalsAsync(
         CashierShiftId shiftId,
@@ -137,15 +134,42 @@ public sealed class DeviceShiftRepository(
             .SumAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return new ShiftCashTotals(cashSales, CashRefunds: 0m, Payouts: 0m);
+        decimal cashRefunds = await context.LocalRefunds
+            .AsNoTracking()
+            .Where(r => r.CashierShiftId == shiftId && r.Method == PaymentMethod.Cash)
+            .Select(r => r.Amount)
+            .SumAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new ShiftCashTotals(cashSales, cashRefunds, Payouts: 0m);
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
+    /// <remarks>
+    /// This is what stops a sale being refunded past what it was paid: a device
+    /// holding only some of a sale's returns would under-count and let the
+    /// second refund through, so it answers from its own rows and the server
+    /// re-checks the same rule when the events arrive.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<PaymentMethod, decimal>> GetRefundedAmountsByMethodAsync(
         SaleId saleId,
         CancellationToken cancellationToken,
         SalesReturnId? excludedReturnId = null)
-        => throw NotOnADeviceYet(nameof(GetRefundedAmountsByMethodAsync));
+    {
+        var rows = await (
+            from salesReturn in context.LocalSalesReturns.AsNoTracking()
+            join refund in context.LocalRefunds.AsNoTracking()
+                on salesReturn.Id equals refund.SalesReturnId
+            where salesReturn.SaleId == saleId
+                  && (excludedReturnId == null || salesReturn.Id != excludedReturnId)
+            select new { refund.Method, refund.Amount })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.Method)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount));
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<ShiftForceCloseCandidate>> GetForceCloseCandidatesAsync(

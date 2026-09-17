@@ -239,6 +239,64 @@ public sealed class DeviceSaleExecutionTests
             .Should().Be(1);
     }
 
+    [Fact]
+    public async Task ACustomerReturnsGoods_AndTheCashRefundLeavesTheDrawerShort()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        Result<SaleId> sold = await host.SellAsync(quantity: 3m, unitPaid: 75m);
+        sold.IsSuccess.Should().BeTrue(sold.IsFailure ? sold.Error.ToString() : string.Empty);
+
+        Result<SalesReturnId> returned = await host.ReturnAsync(sold.Value, quantity: 1m);
+        returned.IsSuccess.Should().BeTrue(returned.IsFailure ? returned.Error.ToString() : string.Empty);
+
+        Result<RefundId> refunded = await host.RefundAsync(sold.Value, returned.Value, amount: 25m);
+        refunded.IsSuccess.Should().BeTrue(refunded.IsFailure ? refunded.Error.ToString() : string.Empty);
+
+        // Returned goods do not go back on the shelf. They land in ReturnPending
+        // until someone inspects them (OFFLINE_SYNC.md §1), so the sellable
+        // count stays at seventeen and the returned unit is held separately.
+        (await host.QuantityAsync(host.StoreId, InventoryState.Available)).Should().Be(17m);
+        (await host.QuantityAsync(host.StoreId, InventoryState.ReturnPending)).Should().Be(1m);
+
+        // The drawer holds the float plus 75 taken minus 25 paid back. Counting
+        // 2,050 must balance — this is the case that would have reported a
+        // twenty-five peso shortfall while refunds were reported as zero.
+        Result<CashierShiftId> closed = await host.CloseShiftAsync(declared: 2050m, counted: 2050m);
+
+        closed.IsSuccess.Should().BeTrue(closed.IsFailure ? closed.Error.ToString() : string.Empty);
+
+        await using PosDeviceDbContext context = await host.Database.OpenContextAsync();
+        CashierShift shift = await context.LocalShifts.SingleAsync(CancellationToken.None);
+
+        shift.CashVariance.Should().Be(0m, "the refund is counted out of the drawer, not ignored");
+
+        (await context.Outbox.CountAsync(e => e.Type == SyncEventType.SalesReturnCreated, CancellationToken.None))
+            .Should().Be(1);
+        (await context.Outbox.CountAsync(e => e.Type == SyncEventType.RefundIssued, CancellationToken.None))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ASaleCannotBeRefundedPastWhatItWasPaid()
+    {
+        await using SaleHost host = await SaleHost.StartAsync();
+        await host.ReceiveStockAsync(20m);
+
+        Result<SaleId> sold = await host.SellAsync(quantity: 3m, unitPaid: 75m);
+        Result<SalesReturnId> returned = await host.ReturnAsync(sold.Value, quantity: 3m);
+        returned.IsSuccess.Should().BeTrue(returned.IsFailure ? returned.Error.ToString() : string.Empty);
+
+        (await host.RefundAsync(sold.Value, returned.Value, amount: 75m)).IsSuccess.Should().BeTrue();
+
+        // A second refund of the same cash would hand out money the sale never
+        // took. The device answers from its own rows; the server re-checks.
+        Result<RefundId> again = await host.RefundAsync(sold.Value, returned.Value, amount: 75m);
+
+        again.IsFailure.Should().BeTrue();
+    }
+
     /// <summary>A device container as MauiProgram composes one, with stock on the shelf.</summary>
     private sealed class SaleHost : IAsyncDisposable
     {
@@ -279,6 +337,8 @@ public sealed class DeviceSaleExecutionTests
                 new(Permissions.Sales.CloseShift, host.StoreId),
                 new(Permissions.Sales.Void, host.StoreId),
                 new(Permissions.Sales.Reprint, host.StoreId),
+                new(Permissions.Sales.Return, host.StoreId),
+                new(Permissions.Sales.Refund, host.StoreId),
                 .. grantSalePermission
                     ? new[] { new PermissionSnapshotGrant(Permissions.Sales.Create, host.StoreId) }
                     : [],
@@ -397,6 +457,45 @@ public sealed class DeviceSaleExecutionTests
         }
 
         public Task<Result<TResult>> SendCommandAsync<TResult>(ICommand<TResult> command) => SendAsync(command);
+
+        public async Task<Result<SalesReturnId>> ReturnAsync(SaleId saleId, decimal quantity)
+        {
+            DocumentNumber number;
+            await using (AsyncServiceScope scope = this.provider.CreateAsyncScope())
+            {
+                number = await scope.ServiceProvider
+                    .GetRequiredService<IDocumentNumberGenerator>()
+                    .NextAsync(DocumentType.SalesReturn, CancellationToken.None);
+            }
+
+            return await SendAsync(new CreateSalesReturnCommand(
+                number,
+                EventId.New(),
+                saleId,
+                StoreId,
+                ShiftId,
+                DeviceId,
+                null,
+                DateOnly.FromDateTime(Now.UtcDateTime),
+                Now,
+                CashierId,
+                [new SalesReturnLine(ProductId, quantity)]));
+        }
+
+        public Task<Result<RefundId>> RefundAsync(SaleId saleId, SalesReturnId returnId, decimal amount)
+            => SendAsync(new RefundSalesReturnCommand(
+                EventId.New(),
+                saleId,
+                returnId,
+                StoreId,
+                ShiftId,
+                DeviceId,
+                PaymentMethod.Cash,
+                amount,
+                amount,
+                null,
+                Now,
+                CashierId));
 
         public Task<Result<CashierShiftId>> CloseShiftAsync(decimal declared, decimal counted)
             => SendAsync(new CloseShiftCommand(ShiftId, StoreId, declared, counted));

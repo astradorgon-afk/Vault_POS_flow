@@ -37,6 +37,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
     public DbSet<Sale> LocalSales => Set<Sale>();
     public DbSet<SaleReceiptPrint> LocalReceiptPrints => Set<SaleReceiptPrint>();
+    public DbSet<SalesReturn> LocalSalesReturns => Set<SalesReturn>();
+    public DbSet<Refund> LocalRefunds => Set<Refund>();
     public DbSet<OutboxEvent> Outbox => Set<OutboxEvent>();
     public DbSet<DeviceSequence> Sequences => Set<DeviceSequence>();
     public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
@@ -318,6 +320,12 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
         builder.Entity<Payment>().ToTable("local_payment");
         builder.ApplyConfiguration(new SaleReceiptPrintConfiguration());
         builder.Entity<SaleReceiptPrint>().ToTable("local_sale_receipt_print");
+        builder.ApplyConfiguration(new SalesReturnConfiguration());
+        builder.ApplyConfiguration(new SalesReturnItemConfiguration());
+        builder.ApplyConfiguration(new RefundConfiguration());
+        builder.Entity<SalesReturn>().ToTable("local_sales_return");
+        builder.Entity<SalesReturnItem>().ToTable("local_sales_return_item");
+        builder.Entity<Refund>().ToTable("local_refund");
 
         // The server's own ledger mappings, applied verbatim so the two
         // databases cannot drift in column shape, index or concurrency token,
