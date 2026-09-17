@@ -61,6 +61,23 @@ public sealed class DeviceLedgerTests
     }
 
     [Fact]
+    public async Task APostInsideTheCallersTransaction_SeesStockCommittedBeforeIt()
+    {
+        await using LedgerHost host = await LedgerHost.StartAsync();
+
+        (await host.Ledger.PostAsync(Receipt(100m, 45m), CancellationToken.None)).IsSuccess.Should().BeTrue();
+        await host.SaveAsync();
+
+        // A command posts inside the unit of work's transaction, so the ledger
+        // takes its enlisted path: it stages and leaves durability to the caller.
+        await using var transaction = await host.Context.Database.BeginTransactionAsync(CancellationToken.None);
+
+        Result<PostedMovementGroup> sale = await host.Ledger.PostAsync(Sale(12m, 45m), CancellationToken.None);
+
+        sale.IsSuccess.Should().BeTrue(Because(sale));
+    }
+
+    [Fact]
     public async Task TheLedgerRefusesToSellStockTheDeviceDoesNotHave()
     {
         await using LedgerHost host = await LedgerHost.StartAsync();

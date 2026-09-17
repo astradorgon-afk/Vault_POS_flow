@@ -22,6 +22,9 @@ public enum SyncEventType
 
     /// <summary>A cashier resumed a suspended shift.</summary>
     ShiftResumed = 3,
+
+    /// <summary>A sale was completed and paid for.</summary>
+    SaleCompleted = 4,
 }
 
 /// <summary>Where one outbox event has got to.</summary>

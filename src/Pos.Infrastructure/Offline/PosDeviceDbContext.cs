@@ -35,6 +35,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<DeviceSyncCursor> SyncCursors => Set<DeviceSyncCursor>();
     public DbSet<DeviceLocalAudit> LocalAudit => Set<DeviceLocalAudit>();
     public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
+    public DbSet<Sale> LocalSales => Set<Sale>();
     public DbSet<OutboxEvent> Outbox => Set<OutboxEvent>();
     public DbSet<DeviceSequence> Sequences => Set<DeviceSequence>();
     public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
@@ -305,6 +306,15 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.HasIndex(e => e.DeviceSequence).IsUnique().HasDatabaseName("ux_local_outbox_sequence");
             entity.HasIndex(e => new { e.Status, e.DeviceSequence }).HasDatabaseName("ix_local_outbox_status_sequence");
         });
+
+        // The sale aggregate, mapped from the server's own configurations so an
+        // offline sale and an online one are the same record in the same shape.
+        builder.ApplyConfiguration(new SaleConfiguration());
+        builder.ApplyConfiguration(new SaleItemConfiguration());
+        builder.ApplyConfiguration(new PaymentConfiguration());
+        builder.Entity<Sale>().ToTable("local_sale");
+        builder.Entity<SaleItem>().ToTable("local_sale_item");
+        builder.Entity<Payment>().ToTable("local_payment");
 
         // The server's own ledger mappings, applied verbatim so the two
         // databases cannot drift in column shape, index or concurrency token,
