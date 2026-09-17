@@ -52,6 +52,10 @@ Scan / search  ->  Cart  ->  (discounts, overrides)  ->  Payment  ->  Complete
    which is what makes recall traceability work down to the customer receipt.
 4. **Stock check** against the location's `Available` balance. Insufficient stock
    is refused under the default `Prohibit` policy (INVENTORY_LEDGER.md §7).
+   A sale rung up offline is replayed centrally through this same flow when it
+   syncs — the same handler, re-resolving steps 2, 3 and 6 from the server's own
+   data — so an offline sale is never recorded at numbers a register worked out
+   for itself (OFFLINE_SYNC.md §3.1.1).
 5. **Discounts** — line and document level. A manual discount requires
    `sale.discount`; a price override requires `sale.price_override`. Both record
    the authorizing user on the line, even when a manager authorises on the

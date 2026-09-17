@@ -44,6 +44,7 @@ public sealed class DeviceSalesRepository(
             SyncEventType.SaleCompleted,
             new SaleSyncPayload(
                 sale.Id.Value,
+                sale.EventId.Value,
                 sale.Number,
                 sale.LocationId.Value,
                 sale.DeviceId.Value,
@@ -52,12 +53,67 @@ public sealed class DeviceSalesRepository(
                 sale.CustomerId?.Value,
                 sale.NetTotal,
                 sale.CompletedAtUtc,
-                sale.BusinessDate),
+                sale.BusinessDate,
+                ToLines(sale),
+                [.. sale.Payments.Select(p => new SalePaymentSyncPayload(
+                    p.Method.ToString(), p.Amount, p.Tendered, p.ProviderReference))]),
             sale.LocationId,
             cancellationToken).ConfigureAwait(false);
 
         return Result<SaleId>.Success(sale.Id);
     }
+
+    /// <summary>
+    /// Rebuilds the lines the cashier rang up from the items the sale stored.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The server replays the sale through the same handler it runs online, and
+    /// that handler takes lines, not items: it re-resolves the price, the VAT
+    /// class and the FEFO allocation itself. So the event has to carry what was
+    /// asked for, not what the device worked out — uploading the device's batch
+    /// allocation would be asking head office to trust a shelf it cannot see.
+    /// </para>
+    /// <para>
+    /// One line becomes several items when FEFO splits it across batches, and
+    /// every item of a split shares each fact below while differing only in
+    /// batch, so grouping restores the line exactly. Two lines identical in all
+    /// of them merge into one, which changes how many lines a re-printed receipt
+    /// would show and no number the server computes: the quantities and
+    /// discounts add up, and a discount spread across a longer line is
+    /// apportioned by quantity either way.
+    /// </para>
+    /// <para>
+    /// The expired-batch override is absent because it cannot have happened:
+    /// <c>sale.expired_override</c> is not offline-capable, so it never reaches
+    /// a device's permission snapshot (OFFLINE_SYNC.md §4).
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<SaleLineSyncPayload> ToLines(Sale sale)
+        =>
+        [
+            .. sale.Items
+                .OrderBy(i => i.LineNumber)
+                .GroupBy(i => new
+                {
+                    i.ProductId,
+                    i.UnitOfMeasureId,
+                    i.Barcode,
+                    i.PriceWasOverridden,
+                    OverriddenPrice = i.PriceWasOverridden ? i.UnitPrice : 0m,
+                    i.PriceOverrideAuthorizedByUserId,
+                    i.DiscountAuthorizedByUserId,
+                })
+                .Select(group => new SaleLineSyncPayload(
+                    group.Key.ProductId.Value,
+                    group.Sum(i => i.Quantity),
+                    group.Key.UnitOfMeasureId.Value,
+                    group.Key.Barcode,
+                    group.Key.PriceWasOverridden ? group.Key.OverriddenPrice : null,
+                    group.Key.PriceOverrideAuthorizedByUserId?.Value,
+                    group.Sum(i => i.Discount),
+                    group.Key.DiscountAuthorizedByUserId?.Value)),
+        ];
 
     /// <inheritdoc />
     public async Task<Sale?> GetByIdAsync(SaleId saleId, CancellationToken cancellationToken)
@@ -333,19 +389,34 @@ public sealed class DeviceSalesRepository(
             $"{member} belongs to a use case that is not registered on a device; reaching it is a registration mistake, not a runtime condition."));
 }
 
-/// <summary>What the server is told about a sale that happened offline.</summary>
+/// <summary>
+/// What the server is told about a sale that happened offline: what the cashier
+/// rang up, not what the device worked out from it.
+/// </summary>
 /// <param name="SaleId">The sale the device created.</param>
+/// <param name="EventId">
+/// The business event the device generated when the sale was rung up. The
+/// server passes it back into the ledger, which is what makes a replayed sale
+/// post its movements once.
+/// </param>
 /// <param name="Number">The device-scoped SAL number printed on the receipt.</param>
 /// <param name="LocationId">Where it was sold.</param>
 /// <param name="DeviceId">The register.</param>
 /// <param name="ShiftId">The shift it belongs to.</param>
 /// <param name="CompletedByUserId">The cashier who completed it.</param>
 /// <param name="CustomerId">The named customer, when there was one.</param>
-/// <param name="NetTotal">What was actually taken.</param>
+/// <param name="NetTotal">
+/// What was actually taken, as printed on the receipt. The server re-derives
+/// its own from the prices it holds; this is sent so a difference can be shown
+/// on the price-variance report rather than silently re-priced.
+/// </param>
 /// <param name="CompletedAtUtc">The device clock at completion.</param>
 /// <param name="BusinessDate">The business date in the location's timezone.</param>
+/// <param name="Lines">What was sold, as the cashier asked for it.</param>
+/// <param name="Payments">How it was settled.</param>
 public sealed record SaleSyncPayload(
     Guid SaleId,
+    Guid EventId,
     string Number,
     Guid LocationId,
     Guid DeviceId,
@@ -354,7 +425,39 @@ public sealed record SaleSyncPayload(
     Guid? CustomerId,
     decimal NetTotal,
     DateTimeOffset CompletedAtUtc,
-    DateOnly BusinessDate);
+    DateOnly BusinessDate,
+    IReadOnlyList<SaleLineSyncPayload> Lines,
+    IReadOnlyList<SalePaymentSyncPayload> Payments);
+
+/// <summary>One line of a sale rung up offline.</summary>
+/// <param name="ProductId">The product sold.</param>
+/// <param name="Quantity">How much, in the unit of measure.</param>
+/// <param name="UnitOfMeasureId">The unit the quantity is expressed in.</param>
+/// <param name="Barcode">The scanned barcode, when it was scanned.</param>
+/// <param name="UnitPriceOverride">The cashier-entered price, when one was entered.</param>
+/// <param name="PriceOverrideAuthorizedByUserId">Who authorized that override.</param>
+/// <param name="Discount">The manual discount on the line.</param>
+/// <param name="DiscountAuthorizedByUserId">Who authorized the discount.</param>
+public sealed record SaleLineSyncPayload(
+    Guid ProductId,
+    decimal Quantity,
+    Guid UnitOfMeasureId,
+    string? Barcode,
+    decimal? UnitPriceOverride,
+    Guid? PriceOverrideAuthorizedByUserId,
+    decimal Discount,
+    Guid? DiscountAuthorizedByUserId);
+
+/// <summary>One payment that settled a sale rung up offline.</summary>
+/// <param name="Method">The payment method, by name.</param>
+/// <param name="Amount">The amount applied to the sale.</param>
+/// <param name="Tendered">What was handed over, for cash.</param>
+/// <param name="ProviderReference">The provider reference, for card and wallet.</param>
+public sealed record SalePaymentSyncPayload(
+    string Method,
+    decimal Amount,
+    decimal? Tendered,
+    string? ProviderReference);
 
 /// <summary>What the server is told about a sale voided offline.</summary>
 /// <param name="SaleId">The sale.</param>

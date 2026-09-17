@@ -258,8 +258,9 @@ Substantially delivered in Phase 1, because everything else depends on it.
       event, the idempotency record committed with the effect, a reused
       identifier carrying a different hash refused as tampering, a per-device
       checkpoint deferring gaps. C44 applies the four shift events centrally,
-      replaying each transition through the aggregate. The five sale event
-      types are still refused as unsupported)*
+      replaying each transition through the aggregate; C45 applies the sale by
+      replaying it through the same handler the online endpoint runs. Void,
+      reprint, return and refund are still refused as unsupported)*
 - [ ] Pull endpoint, change feed, cursors, rebaseline
 - [ ] Retry queue with exponential backoff
 - [ ] Conflict rules implementation

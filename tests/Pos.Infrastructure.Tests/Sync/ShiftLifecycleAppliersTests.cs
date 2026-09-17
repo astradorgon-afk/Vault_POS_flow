@@ -44,8 +44,12 @@ public sealed class ShiftLifecycleAppliersTests : IAsyncLifetime
         this.connection = new SqliteConnection("Data Source=:memory:");
         await this.connection.OpenAsync();
 
+        // No-tracking, as the server container configures it. Reads that feed a
+        // write opt in explicitly there, and a fixture that tracked by default
+        // would pass over the exact mistake that breaks in production.
         DbContextOptions<PosDbContext> options = new DbContextOptionsBuilder<PosDbContext>()
             .UseSqlite(this.connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
             .Options;
 
         this.context = new PosDbContext(options);

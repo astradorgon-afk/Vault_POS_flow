@@ -31,8 +31,12 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
         this.connection = new SqliteConnection("Data Source=:memory:");
         await this.connection.OpenAsync();
 
+        // No-tracking, as the server container configures it. Reads that feed a
+        // write opt in explicitly there, and a fixture that tracked by default
+        // would pass over the exact mistake that breaks in production.
         DbContextOptions<PosDbContext> options = new DbContextOptionsBuilder<PosDbContext>()
             .UseSqlite(this.connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
             .Options;
 
         this.context = new PosDbContext(options);
@@ -128,6 +132,19 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
 
         response.Results[0].Outcome.Should().Be(SyncOutcome.Rejected);
         response.Results[0].ErrorCode.Should().Be("sync.event_type_unsupported");
+    }
+
+    [Fact]
+    public async Task ASecondBatchContinuesFromWhereTheFirstStopped()
+    {
+        await Push(Event(1, "{\"a\":1}"), Event(2, "{\"a\":2}"));
+
+        SyncPushResponse next = await Push(Event(3, "{\"a\":3}"));
+
+        next.Results[0].Outcome.Should().Be(
+            SyncOutcome.Accepted,
+            "the checkpoint advances with every event, not only the first: a device that had to defer forever "
+            + "after its first upload would never sync again");
     }
 
     [Fact]

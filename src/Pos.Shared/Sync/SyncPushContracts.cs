@@ -1,11 +1,23 @@
+using System.Text.Json.Serialization;
+
 namespace Pos.Shared.Sync;
 
 /// <summary>What the server decided about one uploaded event.</summary>
 /// <remarks>
+/// <para>
 /// There is one of these per event and never a single batch-level verdict: a
 /// batch is a transport convenience, and a device has to know which of its
 /// events landed so it can stop retrying exactly those.
+/// </para>
+/// <para>
+/// It goes on the wire by name, as OFFLINE_SYNC.md §3 documents it. The
+/// converter is on the type rather than left to the host's serializer options,
+/// because the same contract is read by a device client that does not share
+/// them, and a verdict that silently became <c>3</c> would be a protocol break
+/// nobody notices until a register stops retrying the wrong events.
+/// </para>
 /// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter<SyncOutcome>))]
 public enum SyncOutcome
 {
     /// <summary>Applied for the first time.</summary>

@@ -274,11 +274,39 @@ is told plainly instead of losing work silently.
 | `ShiftOpened` | Creates the shift, **keeping the device's identifier and SHF number**. Re-minting either would orphan the receipts already printed. A shift the server already holds is refused with `sync.shift_already_held`. |
 | `ShiftSuspended` / `ShiftResumed` | Replayed through the aggregate, so a transition that would have been refused at the till is refused here too rather than written as a status column. |
 | `ShiftClosed` | Declared and counted cash are taken as the cashier entered them — they are facts about a physical drawer. The **variance is re-derived** from the sales and refunds the server accepted; see below. A device claiming `isForceClosed` is refused with `sync.force_close_not_permitted`: force-close is the server worker's authority, and the claim is what would suppress the count. |
+| `SaleCompleted` | **Replayed through `CompleteSaleCommandHandler`** — the same handler the online endpoint runs. The event carries the lines and payments the cashier rang up, not the device's own resolution of them, so the server re-derives the effective price, the VAT class, the FEFO allocation and the cash rounding from its own data. The device's `eventId` goes back into the ledger, which is what makes the movements post once. A receipt number the server already holds is refused with `sync.sale_already_held`. |
+
+A sale's identity across the two sides is its **SAL number**, not its row id:
+the server mints its own `SaleId`, and the number is unique, device-scoped so it
+cannot collide, and already printed on the customer's receipt. Later events about
+the same sale name it by that number. A shift is different — its identifier *is*
+the device's, kept by `ShiftOpenedApplier`, because the sales that reference it
+were uploaded carrying that identifier.
 
 Every applier refuses a payload naming another device (`sync.device_mismatch`),
 and an update naming a shift the server has never seen (`sync.shift_unknown`) —
 under strict per-device ordering that means the open was refused, so the shift
 will never exist and retrying will never help.
+
+**Authorization is evaluated at processing time, and does not refuse a sale.**
+A cashier who lost `sale.create` at the location while the device was offline —
+reassigned, or their role narrowed — has their sale **recorded and flagged**
+`RequiresReview` with `sync.cashier_permission_withdrawn`, not refused. The goods
+left the shelf and the money changed hands; refusing would destroy the only
+central record of both. The handler is called directly rather than dispatched
+for exactly this reason: the pipeline's authorization behaviour would evaluate
+the principal that *uploaded* the batch, where what matters is the cashier who
+rang the sale up, and it would refuse where the rule says flag.
+
+**Known gap: a sale the server prices differently is refused.** §7 says such a
+sale is accepted at the price actually charged with a `PriceVarianceRecorded`
+note. Today the server re-prices the line and the payments no longer settle the
+re-priced total, so the handler refuses with `sale.payment_mismatch`. Closing it
+means carrying the price row the device quoted, so the line is recorded against
+that version — not re-priced, and not dressed up as a manual override, which
+would put an unauthorized entry on the price-override report. Until then the
+record is parked rather than lost: the device escalates a refused event as a
+`SyncFailure` and keeps it forever (§3.2).
 
 **Why the close re-derives the variance.** The device computes its own from the
 sales it holds and prints it on the Z-report. The server derives its own because

@@ -49,6 +49,23 @@ public sealed record SyncApplyResult(
     /// <returns>A rejected result.</returns>
     public static SyncApplyResult Rejected(string errorCode, string message)
         => new(SyncOutcome.Rejected, null, errorCode, message);
+
+    /// <summary>
+    /// The event took effect and a person has to look at it.
+    /// </summary>
+    /// <remarks>
+    /// This is not a softer refusal. It is for the events that must land
+    /// whatever the server now thinks — the money already changed hands, the
+    /// goods already left the shelf — but that a person would want to know
+    /// about, such as a sale rung up by a cashier whose authority was withdrawn
+    /// while the device was offline (OFFLINE_SYNC.md §7).
+    /// </remarks>
+    /// <param name="documentNumber">The document number the server holds.</param>
+    /// <param name="errorCode">The stable code for what needs looking at.</param>
+    /// <param name="message">What to tell whoever looks.</param>
+    /// <returns>A result that applied but is flagged.</returns>
+    public static SyncApplyResult RequiresReview(string? documentNumber, string errorCode, string message)
+        => new(SyncOutcome.RequiresReview, documentNumber, errorCode, message);
 }
 
 /// <summary>
@@ -162,7 +179,12 @@ public sealed class SyncPushProcessor(
 
         // 2. Ordering. A gap means the device has an earlier event still in
         //    flight, so this one waits rather than jumping it.
+        // Tracked explicitly: the server context reads no-tracking by default,
+        // and an advance applied to a detached checkpoint saves nothing. The
+        // symptom is silent and total — the first batch lands, and every batch
+        // after it defers forever against a checkpoint frozen at one.
         SyncCheckpoint? checkpoint = await context.SyncCheckpoints
+            .AsTracking()
             .FirstOrDefaultAsync(c => c.DeviceId == deviceId, cancellationToken)
             .ConfigureAwait(false);
 
