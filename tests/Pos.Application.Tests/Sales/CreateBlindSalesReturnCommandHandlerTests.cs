@@ -71,7 +71,7 @@ public sealed class CreateBlindSalesReturnCommandHandlerTests
                 false,
                 Now)));
 
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+        _repository.GetReturnProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
             .Returns([_product]);
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
@@ -194,7 +194,7 @@ public sealed class CreateBlindSalesReturnCommandHandlerTests
     [Fact]
     public async Task UnknownProduct_ReturnsNotFound()
     {
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+        _repository.GetReturnProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
             .Returns([]);
         CreateBlindSalesReturnCommand command = Command();
 
@@ -213,7 +213,7 @@ public sealed class CreateBlindSalesReturnCommandHandlerTests
             CategoryId.New(),
             Each,
             Manager).Value;
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
+        _repository.GetReturnProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
             .Returns([unpriced]);
         CreateBlindSalesReturnCommand command = Command(unpriced.Id);
 

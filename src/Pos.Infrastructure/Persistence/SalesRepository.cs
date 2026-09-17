@@ -73,7 +73,44 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<Product>> GetSaleProductsAsync(
+    public async Task<IReadOnlyList<SaleProduct>> GetSaleProductsAsync(
+        IReadOnlyCollection<ProductId> productIds,
+        LocationId locationId,
+        DateTimeOffset at,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(productIds);
+
+        if (productIds.Count == 0)
+        {
+            return [];
+        }
+
+        List<Product> products = await context.Products
+            .AsNoTracking()
+            .Include(p => p.Prices)
+            .Where(p => productIds.Contains(p.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Effective-dated price resolution stays on the aggregate, which is
+        // where the rule about location-specific rows beating global ones lives.
+        return [.. products.Select(p =>
+        {
+            ProductPrice? effective = p.PriceAt(locationId, at);
+
+            return new SaleProduct(
+                p.Id,
+                p.Name,
+                p.IsVatExempt,
+                p.TracksBatches,
+                effective?.Id,
+                effective?.Price.Amount);
+        })];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Product>> GetReturnProductsAsync(
         IReadOnlyCollection<ProductId> productIds,
         CancellationToken cancellationToken)
     {
@@ -87,6 +124,7 @@ public sealed class SalesRepository(PosDbContext context) : ISalesRepository
         return await context.Products
             .AsNoTracking()
             .Include(p => p.Prices)
+            .Include(p => p.Barcodes)
             .Where(p => productIds.Contains(p.Id))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);

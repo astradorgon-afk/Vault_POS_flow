@@ -165,6 +165,16 @@ adapters.
 whitelist is asserted by a test, so no new command becomes offline-capable by
 accident.
 
+**Ports must ask for what a device can supply (C37, 2026-09-17).** Running one
+handler on both sides constrains what its ports may return. The sale asked for
+whole `Product` aggregates to read five fields, which a device cannot produce: it
+mirrors master data thinly and `Product`'s constructor is private. The port now
+returns a `SaleProduct` read model with the price already resolved. The rule this
+sets: where a use case is offline-capable, its ports return what the use case
+needs, not the aggregate it happens to come from. Server-only use cases — the
+blind return, whose permission is not offline-capable — may keep asking for
+aggregates.
+
 **Built in C30 (2026-09-17).** The whitelist is `OfflineCommandCatalogue`, an
 explicit list of command types, and `AddOfflineClientApplication` is the device
 composition root that registers only what it allows. Declaring a use case and

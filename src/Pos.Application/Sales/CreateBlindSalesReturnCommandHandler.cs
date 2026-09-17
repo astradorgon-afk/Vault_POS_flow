@@ -109,7 +109,7 @@ public sealed class CreateBlindSalesReturnCommandHandler(
         List<BlindSalesReturnLine> lines = command.Lines.ToList();
 
         IReadOnlyList<Product> products = await repository
-            .GetSaleProductsAsync(lines.Select(l => l.ProductId).Distinct().ToArray(), cancellationToken)
+            .GetReturnProductsAsync(lines.Select(l => l.ProductId).Distinct().ToArray(), cancellationToken)
             .ConfigureAwait(false);
 
         Dictionary<ProductId, Product> productById = products.ToDictionary(p => p.Id);

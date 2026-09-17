@@ -4,7 +4,6 @@ using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
 using Pos.Application.Inventory;
 using Pos.Domain.Auditing;
-using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
@@ -150,11 +149,11 @@ public sealed class CompleteSaleCommandHandler(
         // 2. Load every product being sold, with its price rows.
         // ------------------------------------------------------------------
         ProductId[] productIds = [.. command.Lines.Select(l => l.ProductId).Distinct()];
-        IReadOnlyList<Product> products = await repository
-            .GetSaleProductsAsync(productIds, cancellationToken)
+        IReadOnlyList<SaleProduct> products = await repository
+            .GetSaleProductsAsync(productIds, command.LocationId, command.CompletedAtUtc, cancellationToken)
             .ConfigureAwait(false);
 
-        Dictionary<ProductId, Product> productById = products.ToDictionary(p => p.Id);
+        Dictionary<ProductId, SaleProduct> productById = products.ToDictionary(p => p.Id);
 
         foreach (ProductId productId in productIds)
         {
@@ -211,7 +210,7 @@ public sealed class CompleteSaleCommandHandler(
 
         foreach (CompleteSaleLine line in command.Lines)
         {
-            Product product = productById[line.ProductId];
+            SaleProduct product = productById[line.ProductId];
 
             // Asking for the exception path itself is a permission use even when
             // the sellable shelf ends up covering the line: a cashier without
@@ -222,8 +221,8 @@ public sealed class CompleteSaleCommandHandler(
             }
 
             // --- 4a. Price resolution. ---
-            ProductPrice? effectivePrice = product.PriceAt(command.LocationId, command.CompletedAtUtc);
-
+            // The repository resolved the effective row for this location and
+            // moment; the handler only decides what to do when there is none.
             decimal unitPrice;
             ProductPriceId priceVersion;
             bool priceWasOverridden = line.UnitPriceOverride is not null;
@@ -233,17 +232,18 @@ public sealed class CompleteSaleCommandHandler(
                 unitPrice = overrideValue;
                 // Still record which row *would* have been effective, or Empty
                 // when no price row exists yet for the product.
-                priceVersion = effectivePrice?.Id ?? ProductPriceId.Empty;
+                priceVersion = product.EffectivePriceId ?? ProductPriceId.Empty;
             }
             else
             {
-                if (effectivePrice is null)
+                if (product.EffectivePriceId is not { } effectivePriceId
+                    || product.EffectiveUnitPrice is not { } effectiveUnitPrice)
                 {
                     return Result<SaleId>.Failure(SaleCommandErrors.PriceMissing(line.ProductId, command.LocationId));
                 }
 
-                unitPrice = effectivePrice.Price.Amount;
-                priceVersion = effectivePrice.Id;
+                unitPrice = effectiveUnitPrice;
+                priceVersion = effectivePriceId;
             }
 
             // --- 4b. VAT classification. ---

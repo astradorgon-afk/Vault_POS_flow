@@ -31,6 +31,9 @@ public sealed class SalesRepositoryTests : IAsyncLifetime
     private static readonly UnitOfMeasureId Unit = UnitOfMeasureId.New();
     private static readonly ProductId Widget = ProductId.New();
 
+    /// <summary>A moment after the test price row takes effect.</summary>
+    private static readonly DateTimeOffset PricedAt = new(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
     private SqliteConnection _connection = null!;
     private PosDbContext _context = null!;
     private SalesRepository _repository = null!;
@@ -155,17 +158,20 @@ public sealed class SalesRepositoryTests : IAsyncLifetime
         _context.Products.Add(product);
         await _context.SaveChangesAsync();
 
-        IReadOnlyList<Product> loaded = await _repository.GetSaleProductsAsync([product.Id], CancellationToken.None);
+        IReadOnlyList<SaleProduct> loaded = await _repository.GetSaleProductsAsync(
+            [product.Id], Main, PricedAt, CancellationToken.None);
 
-        Product found = loaded.Should().ContainSingle(p => p.Id == product.Id).Subject;
-        found.Prices.Should().ContainSingle();
-        found.Prices[0].Amount.Should().Be(100m);
+        SaleProduct found = loaded.Should().ContainSingle(p => p.Id == product.Id).Subject;
+        found.EffectivePriceId.Should().NotBeNull("the repository resolves the effective row, not the handler");
+        found.EffectiveUnitPrice.Should().Be(100m);
+        found.Name.Should().Be(product.Name);
     }
 
     [Fact]
     public async Task GetSaleProductsAsync_EmptyRequest_ReturnsEmpty()
     {
-        IReadOnlyList<Product> loaded = await _repository.GetSaleProductsAsync([], CancellationToken.None);
+        IReadOnlyList<SaleProduct> loaded = await _repository.GetSaleProductsAsync(
+            [], Main, PricedAt, CancellationToken.None);
 
         loaded.Should().BeEmpty();
     }
@@ -178,8 +184,10 @@ public sealed class SalesRepositoryTests : IAsyncLifetime
         _context.Products.Add(product);
         await _context.SaveChangesAsync();
 
-        IReadOnlyList<Product> loaded = await _repository.GetSaleProductsAsync(
+        IReadOnlyList<SaleProduct> loaded = await _repository.GetSaleProductsAsync(
             [product.Id, ProductId.New()],
+            Main,
+            PricedAt,
             CancellationToken.None);
 
         loaded.Should().ContainSingle(p => p.Id == product.Id);

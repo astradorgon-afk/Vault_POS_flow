@@ -326,8 +326,17 @@ public sealed class CompleteSaleCommandHandlerTests
         ProductId productId = product.Id;
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
             .Returns(new List<SellableBatchItem>
             {
@@ -439,8 +448,12 @@ public sealed class CompleteSaleCommandHandlerTests
         LocationId locationId = LocationId.New();
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product>());
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>());
 
         var command = CommandWithLines(locationId, productId);
 
@@ -463,8 +476,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
 
         var command = CommandWithLines(locationId, productId);
 
@@ -484,8 +506,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -621,8 +652,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, settings));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -665,8 +705,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -711,8 +760,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -763,8 +821,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
             .Returns(new List<SellableBatchItem>
             {
@@ -805,8 +872,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -859,8 +935,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
             .Returns(new List<SellableBatchItem>
             {
@@ -902,8 +987,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
             .Returns(new List<SellableBatchItem>
             {
@@ -945,8 +1039,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns((LocationId?)null);
         _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
@@ -993,8 +1096,17 @@ public sealed class CompleteSaleCommandHandlerTests
 
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -1081,8 +1193,17 @@ public sealed class CompleteSaleCommandHandlerTests
     {
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(locationFacts);
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -1105,8 +1226,17 @@ public sealed class CompleteSaleCommandHandlerTests
         ProductId productId = product.Id;
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _expiry.GetSellableBatchesAsync(locationId, productId, Arg.Any<CancellationToken>())
             .Returns(new List<SellableBatchItem>
             {
@@ -1129,8 +1259,17 @@ public sealed class CompleteSaleCommandHandlerTests
         ProductId productId = product.Id;
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())
@@ -1159,8 +1298,17 @@ public sealed class CompleteSaleCommandHandlerTests
         ProductId productId = product.Id;
         _repository.GetLocationAsync(locationId, Arg.Any<CancellationToken>())
             .Returns(new SaleLocationFacts(LocationKind.Store, LocationSettings.Default));
-        _repository.GetSaleProductsAsync(Arg.Any<IReadOnlyCollection<ProductId>>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Product> { product });
+        ProductPrice? effective = product.PriceAt(locationId, Now);
+        _repository.GetSaleProductsAsync(
+                Arg.Any<IReadOnlyCollection<ProductId>>(),
+                Arg.Any<LocationId>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<SaleProduct>
+            {
+                new(product.Id, product.Name, product.IsVatExempt, product.TracksBatches,
+                    effective?.Id, effective?.Price.Amount),
+            });
         _repository.GetExternalCustomerLocationIdAsync(Arg.Any<CancellationToken>())
             .Returns(LocationId.New());
         _repository.AddAsync(Arg.Any<Sale>(), Arg.Any<CancellationToken>())

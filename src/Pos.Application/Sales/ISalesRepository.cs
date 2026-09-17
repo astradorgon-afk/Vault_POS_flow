@@ -49,13 +49,46 @@ public interface ISalesRepository
     Task<SaleLocationFacts?> GetLocationAsync(LocationId locationId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Loads the products being sold, with their price rows, so the handler can
-    /// resolve the effective price and VAT class for every line.
+    /// Loads what pricing a sale line needs about each product, with the
+    /// effective price already resolved for the location and moment of the sale.
     /// </summary>
     /// <param name="productIds">The products sold.</param>
+    /// <param name="locationId">The location the sale happens at.</param>
+    /// <param name="at">The moment the sale happens.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The products, possibly not containing every requested identifier.</returns>
-    Task<IReadOnlyList<Product>> GetSaleProductsAsync(
+    /// <remarks>
+    /// It returns a read model rather than the <see cref="Product"/> aggregate on
+    /// purpose. The handler reads five fields; loading an aggregate to get them
+    /// meant every implementation had to be able to produce a whole
+    /// <see cref="Product"/>, which a device cannot — it mirrors master data
+    /// thinly and has no category, brand or unit-of-measure to rebuild one from.
+    /// Asking for what the use case actually needs lets the server project from
+    /// its catalogue and a device project from its cache, with the same handler
+    /// above both.
+    /// </remarks>
+    Task<IReadOnlyList<SaleProduct>> GetSaleProductsAsync(
+        IReadOnlyCollection<ProductId> productIds,
+        LocationId locationId,
+        DateTimeOffset at,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Loads whole products for a blind return, which needs barcodes, the base
+    /// unit of measure and the default purchase cost to register goods it has no
+    /// sale for.
+    /// </summary>
+    /// <param name="productIds">The products being returned.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The products, possibly not containing every requested identifier.</returns>
+    /// <remarks>
+    /// This one keeps the aggregate, and can: <c>sale.return_blind</c> is not an
+    /// offline-capable permission, so a blind return only ever runs on the
+    /// server, where the whole catalogue is at hand. Splitting it from the sale's
+    /// read model is what lets the sale path stay within what a device can
+    /// mirror.
+    /// </remarks>
+    Task<IReadOnlyList<Product>> GetReturnProductsAsync(
         IReadOnlyCollection<ProductId> productIds,
         CancellationToken cancellationToken);
 
@@ -148,3 +181,26 @@ public sealed record ExpiredSaleBatch(
     decimal Quantity,
     DateOnly? ExpiresOn,
     decimal UnitCost);
+
+/// <summary>
+/// What a sale or blind-return line needs to know about one product, with its
+/// price already resolved for that location and moment.
+/// </summary>
+/// <param name="Id">The product.</param>
+/// <param name="Name">The name printed on the receipt line.</param>
+/// <param name="IsVatExempt">Whether the line is exempt from VAT.</param>
+/// <param name="TracksBatches">Whether the line must be allocated to batches.</param>
+/// <param name="EffectivePriceId">
+/// The price row in force, or <see langword="null"/> when the product has no
+/// price at this location and moment. A line without an override cannot proceed
+/// on a null; one with an override records it as the version that would have
+/// applied.
+/// </param>
+/// <param name="EffectiveUnitPrice">The amount of that price row.</param>
+public sealed record SaleProduct(
+    ProductId Id,
+    string Name,
+    bool IsVatExempt,
+    bool TracksBatches,
+    ProductPriceId? EffectivePriceId,
+    decimal? EffectiveUnitPrice);
