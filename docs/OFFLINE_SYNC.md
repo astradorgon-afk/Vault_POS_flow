@@ -212,8 +212,29 @@ differences are injected, not branched:
 | `IChangeFeedPublisher` | writes `change_log` | writes `outbox_event` |
 | `IPriceResolver` | live effective-dated prices | cached prices + `PriceVersion` stamp |
 
-A command not in the client's whitelist simply has no registered handler, so an
-offline attempt fails closed with `Unavailable`, never by silently degrading.
+The whitelist is `OfflineCommandCatalogue`: an explicit list of command types,
+not an attribute a command can put on itself, so a new use case is
+offline-incapable until someone adds it there and updates the boundary tests.
+`AddOfflineClientApplication` composes the device container from it — the same
+dispatcher and the same behaviours in the same order as the server, but only the
+listed commands' handlers and validators, and no query handler. A command not in
+the whitelist simply has no registered handler, so an offline attempt fails
+closed with `application.handler_unavailable` (`Unavailable`), never by silently
+degrading.
+
+Each entry names the permission the pipeline authorizes it by, and those are
+asserted to be offline-capable in the permission catalogue — the same flag that
+trims a device's snapshot. The two lists therefore cannot disagree: a command
+whose permission a device may not cache cannot be declared offline-capable.
+Permissions a handler checks for itself are not listed and do not need to be;
+`sale.expired_override` is not offline-capable, so it can never reach a snapshot
+and the expired-batch override is unreachable offline by construction.
+
+An entry is `Pending` until the device-side ports its handler needs exist, and
+only a `Registered` entry is added to the container. The distinction is not
+bookkeeping: registering a handler whose repositories are unregistered would
+make the container throw on resolve, where the whole point of the boundary is to
+fail closed with a result the UI can explain.
 
 ---
 

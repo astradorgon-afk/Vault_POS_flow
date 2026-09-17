@@ -165,6 +165,17 @@ adapters.
 whitelist is asserted by a test, so no new command becomes offline-capable by
 accident.
 
+**Built in C30 (2026-09-17).** The whitelist is `OfflineCommandCatalogue`, an
+explicit list of command types, and `AddOfflineClientApplication` is the device
+composition root that registers only what it allows. Declaring a use case and
+registering it are separate states: an entry stays `Pending` until the device
+carries the tables its handler writes, because registering a handler whose ports
+are missing would throw on resolve instead of failing closed with
+`application.handler_unavailable`. `Pos.Architecture.Tests` asserts the
+catalogue against the OFFLINE_SYNC.md §1 table, asserts every declared
+permission is offline-capable, and asserts that nothing outside the list
+resolves in the device container.
+
 ---
 
 ## ADR-0009 — SQLite stores `decimal` as TEXT

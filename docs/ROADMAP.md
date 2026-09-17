@@ -222,7 +222,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
   initial device migration (C28); the key applied as a raw key (C29b)
 - [x] Cache tables + read-only enforcement: change-feed applier with a
   same-transaction cursor, interceptor and trigger write guards (C29)
-- [ ] Client DI container with whitelisted command set
+- [~] Client DI container with whitelisted command set
+      *(C30 declares the 22 offline use cases of OFFLINE_SYNC.md §1 in
+      `OfflineCommandCatalogue` and registers only those in
+      `AddOfflineClientApplication`; every entry stays `Pending` until the
+      device carries the `local_*` tables its handlers write to, so a device
+      refuses every command with `application.handler_unavailable` today)*
 - [ ] Local document numbering (device-scoped)
 - [ ] Permission snapshot storage and expiry
 - [ ] Offline indicators, sync status UI

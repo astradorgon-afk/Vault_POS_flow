@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application and C29b device keying complete; C29c CI repair in progress (uncommitted)
+**Last updated:** 2026-09-17 · **Milestone:** Phase 12 (offline storage) in progress; C29 protected change-feed application, C29b device keying and C29c CI repair complete; C30 declares and enforces the device command boundary
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on |
-| Tests | **1,013 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 148, Security 52, Architecture 14, API 174** (2026-09-17, through C29b device keying). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
+| Tests | **1,024 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 148, Security 52, Architecture 25, API 174** (2026-09-17, through C30 the device command boundary). PostgreSQL tests require Docker; all 21 (19 Infrastructure, 2 API) passed against PostgreSQL 17 on 2026-09-17, after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). |
 | Migrations | 28 PostgreSQL migrations plus 2 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups) |
@@ -23,7 +23,7 @@ and what to pick up next.
 ```
 Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
 Pos.Infrastructure.Tests    148 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards
-Pos.Architecture.Tests       14 passing   layering, ledger isolation, permission catalogue and client reference boundary
+Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
 Pos.Api.IntegrationTests    174 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract and scheduled-price cancellation
@@ -767,6 +767,51 @@ They are removed rather than spread to every connection, so writes stay at
 `synchronous = FULL`, the behavior every test has exercised, and a committed
 sale survives power loss.
 
+C29c splits the client out of the server's CI job. `build-and-test` removes
+`Pos.Client` from its checkout's solution before restoring, which is what stops
+`NETSDK1147`; new `build-client-windows` and `build-client-android` jobs build
+it with the MAUI workloads pinned to set `10.0.301`, the band that ships the
+MAUI 10.0.20 packages `Directory.Packages.props` pins. The Release build of the
+Windows target found a real defect on the way: `MauiProgram.cs` imported
+`Microsoft.Extensions.Logging` for a Debug-only call, so Release failed on
+IDE0005; the directive now sits under `#if DEBUG`. The Android job's Release
+build has still never run on Linux (§4).
+
+C30 draws the device command boundary. `Pos.Client` references
+`Pos.Application` and executes the same handlers as the server (ADR-0008), so
+the only thing between a disconnected terminal and a use case that needs central
+authority is which handlers are registered. `OfflineCommandCatalogue` makes that
+an explicit list of 22 command types — the executable form of the capability
+table in OFFLINE_SYNC.md §1 — and `AddOfflineClientApplication` is the device's
+composition root: the same dispatcher and the same five behaviours in the same
+order as the server, but only the whitelisted commands' handlers and validators,
+and no query handler at all. A command outside the list simply has no handler,
+and the dispatcher answers `application.handler_unavailable`
+(`ErrorType.Unavailable`) without touching a port, so a device refuses
+`ApproveStockAdjustmentCommand` even with nothing else configured.
+
+Two properties hold the whitelist honest. Each entry names the permission its
+command is authorized by, and a test asserts every one of them is
+`IsOfflineCapable` in the permission catalogue — which is the same flag the
+authentication service uses to trim a device's snapshot, so a device could never
+be granted what it would need anyway. A second test reads
+`IAuthorizedMessage.RequiredPermission` off each declared command and checks it
+against the entry, so the two cannot drift. Permissions checked inside a handler
+rather than by the pipeline are deliberately unlisted: `sale.expired_override`
+is not offline-capable, so it can never appear in a snapshot and the
+expired-batch override is dead offline by construction.
+
+Every entry is currently `Pending` rather than `Registered`. Declaring a use
+case offline-capable and registering it are separate on purpose: the device
+database holds caches, snapshots and the feed cursor, but no `local_*` tables
+yet, so no handler's repositories can be satisfied there. Registering one now
+would make the container throw on resolve instead of failing closed, which is
+strictly worse. Entries flip to `Registered` as the device adapters land, and
+the boundary tests cover that path today through a catalogue passed in by the
+test: a registered command resolves, reaches the pipeline, and is then refused
+by the authorization behaviour rather than by the dispatcher — offline does not
+widen authority.
+
 ---
 
 ## 3. Bugs the tests caught this session
@@ -1013,7 +1058,7 @@ Stated plainly so they are not mistaken for finished work:
 | A scheduled price cannot be cancelled once it has taken effect | Phase 3 | Past prices are history; change an effective price by scheduling a replacement. Pre-effective cancellation is implemented (C19): `catalog.price_cancel_successor` / `catalog.price_cancel_chain` refuse rewinds that would renumber another plan. |
 | Generic idempotency pipeline behaviour not built | Phase 1 | The ledger is idempotent on its own; the generic behaviour lands with sync in Phase 13. |
 | Permission cache is in-process | Phase 2 | Single API instance is exact. Scaling out needs a Redis backplane; revocation would otherwise lag by the 15-second policy-version window. |
-| CI cannot build the solution since `Pos.Client` joined it | CI (C28); fix in progress (C29c) | Reproduced in a clean `sdk:10.0.301` Linux container: restore fails with `NETSDK1147` (needs `maui-android`). The uncommitted C29c workflow fixes the server job and adds client jobs; the Android job is not yet verified (see §5). Nothing is pushed. |
+| The Android client job has never completed a Release build on Linux | CI (C29c) | C29c is committed: the server job drops `Pos.Client` from its checkout and dedicated Windows and Android jobs build it. The Windows job's Release build is verified locally; on Linux `InstallAndroidDependencies` failed in a container with `CommonUtilities.Helpers.UserName must have a valid value` (root, no `USER`), which GitHub runners do set. The first CI run on this branch is the real verification. |
 | PostgreSQL suites turn any container start-up failure into a skip | Tests (Phase 1) | The Infrastructure PostgreSQL classes catch every exception from starting the container and skip, as if Docker were absent. On 2026-09-17, under heavy Docker load, all 18 skipped while Docker was running; alone, they all ran and passed. In CI, where Docker is guaranteed, a broken start would pass green without exercising the triggers and grants. Skipping should happen only when no Docker endpoint exists, or CI should fail on skips. |
 
 ---
@@ -1021,47 +1066,44 @@ Stated plainly so they are not mistaken for finished work:
 ## 5. What to do next
 
 Phase 11 is complete. Phase 12 has the Windows/Android client, the encrypted
-device database (C28), protected change-feed application (C29) and raw-key
-device keying (C29b). Continue in this order:
+device database (C28), protected change-feed application (C29), raw-key device
+keying (C29b), the split client CI jobs (C29c) and the declared command
+boundary (C30). Continue in this order:
 
-1. **Finish C29c, the CI repair (uncommitted; work stopped 2026-09-17).**
-   Changed so far: `.github/workflows/ci.yml`, `src/Pos.Client/MauiProgram.cs`,
-   DEPLOYMENT.md §8, ROADMAP.md, and DECISIONS.md (ADR-0019 follow-up).
-   - `build-and-test` now removes `Pos.Client` from its checkout's solution
-     first. **Verified** in a clean `sdk:10.0.301` Linux container from a fresh
-     clone: restore and Release build succeeded with 0 warnings, and every
-     non-PostgreSQL suite passed. The same container without that step
-     reproduces CI's `NETSDK1147` failure.
-   - New `build-client-windows` job (`windows-latest`, workload set `10.0.301`,
-     Release, Windows target only). **Verified** except the workload install:
-     the Release build from a fresh clone found a real error. `MauiProgram.cs`
-     imported `Microsoft.Extensions.Logging` for a Debug-only call, so Release
-     failed on IDE0005. The directive is now under `#if DEBUG`, and Release and
-     Debug both build with 0 warnings. The workload install was not run here
-     because it would change this machine's Visual Studio-managed workloads.
-   - New `build-client-android` job (`ubuntu-latest`, .NET under the runner's
-     temp directory, Microsoft JDK 17, workload set `10.0.301`,
-     `InstallAndroidDependencies`, then a Release build). **Partly verified.**
-     The pinned `dotnet workload install maui-android --version 10.0.301`
-     succeeds in a clean Ubuntu 24.04 container, and on Windows the dependency
-     target fills an empty SDK directory (android-36, build-tools 36.0.0). On
-     Linux the dependency step failed inside the container with
-     `CommonUtilities.Helpers.UserName must have a valid value`: the container
-     runs as root with no `USER` variable, which GitHub runners do set. Next:
-     rerun with `USER` set (the `vf-ci-android-state` image holds the installed
-     workload and JDK), then run the Release build, which has not run on Linux
-     yet. If the variable matters, set it in the job.
-   - Then commit C29c. Nothing in it is pushed.
-2. **C30 — client command boundary:** register only the offline-safe command
-   handlers and prove server-only use cases cannot resolve in the client.
-3. **C31 — device numbering and permission expiry:** allocate stable
+1. **Watch the first CI run on this branch.** `build-client-android` has never
+   completed a Release build on Linux: locally the dependency step failed in a
+   container with `CommonUtilities.Helpers.UserName must have a valid value`,
+   which a GitHub runner should not hit because it sets `USER`. If it does, set
+   the variable in the job. `build-client-windows` and `build-and-test` are
+   verified from clean containers.
+2. **C31 — device numbering and permission expiry:** allocate stable
    device-scoped document numbers and deny expired or widened snapshots
    (including a snapshot whose policy version is older than the stored one).
-4. **C32 — offline status UI:** show database, enrolment, connectivity and sync
+   This is the first half of what the whitelisted handlers need before any
+   catalogue entry can move from `Pending` to `Registered`.
+3. **C32 — offline status UI:** show database, enrolment, connectivity and sync
    state without exposing storage or transport details.
+4. **The device's `local_*` tables.** The other half: a device carries caches,
+   snapshots and the feed cursor, but no local sale, shift, movement or balance
+   tables, so no whitelisted handler's repositories can be satisfied yet. Until
+   they exist, every catalogue entry stays `Pending` and the device correctly
+   refuses every command.
 5. **Phase 13 — synchronization:** add the outbox, push/pull endpoints,
-   idempotent processing, retry policy and conflict handling. Its failure records
-   will feed the remaining sync-failure notification.
+   idempotent processing, retry policy and conflict handling. Its failure
+   records will feed the remaining sync-failure notification.
+
+Two questions the capability table does not answer, worth settling before the
+entries flip:
+
+- **Transfer pick, dispatch and verify offline.** `transfer.pick`,
+  `transfer.dispatch` and `transfer.verify` are all offline-capable
+  permissions, but OFFLINE_SYNC.md §1 lists only "transfer request" and
+  receiving against a pre-authorized transfer. C30 follows the table and leaves
+  them off; a source store dispatching a transfer while offline is plausible
+  and needs a decision, not an assumption.
+- **Customer records offline.** `customer.manage` is offline-capable and the
+  device caches `customer_lite`, but the table does not mention creating a
+  customer offline. Left off for the same reason.
 
 ---
 

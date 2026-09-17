@@ -140,8 +140,8 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C28 — Windows/Android MAUI Blazor Hybrid client; dedicated seven-table device schema; SQLCipher encryption with a 256-bit key held in platform `SecureStorage`; initial SQLite migration; cached product/barcode/price/location/user and permission-snapshot entities; money and UTC text converters; global/store snapshot uniqueness; architecture and encrypted-file regression tests.
   - [x] C29 — `ChangeFeedApplier` applies a validated page and its `sync_cursor` in one `BEGIN IMMEDIATE` transaction (replays recognised, gaps refused); cache, snapshot and cursor writes outside it refused by an EF interceptor and by per-connection-function SQLite triggers; migration `DeviceChangeFeedGuards`.
   - [x] C29b — device database keyed with its 256-bit key as a SQLCipher raw key (opens fell from 650–800 ms to about 2 ms); key read once per process, failed reads retried; initializer pragmas limited to the ones that outlive their connection, leaving `synchronous = FULL`.
-  - [~] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. Uncommitted: the Linux Android job is not fully verified (STATUS.md §5).
-  - [ ] C30 — client command boundary: only offline-safe handlers resolve in the client
+  - [x] C29c — CI repair: the server job leaves `Pos.Client` out; new Android (Ubuntu) and Windows client jobs gated on it, with workloads pinned to set `10.0.301`; Release-only IDE0005 in `MauiProgram.cs` fixed. The Linux Android Release build is still unverified — the first CI run on the branch is its real test (STATUS.md §4).
+  - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 22 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
 - [ ] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
@@ -903,7 +903,7 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   matching tests red. The 49 device tests now run in 17 s (C29's 43 took 3 min
   27 s). No device database existed to migrate: nothing is deployed.
 
-### C29c — CI repair (in progress, uncommitted)
+### C29c — CI repair (`ci(offline-c29c)`)
 
 - **Diagnosis, reproduced:** in a clean `mcr.microsoft.com/dotnet/sdk:10.0.301`
   Linux container, `dotnet restore VaultFlow.slnx` from a fresh clone fails with
@@ -935,3 +935,48 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Docker Desktop** crashed at start on the known stale socket
   (`Docker/run/dockerInference`); renaming `run` and `docker-secrets-engine`
   to `*.stale-20260917` fixed it again.
+
+### C30 — client command boundary (`feat(offline-c30)`)
+
+- **`OfflineCommandCatalogue`** is the whitelist: an explicit list of 22 command
+  types, one per offline capability in OFFLINE_SYNC.md §1. A command cannot opt
+  itself in with an attribute, and the constructor refuses a type that is not an
+  `ICommand<>` or a command declared twice.
+- **`AddOfflineClientApplication`** is the device composition root, called from
+  `MauiProgram`. Same dispatcher, same five behaviours in the same order as the
+  server; only the whitelisted commands' handlers and their validators, and no
+  query handler — device reads belong to the device database, not to
+  server-shaped queries whose repositories address tables a device does not
+  carry.
+- **Declared is not registered.** Every entry is `Pending`: the device holds
+  caches, permission snapshots and the feed cursor, but no `local_*` tables, so
+  no handler's repositories can be satisfied there yet. Registering one anyway
+  would make the container throw on resolve, where the boundary exists to fail
+  closed. Entries flip to `Registered` as the device adapters land.
+- **Two cross-checks keep the whitelist honest.** Each entry names the
+  permission its command is authorized by, and every one is asserted
+  `IsOfflineCapable` in the permission catalogue — the same flag
+  `AuthenticationService` uses to trim a device snapshot. A second test reads
+  `IAuthorizedMessage.RequiredPermission` off each declared command (through an
+  uninitialized instance; none of them reads its own state to answer) and checks
+  it against the entry, so the two cannot drift.
+- **Handler-level permissions are deliberately unlisted.**
+  `sale.expired_override` is not offline-capable, so it can never be in a
+  snapshot: the expired-batch override is unreachable offline by construction
+  rather than by a check.
+- **11 tests** in `Pos.Architecture.Tests`: the catalogue equals the documented
+  list (it caught `ReceiveTransferCommand` missing from the expected set on the
+  first run), every entry has a handler to register, nothing outside the list
+  resolves in the device container, no query handler resolves, the container
+  composes nothing outside `Pos.Application`, a server-only command
+  (`ApproveStockAdjustmentCommand`) answers `application.handler_unavailable`
+  with no ports registered at all, and — through a catalogue the test supplies —
+  a registered command resolves, reaches the pipeline, and is refused by the
+  authorization behaviour rather than by the dispatcher. Registering every
+  handler instead of the whitelisted ones turns 2 of them red.
+- **Verification:** 1,024 passing without PostgreSQL (Domain 378, Application
+  247, Infrastructure 148, Security 52, Architecture 25, API 174); 18
+  PostgreSQL Infrastructure tests skipped, no Docker in the session container.
+  `Pos.Client` itself was not compiled here — the MAUI workloads need the
+  download host the environment blocks — so the one-line `MauiProgram` change
+  is verified by CI's client jobs, not locally. No migration; no schema change.

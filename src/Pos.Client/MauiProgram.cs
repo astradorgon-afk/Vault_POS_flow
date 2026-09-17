@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 #endif
 using Pos.Application.Common.Abstractions;
+using Pos.Application.Common.Offline;
 using Pos.Client.Storage;
 using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Offline;
@@ -21,6 +22,12 @@ public static class MauiProgram
             });
 
         builder.Services.AddMauiBlazorWebView();
+
+        // The device registers only the whitelisted use cases. Anything else
+        // has no handler here, so the dispatcher refuses it rather than
+        // running a server use case against a device database.
+        builder.Services.AddOfflineClientApplication();
+
         builder.Services.AddSingleton(new DeviceDatabaseOptions(
             Path.Combine(FileSystem.Current.AppDataDirectory, "device.db")));
         builder.Services.AddSingleton<IDeviceDatabaseKeyProvider, SecureStorageDeviceDatabaseKeyProvider>();
