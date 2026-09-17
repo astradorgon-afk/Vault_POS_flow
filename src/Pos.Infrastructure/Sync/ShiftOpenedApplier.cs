@@ -33,6 +33,7 @@ public sealed class ShiftOpenedApplier(PosDbContext context, ISystemClock clock)
     /// <inheritdoc />
     public async Task<SyncApplyResult> ApplyAsync(
         DeviceId deviceId,
+        EventId eventId,
         string payloadJson,
         CancellationToken cancellationToken)
     {

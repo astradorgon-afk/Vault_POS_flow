@@ -143,6 +143,9 @@ public sealed class DeviceSalesRepository(
                     sale.Id.Value,
                     sale.Number,
                     sale.LocationId.Value,
+                    sale.DeviceId.Value,
+                    sale.CashierShiftId.Value,
+                    sale.BusinessDate,
                     sale.VoidedByUserId?.Value,
                     sale.VoidedAtUtc,
                     sale.VoidReason),
@@ -399,6 +402,8 @@ public sealed class DeviceSalesRepository(
                     print.Id.Value,
                     print.SaleId.Value,
                     sale.Number,
+                    sale.LocationId.Value,
+                    sale.DeviceId.Value,
                     print.PrintedByUserId.Value,
                     print.PrintedAtUtc,
                     print.IsReprint,
@@ -501,6 +506,9 @@ public sealed record SalePaymentSyncPayload(
 /// <param name="SaleId">The sale.</param>
 /// <param name="Number">The receipt number the void applies to.</param>
 /// <param name="LocationId">Where it was sold.</param>
+/// <param name="DeviceId">The register that voided it.</param>
+/// <param name="ShiftId">The shift the void belongs to, which must still be open.</param>
+/// <param name="BusinessDate">The business date the reversal counts toward.</param>
 /// <param name="VoidedByUserId">Who voided it.</param>
 /// <param name="VoidedAtUtc">When, by the device clock.</param>
 /// <param name="Reason">Why, which a void always requires.</param>
@@ -508,6 +516,9 @@ public sealed record SaleVoidSyncPayload(
     Guid SaleId,
     string Number,
     Guid LocationId,
+    Guid DeviceId,
+    Guid ShiftId,
+    DateOnly BusinessDate,
     Guid? VoidedByUserId,
     DateTimeOffset? VoidedAtUtc,
     string? Reason);
@@ -516,6 +527,8 @@ public sealed record SaleVoidSyncPayload(
 /// <param name="PrintId">The print record.</param>
 /// <param name="SaleId">The sale it belongs to.</param>
 /// <param name="Number">The receipt number.</param>
+/// <param name="LocationId">Where the copy came out.</param>
+/// <param name="DeviceId">The register that printed it.</param>
 /// <param name="PrintedByUserId">Who printed it.</param>
 /// <param name="PrintedAtUtc">When, by the device clock.</param>
 /// <param name="IsReprint">Whether this was a second copy.</param>
@@ -524,6 +537,8 @@ public sealed record ReceiptPrintSyncPayload(
     Guid PrintId,
     Guid SaleId,
     string Number,
+    Guid LocationId,
+    Guid DeviceId,
     Guid PrintedByUserId,
     DateTimeOffset PrintedAtUtc,
     bool IsReprint,

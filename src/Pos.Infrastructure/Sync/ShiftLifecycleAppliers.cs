@@ -145,6 +145,7 @@ public sealed class ShiftSuspendedApplier(IShiftRepository shifts, IAuditWriter 
     /// <inheritdoc />
     public async Task<SyncApplyResult> ApplyAsync(
         DeviceId deviceId,
+        EventId eventId,
         string payloadJson,
         CancellationToken cancellationToken)
     {
@@ -197,6 +198,7 @@ public sealed class ShiftResumedApplier(IShiftRepository shifts, IAuditWriter au
     /// <inheritdoc />
     public async Task<SyncApplyResult> ApplyAsync(
         DeviceId deviceId,
+        EventId eventId,
         string payloadJson,
         CancellationToken cancellationToken)
     {
@@ -273,6 +275,7 @@ public sealed class ShiftClosedApplier(IShiftRepository shifts, IAuditWriter aud
     /// <inheritdoc />
     public async Task<SyncApplyResult> ApplyAsync(
         DeviceId deviceId,
+        EventId eventId,
         string payloadJson,
         CancellationToken cancellationToken)
     {

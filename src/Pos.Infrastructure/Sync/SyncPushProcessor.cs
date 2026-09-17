@@ -20,10 +20,20 @@ public interface ISyncEventApplier
 
     /// <summary>Applies the event against current server state.</summary>
     /// <param name="deviceId">The device that produced it.</param>
+    /// <param name="eventId">
+    /// The device's identifier for this business event, stable across every
+    /// retry. It is the key the whole protocol already deduplicates on, so an
+    /// applier that posts to the ledger passes it straight through rather than
+    /// minting a second idempotency key that a retry would not reproduce.
+    /// </param>
     /// <param name="payloadJson">The canonical payload.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>What to report back, and what to store for a replay.</returns>
-    Task<SyncApplyResult> ApplyAsync(DeviceId deviceId, string payloadJson, CancellationToken cancellationToken);
+    Task<SyncApplyResult> ApplyAsync(
+        DeviceId deviceId,
+        EventId eventId,
+        string payloadJson,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>What applying one event produced.</summary>
@@ -224,7 +234,7 @@ public sealed class SyncPushProcessor(
             .ConfigureAwait(false);
 
         SyncApplyResult applied = await applier
-            .ApplyAsync(deviceId, uploaded.PayloadJson, cancellationToken)
+            .ApplyAsync(deviceId, eventId, uploaded.PayloadJson, cancellationToken)
             .ConfigureAwait(false);
 
         if (applied.Outcome is SyncOutcome.Rejected or SyncOutcome.Conflict)

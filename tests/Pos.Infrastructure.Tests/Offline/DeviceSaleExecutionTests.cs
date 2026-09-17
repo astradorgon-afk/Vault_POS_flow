@@ -253,8 +253,20 @@ public sealed class DeviceSaleExecutionTests
         sale.Status.Should().Be(SaleStatus.Voided);
         sale.VoidReason.Should().Be("wrong item scanned");
 
-        (await context.Outbox.CountAsync(e => e.Type == SyncEventType.SaleVoided, CancellationToken.None))
-            .Should().Be(1);
+        OutboxEvent queued = await context.Outbox
+            .AsNoTracking()
+            .SingleAsync(e => e.Type == SyncEventType.SaleVoided, CancellationToken.None);
+
+        // Head office replays the void through the same handler, which needs the
+        // shift it belongs to and the business date it reverses on — not just
+        // the fact that something was voided.
+        SaleVoidSyncPayload payload = JsonSerializer.Deserialize<SaleVoidSyncPayload>(queued.PayloadJson)!;
+
+        payload.Number.Should().Be(sale.Number, "the receipt number is how the server finds the sale");
+        payload.ShiftId.Should().Be(host.ShiftId.Value);
+        payload.DeviceId.Should().Be(host.DeviceId.Value);
+        payload.VoidedByUserId.Should().Be(host.CashierId.Value);
+        payload.Reason.Should().Be("wrong item scanned");
     }
 
     [Fact]

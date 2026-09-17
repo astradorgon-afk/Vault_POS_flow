@@ -126,6 +126,7 @@ public sealed class ShiftLifecycleAppliersTests : IAsyncLifetime
         SyncApplyResult result = await new ShiftSuspendedApplier(
             new ShiftRepository(this.context), this.audit).ApplyAsync(
                 other,
+                EventId.New(),
                 CanonicalJson.Serialize(Payload(shiftId, ShiftStatus.Suspended) with { DeviceId = other.Value }),
                 CancellationToken.None);
 

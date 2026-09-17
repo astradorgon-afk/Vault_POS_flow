@@ -231,6 +231,7 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
 
         public Task<SyncApplyResult> ApplyAsync(
             DeviceId deviceId,
+            EventId eventId,
             string payloadJson,
             CancellationToken cancellationToken)
         {

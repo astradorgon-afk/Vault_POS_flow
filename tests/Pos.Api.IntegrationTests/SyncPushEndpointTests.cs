@@ -202,6 +202,86 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task ASaleVoidedOffline_PutsTheStockBack_AndTheReprintIsLogged()
+    {
+        Seed seed = await SeedAsync("sp8", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        // A whole till session through an outage: open, sell, reprint the
+        // customer's receipt, then void the sale when they change their mind.
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 2m, netTotal: 90m)),
+            Event(3, "SaleReceiptReprinted", ReprintPayload(seed, saleNumber)),
+            Event(4, "SaleVoided", VoidPayload(seed, shiftId, saleNumber)));
+
+        results.Select(r => r.GetProperty("outcome").GetString())
+            .Should().Equal("Accepted", "Accepted", "Accepted", "Accepted");
+
+        Sale sale = await factory.WithServiceAsync(context => context.Sales
+            .AsNoTracking()
+            .SingleAsync(s => s.Number == saleNumber));
+
+        sale.Status.Should().Be(SaleStatus.Voided);
+        sale.VoidReason.Should().Be("Customer changed their mind");
+
+        // The reversing post is the point: a void that only changed a status
+        // would leave two units sold that are still on the shelf.
+        decimal available = await factory.WithServiceAsync(context => context.InventoryBalances
+            .AsNoTracking()
+            .Where(b => b.LocationId == seed.Store
+                        && b.ProductId == seed.Product
+                        && b.State == InventoryState.Available)
+            .Select(b => b.Quantity)
+            .SumAsync());
+
+        available.Should().Be(10m, "the goods came back");
+
+        bool reprintLogged = await factory.WithServiceAsync(context => context.AuditLog
+            .AsNoTracking()
+            .AnyAsync(e => e.Action == AuditActions.Sales.ReceiptReprinted));
+
+        reprintLogged.Should().BeTrue(
+            "a second copy of a receipt can walk out of the shop and come back as a return");
+    }
+
+    [Fact]
+    public async Task AVoidWhoseSaleTheServerRefused_IsRefusedTooRatherThanFloatingFree()
+    {
+        Seed seed = await SeedAsync("sp9", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        // The sale is not uploaded at all. A void that went through anyway would
+        // put stock back on a shelf against nothing.
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleVoided", VoidPayload(seed, shiftId, saleNumber)));
+
+        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
+        results[1].GetProperty("errorCode").GetString().Should().Be("sync.sale_unknown");
+
+        decimal available = await factory.WithServiceAsync(context => context.InventoryBalances
+            .AsNoTracking()
+            .Where(b => b.LocationId == seed.Store
+                        && b.ProductId == seed.Product
+                        && b.State == InventoryState.Available)
+            .Select(b => b.Quantity)
+            .SumAsync());
+
+        available.Should().Be(10m, "nothing was invented to reverse");
+    }
+
+    [Fact]
     public async Task ASaleForAShiftTheServerHasNotSeen_IsDeferredWithEverythingBehindIt()
     {
         Seed seed = await SeedAsync("sp3", shelfQty: 10m);
@@ -321,6 +401,30 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
             [new SaleLineSyncPayload(
                 seed.Product.Value, quantity, seed.UnitId.Value, seed.Barcode, null, null, 0m, null, quotedPriceVersion)],
             [new SalePaymentSyncPayload(nameof(PaymentMethod.Cash), netTotal, netTotal, null)]);
+
+    private static SaleVoidSyncPayload VoidPayload(Seed seed, Guid shiftId, string saleNumber)
+        => new(
+            Guid.CreateVersion7(),
+            saleNumber,
+            seed.Store.Value,
+            seed.Device.Value,
+            shiftId,
+            BusinessDate,
+            seed.CashierId.Value,
+            DateTimeOffset.UtcNow,
+            "Customer changed their mind");
+
+    private static ReceiptPrintSyncPayload ReprintPayload(Seed seed, string saleNumber)
+        => new(
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            saleNumber,
+            seed.Store.Value,
+            seed.Device.Value,
+            seed.CashierId.Value,
+            DateTimeOffset.UtcNow,
+            IsReprint: true,
+            "Customer asked for another copy");
 
     private static object Event<TPayload>(long sequence, string type, TPayload payload)
     {

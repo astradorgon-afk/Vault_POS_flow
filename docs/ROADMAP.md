@@ -261,8 +261,8 @@ Substantially delivered in Phase 1, because everything else depends on it.
       replaying each transition through the aggregate; C45 applies the sale by
       replaying it through the same handler the online endpoint runs, and C46
       lets a line name the price row it was charged from so a stale price is
-      recorded rather than re-priced. Void, reprint, return and refund are still
-      refused as unsupported)*
+      recorded rather than re-priced; C47 adds void and reprint. Return and
+      refund are still refused as unsupported)*
 - [ ] Pull endpoint, change feed, cursors, rebaseline
 - [ ] Retry queue with exponential backoff
 - [ ] Conflict rules implementation

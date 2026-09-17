@@ -278,7 +278,9 @@ the first one attached.
 ### 3.1.1 What each event type means centrally
 
 The processor is type-agnostic: it owns idempotency and ordering, and an applier
-owns only what one event means. An event type the server does not understand is
+owns only what one event means. It hands each applier the device's `eventId`,
+because an applier that posts to the ledger needs an idempotency key that a
+retry reproduces, and the protocol already has exactly one. An event type the server does not understand is
 refused with `sync.event_type_unsupported` rather than dropped, so a newer device
 is told plainly instead of losing work silently.
 
@@ -288,6 +290,14 @@ is told plainly instead of losing work silently.
 | `ShiftSuspended` / `ShiftResumed` | Replayed through the aggregate, so a transition that would have been refused at the till is refused here too rather than written as a status column. |
 | `ShiftClosed` | Declared and counted cash are taken as the cashier entered them — they are facts about a physical drawer. The **variance is re-derived** from the sales and refunds the server accepted; see below. A device claiming `isForceClosed` is refused with `sync.force_close_not_permitted`: force-close is the server worker's authority, and the claim is what would suppress the count. |
 | `SaleCompleted` | **Replayed through `CompleteSaleCommandHandler`** — the same handler the online endpoint runs. The event carries the lines and payments the cashier rang up, not the device's own resolution of them, so the server re-derives the effective price, the VAT class, the FEFO allocation and the cash rounding from its own data. The device's `eventId` goes back into the ledger, which is what makes the movements post once. A receipt number the server already holds is refused with `sync.sale_already_held`. |
+| `SaleVoided` | Replayed through `VoidSaleCommandHandler`, so the reversing ledger post and the same-shift rule come from the one implementation. The void's idempotency key is the **sync event identifier**, which is stable across retries where a freshly minted one would not be. |
+| `SaleReceiptReprinted` | Replayed through `ReprintSaleReceiptCommandHandler`. It moves no money and no stock, which is exactly why it has to arrive: a second copy of a receipt can leave the shop and come back as a return, and a print log that silently skips the offline copies is worse than none because it is trusted. |
+
+A follow-up event whose sale the server does not hold is refused with
+`sync.sale_unknown`, never quietly dropped. Under per-device ordering the sale
+was uploaded first, so a missing one means that upload was refused — and a void
+floating free of the sale it reverses would put stock back on a shelf against
+nothing.
 
 A sale's identity across the two sides is its **SAL number**, not its row id:
 the server mints its own `SaleId`, and the number is unique, device-scoped so it

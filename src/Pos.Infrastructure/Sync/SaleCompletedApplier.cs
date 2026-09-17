@@ -78,6 +78,7 @@ public sealed class SaleCompletedApplier(
     /// <inheritdoc />
     public async Task<SyncApplyResult> ApplyAsync(
         DeviceId deviceId,
+        EventId eventId,
         string payloadJson,
         CancellationToken cancellationToken)
     {
