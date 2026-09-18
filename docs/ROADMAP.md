@@ -376,7 +376,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(C67: all nine, every panel present including the clean ones, each with its
       whole count and a sample. Expired-still-sellable is always Critical — it is
       the one exception that can reach a customer)*
-- [ ] Document timeline drill-down and movement chain explorer
+- [x] Document timeline drill-down and movement chain explorer
+      *(C68: the audit log, the ledger and the sync verdicts merged into one list,
+      each entry saying which it came from; a reversal is followable in both
+      directions, and a document outside the caller's stores is a 404 rather than
+      an empty timeline)*
 
 ## Phase 17 — Testing
 

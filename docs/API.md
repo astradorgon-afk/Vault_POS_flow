@@ -863,7 +863,7 @@ Planned:
 
 ```
 
-Built (C66, C67):
+Built (C66–C68):
 
 ```
 GET /api/v1/dashboard/overview                report.view            (C66)
@@ -871,6 +871,8 @@ GET /api/v1/dashboard/overview                report.view            (C66)
     &from=&to=&locationId=
 GET /api/v1/dashboard/exceptions              report.view            (C67)
     ?range=&from=&to=&locationId=
+GET /api/v1/dashboard/timeline                report.view            (C68)
+    ?referenceType=Sale|TransferOrder|PurchaseOrder|…&referenceId=
 ```
 
 All report endpoints take the same `range` / `from` / `to` / `locationId`
@@ -1177,6 +1179,34 @@ A register enrolled and **never** heard from counts as offline. It is the worst
 case rather than a missing one — a till nobody has ever heard from is either
 broken or in somebody's drawer — and a null last-seen date would drop it from a
 query written the obvious way.
+
+### 11.11 The document drill-down
+
+`GET /api/v1/dashboard/timeline` answers "what happened to this document" by
+merging three sources — the audit log, the ledger and the sync verdicts — into one
+list. **Every entry says which source it came from.** A person chasing a
+discrepancy needs to know whether they are looking at something somebody did,
+something the ledger posted, or something head office decided about an upload, and
+a merged list without the label invites reading one as another.
+
+**Ordered by when the system recorded each thing**, not by when it happened. An
+offline sale uploaded on Tuesday occurred on Monday, and a timeline sorted by
+occurrence would put its ledger posting before the shift that contained it. Both
+times are carried, so a reader sees the gap rather than being protected from it.
+
+**A posting shows every leg, not just the side you asked about.** Stock leaving one
+bucket always arrives somewhere, and a chain showing one side would look like stock
+vanishing. Legs carry their value only for a caller with
+`report.view.financial`.
+
+**A reversal is followable in both directions.** The reversing posting names what
+it undid, and the original names what undid it. Backwards-only would leave somebody
+reading the original with no sign it had been reversed — which is exactly the
+reading that counts the same loss twice.
+
+**A document nothing in the caller's stores touched comes back `404`**, not an
+empty timeline. "You may not see this" and "nothing happened" are different
+answers, and an empty one would quietly tell a manager the second.
 
 ---
 

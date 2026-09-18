@@ -1,4 +1,5 @@
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
 using Pos.Domain.Reports;
 
 namespace Pos.Application.Reports;
@@ -46,5 +47,23 @@ public interface IDashboardRepository
         decimal highValueThreshold,
         TimeSpan offlineAfter,
         int sampleSize,
+        CancellationToken cancellationToken);
+
+    /// <summary>Builds one document's timeline and the ledger chain it caused.</summary>
+    /// <param name="referenceType">What kind of document.</param>
+    /// <param name="referenceId">Which one.</param>
+    /// <param name="locations">
+    /// The stores in scope, or empty for every store. A document nothing in scope
+    /// touched comes back null rather than empty: "you may not see this" and
+    /// "nothing happened" are different answers.
+    /// </param>
+    /// <param name="includeFinancial">Whether the caller may see what the legs were worth.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The timeline, or null when there is nothing in scope to show.</returns>
+    Task<DocumentTimeline?> GetTimelineAsync(
+        ReferenceDocumentType referenceType,
+        Guid referenceId,
+        IReadOnlyCollection<LocationId> locations,
+        bool includeFinancial,
         CancellationToken cancellationToken);
 }

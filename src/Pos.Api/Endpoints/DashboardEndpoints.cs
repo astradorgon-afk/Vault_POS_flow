@@ -7,6 +7,7 @@ using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Reports;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
 using Pos.Domain.Reports;
 using Pos.Domain.Sales;
 using Pos.Infrastructure.Configuration;
@@ -43,7 +44,68 @@ public static class DashboardEndpoints
             .WithName("GetDashboardExceptions")
             .WithSummary("Everything that needs somebody, worst first.");
 
+        group.MapGet("/timeline", GetTimelineAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetDocumentTimeline")
+            .WithSummary("Everything that happened to one document, and the ledger chain it caused.");
+
         return app;
+    }
+
+    /// <summary>
+    /// The drill-down: one document's timeline and its movement chain.
+    /// </summary>
+    /// <remarks>
+    /// A document nothing in the caller's stores touched comes back 404 rather
+    /// than an empty timeline. "You may not see this" and "nothing happened" are
+    /// different answers, and an empty one would quietly tell a manager the second.
+    /// </remarks>
+    private static async Task<IResult> GetTimelineAsync(
+        [FromQuery] ReferenceDocumentType referenceType,
+        [FromQuery] Guid referenceId,
+        [FromServices] IDashboardRepository dashboard,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(referenceType))
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<DocumentTimeline>.Failure(Error.Validation(
+                    "dashboard.reference_type_unknown", "That is not a kind of document this system records.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        Result<IReadOnlyCollection<LocationId>> scope = Scope(authorization, null);
+
+        if (scope.IsFailure)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<DocumentTimeline>.Failure(scope.Errors), currentUser.CorrelationId.Value);
+        }
+
+        DocumentTimeline? timeline = await dashboard
+            .GetTimelineAsync(
+                referenceType,
+                referenceId,
+                scope.Value,
+                authorization.Permissions.Contains(Permissions.Administration.ViewFinancialReports),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return timeline is null
+            ? ProblemDetailsMapping.ToProblem(
+                Result<DocumentTimeline>.Failure(Error.NotFound(
+                    "dashboard.document_not_found", "There is nothing recorded against that document here.")),
+                currentUser.CorrelationId.Value)
+            : TypedResults.Ok(timeline);
     }
 
     /// <summary>
