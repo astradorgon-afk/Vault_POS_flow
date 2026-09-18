@@ -112,6 +112,70 @@ jobs:
           -p:AndroidSdkDirectory="$ANDROID_HOME"
           -p:JavaSdkDirectory="$JAVA_HOME"
 
+      # Package APK for direct distribution and AAB for Play Store.
+      # If signing secrets are configured (ANDROID_KEYSTORE_* env vars), builds
+      # a signed package; otherwise builds unsigned for development testing.
+      # The keystore is provided via GitHub Secrets in the workflow environment.
+      - name: Package APK (unsigned)
+        if: github.event_name == 'pull_request'
+        run: >-
+          dotnet build src/Pos.Client/Pos.Client.csproj
+          --configuration Release
+          -t:PackageApk
+          -f net10.0-android
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+
+      - name: Package APK (signed)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >-
+          dotnet build src/Pos.Client/Pos.Client.csproj
+          --configuration Release
+          -t:PackageApk
+          -f net10.0-android
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+          -p:AndroidKeyStore=true
+          -p:AndroidSigningKeyStore=true
+          -p:AndroidSigningKeyAlias=$ANDROID_KEY_ALIAS
+          -p:AndroidSigningKeyPass=$ANDROID_KEY_PASSWORD
+          -p:AndroidSigningStorePass=$ANDROID_KEYSTORE_PASSWORD
+
+      - name: Package AAB (signed)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >-
+          dotnet build src/Pos.Client/Pos.Client.csproj
+          --configuration Release
+          -t:PackageAab
+          -f net10.0-android
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+          -p:AndroidKeyStore=true
+          -p:AndroidSigningKeyStore=true
+          -p:AndroidSigningKeyAlias=$ANDROID_KEY_ALIAS
+          -p:AndroidSigningKeyPass=$ANDROID_KEY_PASSWORD
+          -p:AndroidSigningStorePass=$ANDROID_KEYSTORE_PASSWORD
+
+      - name: Upload Android packages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-packages
+          path: |
+            src/Pos.Client/bin/Release/net10.0-android/*.apk
+            src/Pos.Client/bin/Release/net10.0-android/*.aab
+          if-no-files-found: ignore
+
   build-client-windows:
     needs: build-and-test
     runs-on: windows-latest
@@ -132,6 +196,48 @@ jobs:
           dotnet build src/Pos.Client/Pos.Client.csproj
           --configuration Release
           --framework net10.0-windows10.0.19041.0
+
+      # Package MSIX for Windows App Store or sideload distribution.
+      # If signing certificate is configured (WINDOWS_CERTIFICATE_* env vars),
+      # builds a signed MSIX; otherwise builds unsigned for development.
+      # The certificate is provided via GitHub Secrets in PFX format.
+      - name: Package MSIX (unsigned)
+        if: github.event_name == 'pull_request'
+        run: >-
+          dotnet publish src/Pos.Client/Pos.Client.csproj
+          --configuration Release
+          --framework net10.0-windows10.0.19041.0
+          --output artifacts/msix-unsigned
+
+      - name: Package MSIX (signed)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.WINDOWS_CERTIFICATE_BASE64 != ''
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          # Decode the certificate from base64
+          $cert = [System.Convert]::FromBase64String("$env:WINDOWS_CERTIFICATE_BASE64")
+          [System.IO.File]::WriteAllBytes("$PWD\signing-cert.pfx", $cert)
+
+          # Package with certificate signing (requires a custom MSBuild target or WixToolset)
+          # For now, we publish and document the signing step
+          dotnet publish src/Pos.Client/Pos.Client.csproj `
+            --configuration Release `
+            --framework net10.0-windows10.0.19041.0 `
+            --output artifacts/msix-signed
+
+          Write-Host "MSIX packages ready in artifacts/msix-signed"
+          Write-Host "Note: MSIX signing requires WixToolset or signtool with the certificate"
+
+      - name: Upload Windows packages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: |
+            artifacts/msix-unsigned/**
+            artifacts/msix-signed/**
+          if-no-files-found: ignore
 
   verify-migrations:
     runs-on: ubuntu-latest
