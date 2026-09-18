@@ -32,6 +32,10 @@ public static class SyncEndpoints
             .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageSync))
             .WithSummary("Asks the register holding a refused event to send it again.");
 
+        group.MapGet("/baseline", BaselineAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Catalog.View))
+            .WithSummary("Downloads the calling device's whole starting state.");
+
         group.MapGet("/pull", PullAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Catalog.View))
             .WithSummary("Downloads one page of the change feed for the calling device.");
@@ -144,4 +148,36 @@ public static class SyncEndpoints
                 title: "No refused event with that identifier is recorded.",
                 statusCode: StatusCodes.Status404NotFound,
                 type: "https://vaultflow/errors/sync.failure_unknown");
+
+    /// <summary>
+    /// Gives the calling device its whole starting state.
+    /// </summary>
+    /// <remarks>
+    /// The feed carries changes, so a register provisioned today has nothing to
+    /// read for anything that existed before the feed did. This is what it
+    /// fetches first, and what a <c>410</c> from the pull route sends it back
+    /// for.
+    /// </remarks>
+    private static async Task<IResult> BaselineAsync(
+        SyncBaselineProcessor baseline,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        if (currentUser.DeviceId is not { } deviceId)
+        {
+            return Results.Problem(
+                title: "Only an enrolled device can download a baseline.",
+                statusCode: StatusCodes.Status403Forbidden,
+                type: "https://vaultflow/errors/sync.device_required");
+        }
+
+        SyncBaselineResponse? built = await baseline.BuildAsync(deviceId, cancellationToken).ConfigureAwait(false);
+
+        return built is null
+            ? Results.Problem(
+                title: "This device is not registered.",
+                statusCode: StatusCodes.Status403Forbidden,
+                type: "https://vaultflow/errors/sync.device_unknown")
+            : Results.Ok(built);
+    }
 }

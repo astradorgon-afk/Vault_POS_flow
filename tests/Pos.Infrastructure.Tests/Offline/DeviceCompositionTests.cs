@@ -125,5 +125,8 @@ public sealed class DeviceCompositionTests
             int limit,
             CancellationToken cancellationToken)
             => throw new NotSupportedException("The composition check never asks for anything.");
+
+        public Task<Result<Pos.Shared.Sync.SyncBaselineResponse>> BaselineAsync(CancellationToken cancellationToken)
+            => throw new NotSupportedException("The composition check never starts a device.");
     }
 }

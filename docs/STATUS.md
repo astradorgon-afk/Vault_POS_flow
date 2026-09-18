@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, and C54 a real register running the whole loop
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, and C55 the baseline that register starts from
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,211 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 308, Security 52, Architecture 25, API 201** (2026-09-17, through C54 the sync round trip). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C54 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,219 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 316, Security 52, Architecture 25, API 201** (2026-09-18, through C55 the sync baseline). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C55 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1440,11 +1440,55 @@ answer a permission question with once the line was gone.
   because a register whose catalogue silently stopped updating is the worst shape
   this can fail in.
 
-**And one gap it made plain.** The feed carries changes, not a starting state.
-Anything provisioned before the feed existed has no row for a new register to
-read, so a register pulling from cursor zero never receives it. That is what
-`/api/v1/sync/baseline` is for, and it is not built — the test stands in for it
-by touching the rows it needs, which is a test doing something the system cannot.
+**And one gap it made plain**, which C55 then closed. The feed carries changes,
+not a starting state. Anything provisioned before the feed existed has no row for
+a new register to read, so a register pulling from cursor zero never receives it.
+The C54 test stood in for the missing route by touching the rows it needed, which
+is a test doing something the system cannot.
+
+C55 builds that route. `GET /api/v1/sync/baseline` projects the device's store,
+every external counterparty, every product with its barcodes and the prices that
+could still apply, and every batch — as the very change records the feed carries,
+so the device writes them with the applier it already has rather than a second
+code path that could disagree about what a product is.
+
+It is deliberately **not** a page of the feed. The sequences number the baseline's
+own rows, from one, and the feed's counter is left untouched: a baseline records
+nothing that happened, and an earlier draft that reserved real sequence numbers
+pushed the register's cursor past rows the server had still to write — the very
+next pull was refused with a `410` it had just recovered from.
+
+The cursor a register resumes from is the feed's high-water mark read **before**
+the state is projected. A change that commits while the baseline is being built
+then sits both inside the state and after the cursor, so the device applies it a
+second time; reading the mark afterwards would let that same change fall between
+the two and be stepped over for ever. Repeating an idempotent write costs nothing.
+Missing one costs a register its catalogue.
+
+**What that ordering does not fix, and the round trip found.** The server issues a
+permission snapshot and keeps no copy of it — the feed row *is* the record. A
+baseline that moved the cursor past that row left the cashier signed in and unable
+to ring anything up, which is exactly the failure C54 had just fixed, arriving by
+a different door. The baseline now reads the live snapshots back out of the feed:
+newest per user, at or before the cursor, dropping any since revoked or already
+expired. Snapshots are the only part of the baseline not projected from the
+server's own tables, and the only part that needed the feed to be read as a store
+rather than as a log.
+
+**Applying one empties the cached tables first**, because a baseline is the whole
+truth about them: merging would leave behind a product withdrawn while the
+register was dark, or a price the server has since dropped — rows the baseline
+cannot mention because they no longer exist, and which a register would go on
+selling from. Emptied is exactly what the baseline refills and nothing else. The
+outbox, the local sales and the ledger are untouched: a rebaseline must never be a
+way of losing a day's takings. The cached users are untouched for the opposite
+reason — nothing yet writes a `UserChanged` row, so a baseline has nothing to put
+back, and that emitter is now the named gap in the device's user cache.
+
+**A `410` is no longer merely reported.** The downloader fetches a baseline in the
+same run and comes out of it holding the current catalogue, so a register recovers
+on its own rather than waiting for somebody to notice. The round-trip case that
+used to assert "told to start again" now asserts it started again, and finished.
 
 **Reviewing the handler for C46 turned up a second engine fault.** An applier can
 get several steps in before it refuses — the sale handler writes a price-variance
@@ -1740,11 +1784,13 @@ those events yet.
    tested; what is missing is a background service that runs one when the
    connectivity probe says the line is back, and a configured `HttpClient` that
    knows the server's address and carries this register's token.
-2. **The baseline route**, `/api/v1/sync/baseline`. It is what a device fetches
-   after a `410`, and — as C54 made plain — what a *new* register needs before
-   its first pull, because the feed carries changes rather than a starting
-   state. Feed retention and pruning belong with it.
-3. **The sync-failure alert generator**, Phase 14's last item, which the failure
+2. **Feed retention and pruning.** C55 built the baseline a `410` sends a device
+   back for, but nothing prunes the feed, so the `410` that pruning causes is
+   still unreachable outside a test that deletes rows by hand.
+3. **A `UserChanged` emitter.** The device caches users and the applier knows how
+   to write them, but nothing on the server ever records the change — so the
+   cache is never filled, and the baseline cannot fill it either.
+4. **The sync-failure alert generator**, Phase 14's last item, which the failure
    queue (C53) now has something to read.
 
 Two smaller things outstanding:

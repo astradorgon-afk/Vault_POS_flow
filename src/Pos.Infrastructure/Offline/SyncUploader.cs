@@ -32,6 +32,11 @@ public interface ISyncTransport
     /// cursor and the device has to start from a fresh baseline.
     /// </returns>
     Task<Result<SyncPullResponse>> PullAsync(long cursor, int limit, CancellationToken cancellationToken);
+
+    /// <summary>Asks for this device's whole starting state.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The baseline, shaped as changes so the same applier writes it.</returns>
+    Task<Result<SyncBaselineResponse>> BaselineAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>What one upload run did.</summary>

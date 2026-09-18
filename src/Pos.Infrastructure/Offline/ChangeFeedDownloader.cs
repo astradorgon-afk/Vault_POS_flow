@@ -65,6 +65,21 @@ public sealed class ChangeFeedDownloader(ISyncTransport transport, ChangeFeedApp
         long cursor = await applier.ReadCursorAsync(cancellationToken).ConfigureAwait(false);
         int applied = 0;
 
+        // A register that has applied nothing has no changes to ask for — the
+        // feed carries changes, not a starting state — so it starts with one.
+        if (cursor == 0)
+        {
+            ChangeFeedDownloadOutcome started = await BaselineAsync(cancellationToken).ConfigureAwait(false);
+
+            if (started.Problem is not null || started.Unreachable)
+            {
+                return started;
+            }
+
+            cursor = started.Cursor;
+            applied = started.Applied;
+        }
+
         for (int page = 0; page < MaxPagesPerRun; page++)
         {
             Result<SyncPullResponse> fetched = await transport
@@ -73,12 +88,22 @@ public sealed class ChangeFeedDownloader(ISyncTransport transport, ChangeFeedApp
 
             if (fetched.IsFailure)
             {
-                return new ChangeFeedDownloadOutcome(
-                    cursor,
-                    applied,
-                    Unreachable: fetched.Error.Code != HttpSyncTransport.RebaselineRequired,
-                    RebaselineRequired: fetched.Error.Code == HttpSyncTransport.RebaselineRequired,
-                    fetched.Error.Code);
+                if (fetched.Error.Code != HttpSyncTransport.RebaselineRequired)
+                {
+                    return new ChangeFeedDownloadOutcome(cursor, applied, true, false, fetched.Error.Code);
+                }
+
+                // The server cannot serve this cursor any more, and the remedy is
+                // never a retry. Starting again is the only honest answer, and
+                // doing it here rather than reporting it means a register recovers
+                // on its own instead of waiting for somebody to notice.
+                ChangeFeedDownloadOutcome restarted = await BaselineAsync(cancellationToken).ConfigureAwait(false);
+
+                return restarted with
+                {
+                    Applied = applied + restarted.Applied,
+                    RebaselineRequired = true,
+                };
             }
 
             SyncPullResponse body = fetched.Value;
@@ -116,6 +141,39 @@ public sealed class ChangeFeedDownloader(ISyncTransport transport, ChangeFeedApp
         }
 
         return new ChangeFeedDownloadOutcome(cursor, applied, false, false);
+    }
+
+    /// <summary>Fetches a whole starting state and replaces the cache with it.</summary>
+    private async Task<ChangeFeedDownloadOutcome> BaselineAsync(CancellationToken cancellationToken)
+    {
+        Result<SyncBaselineResponse> fetched = await transport
+            .BaselineAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (fetched.IsFailure)
+        {
+            return new ChangeFeedDownloadOutcome(0, 0, true, false, fetched.Error.Code);
+        }
+
+        SyncBaselineResponse body = fetched.Value;
+
+        // Read as a page of its own, running from nothing to however many rows
+        // the baseline carries. Those numbers order the writing and nothing else;
+        // where the device resumes is the cursor the server read the state at.
+        Result<ChangeFeedPage> read = Translate(new SyncPullResponse(0, body.Changes.Count, body.Changes));
+
+        if (read.IsFailure)
+        {
+            return new ChangeFeedDownloadOutcome(0, 0, false, false, read.Error.Message);
+        }
+
+        Result<ChangeFeedApplyOutcome> written = await applier
+            .ApplyBaselineAsync(read.Value, body.ResumeCursor, cancellationToken)
+            .ConfigureAwait(false);
+
+        return written.IsFailure
+            ? new ChangeFeedDownloadOutcome(0, 0, false, false, written.Error.Message)
+            : new ChangeFeedDownloadOutcome(written.Value.Cursor, written.Value.AppliedChanges, false, false);
     }
 
     /// <summary>Turns a wire page into the typed changes the applier takes.</summary>

@@ -44,14 +44,42 @@ public sealed class HttpSyncTransport(HttpClient client) : ISyncTransport
     /// </summary>
     public const string RebaselineRequired = "sync.rebaseline_required";
 
+    /// <summary>The baseline route.</summary>
+    public const string BaselinePath = "api/v1/sync/baseline";
+
+    /// <inheritdoc />
+    public async Task<Result<SyncBaselineResponse>> BaselineAsync(CancellationToken cancellationToken)
+    {
+        Result<SyncBaselineResponse> read = await GetAsync<SyncBaselineResponse>(BaselinePath, cancellationToken)
+            .ConfigureAwait(false);
+
+        return read.IsSuccess && read.Value.Changes is null
+            ? Result<SyncBaselineResponse>.Failure(Unreadable())
+            : read;
+    }
+
     /// <inheritdoc />
     public async Task<Result<SyncPullResponse>> PullAsync(
         long cursor,
         int limit,
         CancellationToken cancellationToken)
     {
-        string path = FormattableString.Invariant($"{PullPath}?cursor={cursor}&limit={limit}");
+        Result<SyncPullResponse> read = await GetAsync<SyncPullResponse>(
+            FormattableString.Invariant($"{PullPath}?cursor={cursor}&limit={limit}"),
+            cancellationToken).ConfigureAwait(false);
 
+        return read.IsSuccess && read.Value.Changes is null
+            ? Result<SyncPullResponse>.Failure(Unreadable())
+            : read;
+    }
+
+    private static Error Unreadable() => Error.Unavailable(
+        "sync.response_unreadable",
+        "The server answered with something this device could not read.");
+
+    private async Task<Result<TBody>> GetAsync<TBody>(string path, CancellationToken cancellationToken)
+        where TBody : class
+    {
         HttpResponseMessage response;
 
         try
@@ -61,11 +89,11 @@ public sealed class HttpSyncTransport(HttpClient client) : ISyncTransport
         }
         catch (HttpRequestException ex)
         {
-            return Result<SyncPullResponse>.Failure(Error.Unavailable("sync.unreachable", ex.Message));
+            return Result<TBody>.Failure(Error.Unavailable("sync.unreachable", ex.Message));
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            return Result<SyncPullResponse>.Failure(Error.Unavailable("sync.timeout", ex.Message));
+            return Result<TBody>.Failure(Error.Unavailable("sync.timeout", ex.Message));
         }
 
         using (response)
@@ -74,33 +102,31 @@ public sealed class HttpSyncTransport(HttpClient client) : ISyncTransport
             // retry: the device has to fetch a fresh baseline and start again.
             if (response.StatusCode == System.Net.HttpStatusCode.Gone)
             {
-                return Result<SyncPullResponse>.Failure(Error.Conflict(
+                return Result<TBody>.Failure(Error.Conflict(
                     RebaselineRequired,
                     "The server can no longer serve this device's cursor."));
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return Result<SyncPullResponse>.Failure(Error.Unavailable(
+                return Result<TBody>.Failure(Error.Unavailable(
                     "sync.http_" + ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture),
                     FormattableString.Invariant($"The server answered {(int)response.StatusCode} {response.StatusCode}.")));
             }
 
             try
             {
-                SyncPullResponse? page = await response.Content
-                    .ReadFromJsonAsync<SyncPullResponse>(ReadOptions, cancellationToken)
+                TBody? body = await response.Content
+                    .ReadFromJsonAsync<TBody>(ReadOptions, cancellationToken)
                     .ConfigureAwait(false);
 
-                return page is null || page.Changes is null
-                    ? Result<SyncPullResponse>.Failure(Error.Unavailable(
-                        "sync.response_unreadable",
-                        "The server answered with something this device could not read."))
-                    : Result<SyncPullResponse>.Success(page);
+                return body is null
+                    ? Result<TBody>.Failure(Unreadable())
+                    : Result<TBody>.Success(body);
             }
             catch (JsonException ex)
             {
-                return Result<SyncPullResponse>.Failure(
+                return Result<TBody>.Failure(
                     Error.Unavailable("sync.response_unreadable", ex.Message));
             }
         }

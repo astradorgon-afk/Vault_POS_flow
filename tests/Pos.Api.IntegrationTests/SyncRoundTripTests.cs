@@ -9,8 +9,6 @@ using Pos.Application.Sales;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
-using Pos.Domain.Organizations;
-using Pos.Infrastructure.Persistence;
 using Pos.Domain.Sales;
 using Pos.Infrastructure.Offline;
 
@@ -190,7 +188,30 @@ public sealed partial class SyncRoundTripTests(PosApiFactory factory) : IAsyncLi
         outcome.RebaselineRequired.Should().BeTrue();
         outcome.Unreachable.Should().BeFalse(
             "a cursor the server cannot honour is not a connection problem, and retrying would never fix it");
-        outcome.Applied.Should().Be(0);
+
+        // Being told to start again is not the end of the run. The register
+        // fetches a baseline in the same pass and comes out of it holding the
+        // current catalogue, including the two reprices whose feed rows it
+        // never saw.
+        outcome.Problem.Should().BeNull();
+        outcome.Applied.Should().BePositive();
+        outcome.Cursor.Should().BeGreaterThan(first.Cursor);
+
+        await using (PosDeviceDbContext store = register.OpenStore())
+        {
+            (await store.Products.AnyAsync(p => p.Id == seed.Product, CancellationToken.None))
+                .Should().BeTrue("a rebaselined register still knows its catalogue");
+
+            List<decimal> prices = await store.ProductPrices
+                .AsNoTracking()
+                .Where(p => p.ProductId == seed.Product)
+                .Select(p => p.Amount)
+                .ToListAsync(CancellationToken.None);
+
+            prices.Should().Contain(
+                65m,
+                "the baseline carries the price as it stands, not the feed rows that made it");
+        }
     }
 
     private static async Task<string> PinSignInAsync(HttpClient client, Seed seed)
@@ -238,21 +259,9 @@ public sealed partial class SyncRoundTripTests(PosApiFactory factory) : IAsyncLi
         LocationId store = await factory.CreateLocationAsync($"RT-{suffix}", $"Round Trip {suffix}", LocationKind.Store);
         LocationId counterparty = await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalCustomer);
 
-        // The feed carries changes, not a starting state. Anything that existed
-        // before the feed did — EXT-CUSTOMER is provisioned at start-up — has no
-        // row for a new register to read, so it is touched here to produce one.
-        // That is the gap `/api/v1/sync/baseline` exists to fill, and this is a
-        // test standing in for it rather than a thing the system does.
-        await factory.WithServiceAsync<PosDbContext>(async context =>
-        {
-            Location external = await context.Locations.AsTracking().SingleAsync(l => l.Id == counterparty);
-
-            // Marked modified rather than actually changed: nothing about it
-            // needs to differ, it just has to pass through a save so the feed
-            // records it once.
-            context.Entry(external).State = EntityState.Modified;
-            await context.SaveChangesAsync();
-        });
+        // Nothing is touched to make this reachable. A new register fetches a
+        // baseline before its first pull, so what existed before the feed did —
+        // EXT-CUSTOMER is provisioned at start-up — arrives anyway.
 
         string employeeCode = $"rt{suffix[^1]}";
         UserId cashier = await factory.CreateUserAsync(

@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.TryAddScoped<Sync.SyncPushProcessor>();
         services.TryAddScoped<Sync.SyncPullProcessor>();
         services.TryAddScoped<Sync.SyncFailureService>();
+        services.TryAddScoped<Sync.SyncBaselineProcessor>();
         services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftOpenedApplier>();
         services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftSuspendedApplier>();
         services.AddScoped<Sync.ISyncEventApplier, Sync.ShiftResumedApplier>();

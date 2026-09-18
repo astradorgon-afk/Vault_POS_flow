@@ -101,6 +101,96 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
         return Result.Success(new ChangeFeedApplyOutcome(page.NextCursor, page.Changes.Count, AlreadyApplied: false));
     }
 
+    /// <summary>
+    /// Replaces everything the feed owns with a fresh starting state.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A baseline is the whole truth about the cached tables, so they are emptied
+    /// before it is written. Merging it instead would leave behind a product
+    /// withdrawn while the register was dark, or a price the server has since
+    /// dropped — rows the baseline cannot mention because they no longer exist,
+    /// and which a register would go on selling from.
+    /// </para>
+    /// <para>
+    /// Only the applier's own tables are touched. The outbox, the local sales and
+    /// the ledger are the register's own work, not a copy of head office's, and a
+    /// rebaseline must never be a way of losing a day's takings.
+    /// </para>
+    /// <para>
+    /// Emptied is exactly what the baseline refills, and nothing else. The cached
+    /// users are therefore left alone: nothing yet writes a <c>UserChanged</c>
+    /// row, so a baseline has nothing to put back and clearing them would only
+    /// lose what earlier builds cached.
+    /// </para>
+    /// </remarks>
+    /// <param name="baseline">
+    /// The starting state, shaped as a page. Its sequences number the baseline's
+    /// own rows and are not feed positions.
+    /// </param>
+    /// <param name="resumeCursor">The feed position the state was read at.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What was written.</returns>
+    public async Task<Result<ChangeFeedApplyOutcome>> ApplyBaselineAsync(
+        ChangeFeedPage baseline,
+        long resumeCursor,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseline);
+
+        await using (PosDeviceDbContext purge =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false))
+        {
+            await using IDbContextTransaction clearing =
+                await purge.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+            using (purge.ChangeFeedWrites.Open())
+            {
+                await purge.ProductBarcodes.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+                await purge.ProductPrices.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+                await purge.Batches.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+                await purge.Products.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+                await purge.Locations.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+                await purge.PermissionSnapshots.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+                await purge.SyncCursors.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await clearing.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        Result<ChangeFeedApplyOutcome> written =
+            await ApplyAsync(baseline, cancellationToken).ConfigureAwait(false);
+
+        if (written.IsFailure)
+        {
+            return written;
+        }
+
+        // The page's own cursor counted its rows; the device's cursor is where
+        // the feed stood when the state was read. Written after the state and
+        // not with it, so a device that loses power in between comes back at the
+        // lower position and downloads the overlap again rather than skipping it.
+        await using PosDeviceDbContext context =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        // Replaced rather than advanced. A feed cursor never moves backwards and
+        // that guard is right — but a baseline is not a move along the feed, it is
+        // a new starting point, and the position it sets can be below the one the
+        // rows it just wrote counted up to.
+        using (context.ChangeFeedWrites.Open())
+        {
+            await context.SyncCursors
+                .Where(c => c.Feed == ChangeFeed)
+                .ExecuteDeleteAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            context.SyncCursors.Add(new DeviceSyncCursor(ChangeFeed, resumeCursor, clock.UtcNow));
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return Result.Success(written.Value with { Cursor = resumeCursor });
+    }
+
     /// <summary>Reads the device's stored feed position.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The cursor, or zero when nothing has been applied yet.</returns>

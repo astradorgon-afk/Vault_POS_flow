@@ -118,3 +118,24 @@ public sealed record SyncPullResponse(
     long FromCursor,
     long NextCursor,
     IReadOnlyList<SyncPullChange> Changes);
+
+/// <summary>A register's whole starting state (OFFLINE_SYNC.md §5.1).</summary>
+/// <remarks>
+/// <para>
+/// Shaped as changes rather than a bespoke snapshot so the device writes it with
+/// the applier it already has, but it is not a page of the feed: the sequences
+/// number the baseline's own rows and mean nothing outside it.
+/// </para>
+/// <para>
+/// <paramref name="ResumeCursor"/> is the feed position the state was read at,
+/// and it is read <em>before</em> the state is projected. A change that commits
+/// while the baseline is being built therefore sits after the cursor as well as
+/// inside the state, and is applied twice rather than stepped over — repeating an
+/// idempotent write is free, and missing one leaves a register quietly wrong.
+/// </para>
+/// </remarks>
+/// <param name="ResumeCursor">The cursor to store, and to pull from next.</param>
+/// <param name="Changes">The starting state, in the order it must be written.</param>
+public sealed record SyncBaselineResponse(
+    long ResumeCursor,
+    IReadOnlyList<SyncPullChange> Changes);

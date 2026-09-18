@@ -339,6 +339,9 @@ public sealed class SyncUploaderTests
             CancellationToken cancellationToken)
             => throw new NotSupportedException("These tests only push.");
 
+        public Task<Result<SyncBaselineResponse>> BaselineAsync(CancellationToken cancellationToken)
+            => throw new NotSupportedException("These tests only push.");
+
         public Task<Result<SyncPushResponse>> PushAsync(
             SyncPushRequest request,
             CancellationToken cancellationToken)

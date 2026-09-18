@@ -512,7 +512,71 @@ no longer a thing this feed can honour:
   page with a hole in it would leave the register quietly wrong about its own
   catalogue.
 
-### 5.1 How the server records it
+### 5.1 The baseline a register starts from
+
+```
+GET /api/v1/sync/baseline
+```
+
+The feed carries **changes**, not a starting state. A register provisioned today
+has no row to read for anything that existed before the feed did, so pulling from
+cursor zero would leave it without its catalogue, its store's settings or the
+counterparty every sale posts its other leg against. This is what it fetches
+instead: once, before its first pull, and again whenever a `410 Gone` sends it
+back for one.
+
+The response is **not a page of the feed**. It carries the state and the cursor to
+resume from:
+
+```json
+{ "resumeCursor": 1902334, "changes": [ … ] }
+```
+
+The changes are the same records the feed carries — the device writes them with
+the applier it already has, rather than a second code path that could disagree
+about what a product is — but their sequences number the baseline's own rows,
+from one, and mean nothing outside it. The feed's counter is left alone: a
+baseline records nothing that happened, and reserving numbers from the counter
+would push a register's cursor past rows the server had still to write.
+
+`resumeCursor` is the feed's high-water mark read **before** the state is
+projected, never after. A change that commits while the baseline is being built
+is then both inside the state and after the cursor, so the device applies it a
+second time; reading the mark afterwards would let that same change fall between
+the two and be stepped over for ever. Repeating an idempotent write costs
+nothing. Missing one costs a register its catalogue.
+
+What it carries:
+
+- the device's own location and every external counterparty,
+- every product with its barcodes, and the prices that could still apply — a
+  period that closed before now can never price a sale, and a baseline is a
+  starting state rather than a history,
+- every batch,
+- the permission snapshots that are still live.
+
+The snapshots are the one part not projected from the server's own tables. The
+server issues a snapshot and keeps no copy: the feed row **is** the record. So
+the baseline reads the live ones back out of the feed — newest per user, at or
+before the cursor, dropping any since revoked or already expired. Without that, a
+baseline would carry a register past the row granting its cashier the authority
+to sell and leave it signed in and unable to ring anything up.
+
+Applying one empties the cached tables first, because a baseline is the whole
+truth about them: merging would leave behind a product withdrawn while the
+register was dark, or a price the server has since dropped — rows the baseline
+cannot mention because they no longer exist, and which a register would go on
+selling from. Emptied is exactly what the baseline refills and nothing else. The
+outbox, the local sales and the ledger are the register's own work, not a copy of
+head office's: a rebaseline must never be a way of losing a day's takings. The
+cached users are left alone too, for the opposite reason — nothing yet writes a
+`UserChanged` row, so a baseline has nothing to put back.
+
+A register that is told to start again does so **in the same download run**. It
+fetches a baseline, applies it and reports the run as a rebaseline, rather than
+returning the refusal and waiting for somebody to notice.
+
+### 5.2 How the server records it
 
 `sync.change_feed` is append-only: one row per change, carrying the change
 exactly as a device will receive it. Serving a page is then a read, not a

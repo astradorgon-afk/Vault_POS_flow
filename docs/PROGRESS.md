@@ -167,7 +167,27 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [ ] Retry queue with exponential backoff
   - [~] C52 — conflict rules: a replayed sale now posts to the ledger marked for review, which is what `AllowOfflineWithReview` was written to wait for and which nothing had ever set; a `NegativeStockAttempt` is recorded whether the draw was permitted or refused, because a permitted oversell is the one somebody most needs to find — it is the shelf that is now wrong — and recording only refusals meant the report showed every draw that did not happen and none that did. A sale of a product withdrawn while the till was dark lands and is flagged `sync.sold_a_withdrawn_product`, and the product stays withdrawn. Accepting an oversell end to end is pinned as not done: FEFO refuses before the policy is consulted, and deciding which batch carries a shortfall is a question about the allocator, not about sync. Two test helpers were mutating detached entities and passing for the wrong reason — the no-tracking default again. 3 tests.
   - [x] C53 — the failure queue and manual retry: `GET /api/v1/sync/failures` lists what head office turned away or set aside, read from `sync.processed_event` rather than a second table devices report into — everything on it is the server's own decision, so a reporting round-trip could only add a way for the two to disagree. `POST /api/v1/sync/failures/{eventId}/retry` re-applies nothing: a refused event earns the same answer unchanged, and it only becomes worth asking when a person changes what made the server refuse it. That ask travels as a `SyncRetryRequested` directive on the register's own feed, because a register that is offline cannot be told anything at all. The device reopens only an event that had stopped — one mid-backoff keeps its backoff, and an accepted one is never reopened, because asking a register to resend a sale head office already holds is how a day's takings get counted twice. The feed's sequence allocator moved out of the recorder so both writers share it. 4 tests.
-  - [~] C54 — the round trip, and what it found: `ChangeFeedDownloader` is the join that was missing — the server had a route and the device had an applier, and nothing carried a page between them; a kind this build does not know is refused rather than skipped, because a register that quietly ignores half a feed and believes its catalogue current is the worse failure. PIN sign-in now puts the cashier's offline authority on the register's feed, which nothing had ever done, so a register could download a catalogue and still refuse to sell. Running a real device against the real server over HTTP then found three things no unit test could: `EXT-CUSTOMER` was scoped to itself, so no register ever received it and none could sell; the feed's currency was read from an organization row that is never written, so every location arrived with none and the page was refused; and the download outcome could not tell "nothing to do" from "the page was refused". The feed carries changes and not a starting state, so a new register still needs `/api/v1/sync/baseline`, which is not built — the test stands in for it. 2 tests.
+  - [x] C54 — the round trip, and what it found: `ChangeFeedDownloader` is the join that was missing — the server had a route and the device had an applier, and nothing carried a page between them; a kind this build does not know is refused rather than skipped, because a register that quietly ignores half a feed and believes its catalogue current is the worse failure. PIN sign-in now puts the cashier's offline authority on the register's feed, which nothing had ever done, so a register could download a catalogue and still refuse to sell. Running a real device against the real server over HTTP then found three things no unit test could: `EXT-CUSTOMER` was scoped to itself, so no register ever received it and none could sell; the feed's currency was read from an organization row that is never written, so every location arrived with none and the page was refused; and the download outcome could not tell "nothing to do" from "the page was refused". The feed carries changes and not a starting state, so a new register still needs `/api/v1/sync/baseline`, which is not built — the test stands in for it. 2 tests.
+  - [x] C55 — the baseline a register starts from, closing C54's pinned gap:
+    `GET /api/v1/sync/baseline` projects the device's store, the external
+    counterparties, every product with its barcodes and still-applicable prices,
+    and every batch, as the very change records the feed carries — so the device
+    writes it with the applier it already has. It is **not** a page of the feed:
+    the sequences number the baseline's own rows and the feed's counter is left
+    alone, because a baseline records nothing that happened and reserving numbers
+    would push a register's cursor past rows the server had still to write. The
+    cursor it resumes from is the feed's high-water mark read *before* the state
+    is projected: a change that commits during the build then sits both inside the
+    state and after the cursor and is applied twice, where reading the mark
+    afterwards would let it fall between the two and be stepped over for ever.
+    Writing the round trip without its stand-in found what the ordering alone does
+    not fix — the server issues a permission snapshot and keeps no copy, so the
+    feed row is the only record, and a baseline that walked the cursor past it left
+    the cashier signed in and unable to sell. The baseline now reads the live
+    snapshots back out of the feed, newest per user, dropping the revoked and the
+    expired. A `410` is also no longer just reported: the register fetches a
+    baseline in the same run and recovers on its own. 9 tests (8 unit, and the
+    round-trip case that now reaches its own recovery).
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
@@ -1192,9 +1212,11 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification:** 1,024 passing without PostgreSQL (Domain 378, Application
-  247, Infrastructure 148, Security 52, Architecture 25, API 174); 18
-  PostgreSQL Infrastructure tests skipped, no Docker in the session container.
+- **Verification (2026-09-18, through C55):** 1,219 passing without PostgreSQL
+  (Domain 378, Application 247, Infrastructure 316, Security 52, Architecture 25,
+  API 201); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+  failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
-  download host the environment blocks — so the one-line `MauiProgram` change
-  is verified by CI's client jobs, not locally. No migration; no schema change.
+  download host the environment blocks — so its wiring is verified by
+  `DeviceCompositionTests` and by CI's client jobs, not locally. No migration; no
+  schema change.
