@@ -2410,8 +2410,27 @@ Stated plainly so they are not mistaken for finished work:
 
 Phases 12 through 16 are complete. **Phase 17 is complete at C69**: the coverage
 gate and the concurrency suites closed the last two rows, and the remaining six
-were marked against the suites that already met them. Phase 18, deployment, is
-what is left.
+were marked against the suites that already met them. C70 then repaired the two
+CI jobs that had been failing since the workflow was written. Phase 18,
+deployment, is what is left.
+
+**Phase 18, audited rather than guessed at.** Four of its eight rows are already
+built and were built early, during the compose-stack work:
+
+| Row | State |
+|---|---|
+| Dockerfiles (API, Web) with non-root users | Half. `build/docker/Dockerfile.api` publishes the API as a non-root user on a read-only root filesystem with a health check, and `Dockerfile.migrator` builds an EF migration bundle. **There is no `Dockerfile.web` and no `web` service in the stack**, so the Blazor dashboard is not deployed anywhere — which is also why `Pos.Web` sits at 0% coverage. |
+| docker compose for dev and a production overlay | Half. `compose.yaml` is the dev stack. **`compose.prod.yaml` does not exist** — the header comment in `compose.yaml` describes it as though it does. |
+| Reverse proxy with TLS, HSTS, security headers | Done. `build/docker/Caddyfile` terminates TLS, sets HSTS and the browser-hardening headers, and answers `/health/ready` with a 404 so database state stays on the internal network. Production still needs the ACME block the overlay would supply. |
+| Migration job separate from the API | Done. `migrator` runs an EF bundle to completion before any API container starts, under the owning role; `grants` then narrows `pos_app` to least privilege. The API never holds DDL rights. |
+| Backup and restore scripts, restore drill documented | Not built. |
+| Production logging/metrics configuration | Not built. There is no `appsettings.Production.json`. The meters ARCHITECTURE.md §12 names — sale latency, sync batch size, sync failure rate, ledger append latency, balance drift — do not exist in the code; nothing anywhere constructs a `Meter`. Emitting them needs no dependency (`System.Diagnostics.Metrics` is in the BCL); **scraping** them does, and which exporter is a decision worth taking deliberately rather than in passing. |
+| MAUI packaging: MSIX (Windows), signed AAB (Android) | Not built. CI builds the client but packages nothing. |
+| CI: build, test, analyze, publish images | Half. Build, test and the gates run; **nothing publishes an image**. |
+
+None of it can be verified in this container: there is a Docker client but no
+daemon, so an image cannot be built and a compose stack cannot be brought up.
+`docker compose config` still merges and validates an overlay without one.
 
 Three things named in earlier phases are still open, and none of them is a
 testing gap:

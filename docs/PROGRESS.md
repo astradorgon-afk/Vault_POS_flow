@@ -534,6 +534,19 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   **Not yet proven green**: the workflow does not run on branches, so the next
   push to `main` is the first run that can pass.
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
+  - Audited, not started. Four of the eight rows are already built, from the
+    earlier compose-stack work: the API and migrator images (non-root, read-only
+    root filesystem, EF bundle applied before any API container starts), the
+    Caddy proxy with TLS and the hardening headers, and the separate migration
+    job with `grants` narrowing `pos_app` afterwards. What is missing:
+    `Dockerfile.web` and a `web` service (the Blazor dashboard is deployed
+    nowhere, which is why `Pos.Web` is at 0% coverage), `compose.prod.yaml`
+    (which `compose.yaml`'s header already describes as though it exists),
+    backup and restore scripts with a documented drill, an
+    `appsettings.Production.json`, the meters ARCHITECTURE.md §12 names — none
+    of which exist in the code — MAUI packaging, and image publishing in CI.
+    None of it is verifiable in this container: Docker client, no daemon. See
+    STATUS.md §5 for the row-by-row state.
 
 ---
 

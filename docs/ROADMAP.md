@@ -426,14 +426,38 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 18 — Deployment
 
-- [ ] Dockerfiles (API, Web) with non-root users
-- [ ] docker compose for dev and a production overlay
-- [ ] Reverse proxy with TLS, HSTS, security headers
-- [ ] Migration job separate from the API
+*(Audited 2026-09-18, not started. Four rows were built early, during the
+compose-stack work; the marks below say which. Nothing here is verifiable in the
+development container — a Docker client with no daemon — so each remaining row
+lands with what it can be checked against stated.)*
+
+- [~] Dockerfiles (API, Web) with non-root users
+      *(`Dockerfile.api` publishes the API as a non-root user on a read-only root
+      filesystem with a health check; `Dockerfile.migrator` builds an EF bundle.
+      There is no `Dockerfile.web` and no `web` service, so the Blazor dashboard
+      is deployed nowhere — which is why `Pos.Web` sits at 0% coverage)*
+- [~] docker compose for dev and a production overlay
+      *(`compose.yaml` is the dev stack; `compose.prod.yaml` does not exist,
+      though `compose.yaml`'s own header describes it as though it does)*
+- [x] Reverse proxy with TLS, HSTS, security headers
+      *(`build/docker/Caddyfile`: TLS, HSTS, nosniff, referrer and COOP/CORP
+      policies, and `/health/ready` answered with a 404 so database state stays
+      on the internal network. The real ACME block is the overlay's job)*
+- [x] Migration job separate from the API
+      *(`migrator` runs the bundle to completion under the owning role before any
+      API container starts, so replicas never race on schema; `grants` then
+      narrows `pos_app`, and the API never holds DDL rights)*
 - [ ] Backup and restore scripts, restore drill documented
 - [ ] Production logging/metrics configuration
+      *(no `appsettings.Production.json`, and none of the meters ARCHITECTURE.md
+      §12 names exists — nothing in the code constructs a `Meter`. Emitting them
+      needs no dependency; scraping them does, and which exporter is a decision
+      to take deliberately)*
 - [ ] MAUI packaging: MSIX (Windows), signed AAB (Android)
-- [ ] CI: build, test, analyze, publish images
+      *(CI builds the client and packages nothing)*
+- [~] CI: build, test, analyze, publish images
+      *(build, test, the coverage gate, the migration check and the secret scan
+      all run — and as of C70 can all pass; nothing publishes an image)*
 
 ---
 
