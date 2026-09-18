@@ -104,6 +104,7 @@ public static class DependencyInjection
         services.TryAddScoped<IDiscrepancyAlertRepository, DiscrepancyAlertRepository>();
         services.TryAddScoped<IEmergencyTransferAlertRepository, EmergencyTransferAlertRepository>();
         services.TryAddScoped<ISyncFailureAlertRepository, SyncFailureAlertRepository>();
+        services.TryAddScoped<Application.Reports.ISalesAnalysisRepository, SalesAnalysisRepository>();
         services.TryAddScoped<INotificationReader, NotificationReader>();
         services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 

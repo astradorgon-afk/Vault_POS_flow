@@ -818,15 +818,30 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
+Built (C7, C58):
+
 ```
-GET /api/v1/reports/sales                     report.view
-GET /api/v1/reports/daily-sales              report.view   (POS day summary, C7)
-GET /api/v1/reports/sales/by-product          report.view
-GET /api/v1/reports/sales/by-category         report.view
-GET /api/v1/reports/sales/by-store            report.view
-GET /api/v1/reports/sales/by-cashier          report.view
-GET /api/v1/reports/sales/by-payment-method   report.view
-GET /api/v1/reports/gross-profit              report.view.financial
+GET /api/v1/reports/daily-sales               report.view   (POS day summary, C7)
+GET /api/v1/reports/sales                     report.view   (C58)
+GET /api/v1/reports/sales/payments            report.view   (C58)
+```
+
+`GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
+is **one** route rather than the four `by-*` routes this section originally
+planned. The cut is a parameter because the rows, the totals and the margin
+arithmetic are identical in all four cases; four routes would have been four
+places for the same rounding to drift. Gross profit is not a separate report
+either — margin belongs on the rows that earned it, not in a second report a
+reader has to line up by hand.
+
+The response carries `totals` computed from the same aggregates as `rows`, and
+`truncated` when more groups matched than `limit` returned. Revenue is **net of
+VAT** and margin is measured on it; see §11.1.
+
+Planned:
+
+```
+GET /api/v1/reports/inventory/on-hand         report.view
 GET /api/v1/reports/inventory/on-hand         report.view
 GET /api/v1/reports/inventory/valuation       report.view.financial
 GET /api/v1/reports/inventory/movement        report.view
@@ -852,6 +867,39 @@ GET /api/v1/dashboard/exceptions
 All report endpoints take the same `range` / `from` / `to` / `locationId`
 parameters and are scope-filtered to the caller's assigned locations unless they
 hold `location.all`.
+
+### 11.1 How a sales report is scoped, bounded and measured
+
+**Scope comes from the database, not the token.** The caller's locations and
+whether they act business-wide are read through `DatabasePermissionEvaluator` at
+request time. The JWT carries only a primary location and its
+`ICurrentUser.HasAllLocations` is always `false`, which on a report would
+silently narrow an owner to one store and refuse a regional manager their second.
+`locationId` may only **narrow** within what the caller already holds — there is
+no parameter that widens, because on a report that parameter is the whole attack.
+A caller assigned to no location is told `report.no_scope` rather than shown
+zeroes: zeroes read as "the business sold nothing".
+
+**Periods are bounded.** A report is the easiest way to ask a production database
+for every row it has ever held, so a period that runs backwards or covers 400
+days or more is refused with `report.period_invalid`, and `limit` is clamped to
+500 rows.
+
+**Revenue is net of VAT.** Prices are tax-inclusive (POS.md §2.6), so a margin
+measured on what the customer paid flatters every figure by the tax rate. Revenue
+is each line's net amount **less the VAT collected on it** — deliberately not the
+line's taxable base, which is zero on a VAT-exempt line by design and would
+report everything a pharmacy sells to a senior citizen as having earned nothing.
+
+**Returns are reported, not netted out.** `quantityReturned` says how many of the
+period's units have since come back; it is the only figure that moves after the
+fact. Revenue and cost stay as they were rung up, so a report run again next
+month still reconciles with the one somebody printed, and a line's revenue and
+its reversal never land in different reports.
+
+**Nothing earned is a margin of nothing.** A line given away inside a paying sale
+reports `marginPercent: 0` and a negative gross profit, rather than dividing by
+zero.
 
 ---
 

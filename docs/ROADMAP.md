@@ -305,8 +305,14 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 15 — Analytics and Reports
 
-- [ ] Sales reports (product, category, store, cashier, payment method)
-- [ ] Gross profit and margin
+- [x] Sales reports (product, category, store, cashier, payment method)
+      *(C58: one `GET /api/v1/reports/sales` cut by `groupBy`, plus
+      `/sales/payments`. Scope is read from the database rather than the token,
+      `locationId` may only narrow, and the period is bounded)*
+- [x] Gross profit and margin
+      *(C58: margin sits on the rows that earned it rather than in a second
+      report. Revenue is net of the VAT collected — not the taxable base, which
+      is zero on an exempt line and would report a pharmacy as earning nothing)*
 - [ ] Inventory on hand, valuation, movement history
 - [ ] Warehouse distribution, transfer reports
 - [ ] Purchase history and supplier performance

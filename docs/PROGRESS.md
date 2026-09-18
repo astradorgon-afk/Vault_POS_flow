@@ -19,9 +19,8 @@ and the test suites pass. Nothing is pushed.
 storage is complete (C28–C33). **Phase 13 synchronization is complete at C56** —
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
-trip. **Phase 14 notifications is complete at C57**, whose sync-failure
-generator was the last item waiting on Phase 13. Next is Phase 15, analytics and
-reports. Phase 11 was built as the "C" batch
+trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
+is under way**: C58 lands the sales analysis and margin. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -243,7 +242,28 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     only place the join, the outcome filter and the lookback are exercised, and it
     takes the worker out of the host's own hosted services so a generator nobody
     registered cannot pass. 7 tests; no migration.
-- [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
+- [~] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
+  - [x] C58 — sales analysis with margin: one `GET /api/v1/reports/sales` cut by
+    `groupBy=Product|Category|Location|Cashier`, rather than the four `by-*`
+    routes the API plan named — the rows, the totals and the margin arithmetic are
+    identical in all four cases, and four routes would have been four places for
+    the same rounding to drift. Gross profit is not a second report either:
+    margin belongs on the rows that earned it. `GET /api/v1/reports/sales/payments`
+    breaks the period's takings down by method. Writing the tests caught the one
+    that would have mattered most — revenue was reading the sale line's **taxable
+    base**, which is zero on a VAT-exempt line by design, so every exempt product
+    would have reported as earning nothing and carrying a -100% margin. Revenue is
+    the line's net amount less the VAT collected on it, which is right for all
+    three tax classes. Three more decisions are pinned by tests: returns are
+    reported as a column and never netted out of the period that sold the goods,
+    because netting would rewrite a report somebody already printed; a line given
+    away inside a paying sale reports no margin rather than dividing by zero; and
+    the totals are computed from the same aggregates as the rows, so they still
+    cover the whole period when the rows are truncated. Scope is read from
+    `DatabasePermissionEvaluator` rather than the token — `ICurrentUser` answers
+    `false` to business-wide authority whatever the caller holds, which would have
+    narrowed an owner to one store — and `locationId` may only narrow, never
+    widen. 18 tests.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1266,9 +1286,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C57):** 1,231 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 322, Security 52, Architecture 25,
-  API 202); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+- **Verification (2026-09-18, through C58):** 1,249 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 334, Security 52, Architecture 25,
+  API 208); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by

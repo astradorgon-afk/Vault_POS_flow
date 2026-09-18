@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,231 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 322, Security 52, Architecture 25, API 202** (2026-09-18, through C57 the sync-failure alerts). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C57 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,249 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 334, Security 52, Architecture 25, API 208** (2026-09-18, through C58 the sales analysis). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C58 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1431,6 +1431,62 @@ out.**
 **That closes the last Phase 13 checkbox.** Three named things sit outside the
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
+
+C58 opens Phase 15. `GET /api/v1/reports/sales` analyses completed sales over a
+period, cut by product, category, store or cashier, and
+`GET /api/v1/reports/sales/payments` breaks the takings down by method. It is one
+route with a `groupBy` rather than the four `by-*` routes the API plan named: the
+rows, the totals and the margin arithmetic are identical in all four cases, and
+four routes would have been four places for the same rounding to drift. Gross
+profit is not a second report either — margin belongs on the rows that earned it,
+not somewhere a reader has to line up by hand.
+
+**The test that mattered caught a real one.** Revenue was reading the sale line's
+`VatBase`, which reads like "the VAT-exclusive amount" and is not: it is the
+*taxable* base, and it is zero on a VAT-exempt line by design, because there is
+nothing taxable to report. Every exempt product — everything a pharmacy sells to a
+senior citizen — would have reported as having earned nothing and carrying a
+-100% margin, on a report whose whole purpose is deciding what to stock. Revenue
+is the line's net amount less the VAT collected on it, which is correct for all
+three tax classes and needs no special case.
+
+**Three more decisions are pinned by tests rather than left to a reader's
+assumption:**
+
+- **Returns are a column, not a subtraction.** `quantityReturned` says how many of
+  the period's units have since come back; revenue and cost stay as they were rung
+  up. Netting returns out would rewrite a report somebody already printed every
+  time a customer walked back in, and would put a line's revenue and its reversal
+  in different months.
+- **Nothing earned is a margin of nothing.** A line given away inside a paying
+  sale reports zero margin and a negative gross profit. Giving stock away is a
+  real thing a shop does, and a report that divides by it is one nobody can open
+  that week. (The domain will not create a sale that settles for nothing, so the
+  case only arises per line — which is exactly where it arises in a shop.)
+- **The totals come from the same aggregates as the rows**, so they still cover
+  the whole period when the rows are truncated, and `truncated` is said out loud
+  rather than left for the reader to infer from a suspiciously round count.
+
+**Scope is read from the database, not the token.** `ICurrentUser.HasAllLocations`
+is hard-coded `false` and its `AssignedLocations` is the JWT's single primary
+location, so scoping a report through it would have silently narrowed an owner to
+one store and refused a regional manager their second. The endpoints resolve
+`UserAuthorization` through `DatabasePermissionEvaluator` at request time, as the
+count and quarantine endpoints already did. `locationId` may only narrow within
+what the caller holds — there is no parameter that widens, because on a report
+that parameter is the whole attack — and a caller assigned to nothing is told
+`report.no_scope` rather than shown zeroes, which read as "the business sold
+nothing". Periods are capped at 400 days and rows at 500, because a report is the
+easiest way to ask a production database for every row it has ever held.
+
+The EF translation took two attempts worth recording: projecting the joined rows
+into a record before grouping makes EF re-inline the constructor into the grouping
+key and give up, and `Contains` over a list of unwrapped `Guid`s will not match a
+strongly-typed id column. Each cut now groups on its own key alone and resolves
+names in a second pass, which also avoids the row-per-product-per-cashier-per-store
+shape a single grouped query would have produced.
+
+---
 
 C57 closes Phase 14 with the generator that waited on Phase 13.
 `SyncFailureAlertWorker` sweeps `sync.processed_event` every five minutes and
