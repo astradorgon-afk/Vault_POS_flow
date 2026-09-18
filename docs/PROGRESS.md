@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is under way**: C66 lands the owner dashboard's overview. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is under way**: C66 lands the owner dashboard's overview and C67 its exception board. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -434,6 +434,29 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     processor now takes `ISystemClock` like everything else. 26 tests (19 on the
     range resolver alone, where every case is an off-by-one somebody would
     otherwise find in a comparison and quietly distrust); no migration.
+  - [x] C67 — the exception board: `GET /api/v1/dashboard/exceptions` returns all
+    nine panels — unknown products, transfer discrepancies, high-value
+    adjustments, negative-stock attempts, expired stock still sellable, repeated
+    count variances, failed sync, offline devices and emergency transfers.
+    **Every panel is present, including the clean ones**, because a board that hid
+    its empty rows would leave a reader unsure whether there was nothing wrong or
+    nothing looked at. **Each panel reports its whole count and a handful of
+    examples**: a panel that said "5" because it had only looked at five would be
+    the worst kind of wrong, since it would read as good news.
+    `ExpiredStillSellable` is the one panel that is always Critical — every other
+    exception is money or paperwork, and this one can reach a customer. Some panels
+    are a standing state and some count the period, so the payload carries both the
+    window and the instant it was read. A high-value adjustment's count is
+    operational and its value financial, so a caller without
+    `report.view.financial` still sees how many crossed the threshold; the
+    threshold is a configured amount rather than a top-N, because "the ten largest"
+    always finds ten even on a quiet week and trains people to ignore the panel. A
+    register enrolled and never heard from counts as offline: a null last-seen date
+    would drop it from a query written the obvious way, and a till nobody has ever
+    heard from is either broken or in somebody's drawer. A first draft of the scope
+    filter built its predicate from an expression tree — it worked and was
+    unreadable, which is the wrong trade for a security filter, so each call site
+    writes its own. 4 tests; no migration.
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
 
@@ -1455,9 +1478,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C66):** 1,334 passing without PostgreSQL
+- **Verification (2026-09-18, through C67):** 1,338 passing without PostgreSQL
   (Domain 402, Application 247, Infrastructure 380, Security 52, Architecture 25,
-  API 228); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+  API 232); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by

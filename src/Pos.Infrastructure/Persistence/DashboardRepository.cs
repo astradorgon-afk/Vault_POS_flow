@@ -27,7 +27,7 @@ namespace Pos.Infrastructure.Persistence;
 /// <param name="context">The database context.</param>
 /// <param name="sales">The one sales analysis, shared with the reports.</param>
 /// <param name="clock">The authoritative clock.</param>
-public sealed class DashboardRepository(
+public sealed partial class DashboardRepository(
     PosDbContext context,
     ISalesAnalysisRepository sales,
     ISystemClock clock) : IDashboardRepository

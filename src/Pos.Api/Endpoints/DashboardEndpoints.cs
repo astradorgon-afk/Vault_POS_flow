@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Pos.Api.Authorization;
 using Pos.Api.Common;
@@ -8,6 +9,7 @@ using Pos.Application.Reports;
 using Pos.Domain.Common;
 using Pos.Domain.Reports;
 using Pos.Domain.Sales;
+using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
@@ -33,7 +35,105 @@ public static class DashboardEndpoints
             .WithName("GetDashboardOverview")
             .WithSummary("The period's headline numbers, the store comparison and what the stock looks like now.");
 
+        group.MapGet("/exceptions", GetExceptionsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetDashboardExceptions")
+            .WithSummary("Everything that needs somebody, worst first.");
+
         return app;
+    }
+
+    /// <summary>
+    /// Builds the exception board.
+    /// </summary>
+    /// <remarks>
+    /// Takes the same range and scope as the overview, so the two halves of the
+    /// dashboard are always talking about the same period and the same stores.
+    /// Some panels are a standing state and some count the period; the payload
+    /// carries both the window and the instant it was read so a reader never has
+    /// to guess which a number is.
+    /// </remarks>
+    private static async Task<IResult> GetExceptionsAsync(
+        [FromServices] IDashboardRepository dashboard,
+        [FromServices] PosDbContext context,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        [FromServices] ISystemClock clock,
+        [FromServices] IOptions<DashboardOptions> options,
+        CancellationToken cancellationToken,
+        [FromQuery] DashboardRange range = DashboardRange.Last30,
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null,
+        [FromQuery] Guid? locationId = null)
+    {
+        Result<DashboardQuery> query = await QueryAsync(
+            context, evaluator, currentUser, clock, range, from, to, locationId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (query.IsFailure)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<DashboardExceptions>.Failure(query.Errors), currentUser.CorrelationId.Value);
+        }
+
+        DashboardOptions settings = options.Value;
+
+        return TypedResults.Ok(await dashboard
+            .GetExceptionsAsync(
+                query.Value,
+                settings.HighValueAdjustmentThreshold,
+                settings.OfflineAfter,
+                settings.ExceptionSampleSize,
+                cancellationToken)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Resolves the scope, the timezone and the period once, for either half.
+    /// </summary>
+    /// <remarks>
+    /// Shared so the overview and the exception board cannot drift apart on what
+    /// "this month" means or on which stores a caller may see.
+    /// </remarks>
+    private static async Task<Result<DashboardQuery>> QueryAsync(
+        PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
+        ICurrentUser currentUser,
+        ISystemClock clock,
+        DashboardRange range,
+        DateOnly? from,
+        DateOnly? to,
+        Guid? locationId,
+        CancellationToken cancellationToken)
+    {
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        Result<IReadOnlyCollection<LocationId>> scope = Scope(authorization, locationId);
+
+        if (scope.IsFailure)
+        {
+            return Result<DashboardQuery>.Failure(scope.Errors);
+        }
+
+        string timeZoneId = await TimeZoneAsync(context, locationId, cancellationToken).ConfigureAwait(false);
+
+        Result<(DateOnly From, DateOnly To)> period = DashboardPeriod.Resolve(
+            range, clock.BusinessDateFor(timeZoneId), from, to);
+
+        return period.IsFailure
+            ? Result<DashboardQuery>.Failure(period.Errors)
+            : Result<DashboardQuery>.Success(new DashboardQuery(
+                range,
+                period.Value.From,
+                period.Value.To,
+                timeZoneId,
+                scope.Value,
+                authorization.Permissions.Contains(Permissions.Administration.ViewFinancialReports)));
     }
 
     /// <summary>
@@ -65,37 +165,16 @@ public static class DashboardEndpoints
         [FromQuery] DateOnly? to = null,
         [FromQuery] Guid? locationId = null)
     {
-        UserAuthorization authorization = await evaluator
-            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+        Result<DashboardQuery> query = await QueryAsync(
+            context, evaluator, currentUser, clock, range, from, to, locationId, cancellationToken)
             .ConfigureAwait(false);
 
-        Result<IReadOnlyCollection<LocationId>> scope = Scope(authorization, locationId);
-
-        if (scope.IsFailure)
-        {
-            return ProblemDetailsMapping.ToProblem(
-                Result<DashboardOverview>.Failure(scope.Errors), currentUser.CorrelationId.Value);
-        }
-
-        string timeZoneId = await TimeZoneAsync(context, locationId, cancellationToken).ConfigureAwait(false);
-
-        Result<(DateOnly From, DateOnly To)> period = DashboardPeriod.Resolve(
-            range, clock.BusinessDateFor(timeZoneId), from, to);
-
-        if (period.IsFailure)
-        {
-            return ProblemDetailsMapping.ToProblem(
-                Result<DashboardOverview>.Failure(period.Errors), currentUser.CorrelationId.Value);
-        }
-
-        bool financial = authorization.Permissions.Contains(Permissions.Administration.ViewFinancialReports);
-
-        return TypedResults.Ok(await dashboard
-            .GetOverviewAsync(
-                new DashboardQuery(
-                    range, period.Value.From, period.Value.To, timeZoneId, scope.Value, financial),
-                cancellationToken)
-            .ConfigureAwait(false));
+        return query.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<DashboardOverview>.Failure(query.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await dashboard
+                .GetOverviewAsync(query.Value, cancellationToken)
+                .ConfigureAwait(false));
     }
 
     /// <summary>

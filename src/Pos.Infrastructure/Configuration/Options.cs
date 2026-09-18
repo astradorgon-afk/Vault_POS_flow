@@ -356,6 +356,35 @@ public sealed class DiscrepancyAlertOptions
     public TimeSpan Lookback => TimeSpan.FromDays(LookbackDays);
 }
 
+/// <summary>Owner-dashboard settings.</summary>
+public sealed class DashboardOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "Dashboard";
+
+    /// <summary>
+    /// Gets or sets what an adjustment has to be worth to reach the exception
+    /// board.
+    /// </summary>
+    /// <remarks>
+    /// A threshold rather than a top-N, because "the ten largest" always finds ten
+    /// even on a quiet week and trains people to ignore the panel.
+    /// </remarks>
+    [Range(0, 100_000_000)]
+    public decimal HighValueAdjustmentThreshold { get; set; } = 10_000m;
+
+    /// <summary>Gets or sets how many hours without contact makes a register offline.</summary>
+    [Range(1, 720)]
+    public int OfflineDeviceAfterHours { get; set; } = 24;
+
+    /// <summary>Gets or sets how many examples each exception panel carries.</summary>
+    [Range(1, 50)]
+    public int ExceptionSampleSize { get; set; } = 5;
+
+    /// <summary>Gets the offline threshold as a time span.</summary>
+    public TimeSpan OfflineAfter => TimeSpan.FromHours(OfflineDeviceAfterHours);
+}
+
 /// <summary>Sync-failure alert worker settings.</summary>
 public sealed class SyncFailureAlertOptions
 {

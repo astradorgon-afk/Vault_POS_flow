@@ -370,9 +370,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(C66: a snapshot of now with its own `asOfUtc`, whatever period the sales
       figures cover; out of stock and low are counted separately because they go
       to different people)*
-- [ ] Exception panels (unknown products, discrepancies, high-value adjustments,
+- [x] Exception panels (unknown products, discrepancies, high-value adjustments,
       negative-stock attempts, expired-still-available, repeated variances,
       failed sync, offline devices, emergency transfers)
+      *(C67: all nine, every panel present including the clean ones, each with its
+      whole count and a sample. Expired-still-sellable is always Critical — it is
+      the one exception that can reach a customer)*
 - [ ] Document timeline drill-down and movement chain explorer
 
 ## Phase 17 — Testing

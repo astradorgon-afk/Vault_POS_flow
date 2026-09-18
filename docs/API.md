@@ -862,15 +862,15 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/dashboard/exceptions
-```
 
-Built (C66):
+Built (C66, C67):
 
 ```
 GET /api/v1/dashboard/overview                report.view            (C66)
     ?range=Today|Yesterday|Last7|Last30|Month|PrevMonth|Quarter|Year|Custom
     &from=&to=&locationId=
+GET /api/v1/dashboard/exceptions              report.view            (C67)
+    ?range=&from=&to=&locationId=
 ```
 
 All report endpoints take the same `range` / `from` / `to` / `locationId`
@@ -1138,6 +1138,45 @@ people.
 `shareOfRevenue` is null rather than zero when nothing sold anywhere — a share of
 nothing is not nought per cent, it is not a share. The store comparison is never
 truncated, because a league table missing its tail lies about who is last.
+
+### 11.10 The exception board
+
+`GET /api/v1/dashboard/exceptions` returns nine panels: unknown products, transfer
+discrepancies, high-value adjustments, negative-stock attempts, expired stock
+still sellable, repeated count variances, failed sync, offline devices and
+emergency transfers.
+
+**Every panel is present, including the clean ones.** A board that hid its empty
+rows would leave a reader unsure whether there was nothing wrong or nothing looked
+at. Panels sort worst-severity first, then by count; an empty panel sorts last
+whatever its severity.
+
+**Each panel reports its whole count and a handful of examples.** A panel that said
+"5" because it had only looked at five would be the worst kind of wrong, because it
+would read as good news.
+
+**`ExpiredStillSellable` is the one panel that is always Critical.** Every other
+exception is money or paperwork; this one is stock past its expiry date sitting in
+a bucket a till may sell from, and it can reach a customer.
+
+**Some panels are a standing state and some count the period.** Unresolved
+discrepancies, offline devices and failed sync are "right now"; negative-stock
+attempts, high-value adjustments and repeated variances are "during the window".
+The payload carries both the window and the instant it was read, so a reader never
+has to guess which a number is.
+
+A high-value adjustment's **count** is operational and its **value** is financial:
+without `report.view.financial` the panel still says how many crossed the
+threshold and leaves the amount null. The threshold is a configured amount rather
+than a top-N, because "the ten largest" always finds ten even on a quiet week and
+trains people to ignore the panel. `Dashboard:HighValueAdjustmentThreshold`,
+`Dashboard:OfflineDeviceAfterHours` and `Dashboard:ExceptionSampleSize` configure
+it.
+
+A register enrolled and **never** heard from counts as offline. It is the worst
+case rather than a missing one — a till nobody has ever heard from is either
+broken or in somebody's drawer — and a null last-seen date would drop it from a
+query written the obvious way.
 
 ---
 

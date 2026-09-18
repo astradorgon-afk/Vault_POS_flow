@@ -33,4 +33,18 @@ public interface IDashboardRepository
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The overview.</returns>
     Task<DashboardOverview> GetOverviewAsync(DashboardQuery query, CancellationToken cancellationToken);
+
+    /// <summary>Builds the exception board.</summary>
+    /// <param name="query">What to report on.</param>
+    /// <param name="highValueThreshold">What counts as a high-value adjustment.</param>
+    /// <param name="offlineAfter">How long without contact makes a register offline.</param>
+    /// <param name="sampleSize">How many examples each panel carries.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Every panel, worst first, including the empty ones.</returns>
+    Task<DashboardExceptions> GetExceptionsAsync(
+        DashboardQuery query,
+        decimal highValueThreshold,
+        TimeSpan offlineAfter,
+        int sampleSize,
+        CancellationToken cancellationToken);
 }

@@ -165,6 +165,118 @@ public sealed class DashboardEndpointTests(PosApiFactory factory)
         }
     }
 
+    [Fact]
+    public async Task EveryPanelIsPresent_EvenTheCleanOnes()
+    {
+        await factory.CreateUserAsync("db-owner6", Roles.Owner);
+
+        using HttpClient client = factory.CreateClient();
+        string owner = await SignInAsync(client, "db-owner6");
+
+        using HttpResponseMessage response = await GetAsync(
+            client, "/api/v1/dashboard/exceptions?range=Last30", owner);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+
+        using JsonDocument board = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement panels = board.RootElement.GetProperty("panels");
+
+        List<string> kinds = [.. panels.EnumerateArray().Select(p => p.GetProperty("kind").GetString()!)];
+
+        // A board that hid its clean rows would leave a reader unsure whether
+        // there was nothing wrong or nothing looked at.
+        kinds.Should().BeEquivalentTo(new[]
+        {
+            "UnknownProducts", "TransferDiscrepancies", "HighValueAdjustments", "NegativeStockAttempts",
+            "ExpiredStillSellable", "RepeatedCountVariances", "FailedSync", "OfflineDevices",
+            "EmergencyTransfers",
+        });
+
+        foreach (JsonElement panel in panels.EnumerateArray())
+        {
+            panel.GetProperty("count").ValueKind.Should().Be(JsonValueKind.Number);
+            panel.GetProperty("sample").ValueKind.Should().Be(JsonValueKind.Array);
+            panel.GetProperty("severity").GetString().Should()
+                .BeOneOf("Info", "Warning", "Critical", "severity travels by name, not as a number");
+        }
+
+        // Both halves of the window are stated, because some panels count the
+        // period and some are a standing state.
+        board.RootElement.GetProperty("fromDate").GetString().Should().NotBeNull();
+        board.RootElement.GetProperty("asOfUtc").GetDateTimeOffset()
+            .Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public async Task ExpiredStockStillSellable_IsCriticalAndCounted()
+    {
+        LocationId store = await factory.CreateLocationAsync("DB-S4", "Dashboard Expiry", LocationKind.Store);
+        ProductId product = await factory.CreateProductAsync("DB-P4", "Dashboard Milk", "7200000004");
+
+        await factory.CreateUserAsync("db-owner7", Roles.Owner);
+
+        using HttpClient client = factory.CreateClient();
+        string owner = await SignInAsync(client, "db-owner7");
+
+        using HttpResponseMessage response = await GetAsync(
+            client, $"/api/v1/dashboard/exceptions?range=Last30&locationId={store.Value}", owner);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+
+        using JsonDocument board = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        JsonElement expired = board.RootElement.GetProperty("panels").EnumerateArray()
+            .Single(p => p.GetProperty("kind").GetString() == "ExpiredStillSellable");
+
+        // Every other exception is money or paperwork; this one can reach a
+        // customer, which is why it is the one panel that is always Critical.
+        expired.GetProperty("severity").GetString().Should().Be("Critical");
+
+        _ = product;
+    }
+
+    [Fact]
+    public async Task WithoutTheFinancialPermission_AHighValuePanelStillCounts_ButSaysNoAmount()
+    {
+        LocationId store = await factory.CreateLocationAsync("DB-S5", "Dashboard Adjust", LocationKind.Store);
+        await factory.CreateUserAsync("db-staff2", Roles.InventoryStaff, locations: [store]);
+
+        using HttpClient client = factory.CreateClient();
+        string staff = await SignInAsync(client, "db-staff2");
+
+        using HttpResponseMessage response = await GetAsync(
+            client, $"/api/v1/dashboard/exceptions?range=Last30&locationId={store.Value}", staff);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+
+        using JsonDocument board = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        JsonElement high = board.RootElement.GetProperty("panels").EnumerateArray()
+            .Single(p => p.GetProperty("kind").GetString() == "HighValueAdjustments");
+
+        // The count is operational — how many crossed the line — and what they
+        // came to is financial.
+        high.GetProperty("count").ValueKind.Should().Be(JsonValueKind.Number);
+        high.GetProperty("value").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task TheExceptionBoardIsScopedTheSameWayAsTheOverview()
+    {
+        LocationId mine = await factory.CreateLocationAsync("DB-S6", "Dashboard Board Mine", LocationKind.Store);
+        LocationId theirs = await factory.CreateLocationAsync("DB-S7", "Dashboard Board Theirs", LocationKind.Store);
+        await factory.CreateUserAsync("db-sm2", Roles.StoreManager, locations: [mine]);
+
+        using HttpClient client = factory.CreateClient();
+        string manager = await SignInAsync(client, "db-sm2");
+
+        using HttpResponseMessage refused = await GetAsync(
+            client, $"/api/v1/dashboard/exceptions?range=Month&locationId={theirs.Value}", manager);
+
+        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(refused)).Should().Be("report.outside_scope");
+    }
+
     private static async Task<JsonDocument> OverviewAsync(HttpClient client, string token, string range)
     {
         using HttpResponseMessage response = await GetAsync(

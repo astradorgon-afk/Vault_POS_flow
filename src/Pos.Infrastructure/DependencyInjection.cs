@@ -266,6 +266,11 @@ public static class DependencyInjection
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<DashboardOptions>()
+            .Bind(configuration.GetSection(DashboardOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddOptions<ShiftForceCloseOptions>()
             .Bind(configuration.GetSection(ShiftForceCloseOptions.SectionName))
             .ValidateDataAnnotations()

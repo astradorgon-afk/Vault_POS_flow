@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 complete (C58–C65), opening with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, C62, purchasing and supplier performance, C63, the inventory exception reports, C64, audit, quarantine and expiry, C65, CSV export, and C66, the owner dashboard's overview
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 complete (C58–C65), opening with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, C62, purchasing and supplier performance, C63, the inventory exception reports, C64, audit, quarantine and expiry, C65, CSV export, C66, the owner dashboard's overview, and C67, its exception board
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,334 passing without PostgreSQL: Domain 402, Application 247, Infrastructure 380, Security 52, Architecture 25, API 228** (2026-09-18, through C66 the dashboard overview). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C66 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,338 passing without PostgreSQL: Domain 402, Application 247, Infrastructure 380, Security 52, Architecture 25, API 232** (2026-09-18, through C67 the exception board). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C67 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1431,6 +1431,47 @@ out.**
 **That closes the last Phase 13 checkbox.** Three named things sit outside the
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
+
+C67 builds the exception board. `GET /api/v1/dashboard/exceptions` returns nine
+panels: unknown products, transfer discrepancies, high-value adjustments,
+negative-stock attempts, expired stock still sellable, repeated count variances,
+failed sync, offline devices and emergency transfers.
+
+**Every panel is present, including the clean ones.** A board that hid its empty
+rows would leave a reader unsure whether there was nothing wrong or nothing looked
+at — and the second is the state worth knowing about. Panels sort worst-severity
+first; an empty one sorts last whatever its severity.
+
+**Each panel reports its whole count and a handful of examples.** A panel that said
+"5" because it had only looked at five would be the worst kind of wrong, because it
+would read as good news.
+
+**`ExpiredStillSellable` is the one panel that is always Critical.** Every other
+exception on the board is money or paperwork. This one is stock past its expiry
+date sitting in a bucket a till may sell from, and it can reach a customer.
+
+**Some panels are a standing state and some count the period**, and the payload
+says which by carrying both the window and the instant it was read. Unresolved
+discrepancies, offline devices and failed sync are "right now"; negative-stock
+attempts, high-value adjustments and repeated variances are "during the window".
+
+A high-value adjustment's **count** is operational and its **value** financial, so
+a caller without `report.view.financial` still sees how many crossed the line. The
+threshold is a configured amount rather than a top-N: "the ten largest" always
+finds ten even on a quiet week, which trains people to ignore the panel.
+
+A register enrolled and **never** heard from counts as offline. It is the worst
+case rather than a missing one — a till nobody has ever heard from is either broken
+or in somebody's drawer — and a null last-seen date drops it from a query written
+the obvious way.
+
+Two things were rewritten on the way. `from` and `to` are contextual keywords
+inside a LINQ query expression, so the window parameters could not be called that.
+And the first scope filter built its predicate from an expression tree: it worked,
+and it was unreadable, which is the wrong trade for the one filter that decides
+whose data a caller sees. Each call site writes its own predicate now.
+
+---
 
 C66 opens Phase 16. `GET /api/v1/dashboard/overview` gives a period's headline
 numbers, the store comparison and what the stock looks like now.
