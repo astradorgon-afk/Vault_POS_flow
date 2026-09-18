@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -303,6 +303,23 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     `daysOfCover` — null when nothing sold, because there is no rate to divide by
     and reporting infinity as a large number is how a line nobody can shift ends up
     looking merely slow. 7 tests; no migration.
+  - [x] C61 — transfer and distribution reports: `GET /api/v1/reports/transfers`
+    lists what was raised in a window, longest in flight first, and
+    `/transfers/distribution` rolls dispatched transfers up by the lane they
+    travelled. **A transfer is in scope when either end is** — it is as much the
+    receiving store's business as the sending one's, and filtering on the source
+    alone, which is the obvious way to write it, would hide every incoming
+    shipment from the people waiting for it. Requested, dispatched and received
+    stay three columns rather than one: collapsing them is how a shipment that
+    arrived two cartons short comes to look complete. `daysInFlight` is null once
+    a transfer is received, because there is nothing in flight to count.
+    Distribution counts on dispatch and over the dispatch date — counting on
+    receipt would make a lane look idle while a fortnight of stock sat in a van,
+    and counting over the creation date would file this month's shipment under the
+    month it was requested. The tests drive real transfers through Submit, Review,
+    Approve, Pick, Ready, Dispatch and Receive rather than writing the columns, so
+    a fixture cannot pass against a lifecycle the domain would refuse. 7 tests; no
+    migration.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1325,8 +1342,8 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C60):** 1,270 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 351, Security 52, Architecture 25,
+- **Verification (2026-09-18, through C61):** 1,277 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 358, Security 52, Architecture 25,
   API 212); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the

@@ -818,7 +818,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58, C59, C60):
+Built (C7, C58, C59, C60, C61):
 
 ```
 GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
@@ -829,6 +829,8 @@ GET /api/v1/reports/inventory/valuation       report.view.financial  (C59)
 GET /api/v1/reports/inventory/movement        report.view            (C59)
 GET /api/v1/reports/inventory/ageing          report.view            (C60)
 GET /api/v1/reports/inventory/dead-stock      report.view            (C60)
+GET /api/v1/reports/transfers                 report.view            (C61)
+GET /api/v1/reports/transfers/distribution    report.view            (C61)
 ```
 
 `GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
@@ -846,7 +848,6 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/reports/transfers                 report.view
 GET /api/v1/reports/purchases                 report.view
 GET /api/v1/reports/supplier-performance      report.view
 GET /api/v1/reports/adjustments               report.view
@@ -966,6 +967,30 @@ reporting infinity as a large number is how a line nobody can shift ends up
 looking merely slow. It is deliberately **not** called turnover — a true turnover
 ratio needs the average stock held across the period, and the system keeps
 balances rather than a history of them.
+
+### 11.4 Transfers and distribution
+
+**A transfer is in scope when *either* end is.** It is as much the receiving
+store's business as the sending one's, and filtering on the source alone — the
+obvious way to write it — would hide every incoming shipment from the people
+waiting for it. This is the one report whose scope is not a single location
+column.
+
+The three quantities are three columns: `requestedQuantity` is what was asked
+for, `dispatchedQuantity` what actually left the source, `receivedQuantity` what
+the destination counted. Collapsing them is how a shipment that arrived two
+cartons short comes to look complete. `daysInFlight` is null once a transfer has
+been received — there is nothing in flight to count — and rows sort by it
+descending, because what is stuck is what somebody opens this report to find.
+`openOnly=true` keeps only what has not arrived.
+
+**Distribution counts on dispatch, over the dispatch date.** The question a
+distribution report answers is what the warehouse *sent*; counting on receipt
+would make a lane look idle while a fortnight of stock sat in a van, and counting
+over the creation date would file this month's shipment under the month it was
+requested. `shortfallQuantity` is what left and has not turned up, damaged or
+otherwise — stock still legitimately in transit included, because the number a
+lane is judged on is what has not arrived yet.
 
 ---
 

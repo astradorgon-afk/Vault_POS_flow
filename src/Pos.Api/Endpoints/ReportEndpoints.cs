@@ -88,6 +88,22 @@ public static class ReportEndpoints
             .WithName("GetInventoryMovement")
             .WithSummary("Lists the ledger legs recorded in a window.");
 
+        group.MapGet("/transfers", GetTransfersAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetTransferReport")
+            .WithSummary("Lists transfers raised in a window, longest in flight first.");
+
+        group.MapGet("/transfers/distribution", GetDistributionAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetDistributionReport")
+            .WithSummary("Rolls dispatched transfers up by the lane they travelled.");
+
         return app;
     }
 
@@ -325,6 +341,64 @@ public static class ReportEndpoints
                 Result<InventoryMovementReport>.Failure(query.Errors), currentUser.CorrelationId.Value)
             : TypedResults.Ok(await reports
                 .GetMovementsAsync(from, to, query.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetTransfersAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] ITransferReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] bool openOnly = false,
+        [FromQuery] int limit = 200)
+    {
+        if (to < from || (to - from).TotalDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<TransferReport>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<IReadOnlyCollection<LocationId>> scope = await ScopeAsync(
+            evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<TransferReport>.Failure(scope.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetTransfersAsync(
+                    from, to, scope.Value, openOnly, Math.Clamp(limit, 1, MaxRows), cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetDistributionAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] ITransferReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null)
+    {
+        if (to < from || (to - from).TotalDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<DistributionLaneRow>>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<IReadOnlyCollection<LocationId>> scope = await ScopeAsync(
+            evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<DistributionLaneRow>>.Failure(scope.Errors),
+                currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetDistributionAsync(from, to, scope.Value, cancellationToken)
                 .ConfigureAwait(false));
     }
 

@@ -318,7 +318,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       the valuation is the same rows with cost on them behind
       `report.view.financial`. Counterparty legs are excluded from both, and
       unit cost is derived from the totals rather than averaged from the buckets)*
-- [ ] Warehouse distribution, transfer reports
+- [x] Warehouse distribution, transfer reports
+      *(C61: a transfer is in scope when either end is — filtering on the source
+      alone would hide every incoming shipment from the people waiting for it.
+      Requested, dispatched and received stay three columns, and distribution
+      counts on dispatch rather than on receipt)*
 - [ ] Purchase history and supplier performance
 - [ ] Adjustments, expiry, damage, spoilage, shrinkage
 - [ ] Physical count variance, unauthorized inventory, quarantine
