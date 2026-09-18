@@ -242,7 +242,14 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     only place the join, the outcome filter and the lookback are exercised, and it
     takes the worker out of the host's own hosted services so a generator nobody
     registered cannot pass. 7 tests; no migration.
-- [~] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
+- [x] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
+  — every roadmap row delivered at C65. Two are marked `[~]` on purpose and are
+  written up in STATUS: **turnover** proper needs a history of balances the system
+  does not keep (a schema decision, not a reporting one), and **XLSX** needs a
+  third-party spreadsheet library (a dependency decision). A third thing is open
+  for a person rather than for code: `report.export` is granted to `Auditor` alone
+  and the role matrix in PERMISSIONS.md has no row for it, so an Owner who may read
+  every report cannot export one.
   - [x] C58 — sales analysis with margin: one `GET /api/v1/reports/sales` cut by
     `groupBy=Product|Category|Location|Cashier`, rather than the four `by-*`
     routes the API plan named — the rows, the totals and the margin arithmetic are
