@@ -103,6 +103,7 @@ public static class DependencyInjection
         services.TryAddScoped<ILowStockRepository, LowStockRepository>();
         services.TryAddScoped<IDiscrepancyAlertRepository, DiscrepancyAlertRepository>();
         services.TryAddScoped<IEmergencyTransferAlertRepository, EmergencyTransferAlertRepository>();
+        services.TryAddScoped<ISyncFailureAlertRepository, SyncFailureAlertRepository>();
         services.TryAddScoped<INotificationReader, NotificationReader>();
         services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 
@@ -151,6 +152,15 @@ public static class DependencyInjection
         if (emergencyTransferAlerts.Enabled)
         {
             services.AddHostedService<EmergencyTransferAlertWorker>();
+        }
+
+        SyncFailureAlertOptions syncFailureAlerts = configuration
+            .GetSection(SyncFailureAlertOptions.SectionName)
+            .Get<SyncFailureAlertOptions>() ?? new SyncFailureAlertOptions();
+
+        if (syncFailureAlerts.Enabled)
+        {
+            services.AddHostedService<SyncFailureAlertWorker>();
         }
 
         ShiftForceCloseOptions shiftForceClose = configuration
@@ -241,6 +251,11 @@ public static class DependencyInjection
 
         services.AddOptions<EmergencyTransferAlertOptions>()
             .Bind(configuration.GetSection(EmergencyTransferAlertOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<SyncFailureAlertOptions>()
+            .Bind(configuration.GetSection(SyncFailureAlertOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

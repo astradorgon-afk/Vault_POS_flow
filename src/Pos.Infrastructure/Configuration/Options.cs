@@ -356,6 +356,40 @@ public sealed class DiscrepancyAlertOptions
     public TimeSpan Lookback => TimeSpan.FromDays(LookbackDays);
 }
 
+/// <summary>Sync-failure alert worker settings.</summary>
+public sealed class SyncFailureAlertOptions
+{
+    /// <summary>The configuration section name.</summary>
+    public const string SectionName = "SyncFailureAlerts";
+
+    /// <summary>Gets or sets whether the background sync-failure alert worker runs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets how many minutes between sync-failure sweeps.</summary>
+    [Range(1, 1440)]
+    public int IntervalMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// Gets or sets how many days back a sweep looks for unresolved verdicts.
+    /// </summary>
+    /// <remarks>
+    /// A failure older than this raised its alert when it was young; the alert is
+    /// durable and stays until somebody reads it, so the window only decides how
+    /// far back a server that was down catches up from.
+    /// </remarks>
+    [Range(1, 90)]
+    public int LookbackDays { get; set; } = 7;
+
+    /// <summary>Gets or sets whether a sync-failure sweep runs on application start.</summary>
+    public bool RunOnStartup { get; set; }
+
+    /// <summary>Gets the interval as a time span.</summary>
+    public TimeSpan Interval => TimeSpan.FromMinutes(IntervalMinutes);
+
+    /// <summary>Gets the lookback as a time span.</summary>
+    public TimeSpan Lookback => TimeSpan.FromDays(LookbackDays);
+}
+
 /// <summary>Emergency-transfer alert worker settings.</summary>
 public sealed class EmergencyTransferAlertOptions
 {

@@ -15,7 +15,11 @@ using Pos.Domain.Locations;
 using Pos.Domain.Sales;
 using Pos.Domain.Organizations;
 using Pos.Infrastructure.Persistence;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Pos.Infrastructure.Offline;
+using Pos.Domain.Notifications;
+using Pos.Infrastructure.Notifications;
 
 namespace Pos.Api.IntegrationTests;
 
@@ -161,6 +165,63 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
         results[1].GetProperty("errorCode").GetString().Should().Be(
             "sale.item.quoted_price_not_applicable",
             "naming one of our price rows is not the same as being priced by it");
+    }
+
+    [Fact]
+    public async Task AFailureHeadOfficeRecorded_ReachesTheStoreAsAnAlert()
+    {
+        Seed seed = await SeedAsync("spi", shelfQty: 10m);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, seed);
+
+        Guid shiftId = Guid.CreateVersion7();
+        string shiftNumber = DocumentNumber.CreateForDevice(DocumentType.CashierShift, 2026, seed.DeviceCode, 1).Value;
+        string saleNumber = DocumentNumber.CreateForDevice(DocumentType.Sale, 2026, seed.DeviceCode, 1).Value;
+
+        // A product the server has never heard of: the register is refused, and
+        // every event behind this one in its queue now waits on somebody.
+        SaleSyncPayload unknownProduct = SalePayload(seed, shiftId, saleNumber, quantity: 1m, netTotal: 45m)
+            with
+            {
+                Lines = [new SaleLineSyncPayload(
+                    Guid.CreateVersion7(), 1m, seed.UnitId.Value, seed.Barcode, null, null, 0m, null, null)],
+            };
+
+        IReadOnlyList<JsonElement> results = await PushAsync(client, token, seed,
+            Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
+            Event(2, "SaleCompleted", unknownProduct));
+
+        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
+
+        // The failure list has existed since C53 and nothing told anybody to open
+        // it. This is the sweep that does, running against the real verdicts
+        // rather than a substitute: the join to the device, the outcome filter and
+        // the lookback are all only exercised here.
+        // Taken from the host's own hosted services, so this also proves the
+        // generator is wired up: one that is not registered never runs outside a
+        // test that constructs it.
+        SyncFailureAlertWorker worker = factory.Services
+            .GetServices<IHostedService>()
+            .OfType<SyncFailureAlertWorker>()
+            .Single();
+
+        (await worker.SweepOnceAsync(CancellationToken.None)).Should().BePositive();
+
+        Notification alert = await factory.WithServiceAsync(context => context.Notifications
+            .AsNoTracking()
+            .Where(n => n.Kind == NotificationKind.SyncFailure && n.LocationId == seed.Store)
+            .SingleAsync());
+
+        alert.Severity.Should().Be(
+            NotificationSeverity.Critical, "a refused event stops everything behind it in that register's queue");
+        // The code as the register was registered under, which is what is printed
+        // on its receipts — whoever reads this walks to a till, not to a row in a
+        // table. Compared without case because the domain uppercases it.
+        alert.Title.Should().ContainEquivalentOf(seed.DeviceCode);
+
+        // Swept again, and the same failure does not announce itself twice. A
+        // register retries a refused event for as long as it stands.
+        (await worker.SweepOnceAsync(CancellationToken.None)).Should().Be(0);
     }
 
     [Fact]

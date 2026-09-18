@@ -655,6 +655,24 @@ resetting it would throw away a backoff it is in the middle of; one already
 accepted is never reopened, because asking a register to send a sale head office
 already holds is how a day's takings get counted twice.
 
+**Nobody is expected to remember to open the list.** `SyncFailureAlertWorker`
+sweeps the same verdicts every five minutes and raises a durable notification to
+the store whose register produced them. The failure this exists to prevent is not
+the refusal — it is nobody noticing the refusal, because a refused event sits at
+the head of that register's queue and everything behind it waits.
+
+- A `Rejected` or `Conflict` verdict is **Critical**: the queue has stopped, and
+  a till can be trading all day with nothing reaching head office.
+- A `RequiresReview` verdict is a **Warning**: the event was applied and flagged,
+  so the records are central and somebody has to go and look — which is not the
+  same as somebody has to go now.
+
+The alert carries the server's own words, because "refused" without the reason
+only sends somebody to the failure list to be told what they were already being
+told. Deduplication is by event identifier, so one failure raises one alert
+however many sweeps see it: a register retries a refused event for as long as it
+stands, and an alert per retry would bury the one that mattered.
+
 ---
 
 ## 6. Clocks

@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,224 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 316, Security 52, Architecture 25, API 201** (2026-09-18, through C56 the oversell end to end). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C56 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,231 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 322, Security 52, Architecture 25, API 202** (2026-09-18, through C57 the sync-failure alerts). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C57 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1432,6 +1432,37 @@ out.**
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
 
+C57 closes Phase 14 with the generator that waited on Phase 13.
+`SyncFailureAlertWorker` sweeps `sync.processed_event` every five minutes and
+raises a durable notification to the store whose register produced the verdict.
+The failure list has existed since C53 and nothing told anybody to open it; the
+failure this prevents is not the refusal but nobody noticing it, because a
+refused event sits at the head of that register's queue and everything behind it
+waits.
+
+It reads the same rows the list reads. There is deliberately no second table: an
+alert derived from anything but the decision itself could disagree with the list
+somebody opens after reading it. `Rejected` and `Conflict` are **Critical** — the
+queue has stopped, and a till can trade all day with nothing reaching head
+office. `RequiresReview` is a **Warning**: the event was applied and flagged, the
+records are central, and somebody has to go and look rather than go now.
+
+The server's own words travel in the body, because "refused" without the reason
+only sends somebody to the failure list to be told what they were already being
+told; a message longer than the column is trimmed rather than dropped.
+Deduplication is by event identifier, which matters more here than for the other
+generators — a register retries a refused event for as long as it stands, and an
+alert per retry would bury the one that mattered.
+
+The API suite runs the real sweep against the real container, which is the only
+place the join to the device, the outcome filter and the lookback are exercised,
+and it takes the worker out of the host's own hosted services rather than
+constructing one — so a generator nobody registered cannot pass. That needed
+`Pos.Api.IntegrationTests` added to `Pos.Infrastructure`'s `InternalsVisibleTo`;
+the sweeps stay internal so nothing in the application can call one out of turn.
+
+---
+
 C53 gives the refusals somewhere to be seen and one thing to do about them.
 `GET /api/v1/sync/failures` lists what head office turned away or set aside, with
 the register's short code — the one printed on its receipts — so whoever reads it
@@ -1835,8 +1866,8 @@ those events yet.
 3. **A `UserChanged` emitter.** The device caches users and the applier knows how
    to write them, but nothing on the server ever records the change — so the
    cache is never filled, and the baseline cannot fill it either.
-4. **The sync-failure alert generator**, Phase 14's last item, which the failure
-   queue (C53) now has something to read.
+
+The sync-failure alert generator was the fourth entry here and is built (C57).
 
 Two smaller things outstanding:
 

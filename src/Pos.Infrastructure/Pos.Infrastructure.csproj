@@ -33,6 +33,11 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Pos.Infrastructure.Tests" />
     <InternalsVisibleTo Include="Pos.Sync.Tests" />
+
+    <!-- The alert sweeps are internal so nothing in the application can call one
+         out of turn. The API suite runs one against the real container, which is
+         the only place the query that decides what needs a person is exercised. -->
+    <InternalsVisibleTo Include="Pos.Api.IntegrationTests" />
   </ItemGroup>
 
 </Project>

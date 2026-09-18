@@ -294,10 +294,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [x] Persistent notifications + per-user receipts
 - [x] SignalR hub, groups, reconnection
       *(C24 authenticates the hub and derives user/location groups from current database authority)*
-- [~] Alert generators (low stock, expiry, discrepancy, emergency, sync failure)
+- [x] Alert generators (low stock, expiry, discrepancy, emergency, sync failure)
       *(C23 completes expiring-soon and expired-run alerts; C25 adds low-stock alerts;
       C26 adds receiving/transfer discrepancy alerts; C27 adds emergency-transfer alerts;
-      the sync-failure generator waits for the Phase 13 synchronization pipeline)*
+      C57 adds the sync-failure generator, which waited on Phase 13 and now sweeps
+      the server's own verdicts — Critical when a register's queue has stopped,
+      Warning when the event landed and needs looking at)*
 - [x] Notification centre UI
       *(C24 adds the scoped HTTP feed, read/read-all receipts, live badge and responsive web ledger)*
 

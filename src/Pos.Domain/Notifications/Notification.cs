@@ -12,6 +12,17 @@ public enum NotificationKind : short
     ReceivingDiscrepancy = 4,
     TransferShortage = 5,
     EmergencyTransfer = 6,
+
+    /// <summary>
+    /// A register's uploaded event that head office turned away or set aside.
+    /// </summary>
+    /// <remarks>
+    /// The one alert whose subject is not stock or money but a conversation that
+    /// stopped. A refused event sits at the head of that register's queue and
+    /// everything behind it waits, so nobody noticing is the failure mode this
+    /// exists to prevent.
+    /// </remarks>
+    SyncFailure = 7,
 }
 
 /// <summary>The attention level of a notification.</summary>
