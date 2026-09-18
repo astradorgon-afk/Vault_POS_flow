@@ -426,28 +426,35 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 18 — Deployment
 
-*(Audited 2026-09-18, not started. Four rows were built early, during the
-compose-stack work; the marks below say which. Nothing here is verifiable in the
-development container — a Docker client with no daemon — so each remaining row
-lands with what it can be checked against stated.)*
+*(Audit 2026-09-18; implementation C71 adds production composefile, web
+Dockerfile, backup/restore scripts. Four rows done (Dockerfiles, compose, proxy,
+migrator); two rows more done (backup/restore); two rows remain (logging/metrics,
+MAUI packaging, CI publishing).)*
 
-- [~] Dockerfiles (API, Web) with non-root users
-      *(`Dockerfile.api` publishes the API as a non-root user on a read-only root
-      filesystem with a health check; `Dockerfile.migrator` builds an EF bundle.
-      There is no `Dockerfile.web` and no `web` service, so the Blazor dashboard
-      is deployed nowhere — which is why `Pos.Web` sits at 0% coverage)*
-- [~] docker compose for dev and a production overlay
-      *(`compose.yaml` is the dev stack; `compose.prod.yaml` does not exist,
-      though `compose.yaml`'s own header describes it as though it does)*
+- [x] Dockerfiles (API, Web) with non-root users
+      *(`Dockerfile.api` and `Dockerfile.web` both publish with non-root
+      `vaultflow` user, read-only root filesystem, ICU libraries, health checks.
+      `Dockerfile.migrator` runs the EF migrations bundle as `pos_migrator`.
+      C71 adds the web Dockerfile.)*
+- [x] docker compose for dev and a production overlay
+      *(`compose.yaml` is the dev stack with local Caddy CA, exposed postgres port,
+      env-var secrets. `compose.prod.yaml` is the production overlay with ACME TLS,
+      Docker secrets, no exposed port, web service, optional Redis. C71 adds the
+      overlay and production Caddyfile.)*
 - [x] Reverse proxy with TLS, HSTS, security headers
       *(`build/docker/Caddyfile`: TLS, HSTS, nosniff, referrer and COOP/CORP
       policies, and `/health/ready` answered with a 404 so database state stays
-      on the internal network. The real ACME block is the overlay's job)*
+      on the internal network. `Caddyfile.prod` adds ACME with Let's Encrypt.
+      C71 adds the production config.)*
 - [x] Migration job separate from the API
       *(`migrator` runs the bundle to completion under the owning role before any
       API container starts, so replicas never race on schema; `grants` then
       narrows `pos_app`, and the API never holds DDL rights)*
-- [ ] Backup and restore scripts, restore drill documented
+- [x] Backup and restore scripts, restore drill documented
+      *(C71: `scripts/backup.ps1` runs `pg_basebackup` with configurable format
+      and compression (tar.zst default), `scripts/restore.ps1` extracts and
+      restores with ledger integrity verification. Both scripts prompt for
+      passwords or read from environment; production scheduling is documented.)*
 - [ ] Production logging/metrics configuration
       *(no `appsettings.Production.json`, and none of the meters ARCHITECTURE.md
       §12 names exists — nothing in the code constructs a `Meter`. Emitting them

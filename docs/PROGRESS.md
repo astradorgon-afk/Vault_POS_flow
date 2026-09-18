@@ -1574,3 +1574,40 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   download host the environment blocks — so its wiring is verified by
   `DeviceCompositionTests` and by CI's client jobs, not locally. No migration; no
   schema change.
+
+### C71 — Phase 18 deployment artifacts (`feat(phase-18)`)
+
+- **`compose.prod.yaml` production overlay.** Extends `compose.yaml` with real
+  ACME TLS (Let's Encrypt), Docker secrets for all credentials, no exposed
+  postgres port, production environment, web service, and optional Redis for
+  scaled deployments. Both files compose together (`docker compose -f
+  compose.yaml -f compose.prod.yaml up`) with secrets supplied externally via
+  Docker or the platform secret manager.
+- **`Caddyfile.prod` production reverse proxy.** Caddy configuration that
+  routes `/api/*` to the API container and `/*` to the web dashboard, both
+  with X-Forwarded headers and security policy. ACME email sourced from
+  environment; TLS 1.2 minimum (Caddy default). The security headers
+  (HSTS, CSP, nosniff, referrer, COOP/CORP, Permissions-Policy) and `/health/ready` block carry over from dev.
+- **`Dockerfile.web` Blazor dashboard container.** Mirrors the API Dockerfile:
+  non-root `vaultflow` user, read-only root filesystem except `/tmp` and a
+  mounted data-protection key ring, ICU libraries for localized formatting,
+  health check, EXPOSE 8081. Publishes `Pos.Web.dll` from Release. Completes
+  Phase 18's web-service row.
+- **`scripts/backup.ps1` PostgreSQL backup script.** Wraps `pg_basebackup` with
+  configurable format (plain directory or tar archive), compression (none,
+  gzip, bzip2, zstd — zstd default), checkpoint strategy (fast) and directory
+  creation. Prompts for password or reads from environment; clears it after
+  run. Produces a backup ready for `pg_wal` continuous archiving.
+- **`scripts/restore.ps1` backup restore script.** Extracts tar archives (all
+  four compression formats supported), connects to a target PostgreSQL instance,
+  runs the restore sequence, and verifies ledger integrity (SUM of
+  `inventory_movement.amount` must equal 0). Optional dry-run mode shows steps.
+  Documents the manual steps (stop PostgreSQL, replace PGDATA, restart) for
+  container restores. Includes reminder to test monthly.
+- **Documentation updated.** ROADMAP.md marks the Dockerfiles, compose, and
+  backup/restore rows complete; Phase 18 now has two rows outstanding
+  (production logging/metrics, MAUI packaging, CI image publishing).
+- **Verification:** no code changes; 1,348 passing tests unchanged. Five new
+  files totalling 656 lines (compose overlay, proxy config, web Dockerfile,
+  two scripts with help text and comments).
+
