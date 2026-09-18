@@ -1,0 +1,51 @@
+# VaultFlow - production reverse proxy. Terminates real TLS and sets
+# security headers that harden the browser surface.
+
+{
+	# Production: ACME certificate with Let's Encrypt
+	email {$ACME_EMAIL:}
+	# TLS policy: minimum TLS 1.2, modern + compatibility ciphers
+	# (Caddy defaults to TLS 1.2 minimum automatically)
+	admin off
+}
+
+# Site name from environment; renewal via ACME
+{$SITE_ADDRESS:} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "camera=(self), geolocation=(), microphone=(), payment=()"
+		-Server
+	}
+
+	# Readiness probes carry database state; they stay on the internal network.
+	handle /health/ready {
+		respond 404
+	}
+
+	# API routes
+	handle /api/* {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# Web dashboard routes
+	handle /* {
+		reverse_proxy web:8081 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+}
+
+# HTTP redirect to HTTPS
+:80 {
+	redir https://{host}{uri} permanent
+}

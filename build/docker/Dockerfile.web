@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+
+# Build stage. The whole solution is restored so project references resolve, but
+# only the Web app is published.
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+WORKDIR /src
+
+# .editorconfig carries the analyzer severities; without it warnings-as-errors
+# fails the container build on rules the repository deliberately relaxes.
+COPY .editorconfig Directory.Build.props Directory.Packages.props global.json ./
+COPY src/Pos.Domain/Pos.Domain.csproj                 src/Pos.Domain/
+COPY src/Pos.Shared/Pos.Shared.csproj                 src/Pos.Shared/
+COPY src/Pos.SharedUI/Pos.SharedUI.csproj             src/Pos.SharedUI/
+COPY src/Pos.Application/Pos.Application.csproj       src/Pos.Application/
+COPY src/Pos.Infrastructure/Pos.Infrastructure.csproj src/Pos.Infrastructure/
+COPY src/Pos.Web/Pos.Web.csproj                       src/Pos.Web/
+
+RUN dotnet restore src/Pos.Web/Pos.Web.csproj
+
+COPY src/Pos.Domain/         src/Pos.Domain/
+COPY src/Pos.Shared/         src/Pos.Shared/
+COPY src/Pos.SharedUI/       src/Pos.SharedUI/
+COPY src/Pos.Application/    src/Pos.Application/
+COPY src/Pos.Infrastructure/ src/Pos.Infrastructure/
+COPY src/Pos.Web/            src/Pos.Web/
+
+RUN dotnet publish src/Pos.Web/Pos.Web.csproj \
+    --no-restore \
+    --configuration Release \
+    --output /app/publish
+
+# Runtime stage. Non-root, read-only root filesystem (compose mounts tmpfs for
+# /tmp and a volume for the data-protection key ring).
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
+WORKDIR /app
+
+# ICU is required: the system formats money and dates for a real locale, so
+# invariant globalization is not an option here.
+RUN apk add --no-cache icu-libs tzdata \
+    && addgroup -S vaultflow \
+    && adduser -S -G vaultflow -h /app vaultflow \
+    && mkdir -p /app/keys \
+    && chown -R vaultflow:vaultflow /app
+
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
+    ASPNETCORE_HTTP_PORTS=8081 \
+    DOTNET_EnableDiagnostics=0 \
+    TZ=Etc/UTC
+
+COPY --from=build --chown=vaultflow:vaultflow /app/publish .
+
+USER vaultflow
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:8081/health/live || exit 1
+
+ENTRYPOINT ["dotnet", "Pos.Web.dll"]

@@ -1,0 +1,128 @@
+# VaultFlow - production overlay.
+#
+# Extend the base compose.yaml with production-specific settings:
+# - Real TLS with ACME certificate renewal
+# - No direct database access (port removed)
+# - Passwords sourced from Docker secrets
+# - Production environment
+# - Optional Redis for scaled deployments
+#
+# Usage: docker compose -f compose.yaml -f compose.prod.yaml up
+#
+
+name: vaultflow
+
+services:
+  postgres:
+    # Remove the development port exposure
+    ports: []
+    environment:
+      # Passwords come from secrets in production, not .env files
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POS_APP_PASSWORD_FILE: /run/secrets/pos_app_password
+      POS_READONLY_PASSWORD_FILE: /run/secrets/pos_readonly_password
+    secrets:
+      - postgres_password
+      - pos_app_password
+      - pos_readonly_password
+
+  migrator:
+    environment:
+      # Read migrator password from secret instead of .env
+      POS_MIGRATOR_CONNECTION: >-
+        Host=postgres;Port=5432;Database=vaultflow;Username=pos_migrator;Password_FILE=/run/secrets/postgres_password
+    secrets:
+      - postgres_password
+
+  grants:
+    environment:
+      # Use secret instead of environment variable
+      PGPASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Connection string for the application role reads from secret
+      ConnectionStrings__Postgres: >-
+        Host=postgres;Port=5432;Database=vaultflow;Username=pos_app;Password_FILE=/run/secrets/pos_app_password
+      # Turn off bootstrap owner in production
+      BootstrapOwner__Enabled: "false"
+      # Production logging configuration (see appsettings.Production.json)
+      Serilog__MinimumLevel: Information
+      # Optional: configure structured logging sink (e.g., Seq, Splunk, ELK)
+      # Serilog__WriteTo__0__Name: Seq
+      # Serilog__WriteTo__0__Args__serverUrl: https://seq.internal/
+      # Configure metrics export when ready
+      # Metrics__ExporterType: Prometheus
+    secrets:
+      - source: jwt_signing_key
+        target: Jwt__SigningKeyPem
+      - pos_app_password
+
+  web:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8081
+    volumes:
+      - dataprotection-keys:/app/keys
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - api
+    expose:
+      - "8081"
+
+  proxy:
+    # Production TLS via ACME (Let's Encrypt)
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in secrets or .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for certificate renewal}
+      TLS_MODE: production
+    volumes:
+      # Use production Caddyfile that sources ACME configuration
+      - ./build/docker/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # Optional: Redis for scaling (SignalR backplane, permission cache)
+  # Uncomment when scaling pos-api to multiple replicas.
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   command:
+  #     - redis-server
+  #     - --appendonly
+  #     - "yes"
+  #   volumes:
+  #     - redis-data:/data
+  #   expose:
+  #     - "6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 20
+
+secrets:
+  # Production secrets must be provided via Docker secrets or environment
+  postgres_password:
+    external: true
+  pos_app_password:
+    external: true
+  pos_readonly_password:
+    external: true
+  jwt_signing_key:
+    external: true
+
+volumes:
+  redis-data:
+
