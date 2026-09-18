@@ -246,6 +246,9 @@ public sealed class DeviceNegativeStockAttemptRecorder : INegativeStockAttemptRe
     public bool HasPending => this.pending.Count > 0;
 
     /// <inheritdoc />
+    public IReadOnlyList<NegativeStockAttempt> Pending => this.pending;
+
+    /// <inheritdoc />
     public void Record(NegativeStockAttempt attempt) => this.pending.Add(attempt);
 
     /// <inheritdoc />

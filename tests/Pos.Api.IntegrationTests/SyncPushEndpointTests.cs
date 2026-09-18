@@ -378,7 +378,7 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
-    public async Task ASaleThatTookTheShelfBelowZero_StopsAtAllocation_NotAtThePolicy()
+    public async Task ASaleThatTookTheShelfBelowZero_StandsAndIsFlaggedForCounting()
     {
         Seed seed = await SeedAsync("spd", shelfQty: 1m);
         using HttpClient client = factory.CreateClient();
@@ -397,19 +397,42 @@ public sealed class SyncPushEndpointTests(PosApiFactory factory)
             Event(1, "ShiftOpened", ShiftPayload(seed, shiftId, shiftNumber, ShiftStatus.Open)),
             Event(2, "SaleCompleted", SalePayload(seed, shiftId, saleNumber, quantity: 3m, netTotal: 135m)));
 
-        // A known gap, pinned so it cannot change unnoticed. OFFLINE_SYNC.md §7
-        // says a sale that drove stock negative is kept and flagged, never
-        // deleted. It is refused today, and not by the negative-stock policy:
-        // FEFO allocation fails first, because three units cannot be drawn from
-        // batches holding one. Closing it means deciding which batch carries a
-        // shortfall — and for a batch-tracked product, inventing units in a batch
-        // that does not have them is a traceability lie, so it is a decision
-        // about the allocator rather than about sync.
-        //
-        // Nothing is lost meanwhile: the device escalates the refusal as a
-        // SyncFailure and keeps the event for ever (§3.2).
-        results[1].GetProperty("outcome").GetString().Should().Be("Rejected");
-        results[1].GetProperty("errorCode").GetString().Should().Be("inventory.insufficient_stock");
+        // OFFLINE_SYNC.md §7: a sale that drove stock negative is kept and
+        // flagged, never deleted. Three units were rung up against a shelf
+        // holding one, and the two the shelf could not cover go on the batch FEFO
+        // finished on rather than refusing a sale whose goods are already in a
+        // customer's bag.
+        results[1].GetProperty("outcome").GetString().Should().Be("RequiresReview");
+        results[1].GetProperty("errorCode").GetString().Should().Be("sync.sold_into_negative_stock");
+
+        await factory.WithServiceAsync<PosDbContext>(async context =>
+        {
+            // The sale is on the server, under the number printed on the
+            // customer's receipt.
+            (await context.Sales.AsNoTracking().AnyAsync(sale => sale.Number == saleNumber))
+                .Should().BeTrue();
+
+            // And the shelf says what it now is, rather than what somebody would
+            // prefer. A bucket stuck at zero is how a count that never happens
+            // starts.
+            decimal onHand = await context.InventoryBalances
+                .AsNoTracking()
+                .Where(b => b.ProductId == seed.Product && b.LocationId == seed.Store)
+                .SumAsync(b => b.Quantity);
+
+            onHand.Should().Be(-2m);
+
+            // Recorded as an attempt either way, which is what the exception
+            // report reads: this one was permitted, so it is the shelf that is
+            // now wrong and somebody has to go and count it.
+            NegativeStockAttempt attempt = await context.NegativeStockAttempts
+                .AsNoTracking()
+                .SingleAsync(a => a.ProductId == seed.Product);
+
+            attempt.Policy.Should().Be(NegativeStockPolicy.AllowOfflineWithReview);
+            attempt.RequestedQuantity.Should().Be(3m);
+            attempt.AvailableQuantity.Should().Be(1m);
+        });
     }
 
     [Fact]

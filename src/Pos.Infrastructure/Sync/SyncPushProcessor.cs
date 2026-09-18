@@ -101,10 +101,12 @@ public sealed record SyncApplyResult(
 /// <param name="context">The server database.</param>
 /// <param name="clock">The authoritative clock.</param>
 /// <param name="appliers">One applier per event type this server understands.</param>
+/// <param name="attempts">The oversell record, written once each event's transaction has ended.</param>
 public sealed class SyncPushProcessor(
     PosDbContext context,
     ISystemClock clock,
-    IEnumerable<ISyncEventApplier> appliers)
+    IEnumerable<ISyncEventApplier> appliers,
+    INegativeStockAttemptRecorder attempts)
 {
     private readonly Dictionary<string, ISyncEventApplier> byType =
         appliers.ToDictionary(a => a.EventType, StringComparer.Ordinal);
@@ -141,6 +143,16 @@ public sealed class SyncPushProcessor(
 
             SyncEventResult result = await ProcessOneAsync(deviceId, uploaded, cancellationToken)
                 .ConfigureAwait(false);
+
+            // After the event's transaction has ended, never inside it. The
+            // record is written through a second connection, so flushing while
+            // the transaction still held its locks would block on them; and it is
+            // written whether the event was accepted or refused, because a
+            // refused oversell is still a draw somebody tried to make.
+            if (attempts.HasPending)
+            {
+                await attempts.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
 
             results.Add(result);
             deferRest = result.Outcome == SyncOutcome.Deferred;

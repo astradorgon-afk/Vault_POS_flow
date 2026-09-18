@@ -344,11 +344,22 @@ public sealed class CompleteSaleCommandHandler(
                     b.ExpiresOn)),
             ];
 
+            // A sale that already happened at a till the server could not reach
+            // is a fact, not a request. Where the location's policy is
+            // AllowOfflineWithReview, FEFO allocates what it can and puts the
+            // remainder on a batch that does not hold it, rather than refusing a
+            // line whose goods are already in a customer's bag. Nothing is waved
+            // through: the ledger still applies the policy to the draw, and the
+            // oversell is recorded as a negative-stock attempt either way.
+            bool allowShortfall = command.ReplayedOffline
+                && location.Settings.NegativeStockPolicy == NegativeStockPolicy.AllowOfflineWithReview;
+
             Result<IReadOnlyList<AllocatedSlice>> allocation = FefoBatches.Allocate(
                 line.ProductId,
                 command.LocationId,
                 line.Quantity,
-                allocatableBatches);
+                allocatableBatches,
+                allowShortfall);
 
             decimal sellableTotal = allocatableBatches.Sum(b => b.Quantity);
             bool expiredUsed = false;

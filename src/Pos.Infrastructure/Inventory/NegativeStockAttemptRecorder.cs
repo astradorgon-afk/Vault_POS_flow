@@ -25,6 +25,9 @@ public sealed class NegativeStockAttemptRecorder(IServiceScopeFactory scopes) : 
     public bool HasPending => _pending.Count > 0;
 
     /// <inheritdoc />
+    public IReadOnlyList<NegativeStockAttempt> Pending => _pending;
+
+    /// <inheritdoc />
     public void Record(NegativeStockAttempt attempt)
     {
         ArgumentNullException.ThrowIfNull(attempt);

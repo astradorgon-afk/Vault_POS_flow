@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) under way: C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, and C55 the baseline that register starts from
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,219 passing without PostgreSQL: Domain 378, Application 247, Infrastructure 316, Security 52, Architecture 25, API 201** (2026-09-18, through C55 the sync baseline). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C55 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,224 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 316, Security 52, Architecture 25, API 201** (2026-09-18, through C56 the oversell end to end). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C56 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1371,21 +1371,66 @@ and none that did. A sale of a product withdrawn while the till was dark lands
 and is flagged `sync.sold_a_withdrawn_product`, and the product stays withdrawn —
 accepting the sale does not undo the decision to stop selling it.
 
-**Accepting an oversell end to end is pinned as not done, and the reason is not
-where I expected.** §7 says such a sale is kept and flagged. It is refused today,
-and not by the negative-stock policy: **FEFO allocation refuses first**, because
-three units cannot be drawn from batches holding one. Closing it means deciding
-which batch carries a shortfall, and for a batch-tracked product inventing units
-in a batch that does not have them is a traceability lie. That is a decision
-about the allocator, not about sync, and it is not mine to make in passing. The
-test now sets the permissive policy and still asserts the refusal, so it pins
-where the sale actually stops rather than where I assumed.
+**Accepting an oversell end to end was pinned as not done, and the reason was not
+where I expected** — C56 closed it. §7 says such a sale is kept and flagged. It
+was refused, and not by the negative-stock policy: **FEFO allocation refused
+first**, because three units cannot be drawn from batches holding one. Closing it
+meant deciding which batch carries a shortfall, which is a decision about the
+allocator rather than about sync. The test set the permissive policy and asserted
+the refusal anyway, pinning where the sale actually stopped rather than where I
+assumed.
 
 Two of the new test helpers were mutating **detached** entities and passing for
 the wrong reason — the server context's no-tracking default, for the third time
 this phase. The policy-setting helper was a silent no-op, and its test passed
 because it asserted the default behaviour anyway. Both now read `AsTracking()`,
 and the negative-stock test is only meaningful because of it.
+
+C56 makes the decision the pin was waiting for. `FefoBatches.Allocate` takes a
+shortfall flag, and when it is set the quantity the shelf cannot cover is added to
+the slice FEFO finished on rather than refused. The batch it names is the
+latest-expiring: a shelf holding more than the system says is usually a receipt
+nobody recorded, and a receipt nobody recorded is recent, so that is the stock
+most likely to be actually standing there. When no batch is known at all the
+shortfall names none — putting a number against a lot that never held it would be
+worse than saying the batch is unknown, and the sale still has to be recorded
+because the units left the shelf.
+
+The flag is set only for a **replayed offline sale at a location whose policy is
+`AllowOfflineWithReview`**. An online sale is deliberately unchanged: there is a
+terminal in front of it and a cashier who can be told, and widening the rule
+quietly would change what happens at tills today. Nothing is waved through
+either — the ledger still applies the policy to the draw, a location that left it
+at `Prohibit` still refuses, and the bucket is left negative rather than held at
+zero, because a balance that lies is how a count that never happens starts.
+
+**Two bugs had to be fixed before the flag could mean anything, and one more fell
+out.**
+
+- **The applier's oversell check read a table nothing had written.** The ledger
+  collects a refused draw in memory and something else persists it, because a
+  refusal rolls the command back and would take a staged record with it. Online
+  that something is `NegativeStockAttemptBehaviour`, after the unit of work ends.
+  The sale applier calls the handler *directly* — deliberately, so the pipeline
+  does not authorize the uploading device against a rule about the cashier — so
+  the behaviour never ran, nothing was ever written, and the check could only ever
+  have been false. It had never been observed because until C56 the draw always
+  failed first and the code below never ran.
+- **Flushing from inside the applier deadlocked.** The obvious fix — flush, then
+  query — hung for thirty seconds and returned a 500: the recorder writes through
+  a scope and therefore a connection of its own, and the applier's open
+  transaction held the locks it needed. The applier now reads the recorder in
+  memory, and `SyncPushProcessor` flushes once each event's transaction has
+  ended — the same shape as the online pipeline, for the same reason.
+- **The sale replay posted under two different event identifiers.** The processor
+  recorded its verdict under the envelope's `EventId` while the command carried
+  the payload's, so a batch whose two disagreed could post the same sale twice.
+  The protocol has exactly one key a retry reproduces; the replay uses it now, as
+  the void applier already did.
+
+**That closes the last Phase 13 checkbox.** Three named things sit outside the
+phase's list and are written up under "what is left": the scheduling loop that
+calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
 
 C53 gives the refusals somewhere to be seen and one thing to do about them.
 `GET /api/v1/sync/failures` lists what head office turned away or set aside, with

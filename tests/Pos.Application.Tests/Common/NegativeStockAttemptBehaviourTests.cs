@@ -78,6 +78,8 @@ public sealed class NegativeStockAttemptBehaviourTests
     {
         public bool HasPending { get; set; }
 
+        public IReadOnlyList<NegativeStockAttempt> Pending => [];
+
         public int Flushes { get; private set; }
 
         public Exception? FlushError { get; init; }

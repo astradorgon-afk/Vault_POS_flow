@@ -44,7 +44,8 @@ public sealed class SyncPushProcessorTests : IAsyncLifetime
         await this.context.Database.EnsureCreatedAsync();
 
         this.applier = new CountingApplier { Context = this.context };
-        this.processor = new SyncPushProcessor(this.context, new FixedClock(Now), [this.applier]);
+        this.processor = new SyncPushProcessor(
+            this.context, new FixedClock(Now), [this.applier], new CollectingNegativeStockRecorder());
     }
 
     public async Task DisposeAsync()

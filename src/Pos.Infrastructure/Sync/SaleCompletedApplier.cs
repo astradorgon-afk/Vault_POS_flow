@@ -55,11 +55,17 @@ namespace Pos.Infrastructure.Sync;
 /// <param name="handler">The one sale handler, shared with the online path.</param>
 /// <param name="permissions">Evaluated now, not as of the sale.</param>
 /// <param name="audit">The audit trail.</param>
+/// <param name="attempts">
+/// The oversell record. The handler is called directly rather than dispatched,
+/// so the pipeline behaviour that normally flushes this never runs and the
+/// applier has to do it itself.
+/// </param>
 public sealed class SaleCompletedApplier(
     PosDbContext context,
     ICommandHandler<CompleteSaleCommand, SaleId> handler,
     IPermissionEvaluator permissions,
-    IAuditWriter audit) : ISyncEventApplier
+    IAuditWriter audit,
+    INegativeStockAttemptRecorder attempts) : ISyncEventApplier
 {
     private static readonly JsonSerializerOptions ReadOptions = new()
     {
@@ -132,7 +138,7 @@ public sealed class SaleCompletedApplier(
             return SyncApplyResult.Rejected("sync.payload_invalid", "The sale number is not a valid document number.");
         }
 
-        Result<CompleteSaleCommand> rebuilt = Rebuild(upload, deviceId, number.Value);
+        Result<CompleteSaleCommand> rebuilt = Rebuild(upload, deviceId, eventId, number.Value);
 
         if (rebuilt.IsFailure)
         {
@@ -157,12 +163,15 @@ public sealed class SaleCompletedApplier(
             return SyncApplyResult.Rejected(applied.Error.Code, applied.Error.Message);
         }
 
-        // Recorded whether the ledger refused it or let it through, so this
+        // Read out of the recorder rather than out of the table. The ledger
+        // collects an oversell in memory and something else writes it, because a
+        // refusal rolls the command back and would take a staged record with it —
+        // online that something is NegativeStockAttemptBehaviour, after the unit
+        // of work has ended. Here the transaction is still open, and the write
+        // goes through a second connection this one's own locks would block.
+        // Recorded whether the ledger refused the draw or let it through, so this
         // finds the oversells that actually happened, not the ones that did not.
-        bool soldIntoNegativeStock = await context.NegativeStockAttempts
-            .AsNoTracking()
-            .AnyAsync(a => a.EventId == new EventId(upload.EventId), cancellationToken)
-            .ConfigureAwait(false);
+        bool soldIntoNegativeStock = attempts.Pending.Any(a => a.EventId == eventId);
 
         if (soldIntoNegativeStock)
         {
@@ -229,6 +238,7 @@ public sealed class SaleCompletedApplier(
     private static Result<CompleteSaleCommand> Rebuild(
         SaleSyncPayload upload,
         DeviceId deviceId,
+        EventId eventId,
         DocumentNumber number)
     {
         List<CompleteSalePayment> payments = new(upload.Payments.Count);
@@ -274,7 +284,13 @@ public sealed class SaleCompletedApplier(
 
         return Result<CompleteSaleCommand>.Success(new CompleteSaleCommand(
             number,
-            new EventId(upload.EventId),
+
+            // The envelope's identifier, not the payload's. The protocol has
+            // exactly one key a retry reproduces, and it is the one the processor
+            // already records the verdict under; posting the ledger under a
+            // second identifier the payload happens to carry would let a batch
+            // whose two disagreed post the same sale twice.
+            eventId,
             new LocationId(upload.LocationId),
             new CashierShiftId(upload.ShiftId),
             deviceId,

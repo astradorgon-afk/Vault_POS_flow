@@ -15,8 +15,12 @@ and the test suites pass. Nothing is pushed.
 
 ## Current position
 
-**Now:** Phase 10 and the Phase 11 POS flow are committed. **Phase 12 offline
-storage is underway as the C28+ device batch series.** Phase 11 was built as the "C" batch
+**Now:** Phase 10 and the Phase 11 POS flow are committed. Phase 12 offline
+storage is complete (C28–C33). **Phase 13 synchronization is complete at C56** —
+outbox, push, every event applier, the retry queue, the change feed, the pull
+route, the baseline a register starts from, the conflict rules and the full round
+trip. Next is Phase 14's last item, the sync-failure alert generator, which the
+failure queue now has something to read. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -145,7 +149,13 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C32 — offline status surface: `DeviceStatusProvider` reports storage, enrolment, connectivity, last-received store data and cached-authority expiry; the `DeviceStatusView` contract lives in `Pos.Shared` (which references nothing), so it cannot carry a path, key, address or feed position; `DeviceStatusBanner` in `Pos.SharedUI` renders one concern at a time, offline never counting as a warning. 27 new tests.
   - [x] C31 — device numbering and permission expiry: `document_counter` on the device (migration `DeviceDocumentCounter`), an atomic upsert joining the caller's transaction, refusing central types and any short code but its own; `DeviceSnapshotPermissionEvaluator` re-checks expiry at every evaluation, scopes grants, and refuses anything the catalogue does not mark offline-capable; the feed refuses a widening snapshot (`sync.feed_page_invalid`) and a policy-version rollback (`sync.snapshot_policy_rollback`). 24 new tests.
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
-- [~] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
+- [x] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
+  — every roadmap checkbox closed at C56. Three named things sit outside the
+  phase's list and are written up in STATUS.md §"what is left": the scheduling
+  loop that calls the uploader (client work, and the retry-queue entry always said
+  so), feed retention and pruning (which is what makes a production `410`
+  reachable), and a `UserChanged` emitter (the device caches users and the applier
+  knows how to write them, but nothing on the server records the change).
   - [x] C34 — device outbox: `local_outbox_event` plus a single-row `device_sequence`, both allocated in the caller's transaction so a rolled-back event releases its number; `CanonicalJson` sorts object properties at every depth so declaration order cannot change a payload hash; `Environment.TickCount64` recorded as clock-tamper evidence; the device repositories enqueue business events, not row changes; the status banner now reports unsent work (POS.md §6). 18 new tests.
   - [x] C35 — the ledger on the device: `InventoryLedger` runs against `ILedgerStore`, implemented by both contexts, so there is one ledger rather than two; `local_inventory_movement` and `local_inventory_balance` reuse the server's own EF configurations; SQLite guards refuse rewriting history, deleting a balance, and writing a quantity outside the ledger's write window (migration `DeviceLedger`). 8 tests.
   - [x] C36 — cache what a sale reads: `cache_product.is_vat_exempt` and a new applier-owned `cache_batch` (with the C29 guards and a product/expiry index for FEFO), carried by a new `BatchChanged` feed kind; the validator refuses a batch expiring before it was received (migration `DeviceSaleCatalogue`). Found by reading `CompleteSaleCommandHandler`, not by running it.
@@ -165,7 +175,7 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [~] C50 — the server's change feed: `sync.change_feed` is append-only and carries each change as the device will receive it, so serving a page is a read rather than a re-derivation from rows that have since changed again. `ChangeFeedRecorder` is a `SaveChanges` interceptor — a feed that depends on somebody remembering is one that silently stops carrying what nobody remembered — writing in the caller's transaction, so a rolled-back change takes its feed row with it. Its list of what a register caches is deliberate rather than reflective. The sequence comes from a single counter row inside that transaction, not a database identity: identities commit out of order, and a cursor that read past a lower number would never see it again. Writing the tests found two things — a cancelled price produced nothing, so a register would go on selling at a price the server no longer holds; and every strongly-typed id was serializing as `{"value":"..."}`, which a device would need a matching wrapper to read. 11 tests, migration `SyncChangeFeed`.
   - [x] C51 — the pull endpoint: `GET /api/v1/sync/pull` serves a device the changes that are everybody's and its own store's, scoped from its registration rather than from the query string, because making the scope a parameter would turn it into a way of asking for somebody else's catalogue. `nextCursor` is the server's answer rather than something a device infers: a full page stops at its last change, an unfilled one runs to the end of the feed, and without that a device would rescan the changes skipped for being another store's business on every pull for ever. `410 Gone { action: rebaseline }` covers both cursors the feed cannot honour — one ahead of the feed (a server restored from backup) and one whose missed changes have been pruned. 8 tests.
   - [ ] Retry queue with exponential backoff
-  - [~] C52 — conflict rules: a replayed sale now posts to the ledger marked for review, which is what `AllowOfflineWithReview` was written to wait for and which nothing had ever set; a `NegativeStockAttempt` is recorded whether the draw was permitted or refused, because a permitted oversell is the one somebody most needs to find — it is the shelf that is now wrong — and recording only refusals meant the report showed every draw that did not happen and none that did. A sale of a product withdrawn while the till was dark lands and is flagged `sync.sold_a_withdrawn_product`, and the product stays withdrawn. Accepting an oversell end to end is pinned as not done: FEFO refuses before the policy is consulted, and deciding which batch carries a shortfall is a question about the allocator, not about sync. Two test helpers were mutating detached entities and passing for the wrong reason — the no-tracking default again. 3 tests.
+  - [x] C52 — conflict rules: a replayed sale now posts to the ledger marked for review, which is what `AllowOfflineWithReview` was written to wait for and which nothing had ever set; a `NegativeStockAttempt` is recorded whether the draw was permitted or refused, because a permitted oversell is the one somebody most needs to find — it is the shelf that is now wrong — and recording only refusals meant the report showed every draw that did not happen and none that did. A sale of a product withdrawn while the till was dark lands and is flagged `sync.sold_a_withdrawn_product`, and the product stays withdrawn. Accepting an oversell end to end is pinned as not done: FEFO refuses before the policy is consulted, and deciding which batch carries a shortfall is a question about the allocator, not about sync. Two test helpers were mutating detached entities and passing for the wrong reason — the no-tracking default again. 3 tests.
   - [x] C53 — the failure queue and manual retry: `GET /api/v1/sync/failures` lists what head office turned away or set aside, read from `sync.processed_event` rather than a second table devices report into — everything on it is the server's own decision, so a reporting round-trip could only add a way for the two to disagree. `POST /api/v1/sync/failures/{eventId}/retry` re-applies nothing: a refused event earns the same answer unchanged, and it only becomes worth asking when a person changes what made the server refuse it. That ask travels as a `SyncRetryRequested` directive on the register's own feed, because a register that is offline cannot be told anything at all. The device reopens only an event that had stopped — one mid-backoff keeps its backoff, and an accepted one is never reopened, because asking a register to resend a sale head office already holds is how a day's takings get counted twice. The feed's sequence allocator moved out of the recorder so both writers share it. 4 tests.
   - [x] C54 — the round trip, and what it found: `ChangeFeedDownloader` is the join that was missing — the server had a route and the device had an applier, and nothing carried a page between them; a kind this build does not know is refused rather than skipped, because a register that quietly ignores half a feed and believes its catalogue current is the worse failure. PIN sign-in now puts the cashier's offline authority on the register's feed, which nothing had ever done, so a register could download a catalogue and still refuse to sell. Running a real device against the real server over HTTP then found three things no unit test could: `EXT-CUSTOMER` was scoped to itself, so no register ever received it and none could sell; the feed's currency was read from an organization row that is never written, so every location arrived with none and the page was refused; and the download outcome could not tell "nothing to do" from "the page was refused". The feed carries changes and not a starting state, so a new register still needs `/api/v1/sync/baseline`, which is not built — the test stands in for it. 2 tests.
   - [x] C55 — the baseline a register starts from, closing C54's pinned gap:
@@ -188,6 +198,30 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     expired. A `410` is also no longer just reported: the register fetches a
     baseline in the same run and recovers on its own. 9 tests (8 unit, and the
     round-trip case that now reaches its own recovery).
+  - [x] C56 — the oversell, end to end, closing C52's pinned gap and the last
+    Phase 13 checkbox: `FefoBatches.Allocate` takes a shortfall flag, and when it
+    is set the quantity the shelf cannot cover is added to the slice FEFO finished
+    on rather than refused. The batch it names is the latest-expiring, which is
+    the stock most likely to be actually standing there — a shelf holding more
+    than the system says is usually a receipt nobody recorded, and a receipt
+    nobody recorded is recent; when no batch is known at all the shortfall names
+    none, because putting a number against a lot that never held it is worse than
+    saying it is unknown. The flag is set only for a replayed offline sale at a
+    location whose policy is `AllowOfflineWithReview`: an online sale has a
+    terminal in front of it and a cashier who can be told, so it is deliberately
+    unchanged. Nothing is waved through — the ledger still applies the policy to
+    the draw, and the bucket is left negative rather than held at zero, because a
+    balance that lies is how a count that never happens starts. Two things had to
+    be fixed for the flag to mean anything: the applier's oversell check read a
+    table nothing had written, because calling the handler directly skips the
+    pipeline behaviour that flushes the recorder — the check could only ever have
+    been false — and flushing from inside the applier deadlocked, the record going
+    through a second connection the open transaction's own locks blocked. The
+    applier now reads the recorder in memory and the processor flushes once each
+    event's transaction has ended. Finding that turned up a third: the sale replay
+    posted to the ledger under the payload's event identifier while the processor
+    recorded its verdict under the envelope's, so a batch whose two disagreed
+    could post the same sale twice. One key now, the protocol's. 6 tests.
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
@@ -1212,8 +1246,8 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C55):** 1,219 passing without PostgreSQL
-  (Domain 378, Application 247, Infrastructure 316, Security 52, Architecture 25,
+- **Verification (2026-09-18, through C56):** 1,224 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 316, Security 52, Architecture 25,
   API 201); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the

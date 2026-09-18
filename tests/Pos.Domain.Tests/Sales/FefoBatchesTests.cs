@@ -115,4 +115,81 @@ public sealed class FefoBatchesTests
 
         allocate.Should().Throw<ArgumentNullException>();
     }
+
+    [Fact]
+    public void Allocate_WithoutAShortfallAllowed_RefusesWhatTheShelfCannotCover()
+    {
+        Result<IReadOnlyList<AllocatedSlice>> result = FefoBatches.Allocate(
+            Product, Store, requested: 20m, Mixed, allowShortfall: false);
+
+        result.IsFailure.Should().BeTrue("the default is still to refuse, and every online sale relies on it");
+        result.Error!.Code.Should().Be("inventory.insufficient_stock");
+    }
+
+    [Fact]
+    public void Allocate_WithAShortfallAllowed_PutsTheRemainderOnTheLastBatchDrawn()
+    {
+        Result<IReadOnlyList<AllocatedSlice>> result = FefoBatches.Allocate(
+            Product, Store, requested: 20m, Mixed, allowShortfall: true);
+
+        result.IsSuccess.Should().BeTrue();
+        IReadOnlyList<AllocatedSlice> slices = result.Value;
+
+        // Three batches hold eighteen; the two the shelf cannot cover ride on the
+        // last one FEFO reached rather than becoming a fourth slice, because the
+        // line draws more than that batch holds and saying so once is what the
+        // ledger has to see.
+        slices.Should().HaveCount(3);
+        slices[^1].BatchId.Should().Be(Open);
+        slices[^1].Quantity.Should().Be(12m);
+        slices.Sum(s => s.Quantity).Should().Be(20m);
+    }
+
+    [Fact]
+    public void Allocate_WithAShortfallAllowed_AndAnEmptyShelf_NamesTheLatestExpiringBatch()
+    {
+        List<AllocatableBatch> emptied =
+        [
+            new(Early, "LOT-EARLY", Quantity: 0m, UnitCost: 50m, ExpiresOn: new DateOnly(2026, 1, 1)),
+            new(Late, "LOT-LATE", Quantity: 0m, UnitCost: 60m, ExpiresOn: new DateOnly(2026, 3, 1)),
+        ];
+
+        Result<IReadOnlyList<AllocatedSlice>> result = FefoBatches.Allocate(
+            Product, Store, requested: 2m, emptied, allowShortfall: true);
+
+        result.IsSuccess.Should().BeTrue();
+
+        // Nothing was drawn, so no slice carries the answer. The latest-expiring
+        // batch takes it: a shelf holding more than the system says is usually a
+        // receipt nobody recorded, and a receipt nobody recorded is recent.
+        result.Value.Should().ContainSingle();
+        result.Value[0].BatchId.Should().Be(Late);
+        result.Value[0].Quantity.Should().Be(2m);
+    }
+
+    [Fact]
+    public void Allocate_WithAShortfallAllowed_AndNoBatchAtAll_NamesNone()
+    {
+        Result<IReadOnlyList<AllocatedSlice>> result = FefoBatches.Allocate(
+            Product, Store, requested: 2m, [], allowShortfall: true);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().ContainSingle();
+
+        // Left open rather than invented. The units left the shelf and the sale is
+        // a fact; putting a number against a lot that never held it would be worse
+        // than saying the batch is unknown.
+        result.Value[0].BatchId.Should().BeNull();
+        result.Value[0].Quantity.Should().Be(2m);
+    }
+
+    [Fact]
+    public void Allocate_WithAShortfallAllowed_StillRefusesANonPositiveQuantity()
+    {
+        Result<IReadOnlyList<AllocatedSlice>> result = FefoBatches.Allocate(
+            Product, Store, requested: 0m, Mixed, allowShortfall: true);
+
+        result.IsFailure.Should().BeTrue("a shortfall covers stock the shelf lacks, not a line that asks for nothing");
+        result.Error!.Code.Should().Be("sale.item.quantity_invalid");
+    }
 }

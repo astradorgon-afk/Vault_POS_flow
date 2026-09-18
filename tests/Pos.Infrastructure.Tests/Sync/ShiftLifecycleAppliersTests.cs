@@ -65,7 +65,8 @@ public sealed class ShiftLifecycleAppliersTests : IAsyncLifetime
             new ShiftSuspendedApplier(shifts, this.audit),
             new ShiftResumedApplier(shifts, this.audit),
             new ShiftClosedApplier(shifts, this.audit),
-        ]);
+        ],
+            new CollectingNegativeStockRecorder());
     }
 
     public async Task DisposeAsync()

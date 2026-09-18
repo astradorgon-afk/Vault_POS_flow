@@ -212,6 +212,18 @@ public interface INegativeStockAttemptRecorder
     /// <summary>Gets a value indicating whether refused draws are waiting to be written.</summary>
     bool HasPending { get; }
 
+    /// <summary>
+    /// Gets the draws collected so far and not yet written.
+    /// </summary>
+    /// <remarks>
+    /// Read by a caller that has to answer for the draw before the transaction it
+    /// is inside can end — the sync appliers, which decide whether a replayed sale
+    /// needs a person. Reading the table instead would mean flushing first, and
+    /// flushing writes through a second connection that the open transaction's own
+    /// locks would block.
+    /// </remarks>
+    IReadOnlyList<NegativeStockAttempt> Pending { get; }
+
     /// <summary>Collects one refused draw. The same event and bucket are recorded once.</summary>
     /// <param name="attempt">The refused draw.</param>
     void Record(NegativeStockAttempt attempt);

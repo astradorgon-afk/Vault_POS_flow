@@ -274,10 +274,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
       thirty-minute ceiling, eight attempts then escalation, nothing deleted;
       `HttpSyncTransport` treats every non-answer as one, a revoked device
       included. The scheduling loop that calls it is the client's)*
-- [~] Conflict rules implementation
+- [x] Conflict rules implementation
       *(C52: a replayed sale posts marked for review, oversells are recorded
       whether permitted or refused, and a sale of a withdrawn product lands
-      flagged. Accepting an oversell end to end waits on the allocator)*
+      flagged. C56 closes the last row: FEFO allocates a shortfall onto the batch
+      it finished on, so an oversell is accepted end to end and the shelf is left
+      saying what it now is)*
 - [x] Sync failure dashboard and manual retry
       *(C53: the failure list reads the server's own verdicts, and a retry is a
       directive on the register's feed rather than a re-apply here)*
