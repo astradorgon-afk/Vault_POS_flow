@@ -108,6 +108,7 @@ public static class DependencyInjection
         services.TryAddScoped<Application.Reports.IInventoryReportRepository, InventoryReportRepository>();
         services.TryAddScoped<Application.Reports.ITransferReportRepository, TransferReportRepository>();
         services.TryAddScoped<Application.Reports.IPurchasingReportRepository, PurchasingReportRepository>();
+        services.TryAddScoped<Application.Reports.IExceptionReportRepository, ExceptionReportRepository>();
         services.TryAddScoped<INotificationReader, NotificationReader>();
         services.TryAddSingleton<INotificationPublisher, NullNotificationPublisher>();
 

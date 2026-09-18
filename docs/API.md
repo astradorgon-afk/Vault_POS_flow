@@ -818,7 +818,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58–C62):
+Built (C7, C58–C63):
 
 ```
 GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
@@ -833,6 +833,9 @@ GET /api/v1/reports/transfers                 report.view            (C61)
 GET /api/v1/reports/transfers/distribution    report.view            (C61)
 GET /api/v1/reports/purchases                 report.view            (C62)
 GET /api/v1/reports/supplier-performance      report.view            (C62)
+GET /api/v1/reports/adjustments               report.view            (C63)
+GET /api/v1/reports/shrinkage                 report.view.financial  (C63)
+GET /api/v1/reports/count-variance            report.view            (C63)
 ```
 
 `GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
@@ -850,10 +853,7 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/reports/adjustments               report.view
 GET /api/v1/reports/expiry                    report.view
-GET /api/v1/reports/shrinkage                 report.view.financial
-GET /api/v1/reports/count-variance            report.view
 GET /api/v1/reports/unauthorized-inventory    report.view
 GET /api/v1/reports/audit                     audit.view
 GET /api/v1/reports/sync-problems             sync.manage
@@ -1017,6 +1017,32 @@ months later should not rewrite whether the delivery was on time.
 Both reports are scoped by the order's destination location. Suppliers are not
 scoped — they are a business-wide list, and a manager who orders from one may see
 how that supplier has treated their store.
+
+### 11.6 Adjustments, shrinkage and count variance
+
+**Which movement types count as a loss is declared once, in code**, not inferred
+from the sign of a quantity: a transfer dispatch and a count correction both reduce
+a bucket, and only one of them is stock the business no longer has. Sales,
+receipts and transfers are excluded from the adjustment report for the same reason.
+
+**A count adjustment is an adjustment but not shrinkage.** It says the books were
+wrong, not that goods left the building, and folding it in would let a business
+shrink its shrinkage by counting more often. It appears in `adjustments` and not
+in `shrinkage`.
+
+**Shrinkage counts only the legs that took stock away.** Stock put back by an
+approved adjustment shows as `quantityIn` in the adjustment report and is not a
+loss; letting a positive leg through would report the same goods missing and then
+found as two separate losses. Values come off the ledger leg, which recorded what
+the stock was carried at when it left — re-valuing at today's cost would move a
+closed month's figure every time a supplier changed a price, and it would stop
+reconciling to the accounts it exists to explain.
+
+**A count line nobody counted is not a variance of zero.** It reports a null
+`physicalQuantity` and a null `variance`, because "we looked and it was right" and
+"nobody looked" are different facts, and conflating them makes an unfinished count
+read as a clean one. Those lines are excluded by default and returned with
+`includeUncounted=true`, which is what a supervisor closing a count needs.
 
 ---
 

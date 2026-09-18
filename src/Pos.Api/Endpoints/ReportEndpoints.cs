@@ -120,6 +120,30 @@ public static class ReportEndpoints
             .WithName("GetSupplierPerformanceReport")
             .WithSummary("Scores each supplier on punctuality, fill rate and quality over a window.");
 
+        group.MapGet("/adjustments", GetAdjustmentsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetAdjustmentReport")
+            .WithSummary("Summarises stock written off or corrected, by why.");
+
+        group.MapGet("/shrinkage", GetShrinkageAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewFinancialReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetShrinkageReport")
+            .WithSummary("Values the stock lost to damage, spoilage, theft and expiry.");
+
+        group.MapGet("/count-variance", GetCountVariancesAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetCountVarianceReport")
+            .WithSummary("Lists the physical count lines that did not match the system.");
+
         return app;
     }
 
@@ -480,6 +504,92 @@ public static class ReportEndpoints
                 .GetSupplierPerformanceAsync(from, to, scope.Value, cancellationToken)
                 .ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// How much stock was written off or corrected. Quantity only: what it cost is
+    /// the shrinkage report, which needs the financial permission.
+    /// </summary>
+    private static async Task<IResult> GetAdjustmentsAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IExceptionReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null)
+    {
+        Result<IReadOnlyCollection<LocationId>> scope = await WindowScopeAsync(
+            evaluator, currentUser, from, to, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<AdjustmentSummaryRow>>.Failure(scope.Errors),
+                currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetAdjustmentsAsync(from, to, scope.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetShrinkageAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IExceptionReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null)
+    {
+        Result<IReadOnlyCollection<LocationId>> scope = await WindowScopeAsync(
+            evaluator, currentUser, from, to, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<ShrinkageReport>.Failure(scope.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetShrinkageAsync(from, to, scope.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetCountVariancesAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IExceptionReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] bool includeUncounted = false,
+        [FromQuery] int limit = 200)
+    {
+        Result<IReadOnlyCollection<LocationId>> scope = await WindowScopeAsync(
+            evaluator, currentUser, from, to, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<CountVarianceReport>.Failure(scope.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetCountVariancesAsync(
+                    from, to, scope.Value, includeUncounted, Math.Clamp(limit, 1, MaxRows), cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Validates the window and resolves the scope in one step.
+    /// </summary>
+    /// <remarks>
+    /// The period check comes first so a caller asking for fifty years is told
+    /// what is wrong with the question rather than what is wrong with them.
+    /// </remarks>
+    private static async Task<Result<IReadOnlyCollection<LocationId>>> WindowScopeAsync(
+        DatabasePermissionEvaluator evaluator,
+        ICurrentUser currentUser,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        Guid? locationId,
+        CancellationToken cancellationToken)
+        => to < from || (to - from).TotalDays >= MaxPeriodDays
+            ? Result<IReadOnlyCollection<LocationId>>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays))
+            : await ScopeAsync(evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
 
     private static async Task<Result<InventoryReportQuery>> QueryAsync(
         DatabasePermissionEvaluator evaluator,

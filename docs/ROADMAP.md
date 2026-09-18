@@ -328,8 +328,16 @@ Substantially delivered in Phase 1, because everything else depends on it.
       is scored only where an order was both promised a date and received —
       counting an unpromised delivery as on time would reward a supplier for
       refusing to commit)*
-- [ ] Adjustments, expiry, damage, spoilage, shrinkage
-- [ ] Physical count variance, unauthorized inventory, quarantine
+- [~] Adjustments, expiry, damage, spoilage, shrinkage
+      *(C63: adjustments by reason under `report.view`, shrinkage valued behind
+      `report.view.financial`. A count correction is an adjustment and not
+      shrinkage — folding it in would let a business shrink its shrinkage by
+      counting more often. A dedicated expiry report is still to come; the expiry
+      alert generators of C23 already cover the operational warning)*
+- [~] Physical count variance, unauthorized inventory, quarantine
+      *(C63 adds count variance, where a line nobody counted reports null rather
+      than a variance of zero. Unauthorized inventory and quarantine reporting
+      still to come; the quarantine workflow endpoints already exist)*
 - [~] Inventory ageing buckets, slow movers, dead stock, turnover
       *(C60: ageing from the batch's received date, with an explicit `Unknown`
       bucket for stock that tracks no batches; dead stock counts sales rather than
