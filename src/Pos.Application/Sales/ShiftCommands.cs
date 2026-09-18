@@ -14,11 +14,13 @@ namespace Pos.Application.Sales;
 /// <param name="LocationId">The location the shift is opened at.</param>
 /// <param name="BusinessDate">The business date the shift opens on.</param>
 /// <param name="OpeningFloat">The cash in the drawer when the shift opens, greater than or equal to zero.</param>
+/// <param name="ShiftId">The existing offline shift identifier, or null for a new online shift.</param>
 public sealed record OpenShiftCommand(
     DocumentNumber Number,
     LocationId LocationId,
     DateOnly BusinessDate,
-    decimal OpeningFloat)
+    decimal OpeningFloat,
+    CashierShiftId? ShiftId = null)
     : ICommand<CashierShiftId>, IAuthorizedMessage, ILocationScoped
 {
     /// <inheritdoc />

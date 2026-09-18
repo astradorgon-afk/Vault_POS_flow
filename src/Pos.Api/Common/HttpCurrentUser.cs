@@ -23,17 +23,24 @@ namespace Pos.Api.Common;
 /// </para>
 /// </remarks>
 /// <param name="accessor">Access to the current request.</param>
-public sealed class HttpCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
+/// <param name="replay">A trusted scoped identity used by server-side event replay.</param>
+public sealed class HttpCurrentUser(IHttpContextAccessor accessor, ICurrentUserOverride replay) : ICurrentUser
 {
     /// <inheritdoc />
     public UserId? UserId
-        => ReadGuidClaim(JwtRegisteredClaimNames.Sub) is { } value ? new UserId(value) : null;
+        => replay.UserId
+           ?? (ReadGuidClaim(JwtRegisteredClaimNames.Sub) is { } value ? new UserId(value) : null);
 
     /// <inheritdoc />
     public DeviceId? DeviceId
     {
         get
         {
+            if (replay.DeviceId is { } replayDevice)
+            {
+                return replayDevice;
+            }
+
             // The token's binding wins over the header. A device-bound token
             // presented with someone else's device header is not a different
             // device, it is a misuse of that token.
@@ -51,14 +58,20 @@ public sealed class HttpCurrentUser(IHttpContextAccessor accessor) : ICurrentUse
 
     /// <inheritdoc />
     public IReadOnlyCollection<LocationId> AssignedLocations
-        => ReadGuidClaim(PosClaimTypes.PrimaryLocation) is { } location ? [new LocationId(location)] : [];
+        => replay.LocationId is { } location
+            ? [location]
+            : ReadGuidClaim(PosClaimTypes.PrimaryLocation) is { } claimLocation
+                ? [new LocationId(claimLocation)]
+                : [];
 
     /// <inheritdoc />
     public bool HasAllLocations => false;
 
     /// <inheritdoc />
     public CorrelationId CorrelationId
-        => accessor.HttpContext?.Items.TryGetValue(RequestContextMiddleware.CorrelationItemKey, out object? raw) == true
+        => replay.CorrelationId.Value != Guid.Empty
+            ? replay.CorrelationId
+            : accessor.HttpContext?.Items.TryGetValue(RequestContextMiddleware.CorrelationItemKey, out object? raw) == true
            && raw is Guid correlation
             ? new CorrelationId(correlation)
             : new CorrelationId(Guid.Empty);

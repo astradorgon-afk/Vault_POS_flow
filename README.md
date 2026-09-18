@@ -37,7 +37,16 @@ else. The load-bearing documents are
 [`SECURITY.md`](docs/SECURITY.md) and
 [`PERMISSIONS.md`](docs/PERMISSIONS.md).
 Progress is tracked in [`ROADMAP.md`](docs/ROADMAP.md), and every significant
-choice is recorded in [`DECISIONS.md`](docs/DECISIONS.md).
+choice is recorded in [`DECISIONS.md`](docs/DECISIONS.md). Client artifact
+handoff and the remaining signing requirements are in
+[`CLIENT_RELEASES.md`](docs/CLIENT_RELEASES.md).
+
+Current execution priority: Phase 13 synchronization, Phase 16 owner dashboard,
+and Phase 17 testing are complete through C63; Phase 18 deployment is active. See
+[`docs/STATUS.md`](docs/STATUS.md)
+for the active slice.
+
+For the current local-first workflow, see [`docs/LOCAL_TESTING.md`](docs/LOCAL_TESTING.md).
 
 ## Layout
 

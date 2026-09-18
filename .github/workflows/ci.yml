@@ -50,6 +50,10 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory artifacts/test-results
 
+      - name: Enforce coverage gate
+        shell: pwsh
+        run: ./scripts/check-coverage.ps1 -Path artifacts/test-results -MinimumLineRate 0.60
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,6 +109,27 @@ jobs:
           -p:AndroidSdkDirectory="$ANDROID_HOME"
           -p:JavaSdkDirectory="$JAVA_HOME"
 
+      # This is intentionally an unsigned candidate. Store-ready AAB signing
+      # requires repository secrets and a release keystore, so it is kept out
+      # of the normal validation workflow.
+      - name: Publish unsigned Android candidate
+        run: >-
+          dotnet publish src/Pos.Client/Pos.Client.csproj
+          --configuration Release
+          --framework net10.0-android
+          -p:AndroidPackageFormat=apk
+          -p:AndroidKeyStore=false
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+
+      - name: Upload Android candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: vaultflow-android-unsigned-${{ github.sha }}
+          path: artifacts/bin/Pos.Client/release_net10.0-android/**/com.vaultflow.pos.apk
+          if-no-files-found: error
+          retention-days: 14
+
   build-client-windows:
     needs: build-and-test
     runs-on: windows-latest
@@ -125,6 +150,22 @@ jobs:
           dotnet build src/Pos.Client/Pos.Client.csproj
           --configuration Release
           --framework net10.0-windows10.0.19041.0
+
+      # WindowsPackageType is currently None, so this is an unpackaged
+      # validation handoff rather than a signed MSIX release.
+      - name: Publish unpackaged Windows candidate
+        run: >-
+          dotnet publish src/Pos.Client/Pos.Client.csproj
+          --configuration Release
+          --framework net10.0-windows10.0.19041.0
+
+      - name: Upload Windows candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: vaultflow-windows-unpackaged-${{ github.sha }}
+          path: artifacts/bin/Pos.Client/release_net10.0-windows10.0.19041.0/**
+          if-no-files-found: error
+          retention-days: 14
 
   verify-migrations:
     runs-on: ubuntu-latest
@@ -159,3 +200,41 @@ jobs:
 
       - name: Scan tracked files for secrets
         run: pwsh ./scripts/check-secrets.ps1
+
+  publish-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set image metadata
+        id: meta
+        shell: bash
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/docker/Dockerfile.api
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/vaultflow-api:${{ github.sha }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/vaultflow-api:latest
+      - name: Build and publish Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/docker/Dockerfile.web
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/vaultflow-web:${{ github.sha }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/vaultflow-web:latest

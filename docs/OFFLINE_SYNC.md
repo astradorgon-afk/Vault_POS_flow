@@ -155,7 +155,7 @@ back rather than leaving a gap.
 ## 3. Upload protocol
 
 ```
-POST /api/sync/push
+POST /api/v1/sync/push
 Authorization: Bearer <access token>          (device-bound)
 X-Device-Id: <guid>
 X-Correlation-Id: <guid>
@@ -173,7 +173,21 @@ Idempotency-Key: <batch guid>
 }
 ```
 
-Response — **one result per event**, never a single batch-level verdict:
+The first server slice is live at `/api/v1/sync/push`. It authenticates the
+device binding, accepts at most 100 events, verifies each payload hash, and
+advances a contiguous per-device checkpoint. An identical retry returns the
+stored outcome; reusing an event identifier with different content is rejected
+as tampering. Until the corresponding business replay handler is registered,
+shift open, suspend, resume and `SaleCompleted` events replay through the
+existing command pipeline and are reported as `Accepted` only after their
+business transaction and inbox record commit. Other event types are durably recorded as
+`RequiresReview` until their handlers are registered.
+
+Response — **one result per event**, never a single batch-level verdict. Parked
+or rejected events create a durable server failure record; operators with
+`sync.manage` can inspect it and schedule a retry or dismiss it with a note:
+registered replay handlers are also retried automatically by the server worker
+under the original event identity; unsupported handlers remain operator-only.
 
 ```json
 {
@@ -291,7 +305,7 @@ fail closed with a result the UI can explain.
 ## 5. Download: the change feed
 
 ```
-GET /api/sync/pull?cursor=1902334&limit=500
+GET /api/v1/sync/pull?cursor=1902334&limit=500
 ```
 
 Server returns changes with `change_sequence > cursor` where
@@ -307,7 +321,9 @@ location, ordered by `change_sequence`. The feed carries:
 - pre-approval tokens issued to the location,
 - device directives (`revoke`, `force-resync`, `purge-cache`).
 
-The client applies a page and advances its cursor **in the same** SQLite
+The server appends typed changes to the append-only `sync.change_log` through
+`IChangeFeedPublisher`; the database assigns the global sequence inside the
+caller's transaction. The client applies a page and advances its cursor **in the same** SQLite
 transaction (`BEGIN IMMEDIATE`, so a second applier waits and then sees the new
 cursor). An interrupted pull leaves no trace. A replayed page, one whose commit
 the client never observed, is recognised because its `nextCursor` does not
@@ -317,11 +333,16 @@ page is refused whole, before anything is written, with `sync.feed_page_invalid`
 Changes are saved one at a time inside the transaction, so a later change always
 sees an earlier one to the same row exactly as the server ordered them.
 
-Full re-baseline: when `master_data_version` on the server exceeds the device's
+Full re-baseline uses `GET /api/v1/sync/baseline`, which returns the scoped
+catalog, prices, barcodes, location and current feed cursor. When
+`master_data_version` on the server exceeds the device's
 by more than the retained feed window (or the device has been offline beyond
 `FeedRetentionDays`, default 30), the server answers with
 `410 Gone { "action": "rebaseline" }` and the device downloads a fresh snapshot
-from `/api/sync/baseline`. Its outbox is preserved and uploaded first.
+from `/api/v1/sync/baseline`. `ChangeFeedApplier.ReplaceBaselineAsync` replaces
+only feed-owned caches and the feed cursor in one transaction; its outbox is
+preserved and uploaded first, along with local shifts, audit, counters, profile
+and device sequence state.
 
 ---
 
@@ -353,6 +374,8 @@ has a defined rule:
 |---|---|
 | Same event uploaded twice | Idempotency: return the stored result. No second effect. |
 | Same event, different payload hash | `Rejected` + `SyncFailure('idempotency-key-reuse')` + security alert. |
+| Same device sequence, different event identifier | `Conflict` + durable sync failure; the device checkpoint does not advance. |
+| Same event identifier, different sequence or event type | `Conflict` + durable sync failure; the original result is preserved. |
 | Device offline for days, then floods events | Accepted in sequence order; each validated against *current* server state; business dates preserved. |
 | Product changed while device offline (name, category) | Server state wins for master data; the sale keeps the **historical** name/price it printed, stored on `sale_item`. |
 | Price changed while device offline | Sale is accepted at the price actually charged; a `PriceVarianceRecorded` note is attached when it differs from the server's effective price, and it appears on the price-variance report. No silent re-pricing. |
@@ -361,11 +384,11 @@ has a defined rule:
 | User permission reduced while offline | Evaluated at processing time: if the user lacks the permission **now**, the event is `RequiresReview` (not silently accepted, not destroyed). Cash-sale events are always accepted and flagged, because the money already changed hands. |
 | User disabled while offline | Same as above, plus a security alert; the shift is force-closed on the server. |
 | Transfer received quantity ≠ dispatched | Not a conflict — a `TransferDiscrepancy` with a `TransitVariance` ledger leg. |
-| Transfer already received by another device | `Conflict: TransferAlreadyReceived`; the second receipt is rejected and surfaced for manual reconciliation. |
+| Transfer already received by another device | `Conflict: TransferAlreadyReceived`; the second receipt is rejected and surfaced for manual reconciliation. Offline `TransferReceived` events replay through the shared receive command and preserve that conflict outcome. |
 | Two locations act on the same stock | Impossible at the data level: buckets are location-keyed. Cross-location races resolve at the transfer boundary. |
 | Local sale drove stock negative | Accepted per the location's negative-stock policy; if `Prohibit`, the sale is `RequiresReview` and a `NegativeStockAttempt` is recorded. The sale is never deleted. |
-| Events arrive out of order | Sequence gap ⇒ later events buffered until the gap closes or `GapTimeout` (default 30 min) ⇒ then `RequiresReview`. |
-| Event references stale master data (unknown product id) | `Rejected` with `remediation: QuarantineAndReview`; the device converts it to a quarantine incident. |
+| Events arrive out of order | Sequence gap ⇒ later events buffered until the gap closes or `GapTimeout` (default 30 min) ⇒ the later event is `RequiresReview`, the checkpoint skips to it, and late missing sequences require rebaseline. |
+| Event references stale master data (unknown product or customer id) | `Rejected` with `remediation: QuarantineAndReview`; the device converts it to a quarantine incident. |
 | Duplicate document number from a re-imaged device | Rejected — `sale.number` is unique; the device is forced to rebaseline and re-number pending events. |
 
 Guiding principle, applied consistently: **physical reality is recorded; authority

@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-17 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) started with C34, the device outbox. A device now queues the business events it produces, gaplessly and in the same transaction as the records they describe
+**Last updated:** 2026-09-19 · **Milestone:** Phase 17 complete (C63); Phase 18 is the active deployment track. The owner Overview has scoped sales KPIs, inventory availability, ranked exception drill-down rows, a permission-gated sync-failure watch panel, and a movement-chain explorer. Synchronization transport, replay, conflict handling, remediation, gap recovery and operator workflow are complete.
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -927,6 +927,103 @@ an audit row behind.
 
 ### Phase 13 — synchronization
 
+#### C35 — server push intake
+
+- Added `/api/v1/sync/push` for authenticated device uploads. The endpoint
+  validates the token/device binding, device operational state, event scope and
+  payload SHA-256 hash, then processes events in device-sequence order.
+- Added `sync.processed_event` and `sync.device_checkpoint` in migration
+  `SyncEventInbox`. Identical retries return the stored outcome; reusing an
+  event identifier with a different payload hash is rejected as tampering;
+  sequence gaps are deferred without advancing the checkpoint.
+- Shift open/suspend/resume and `SaleCompleted` events use the existing command
+  pipeline and are accepted only after the business transaction and inbox
+  record commit; the implementation preserves device-generated shift and sale
+  identifiers. Other event types remain durably parked as `RequiresReview`.
+- Added six `Pos.Sync.Tests` cases covering shift and sale replay, idempotent replay,
+  tamper detection, sequence gaps and device binding. API build and migration
+  drift checks pass.
+
+#### C36 — pull and feed publishing
+
+- Added the append-only `sync.change_log` table and PostgreSQL migration
+  `SyncChangeLog` plus identity-sequence migration `SyncChangeFeedIdentity`.
+- Added authenticated `/api/v1/sync/pull?cursor&limit` with location scoping,
+  ordered paging, cursor advancement and a 500-event maximum.
+- Added `IChangeFeedPublisher`/`ChangeFeedPublisher`, which serializes typed
+  payloads and appends them inside the caller's transaction.
+- The focused sync suite now has eight passing tests; rebaseline and automatic
+  retry execution remain outstanding.
+
+#### C37 — retry queue and operator actions
+
+- Added durable `sync.sync_failure` rows for parked and rejected uploads. They
+  are created in the same transaction as the processed-event inbox record.
+- Added `GET /api/v1/sync/failures`, `POST .../{failureId}/retry`, and
+  `POST .../{failureId}/dismiss`, protected by `sync.manage`.
+- Retry scheduling increments the attempt count and uses bounded exponential
+  backoff (2, 4, 8, 16, 32 and 60 minutes). Dismissal requires a note.
+- Added migration `SyncFailures` and two focused retry/dismissal tests. The
+  automatic worker that executes due retries and conflict resolution remain.
+
+#### C38 — sequence conflict detection
+
+- A device sequence reused by a different event identifier now returns
+  `Conflict` with `sync.sequence_reuse`.
+- The conflict creates a durable failure record and leaves the device checkpoint
+  unchanged, preventing either event from silently overwriting the other.
+- Added a focused conflict test; the sync suite now has eleven passing tests.
+
+#### C39 — idempotency metadata hardening
+
+- An existing event identifier must retain its original device sequence and
+  event type in addition to its payload hash.
+- Metadata mutation returns `Conflict` with
+  `sync.event_metadata_mismatch`; the original inbox result and checkpoint are
+  preserved.
+- Added a focused metadata-conflict test; the sync suite now has twelve passing
+  tests.
+
+#### C40 — automatic retry execution
+
+- Added `ICurrentUserOverride`/`CurrentUserOverride` so trusted background
+  replay carries the original device event's user, device, location and
+  correlation identity into authorization and audit paths.
+- Added `SyncRetryWorker`, which polls due failures in bounded batches and
+  replays registered shift/sale handlers through the existing command pipeline.
+- Unsupported handlers are excluded from due polling, so they remain visible to
+  operators without an automatic retry hot loop. Successful replay resolves
+  the failure and updates the stored event outcome; failed replay schedules the
+  next bounded backoff attempt.
+
+#### C41 — rebaseline transport
+
+- Added authenticated `GET /api/v1/sync/baseline`, returning a device-scoped
+  product, barcode, price and location snapshot plus the current global feed
+  cursor.
+- Baseline access enforces the same device operational and token-binding rules
+  as push/pull. The endpoint is separate from incremental pull so a client can
+  replace its guarded cache before resuming from the returned cursor.
+- Added a baseline service test; the focused sync suite had thirteen passing
+  tests at this slice.
+
+#### C42 — baseline application and retained-window recovery
+
+- Added `ChangeFeedApplier.ReplaceBaselineAsync`, which clears only feed-owned
+  cache tables and installs the returned cursor in one guarded SQLite
+  transaction. The outbox, local shifts, local audit, counters, device profile
+  and device sequence are preserved.
+- Pull now detects a cursor older than the retained scoped feed window and
+  returns a `410 Gone` response with `action: rebaseline` and the earliest
+  retained cursor. Added focused tests for baseline replacement and expiry.
+
+#### C43 — device sync-health status
+
+- Added authenticated `GET /api/v1/sync/status`, returning device operational
+  state, the last accepted push sequence, current global feed cursor and open
+  failure count. The response is device-bound.
+- Added focused coverage; the sync suite now has fifteen passing tests.
+
 C34 builds the upload queue. `local_outbox_event` holds the business events a
 device has produced but head office has not seen, and a single-row
 `device_sequence` numbers them. Both are written in the caller's transaction, so
@@ -1215,7 +1312,58 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 12 is complete (C28–C33). **Phase 13 is under way:** C34 built the outbox,
+Phase 13 was held after C43 by direction. C54 resumes the sync dashboard work
+while the remaining conflict matrix is implemented in contained slices.
+
+Phase 16 is complete through C61. C44–C47 delivered the scoped sales KPIs,
+inventory availability indicators, sync-failure watch and ranked exception
+drill-down rows. C61 adds the authorization-scoped inventory timeline endpoint,
+read-only movement-chain explorer, and sale-detail entry point.
+
+Phase 17 is complete at C63. C62 added PostgreSQL coverage for 16 concurrent
+central document-number allocations; C63 added parallel sale and transfer
+dispatch races. The Docker-backed full suite passed Domain 378, Application
+247, Infrastructure 245, API 176, Sync 21, Security 52 and Architecture 25
+with no failures or skips. Merged first-party coverage passed at 95.73%, above
+the 60% gate.
+
+The Phase 17 baseline (C48): domain 378 passed, application 247 passed,
+infrastructure 226 passed with 18 PostgreSQL tests skipped, sync 15 passed,
+security 52 passed, and architecture 25 passed. API integration tests recorded
+174 passed and 2 Docker-dependent PostgreSQL failures because Docker was not
+available in the environment. C49 adds the CI Cobertura coverage gate at 60%;
+the Docker-backed rerun remains a CI requirement.
+
+Phase 18 deployment baseline (C50): API and migrator images were already
+present; a non-root Web image, production Caddy configuration and
+`compose.prod.yaml` now complete the host topology. Backup/restore,
+production-secrets wiring, logging/metrics and CI image publishing remain.
+
+The active Phase 18 scope is now local-first: validate the Docker Compose stack,
+database migrations, API/Web flows, synchronization, automated tests and a
+disposable backup/restore rehearsal. GHCR publishing, signed client packages,
+external metrics, deployment-host verification and production migration-job
+separation are deliberately deferred until local acceptance.
+
+C51 adds recoverable PostgreSQL custom-format backup and restore scripts plus
+the documented restore drill in `docs/RESTORE_DRILL.md`. The drill remains an
+operator-run deployment verification and has not been claimed complete here.
+
+C52 adds compact JSON production logging and a `main`-only GHCR image-publishing
+job for the API and Web images. C53 adds retained CI artifacts for an unsigned
+Android candidate and an unpackaged Windows candidate. C54 adds the first
+permission-gated sync-failure watch surface to the Overview. C55 classifies
+current-state replay conflicts as `RequiresReview` instead of `Rejected`. C56
+adds the permission-gated `/sync/failures` retry and dismissal workflow. C57
+adds `QuarantineAndReview` remediation for stale product/customer references.
+C58 adds persisted 30-minute sequence-gap timeout handling and rebaseline
+directives for late missing sequences. C59 adds shared-command replay for
+offline transfer receipts and preserves transfer-state conflicts. C60 closes
+the focused synchronization matrix at 21 passing cases.
+MAUI store signing, restore execution and the final production deployment
+verification remain.
+
+Phase 12 is complete (C28–C33). **Phase 13 is complete:** C34 built the outbox,
 so a device now queues the business events it produces — gaplessly, canonically
 hashed, and in the same transaction as the records they describe. Nothing moves
 those events yet.

@@ -1,0 +1,37 @@
+# Production overlay. Start with:
+# docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+services:
+  postgres:
+    ports: !reset []
+    restart: always
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+    restart: always
+  web:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.web
+    restart: always
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      Api__BaseAddress: http://api:8080
+    volumes:
+      - dataprotection-keys:/app/keys
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_started
+    expose:
+      - "8080"
+  proxy:
+    restart: always
+    volumes:
+      - ./build/docker/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config

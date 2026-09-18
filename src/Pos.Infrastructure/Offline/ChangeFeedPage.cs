@@ -12,6 +12,13 @@ namespace Pos.Infrastructure.Offline;
 /// <param name="Changes">The changes after <paramref name="FromCursor"/>, in feed order.</param>
 public sealed record ChangeFeedPage(long FromCursor, long NextCursor, IReadOnlyList<ChangeFeedChange> Changes);
 
+/// <summary>
+/// A complete feed-owned cache snapshot received after the server asks a device
+/// to rebaseline. Unlike a page, its changes do not carry feed sequence numbers;
+/// the supplied cursor is the authoritative position after the replacement.
+/// </summary>
+public sealed record ChangeFeedBaseline(long Cursor, IReadOnlyList<ChangeFeedChange> Changes);
+
 /// <summary>A single change in the feed.</summary>
 /// <param name="Sequence">The server change sequence; strictly ascending within the feed.</param>
 public abstract record ChangeFeedChange(long Sequence);

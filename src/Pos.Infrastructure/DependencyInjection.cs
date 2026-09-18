@@ -21,6 +21,7 @@ using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Inventory;
 using Pos.Infrastructure.Notifications;
 using Pos.Infrastructure.Persistence;
+using Pos.Infrastructure.Sync;
 using Pos.Infrastructure.Persistence.Interceptors;
 using Pos.Infrastructure.Sales;
 
@@ -78,6 +79,7 @@ public static class DependencyInjection
         services.TryAddScoped<IShiftRepository, ShiftRepository>();
         services.TryAddScoped<IDailySalesReportRepository, DailySalesReportRepository>();
         services.TryAddScoped<IInventoryControlRepository, InventoryControlRepository>();
+        services.TryAddScoped<InventoryTimelineService>();
         services.TryAddScoped<IExpiryService, ExpiryService>();
         services.TryAddScoped<IExpiryRepository, ExpiryRepository>();
         services.TryAddScoped<INotificationWriter, NotificationWriter>();
@@ -368,6 +370,13 @@ public static class DependencyInjection
         services.TryAddScoped<IApprovalGate>(sp => sp.GetRequiredService<ApprovalGate>());
         services.TryAddScoped<IAuthenticationService, AuthenticationService>();
         services.TryAddScoped<IDeviceService, DeviceService>();
+        services.TryAddScoped<SyncPushService>();
+        services.TryAddScoped<SyncPullService>();
+        services.TryAddScoped<SyncBaselineService>();
+        services.TryAddScoped<IChangeFeedPublisher, ChangeFeedPublisher>();
+        services.TryAddScoped<SyncFailureService>();
+        services.TryAddScoped<SyncStatusService>();
+        services.AddHostedService<SyncRetryWorker>();
         services.TryAddScoped<AdministrationSafeguards>();
         services.TryAddScoped<IUserAdministration, UserAdministrationService>();
         services.TryAddScoped<IRoleAdministration, RoleAdministrationService>();

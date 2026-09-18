@@ -26,6 +26,7 @@ public sealed class PostgresDocumentNumberGeneratorTests : IAsyncLifetime
 
     private PostgreSqlContainer? _container;
     private PosDbContext? _context;
+    private DbContextOptions<PosDbContext> _options = null!;
 
     private bool DockerAvailable => _container is not null;
 
@@ -48,13 +49,13 @@ public sealed class PostgresDocumentNumberGeneratorTests : IAsyncLifetime
             return;
         }
 
-        DbContextOptions<PosDbContext> options = new DbContextOptionsBuilder<PosDbContext>()
+        _options = new DbContextOptionsBuilder<PosDbContext>()
             .UseNpgsql(_container.GetConnectionString(), npgsql =>
                 npgsql.MigrationsHistoryTable("__migrations_history", PosDbContext.CoreSchema))
             .AddInterceptors(new AppendOnlyInterceptor())
             .Options;
 
-        _context = new PosDbContext(options);
+        _context = new PosDbContext(_options);
         await _context.Database.MigrateAsync();
     }
 
@@ -89,6 +90,33 @@ public sealed class PostgresDocumentNumberGeneratorTests : IAsyncLifetime
         first.Value.Should().Be("RCT-2026-000001");
         second.Value.Should().Be("RCT-2026-000002");
         otherType.Value.Should().Be("PO-2026-000001");
+    }
+
+    [SkippableFact]
+    public async Task ParallelAllocations_AreUniqueAndGapless_WhenContextsRace()
+    {
+        Skip.IfNot(DockerAvailable, "Docker is not available on this machine.");
+        const int allocationCount = 16;
+
+        DocumentNumber[] numbers = await Task.WhenAll(
+            Enumerable.Range(0, allocationCount)
+                .Select(_ => AllocateInOwnContextAsync(DocumentType.Receipt)))
+            .WaitAsync(TimeSpan.FromSeconds(120));
+
+        numbers.Select(number => number.Value)
+            .Should()
+            .OnlyHaveUniqueItems()
+            .And
+            .BeEquivalentTo(
+                Enumerable.Range(1, allocationCount)
+                    .Select(sequence => $"RCT-2026-{sequence:D6}"));
+    }
+
+    private async Task<DocumentNumber> AllocateInOwnContextAsync(DocumentType type)
+    {
+        await using PosDbContext context = new(_options);
+        DocumentNumberGenerator generator = new(context, new FixedClock(Now));
+        return await generator.NextAsync(type, CancellationToken.None);
     }
 
     private sealed class FixedClock(DateTimeOffset now) : ISystemClock

@@ -70,6 +70,7 @@ try
 
     builder.Services.AddInfrastructure(builder.Configuration, persistence);
 
+    builder.Services.AddScoped<ICurrentUserOverride, CurrentUserOverride>();
     builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
 
     builder.Services
@@ -240,10 +241,12 @@ try
 
     app.MapAuthEndpoints();
     app.MapDeviceEndpoints();
+    app.MapSyncEndpoints();
     app.MapLocationEndpoints();
     app.MapCatalogEndpoints();
     app.MapProductCurationEndpoints();
     app.MapInventoryEndpoints();
+    app.MapInventoryTimelineEndpoints();
     app.MapInventoryExceptionEndpoints();
     app.MapStockAdjustmentEndpoints();
     app.MapInventoryCountEndpoints();
@@ -261,6 +264,7 @@ try
     app.MapReportEndpoints();
     app.MapAdministrationEndpoints();
     app.MapNotificationEndpoints();
+    app.MapDashboardEndpoints();
     app.MapHub<NotificationHub>(NotificationHub.Route).RequireAuthorization();
 
     await app.RunAsync();

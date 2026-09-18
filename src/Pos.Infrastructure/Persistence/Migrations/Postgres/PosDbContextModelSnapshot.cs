@@ -4355,6 +4355,209 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("role_permission", "core");
                 });
 
+            modelBuilder.Entity("Pos.Infrastructure.Sync.ProcessedSyncEvent", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<DateTimeOffset>("AppliedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("applied_at_utc");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<long>("DeviceSequence")
+                        .HasColumnType("bigint")
+                        .HasColumnName("device_sequence");
+
+                    b.Property<long>("DeviceUptimeTicks")
+                        .HasColumnType("bigint")
+                        .HasColumnName("device_uptime_ticks");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("event_type");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at_utc");
+
+                    b.Property<short>("Outcome")
+                        .HasColumnType("smallint")
+                        .HasColumnName("outcome");
+
+                    b.Property<byte[]>("PayloadHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("payload_hash");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasMaxLength(524288)
+                        .HasColumnType("character varying(524288)")
+                        .HasColumnName("payload_json");
+
+                    b.Property<string>("ResponseJson")
+                        .HasMaxLength(8192)
+                        .HasColumnType("character varying(8192)")
+                        .HasColumnName("response_json");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("EventId");
+
+                    b.HasIndex("DeviceId", "AppliedAtUtc")
+                        .HasDatabaseName("ix_processed_event_device_time");
+
+                    b.HasIndex("DeviceId", "DeviceSequence")
+                        .IsUnique()
+                        .HasDatabaseName("ux_processed_event_device_sequence");
+
+                    b.ToTable("processed_event", "sync");
+                });
+
+            modelBuilder.Entity("Pos.Infrastructure.Sync.SyncChangeLogEntry", b =>
+                {
+                    b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("sequence");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Sequence"));
+
+                    b.Property<string>("ChangeType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("change_type");
+
+                    b.Property<Guid?>("LocationScopeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_scope_id");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasMaxLength(524288)
+                        .HasColumnType("character varying(524288)")
+                        .HasColumnName("payload_json");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at_utc");
+
+                    b.HasKey("Sequence");
+
+                    b.HasIndex("LocationScopeId", "Sequence")
+                        .HasDatabaseName("ix_change_log_scope_sequence");
+
+                    b.ToTable("change_log", "sync");
+                });
+
+            modelBuilder.Entity("Pos.Infrastructure.Sync.SyncDeviceCheckpoint", b =>
+                {
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<DateTimeOffset?>("GapDetectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("gap_detected_at_utc");
+
+                    b.Property<long>("LastAcceptedSequence")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_accepted_sequence");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("DeviceId");
+
+                    b.ToTable("device_checkpoint", "sync");
+                });
+
+            modelBuilder.Entity("Pos.Infrastructure.Sync.SyncFailure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<string>("ErrorCode")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("error_message");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_attempt_at_utc");
+
+                    b.Property<DateTimeOffset?>("NextRetryAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_retry_at_utc");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("resolution_note");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at_utc");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sync_failure_event");
+
+                    b.HasIndex("Status", "NextRetryAtUtc")
+                        .HasDatabaseName("ix_sync_failure_queue");
+
+                    b.ToTable("sync_failure", "sync");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
                 {
                     b.HasOne("Pos.Infrastructure.Identity.AppRole", null)

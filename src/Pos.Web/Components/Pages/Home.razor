@@ -1,6 +1,9 @@
 @page "/"
 @attribute [Authorize]
 @rendermode InteractiveServer
+@using System.Globalization
+@using Pos.Web.Services
+@inject VaultFlowApiClient Api
 @inject UserSession Session
 
 <PageTitle>Operations · VaultFlow</PageTitle>
@@ -26,10 +29,216 @@
 
 <section class="readiness"><div><span class="pulse"></span><strong>API session active</strong></div><p>Access expires @Session.Current?.AccessTokenExpiresAtUtc.ToLocalTime().ToString("t").</p></section>
 
+@if (CanViewSales)
+{
+    <section class="owner-overview" aria-labelledby="owner-overview-title">
+        <div class="overview-heading">
+            <div><span class="eyebrow">Owner dashboard · last 7 days</span><h2 id="owner-overview-title">The shape of the week</h2><p>Sales performance across the stores in your current authority scope.</p></div>
+            <a class="quiet-link" href="sales">Open sales ledger →</a>
+        </div>
+
+        @if (loadingDashboard)
+        {
+            <div class="dashboard-empty">Reading the sales ledger…</div>
+        }
+        else if (!string.IsNullOrWhiteSpace(dashboardMessage))
+        {
+            <div class="dashboard-empty" role="status">@dashboardMessage</div>
+        }
+        else
+        {
+            <div class="kpi-grid">
+                <article class="kpi-card kpi-lead"><span>Net sales</span><strong>@Money(totalNet)</strong><small>@dateRangeLabel</small></article>
+                <article class="kpi-card"><span>Transactions</span><strong>@totalTransactions</strong><small>completed activity</small></article>
+                <article class="kpi-card"><span>Average ticket</span><strong>@Money(averageTicket)</strong><small>net sales per transaction</small></article>
+            </div>
+            <div class="store-comparison">
+                <div class="comparison-head"><span>Store comparison</span><span>Net sales · transactions</span></div>
+                @foreach (StoreKpi store in storeKpis.OrderByDescending(x => x.NetSales))
+                {
+                    <div class="store-row">
+                        <div><strong>@store.Name</strong><small>@store.Code</small></div>
+                        <div class="store-bar" aria-label="@store.Name @Money(store.NetSales)"><span style="width:@store.BarWidth%"></span></div>
+                        <strong class="store-total">@Money(store.NetSales)</strong>
+                        <span class="store-count">@store.TransactionCount</span>
+                    </div>
+                }
+            </div>
+            <div class="inventory-watch">
+                <div class="watch-heading"><span>Inventory watch</span><small>last 30 days</small></div>
+                <div class="watch-grid">
+                    <article><span>Negative-stock attempts</span><strong>@negativeStockAttempts</strong><small>product/store pairs</small></article>
+                    <article><span>Repeat variances</span><strong>@repeatVariances</strong><small>counted more than once</small></article>
+                </div>
+                @if (negativeStockRows.Count > 0 || repeatVarianceRows.Count > 0)
+                {
+                    <div class="exception-drilldown">
+                        <div class="drilldown-heading"><span>Needs attention</span><small>highest-ranked exception pairs</small></div>
+                        @foreach (PosNegativeStockSummary row in negativeStockRows.Take(3))
+                        {
+                            <div class="exception-row">
+                                <div><strong>@(row.ProductName ?? row.Sku ?? "Unknown product")</strong><small>@(row.LocationCode ?? "Unknown store") · negative stock</small></div>
+                                <strong>@row.Attempts.ToString(CultureInfo.InvariantCulture) attempts</strong>
+                                <a href="inventory">Review →</a>
+                            </div>
+                        }
+                        @foreach (PosRepeatVariance row in repeatVarianceRows.Take(3))
+                        {
+                            <div class="exception-row">
+                                <div><strong>@(row.ProductName ?? row.Sku ?? "Unknown product")</strong><small>repeat count variance</small></div>
+                                <strong>@row.Occurrences.ToString(CultureInfo.InvariantCulture) counts</strong>
+                                <a href="inventory">Review →</a>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            @if (inventoryOverview is not null)
+            {
+                <div class="availability-grid">
+                    <div class="availability-heading"><span>Availability</span><small>current scoped inventory</small></div>
+                    <div class="availability-cards">
+                        <article><span>Available</span><strong>@inventoryOverview.AvailableQuantity.ToString("#,##0.##", CultureInfo.InvariantCulture)</strong></article>
+                        <article><span>In transit</span><strong>@inventoryOverview.InTransitQuantity.ToString("#,##0.##", CultureInfo.InvariantCulture)</strong></article>
+                        <article><span>Quarantine</span><strong>@inventoryOverview.QuarantineQuantity.ToString("#,##0.##", CultureInfo.InvariantCulture)</strong></article>
+                        <article><span>Low / out / over</span><strong>@inventoryOverview.LowStockItems / @inventoryOverview.OutOfStockItems / @inventoryOverview.OverStockItems</strong></article>
+                    </div>
+                </div>
+            }
+            @if (CanManageSync && syncFailures.Count > 0)
+            {
+                <div class="sync-watch">
+                    <div class="watch-heading"><span>Synchronization watch</span><small>@syncFailures.Count open</small></div>
+                    @foreach (PosSyncFailure failure in syncFailures.Take(5))
+                    {
+                        <div class="sync-row">
+                            <div><strong>@failure.ErrorCode</strong><small>@failure.ErrorMessage</small></div>
+                            <span>@failure.Status</span>
+                            <a href="/sync/failures">Review →</a>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </section>
+}
+
 @code {
+    private readonly List<StoreKpi> storeKpis = [];
+    private bool loadingDashboard;
+    private string? dashboardMessage;
+    private decimal totalNet;
+    private int totalTransactions;
+    private int negativeStockAttempts;
+    private int repeatVariances;
+    private readonly List<PosNegativeStockSummary> negativeStockRows = [];
+    private readonly List<PosRepeatVariance> repeatVarianceRows = [];
+    private readonly List<PosSyncFailure> syncFailures = [];
+    private PosInventoryOverview? inventoryOverview;
+    private DateOnly dashboardFrom = DateOnly.FromDateTime(DateTime.Today).AddDays(-6);
+    private DateOnly dashboardTo = DateOnly.FromDateTime(DateTime.Today);
+
     private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
     private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("catalog.view", StringComparer.Ordinal) == true;
+    private bool CanManageSync => Session.Current?.User.Permissions.Contains("sync.manage", StringComparer.Ordinal) == true;
     private string ScopeLabel => Session.Current?.User.HasAllLocations == true
         ? "All"
         : (Session.Current?.User.Locations.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private decimal averageTicket => totalTransactions == 0 ? 0m : totalNet / totalTransactions;
+    private string dateRangeLabel => $"{dashboardFrom:MMM d} – {dashboardTo:MMM d, yyyy}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewSales)
+        {
+            return;
+        }
+
+        ApiResult<List<PosLocation>> locationsResponse = await Api.GetAsync<List<PosLocation>>(
+            "/api/v1/locations", CancellationToken.None);
+        if (!locationsResponse.IsSuccess || locationsResponse.Value is null)
+        {
+            dashboardMessage = locationsResponse.Error ?? "The dashboard could not load stores.";
+            return;
+        }
+
+        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
+        List<PosLocation> stores = [.. locationsResponse.Value.Where(location =>
+            location.Kind == 1 && (Session.Current?.User.HasAllLocations == true || assigned.Contains(location.Id)))];
+        if (stores.Count == 0)
+        {
+            dashboardMessage = "No active stores are assigned to this account.";
+            return;
+        }
+
+        loadingDashboard = true;
+        DateTimeOffset exceptionTo = DateTimeOffset.UtcNow;
+        DateTimeOffset exceptionFrom = exceptionTo.AddDays(-30);
+        ApiResult<List<PosSaleSummary>>[] results = await Task.WhenAll(stores.Select(store =>
+            Api.SearchSalesAsync(store.Id, dashboardFrom, dashboardTo, CancellationToken.None)));
+        Task<ApiResult<List<PosNegativeStockSummary>>> negativeTask = Api.GetNegativeStockSummaryAsync(exceptionFrom, exceptionTo, CancellationToken.None);
+        Task<ApiResult<List<PosRepeatVariance>>> varianceTask = Api.GetRepeatVariancesAsync(exceptionFrom, exceptionTo, CancellationToken.None);
+        Task<ApiResult<PosInventoryOverview>> inventoryTask = Api.GetInventoryOverviewAsync(CancellationToken.None);
+
+        decimal largestNet = 0m;
+        for (int index = 0; index < stores.Count; index++)
+        {
+            ApiResult<List<PosSaleSummary>> result = results[index];
+            if (!result.IsSuccess || result.Value is null)
+            {
+                continue;
+            }
+
+            List<PosSaleSummary> sales = result.Value;
+            decimal net = sales.Where(sale => !string.Equals(sale.Status, "Voided", StringComparison.OrdinalIgnoreCase))
+                .Sum(sale => sale.NetTotal);
+            int transactions = sales.Count(sale => !string.Equals(sale.Status, "Voided", StringComparison.OrdinalIgnoreCase));
+            storeKpis.Add(new StoreKpi(stores[index].Code, stores[index].Name, net, transactions));
+            totalNet += net;
+            totalTransactions += transactions;
+            largestNet = Math.Max(largestNet, net);
+        }
+
+        foreach (StoreKpi store in storeKpis)
+        {
+            store.BarWidth = largestNet == 0m ? 0 : (int)Math.Round(store.NetSales / largestNet * 100m);
+        }
+
+        ApiResult<List<PosNegativeStockSummary>> negativeResult = await negativeTask;
+        ApiResult<List<PosRepeatVariance>> varianceResult = await varianceTask;
+        ApiResult<PosInventoryOverview> inventoryResult = await inventoryTask;
+        if (CanManageSync)
+        {
+            ApiResult<List<PosSyncFailure>> syncResult = await Api.GetSyncFailuresAsync(8, CancellationToken.None);
+            if (syncResult.IsSuccess && syncResult.Value is not null)
+            {
+                syncFailures.AddRange(syncResult.Value);
+            }
+        }
+        negativeStockAttempts = negativeResult.IsSuccess ? negativeResult.Value?.Count ?? 0 : 0;
+        repeatVariances = varianceResult.IsSuccess ? varianceResult.Value?.Count ?? 0 : 0;
+        if (negativeResult.IsSuccess && negativeResult.Value is not null)
+        {
+            negativeStockRows.AddRange(negativeResult.Value);
+        }
+        if (varianceResult.IsSuccess && varianceResult.Value is not null)
+        {
+            repeatVarianceRows.AddRange(varianceResult.Value);
+        }
+        inventoryOverview = inventoryResult.IsSuccess ? inventoryResult.Value : null;
+
+        loadingDashboard = false;
+    }
+
+    private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
+
+    private sealed class StoreKpi(string code, string name, decimal netSales, int transactionCount)
+    {
+        public string Code { get; } = code;
+        public string Name { get; } = name;
+        public decimal NetSales { get; } = netSales;
+        public int TransactionCount { get; } = transactionCount;
+        public int BarWidth { get; set; }
+    }
 }

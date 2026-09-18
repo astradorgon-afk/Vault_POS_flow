@@ -246,19 +246,58 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 13 — Synchronization
 
-- [~] Outbox, device sequence, canonical payload hashing
+> **Resumed:** C54 restarts the sync dashboard work while Phases 16–18 remain
+> active. The remaining conflict matrix is still outstanding.
+
+- [x] Outbox, device sequence, canonical payload hashing
       *(C34: `local_outbox_event` and a single-row `device_sequence`, both
       written in the caller's transaction so a rolled-back event releases its
       number; `CanonicalJson` sorts properties at every depth so declaration
       order cannot change a hash. The shift lifecycle is its first producer.
       Payload types for the remaining events land with the use cases that
       produce them)*
-- [ ] Push endpoint with per-event idempotent processing
-- [ ] Pull endpoint, change feed, cursors, rebaseline
-- [ ] Retry queue with exponential backoff
-- [ ] Conflict rules implementation
-- [ ] Sync failure dashboard and manual retry
-- [ ] Full sync test matrix
+- [~] Push endpoint with per-event idempotent processing
+      *(C35: authenticated device binding, contiguous checkpoints, payload hash
+      verification, tamper detection and durable `sync.processed_event` inbox;
+      the shift event handlers now replay through the existing command pipeline
+      inside the same transaction; shift and `SaleCompleted` replay now use the
+      existing command pipeline, while remaining event handlers are explicitly
+      `RequiresReview` until wired.)*
+- [~] Pull endpoint, change feed, cursors, rebaseline
+      *(C36: append-only `sync.change_log` and authenticated `/api/v1/sync/pull`
+      with location scoping, ordered cursor paging and a 500-event limit are
+      live; `IChangeFeedPublisher` now appends typed payloads with database-
+      assigned sequence numbers; C41 adds the authenticated baseline snapshot
+      and current cursor; C42 atomically replaces feed-owned device caches and
+      returns `410 Gone` when a cursor falls outside the retained window.)*
+- [~] Retry queue with exponential backoff
+      *(C37: durable `sync.sync_failure` rows, bounded retry scheduling,
+      operator listing, retry and dismissal endpoints are live; automatic
+      worker execution is now wired for registered replay handlers.)*
+- [x] Conflict rules implementation
+      *(C38: device-sequence reuse by another event identifier is detected as
+      `Conflict`, persisted for review, and cannot advance the checkpoint.)*
+      *(C39: an existing event identifier must also retain its original
+      sequence and event type; metadata mutation is a durable `Conflict`.)*
+      *(C55: replay failures caused by current server state or authorization
+      changes are retained as `RequiresReview`; malformed and unknown events
+      remain `Rejected`.)*
+      *(C57: stale product/customer references return the machine-readable
+      `QuarantineAndReview` remediation directive.)*
+      *(C58: persisted sequence-gap timestamps enforce the 30-minute timeout;
+      later events are parked for review and late missing sequences require
+      rebaseline.)*
+      *(C59: offline `TransferReceived` events replay through the shared receive
+      command and preserve transfer-state conflicts; C60 closes the transport
+      conflict cases in the focused matrix.)*
+- [x] Sync failure dashboard and manual retry
+      *(C37: the management API is live with `sync.manage`; C43 adds the
+      device-scoped `/api/v1/sync/status` health contract; C54 adds a
+      permission-gated Overview watch panel and C56 adds the `/sync/failures`
+      operator workflow for retry and note-required dismissal.)*
+- [x] Full sync test matrix
+      *(C60: 21 focused sync cases cover push/pull, replay, conflict,
+      remediation, retry, baseline and sequence recovery paths.)*
 
 ## Phase 14 — Notifications
 
@@ -287,35 +326,56 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 16 — Owner Dashboard
 
-- [ ] Business overview KPIs with date and location filters
-- [ ] Store comparison
-- [ ] Inventory panels (available, in transit, quarantine, low, out, over)
-- [ ] Exception panels (unknown products, discrepancies, high-value adjustments,
+- [x] Business overview KPIs with date and location filters
+      *(C44: the Overview page now shows a scoped seven-day sales KPI surface.)*
+- [x] Store comparison
+      *(C44: the Overview page compares net sales and transaction count by store.)*
+- [x] Inventory panels (available, in transit, quarantine, low, out, over)
+      *(C45 adds the first inventory watch panel for repeated stock exceptions;
+      C46 adds the current scoped availability totals and threshold counts.)*
+- [x] Exception panels (unknown products, discrepancies, high-value adjustments,
       negative-stock attempts, expired-still-available, repeated variances,
       failed sync, offline devices, emergency transfers)
-- [ ] Document timeline drill-down and movement chain explorer
+      *(C45 adds repeated negative-stock attempts and repeated count variances;
+      C47 adds ranked rows with direct review links.)*
+- [x] Document timeline drill-down and movement chain explorer
+      *(C61: authorization-scoped API timeline and read-only Web explorer linked
+      from sale detail.)*
 
 ## Phase 17 — Testing
 
-- [ ] Domain unit tests
-- [ ] Application use-case tests
-- [ ] Infrastructure/integration tests with Testcontainers
-- [ ] API integration tests
-- [ ] Synchronization test suite
-- [ ] Security test suite
-- [ ] Concurrency tests (parallel sales, transfer races, document numbering)
-- [ ] Coverage gate in CI
+- [x] Domain unit tests *(C63: 378 passed.)*
+- [x] Application use-case tests *(C63: 247 passed.)*
+- [x] Infrastructure/integration tests with Testcontainers *(C63: 245 passed.)*
+- [x] API integration tests *(C63: 176 passed.)*
+- [x] Synchronization test suite *(C63: 21 passed.)*
+- [x] Security test suite *(C63: 52 passed.)*
+- [x] Concurrency tests (parallel sales, transfer races, document numbering)
+      *(C62-C63: PostgreSQL race coverage passed.)*
+- [x] Coverage gate in CI
+      *(C63: merged first-party line coverage 95.73%, above the 60% minimum.)*
 
 ## Phase 18 — Deployment
 
-- [ ] Dockerfiles (API, Web) with non-root users
-- [ ] docker compose for dev and a production overlay
-- [ ] Reverse proxy with TLS, HSTS, security headers
+- [~] Dockerfiles (API, Web) with non-root users
+      *(C50 adds the non-root Web Dockerfile; API and migrator images were
+      already present.)*
+- [~] docker compose for dev and a production overlay
+      *(C50 adds `compose.prod.yaml`.)*
+- [~] Reverse proxy with TLS, HSTS, security headers
+      *(C50 adds production Caddy routing for the Web host and internal API.)*
 - [ ] Migration job separate from the API
 - [ ] Backup and restore scripts, restore drill documented
-- [ ] Production logging/metrics configuration
-- [ ] MAUI packaging: MSIX (Windows), signed AAB (Android)
-- [ ] CI: build, test, analyze, publish images
+      *(C51 adds the scripts and `docs/RESTORE_DRILL.md`; a real restore drill
+      remains an operator/deployment-host action.)*
+- [~] Production logging/metrics configuration
+      *(C52 adds compact JSON production logging and keeps health probes
+      available; external metrics export remains.)*
+- [~] MAUI packaging: MSIX (Windows), signed AAB (Android)
+      *(C53 publishes unsigned Android and unpackaged Windows validation
+      artifacts; store packaging and signing remain credential-dependent.)*
+- [~] CI: build, test, analyze, publish images
+      *(C52 publishes API and Web images to GHCR on `main`.)*
 
 ---
 
@@ -326,6 +386,8 @@ Recorded so they are not mistaken for oversights:
 | Item | Why deferred | Tracked in |
 |---|---|---|
 | Redis backplane | single API instance initially; interface is in place | Phase 18 |
+| GHCR publishing, signed AAB/MSIX packaging and external metrics | not required to validate the local API/Web system | Phase 18 local-first scope |
+| Deployment-host restore drill, production migration separation and release credential checks | require a deployment environment and production credentials | Phase 18 local-first scope |
 | `sales.sale` partitioning | not needed below ~5M rows; migration prepared | Phase 18 |
 | GL / accounting export | out of scope v1 | future |
 | Loyalty programme | customer entity exists; scheme undecided | future |

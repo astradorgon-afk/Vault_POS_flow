@@ -1,0 +1,131 @@
+@page "/sync/failures"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Pos.Web.Services
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Sync failures · VaultFlow</PageTitle>
+
+<section class="sync-page-head">
+    <div><span class="eyebrow">Operations · synchronization</span><h1>Failure review</h1><p>Retry recoverable events or record why a failure was dismissed. Nothing is removed from the audit trail.</p></div>
+    <a class="quiet-link" href="/">Back to overview →</a>
+</section>
+
+@if (!CanManageSync)
+{
+    <section class="sync-blocked" role="alert"><span>Access required</span><h2>This account cannot manage synchronization.</h2><p>Ask an administrator for <code>sync.manage</code>.</p></section>
+}
+else if (loading)
+{
+    <section class="sync-empty">Reading the synchronization queue…</section>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="sync-message" role="status">@message</div>
+    }
+    @if (failures.Count == 0)
+    {
+        <section class="sync-empty"><strong>No open failures.</strong><span>The synchronization queue is clear.</span></section>
+    }
+    else
+    {
+        <section class="sync-list" aria-label="Open synchronization failures">
+            @foreach (PosSyncFailure failure in failures)
+            {
+                <article class="sync-card">
+                    <header><div><span>@failure.ErrorCode</span><h2>@failure.ErrorMessage</h2></div><strong>@failure.Status</strong></header>
+                    <dl><div><dt>Event</dt><dd>@failure.EventId</dd></div><div><dt>Device</dt><dd>@failure.DeviceId</dd></div><div><dt>Attempts</dt><dd>@failure.AttemptCount</dd></div></dl>
+                    @if (dismissId == failure.Id)
+                    {
+                        <div class="sync-dismiss"><label for="dismiss-note">Dismissal note<textarea id="dismiss-note" maxlength="1000" @bind="dismissNote" placeholder="Record the operator decision"></textarea></label><div><button type="button" class="sync-button secondary" @onclick="CancelDismiss">Cancel</button><button type="button" class="sync-button danger" @onclick="() => DismissAsync(failure.Id)" disabled="@busy">Confirm dismissal</button></div></div>
+                    }
+                    else
+                    {
+                        <footer><small>Created @failure.CreatedAtUtc.ToLocalTime().ToString("g")</small><div><button type="button" class="sync-button secondary" @onclick="() => RetryAsync(failure.Id)" disabled="@busy">Schedule retry</button><button type="button" class="sync-button danger" @onclick="() => BeginDismiss(failure.Id)">Dismiss</button></div></footer>
+                    }
+                </article>
+            }
+        </section>
+    }
+}
+
+@code {
+    private readonly List<PosSyncFailure> failures = [];
+    private bool loading = true;
+    private bool busy;
+    private string? message;
+    private Guid? dismissId;
+    private string dismissNote = string.Empty;
+
+    private bool CanManageSync => Session.Current?.User.Permissions.Contains("sync.manage", StringComparer.Ordinal) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanManageSync)
+        {
+            loading = false;
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        ApiResult<List<PosSyncFailure>> result = await Api.GetSyncFailuresAsync(100, CancellationToken.None);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            failures.Clear();
+            failures.AddRange(result.Value);
+            message = null;
+        }
+        else
+        {
+            message = result.Error ?? "The synchronization queue could not be loaded.";
+        }
+
+        loading = false;
+    }
+
+    private async Task RetryAsync(Guid failureId)
+    {
+        busy = true;
+        ApiResult<PosSyncFailure> result = await Api.RetrySyncFailureAsync(failureId, CancellationToken.None);
+        message = result.IsSuccess ? "Retry scheduled." : result.Error;
+        await LoadAsync();
+        busy = false;
+    }
+
+    private void BeginDismiss(Guid failureId)
+    {
+        dismissId = failureId;
+        dismissNote = string.Empty;
+        message = null;
+    }
+
+    private void CancelDismiss()
+    {
+        dismissId = null;
+        dismissNote = string.Empty;
+    }
+
+    private async Task DismissAsync(Guid failureId)
+    {
+        if (string.IsNullOrWhiteSpace(dismissNote))
+        {
+            message = "A dismissal note is required.";
+            return;
+        }
+
+        busy = true;
+        ApiResult<PosSyncFailure> result = await Api.DismissSyncFailureAsync(failureId, dismissNote.Trim(), CancellationToken.None);
+        message = result.IsSuccess ? "Failure dismissed." : result.Error;
+        CancelDismiss();
+        await LoadAsync();
+        busy = false;
+    }
+}

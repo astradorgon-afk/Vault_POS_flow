@@ -101,6 +101,61 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
         return Result.Success(new ChangeFeedApplyOutcome(page.NextCursor, page.Changes.Count, AlreadyApplied: false));
     }
 
+    /// <summary>
+    /// Replaces every feed-owned cache and installs the server's baseline cursor
+    /// atomically. Device-owned work such as the outbox, local shifts, audit,
+    /// document counters, profile and sequence is deliberately not touched.
+    /// </summary>
+    public async Task<Result<ChangeFeedApplyOutcome>> ReplaceBaselineAsync(
+        ChangeFeedBaseline baseline,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseline);
+
+        if (baseline.Cursor < 0)
+        {
+            return Result.Failure<ChangeFeedApplyOutcome>(
+                ChangeFeedErrors.PageInvalid("The baseline cursor cannot be negative."));
+        }
+
+        await using PosDeviceDbContext context =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await using IDbContextTransaction transaction =
+            await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        using (context.ChangeFeedWrites.Open())
+        {
+            await context.PermissionSnapshots.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            await context.ProductPrices.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            await context.ProductBarcodes.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            await context.Products.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            await context.Locations.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            await context.Users.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            await context.SyncCursors.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+
+            foreach (ChangeFeedChange change in baseline.Changes)
+            {
+                Result applied = await ApplyChangeAsync(context, change, cancellationToken).ConfigureAwait(false);
+                if (applied.IsFailure)
+                {
+                    return Result.Failure<ChangeFeedApplyOutcome>(applied.Error);
+                }
+
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                context.ChangeTracker.Clear();
+            }
+
+            if (baseline.Cursor > 0)
+            {
+                context.SyncCursors.Add(new DeviceSyncCursor(ChangeFeed, baseline.Cursor, clock.UtcNow));
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return Result.Success(new ChangeFeedApplyOutcome(baseline.Cursor, baseline.Changes.Count, AlreadyApplied: false));
+    }
+
     private static async Task<long> ReadCursorAsync(PosDeviceDbContext context, CancellationToken cancellationToken)
         => await context.SyncCursors
             .AsNoTracking()

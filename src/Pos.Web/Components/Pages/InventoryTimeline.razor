@@ -1,0 +1,80 @@
+@page "/inventory/timeline/{DocumentType}/{DocumentId:guid}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@using Pos.Web.Services
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Movement chain · VaultFlow</PageTitle>
+
+<section class="timeline-head">
+    <div><span class="eyebrow">Inventory ledger · trace</span><h1>@(timeline?.ReferenceNumber ?? "Movement chain")</h1><p>Follow every signed ledger leg that explains this document. The chain is read-only and scoped to your location authority.</p></div>
+    <a class="quiet-link" href="/">Back to overview →</a>
+</section>
+
+@if (!CanViewInventory)
+{
+    <section class="timeline-empty" role="alert"><strong>Access required.</strong><span>Ask an administrator for <code>inventory.view</code>.</span></section>
+}
+else if (loading)
+{
+    <section class="timeline-empty"><strong>Reading the ledger…</strong><span>Ordering movement groups by server-recorded time.</span></section>
+}
+else if (!string.IsNullOrWhiteSpace(message))
+{
+    <section class="timeline-empty" role="alert"><strong>Timeline unavailable.</strong><span>@message</span></section>
+}
+else if (timeline is not null)
+{
+    <section class="timeline-shell" aria-label="Inventory movement timeline">
+        <div class="timeline-summary"><span>@timeline.DocumentType</span><strong>@timeline.Groups.Count movement groups</strong><small>@timeline.DocumentId</small></div>
+        <div class="timeline-track">
+            @foreach (PosInventoryTimelineGroup group in timeline.Groups)
+            {
+                <article class="timeline-event">
+                    <div class="timeline-pin" aria-hidden="true"></div>
+                    <header><div><span>@group.MovementType</span><h2>@group.ReferenceNumber</h2></div><time datetime="@group.RecordedAtUtc.ToString("O")">@group.RecordedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</time></header>
+                    <p class="timeline-occurred">Occurred @group.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) · group @group.MovementGroupId</p>
+                    <div class="timeline-legs">
+                        @foreach (PosInventoryTimelineLeg leg in group.Legs)
+                        {
+                            <div class="timeline-leg">
+                                <div><strong>@leg.ProductName</strong><small>@leg.State · location @leg.LocationId</small></div>
+                                <strong class="@(leg.QuantityDelta < 0 ? "quantity-out" : "quantity-in")">@(leg.QuantityDelta > 0 ? "+" : string.Empty)@leg.QuantityDelta.ToString("0.###", CultureInfo.InvariantCulture)</strong>
+                                <small>@Money(leg.UnitCost) / unit</small>
+                            </div>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public string DocumentType { get; set; } = string.Empty;
+    [Parameter] public Guid DocumentId { get; set; }
+    private PosInventoryTimeline? timeline;
+    private string? message;
+    private bool loading = true;
+    private bool CanViewInventory => Session.Current?.User.Permissions.Contains("inventory.view", StringComparer.Ordinal) == true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!CanViewInventory)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        message = null;
+        ApiResult<PosInventoryTimeline> result = await Api.GetInventoryTimelineAsync(DocumentType, DocumentId, CancellationToken.None);
+        timeline = result.IsSuccess ? result.Value : null;
+        message = result.IsSuccess ? null : result.Error ?? "No movement chain was found for this document.";
+        loading = false;
+    }
+
+    private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
+}

@@ -193,6 +193,7 @@ product, the new price row and the new conversion respectively).
 | GET | `/api/v1/inventory/movements/group/{movementGroupId}` | `inventory.movement.view` |
 | GET | `/api/v1/inventory/products/{id}/history` | `inventory.movement.view` |
 | GET | `/api/v1/inventory/documents/{type}/{id}/timeline` | `inventory.movement.view` |
+| GET | `/api/v1/inventory/timeline/{documentType}/{documentId}` | `inventory.view` (caller locations) |
 | GET | `/api/v1/inventory/adjustments?locationId&status&offset&limit` | `inventory.view` (caller's locations) |
 | GET | `/api/v1/inventory/adjustments/{id}` | `inventory.view` (+ scope) |
 | POST | `/api/v1/inventory/adjustments` | `inventory.adjust` (+ scope) |
@@ -802,10 +803,11 @@ re-checked against the requested location: another store's manager gets
 ## 10. Synchronization
 
 ```
-POST   /api/v1/sync/push        authenticated device — batch of events, per-event results
-GET    /api/v1/sync/pull        authenticated device — change feed after a cursor
+POST   /api/v1/sync/push        authenticated device — shift/sale replay plus per-event results
+GET    /api/v1/sync/pull?cursor&limit  authenticated device — scoped change feed after a cursor
 GET    /api/v1/sync/baseline    authenticated device — full scoped snapshot (rebaseline)
 GET    /api/v1/sync/status      authenticated device — checkpoints, pending review counts
+GET    /api/v1/dashboard/inventory-overview authenticated user — scoped inventory availability totals
 GET    /api/v1/sync/failures    sync.manage — failed events across devices
 POST   /api/v1/sync/failures/{id}/retry     sync.manage
 POST   /api/v1/sync/failures/{id}/dismiss   sync.manage (reason required)
@@ -813,6 +815,14 @@ GET    /api/v1/sync/devices/health          sync.manage
 ```
 
 Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
+
+`/api/v1/sync/status` returns the device operational flag, last accepted push
+sequence, current global feed cursor and open sync-failure count.
+
+If the requested pull cursor is older than the retained scoped feed window,
+`/api/v1/sync/pull` returns `410 Gone` with `action: rebaseline` and the
+earliest retained cursor. The client must fetch `/api/v1/sync/baseline` and
+replace only its feed-owned cache tables before resuming incremental pulls.
 
 ---
 

@@ -16,6 +16,7 @@ using Pos.Domain.Sales;
 using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence.Conversions;
+using Pos.Infrastructure.Sync;
 
 namespace Pos.Infrastructure.Persistence;
 
@@ -256,6 +257,18 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets the sign-in attempt history used for throttling and review.</summary>
     public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+
+    /// <summary>Idempotency records for device-uploaded business events.</summary>
+    public DbSet<ProcessedSyncEvent> ProcessedSyncEvents => Set<ProcessedSyncEvent>();
+
+    /// <summary>Contiguous upload checkpoints for each registered device.</summary>
+    public DbSet<SyncDeviceCheckpoint> SyncDeviceCheckpoints => Set<SyncDeviceCheckpoint>();
+
+    /// <summary>Gets operator-visible synchronization failures.</summary>
+    public DbSet<SyncFailure> SyncFailures => Set<SyncFailure>();
+
+    /// <summary>Gets the append-only master-data change feed.</summary>
+    public DbSet<SyncChangeLogEntry> SyncChangeLog => Set<SyncChangeLogEntry>();
 
     /// <summary>Gets a value indicating whether this context is running on SQLite.</summary>
     public bool IsSqlite => Database.ProviderName?.Contains("Sqlite", StringComparison.Ordinal) == true;

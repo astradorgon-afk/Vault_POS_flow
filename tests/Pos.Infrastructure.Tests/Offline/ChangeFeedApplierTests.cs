@@ -175,6 +175,27 @@ public sealed class ChangeFeedApplierTests
         await AssertNothingWrittenAsync(database);
     }
 
+    [Fact]
+    public async Task ReplaceBaselineAsync_ReplacesFeedCachesAndCursorAtomically()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+        ProductId oldProductId = ProductId.New();
+        ProductId newProductId = ProductId.New();
+
+        await ApplySuccessfullyAsync(database, new ChangeFeedPage(0, 3,
+        [Product(1, oldProductId, "OLD", "Old product")]));
+
+        Result<ChangeFeedApplyOutcome> result = await database.Applier.ReplaceBaselineAsync(
+            new ChangeFeedBaseline(42,
+            [Product(0, newProductId, "NEW", "New product")]));
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().Be(new ChangeFeedApplyOutcome(42, 1, AlreadyApplied: false));
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+        (await context.Products.SingleAsync()).Id.Should().Be(newProductId);
+        (await context.SyncCursors.SingleAsync()).Position.Should().Be(42);
+    }
+
     public static TheoryData<string, ChangeFeedPage> MalformedPages()
     {
         ProductId productId = ProductId.New();

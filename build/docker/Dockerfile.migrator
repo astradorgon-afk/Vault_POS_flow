@@ -25,6 +25,7 @@ COPY src/Pos.Application/    src/Pos.Application/
 COPY src/Pos.Infrastructure/ src/Pos.Infrastructure/
 
 RUN dotnet ef migrations bundle \
+    --context PosDbContext \
     --project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
     --startup-project src/Pos.Infrastructure/Pos.Infrastructure.csproj \
     --configuration Release \

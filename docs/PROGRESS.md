@@ -145,19 +145,186 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   - [x] C32 — offline status surface: `DeviceStatusProvider` reports storage, enrolment, connectivity, last-received store data and cached-authority expiry; the `DeviceStatusView` contract lives in `Pos.Shared` (which references nothing), so it cannot carry a path, key, address or feed position; `DeviceStatusBanner` in `Pos.SharedUI` renders one concern at a time, offline never counting as a warning. 27 new tests.
   - [x] C31 — device numbering and permission expiry: `document_counter` on the device (migration `DeviceDocumentCounter`), an atomic upsert joining the caller's transaction, refusing central types and any short code but its own; `DeviceSnapshotPermissionEvaluator` re-checks expiry at every evaluation, scopes grants, and refuses anything the catalogue does not mark offline-capable; the feed refuses a widening snapshot (`sync.feed_page_invalid`) and a policy-version rollback (`sync.snapshot_policy_rollback`). 24 new tests.
   - [x] C30 — client command boundary: `OfflineCommandCatalogue` declares the 24 offline use cases of OFFLINE_SYNC.md §1; `AddOfflineClientApplication` registers only those handlers and validators, no query handlers, with the server's behaviour pipeline unchanged; everything else answers `application.handler_unavailable` without touching a port. Entries stay `Pending` until the device carries `local_*` tables. 11 boundary tests.
-- [~] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
+- [x] **Phase 13 — Synchronization:** outbox, push/pull endpoints, idempotency behaviour, retries, conflict rules
   - [x] C34 — device outbox: `local_outbox_event` plus a single-row `device_sequence`, both allocated in the caller's transaction so a rolled-back event releases its number; `CanonicalJson` sorts object properties at every depth so declaration order cannot change a payload hash; `Environment.TickCount64` recorded as clock-tamper evidence; the device repositories enqueue business events, not row changes; the status banner now reports unsent work (POS.md §6). 18 new tests.
-  - [ ] Push endpoint with per-event idempotent processing
-  - [ ] Pull endpoint, change feed, cursors, rebaseline
-  - [ ] Retry queue with exponential backoff
-  - [ ] Conflict rules, sync failure dashboard and manual retry
+  - [~] C35 — server push intake: `/api/v1/sync/push` validates the authenticated
+    device binding, enforces contiguous per-device sequences, verifies SHA-256
+    payload hashes, persists `sync.processed_event` and checkpoints, replays
+    identical uploads as duplicates, and rejects event-id reuse with different
+    content. Shift open/suspend/resume and `SaleCompleted` events now replay
+    through the existing command pipeline and are accepted only after the
+    business transaction and inbox commit; remaining event types are parked as
+    `RequiresReview`. Six new sync tests.
+  - [~] C36 â€” pull/change-feed transport: added append-only `sync.change_log`,
+    location-scoped cursor paging at `/api/v1/sync/pull`, invalid cursor/limit
+    refusal, and eight sync tests covering order, scope, limits and cursor
+    advancement. `IChangeFeedPublisher` now appends typed payloads with
+    database-assigned global sequence numbers in the caller's transaction;
+    rebaseline and retry handling remain next.
+  - [~] C37 — retry queue and operator actions: durable `sync.sync_failure`
+    records are created with parked/rejected events; `/api/v1/sync/failures`
+    lists them, retry scheduling uses bounded exponential backoff, and
+    dismissal requires an operator note. Ten sync tests pass. Automatic worker
+    execution and conflict resolution remain next.
+  - [ ] Conflict rules
+  - [~] C39 — idempotency metadata hardening: reusing an event identifier with
+    a different device sequence or event type now returns `Conflict` and does
+    not overwrite the original result. Twelve sync tests pass.
+  - [~] C40 — automatic retry execution: added a scoped replay identity,
+    due-failure polling worker and safe replay of registered shift/sale event
+    handlers. Unsupported handlers remain queued without a hot loop; the
+    remaining conflict matrix and rebaseline work remain.
+  - [~] C41 — rebaseline transport: added authenticated `/api/v1/sync/baseline`
+    returning the device-scoped catalog/price/location snapshot and current
+    global feed cursor. The focused sync suite had thirteen tests at this slice.
+  - [~] C42 — baseline application and retained-window recovery: added atomic
+    feed-cache replacement that preserves device-owned work, plus `410 Gone`
+    pull responses with `action: rebaseline` when the cursor is outside the
+    retained scoped window. Focused offline and sync coverage now exercises
+    both paths.
+  - [~] C43 — device sync-health status: added authenticated
+    `/api/v1/sync/status` for operational state, push checkpoint, current feed
+    cursor and open failure count. Fifteen sync tests pass.
+  - [~] C38 — sequence conflict detection: a device-sequence reused by a
+    different event identifier now returns `Conflict`, creates a durable sync
+    failure, and leaves the checkpoint unchanged. Eleven sync tests pass.
 - [~] **Phase 14 — Notifications:** persistence, expiry alerts, SignalR and the notification centre are complete; the remaining alert generators remain
 - [ ] **Phase 15 — Analytics and reports:** sales, margin, inventory, transfers, purchasing, shrinkage, ageing, audit, export
-- [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
-- [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
-- [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
+- [x] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
+  - [x] C44 — added the authorization-scoped seven-day Overview sales surface:
+    net sales, transaction count, average ticket and store comparison bars.
+  - [x] C45 — added an inventory watch panel backed by the existing exception
+    APIs: repeated negative-stock attempts and repeated count variances over a
+    30-day window. Drill-down and availability panels remain.
+  - [x] C46 — added `/api/v1/dashboard/inventory-overview`, permission-scoped
+    to the caller's locations, and displayed available, in-transit, quarantine,
+    low-stock, out-of-stock and over-stock indicators on the Overview page.
+  - [x] C47 — added ranked exception drill-down rows for the highest negative-
+    stock attempts and repeat count variances, with links into inventory review.
+- [x] C61 — completed the owner dashboard movement drill-down with an
+  authorization-scoped `GET /api/v1/inventory/timeline/{documentType}/{documentId}`
+  endpoint, a read-only Web movement-chain explorer, and a direct link from sale
+  detail. The explorer groups ledger legs by movement group and shows product,
+  location/state, signed quantity, unit cost, reference and timestamps.
+- [x] **Phase 17 — Testing:** coverage gate and the remaining suites
+  - [x] C48 — full solution baseline recorded: domain 378, application 247,
+    infrastructure 226 passed with 18 PostgreSQL skips, sync 15, security 52,
+    architecture 25, and API integration 174 passed. Two PostgreSQL integration
+    cases require Docker and failed because the Docker engine was unavailable;
+    coverage gate and a Docker-backed rerun remain.
+  - [x] C49 — added `scripts/check-coverage.ps1`, aggregating first-party line
+    coverage and enforcing a 60% minimum in the CI test job.
+- [x] Phase 17 completion recorded at C63: all test suites pass under Docker,
+  PostgreSQL concurrency coverage is complete, and the first-party coverage
+  gate is above the required threshold.
+- [~] C62 - added a real PostgreSQL concurrency test for central document
+  numbering: 16 independent contexts allocate receipt numbers concurrently
+  and produce unique, gapless results. The focused PostgreSQL test run passed
+  2/2 tests; the remaining sale and transfer race coverage was completed in
+  C63.
+- [x] C63 - completed the Docker-backed Phase 17 verification: Domain 378,
+  Application 247, Infrastructure 245, API 176, Sync 21, Security 52 and
+  Architecture 25 tests passed with no failures or skips. Added parallel sale
+  and transfer-dispatch race tests; the merged first-party coverage gate passed
+  at 95.73% (141,254/147,559) against the required 60%.
+- [~] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
 
 ---
+
+### C50 — Deployment foundation
+
+- Added the non-root Web container, production Caddy routing and
+  `compose.prod.yaml`; `/api/*` routes internally while the Web host serves
+  the site root.
+
+### C51 — Backup and restore foundation
+
+- Added `scripts/backup-postgres.ps1` and `scripts/restore-postgres.ps1` with
+  empty-backup validation, explicit restore confirmation and a documented
+  recovery drill in `docs/RESTORE_DRILL.md`.
+
+### C52 — Production observability and image publishing
+
+- Added compact JSON Serilog production configuration and a production Web API
+  base-address configuration.
+- Added a `main`-only GitHub Actions job that publishes API and Web images to
+  GHCR with immutable commit tags and a `latest` tag; pull requests continue to
+  build and test without publishing.
+
+### C53 — Client artifact handoff
+
+- Added CI publication of an unsigned Android APK candidate and an unpackaged
+  Windows publish candidate, both retained for 14 days.
+- Documented the handoff and remaining credential-dependent work in
+  `docs/CLIENT_RELEASES.md`; signed AAB and MSIX releases remain intentionally
+  unclaimed.
+
+### C54 — Sync-failure dashboard surface
+
+- Added a permission-gated synchronization watch panel to the owner Overview.
+  It reads the existing `sync.manage` failure list and shows open error codes,
+  status, messages and direct review links without adding mutation controls to
+  the dashboard.
+
+### C55 — Replay conflict classification
+
+- Replay failures classified as current-state conflicts or authorization
+  changes are now stored as `RequiresReview`; malformed, unknown and other
+  validation failures remain `Rejected`.
+- Added focused sync coverage proving a conflicted offline shift remains in the
+  processed-event inbox and the operator failure queue.
+
+### C56 — Sync failure operator workflow
+
+- Added the permission-gated `/sync/failures` page with retry scheduling and
+  note-required dismissal actions backed by the existing management API.
+- Overview review links now land on the operator workflow instead of exposing
+  the raw JSON endpoint.
+
+### C57 — Stale master-data remediation
+
+- Replay failures for unknown products or customers now return `Rejected` with
+  `remediation: QuarantineAndReview`, and the remediation directive is kept in
+  the processed-event response JSON.
+- Added focused coverage for the stale-master-data response contract.
+
+### C58 — Sequence-gap timeout
+
+- Checkpoints now persist the first observed gap, expire it after the documented
+  30-minute window, park the later event as `RequiresReview`, and advance past
+  the missing sequence without silently applying it.
+- Late arrivals for sequences skipped after timeout return
+  `sync.sequence_expired` and require rebaseline. Added focused coverage for
+  both sides of the timeout.
+
+### C59 — Transfer receipt replay
+
+- Added `TransferReceived` replay through the shared `ReceiveTransferCommand`,
+  including batch-aware receipt payloads and current-state conflict handling.
+- Added focused coverage proving the sync transport does not create a second
+  transfer implementation or bypass the transfer domain rules.
+
+### C60 — Synchronization matrix closure
+
+- Expanded the focused synchronization suite to 21 cases, including transfer
+  conflicts, stale-data remediation, gap timeout, late-sequence rejection,
+  baseline recovery, retry/dismissal, and out-of-order recovery.
+
+### C61 — Owner dashboard movement explorer
+
+- Added the permission-gated, location-scoped inventory timeline endpoint and
+  read-only Web movement-chain explorer for sale and other ledger-backed
+  documents.
+- Added the sale-detail entry point, responsive timeline styling, and API
+  contracts/client support. Phase 16 is complete.
+
+### C62 - Central numbering concurrency coverage
+
+- Added `ParallelAllocations_AreUniqueAndGapless_WhenContextsRace` to the
+  PostgreSQL infrastructure suite. It uses 16 independent EF contexts against
+  PostgreSQL 17 and verifies the atomic counter upsert under contention.
+- Focused result: **2 passed, 0 failed**. C63 adds the sale and transfer race
+  cases and closes the Docker-backed full-suite gate.
 
 ## Log
 

@@ -99,7 +99,8 @@ public sealed class OpenShiftCommandHandler(
             cashierId,
             command.OpeningFloat,
             command.BusinessDate,
-            clock.UtcNow);
+            clock.UtcNow,
+            command.ShiftId);
 
         if (opened.IsFailure)
         {

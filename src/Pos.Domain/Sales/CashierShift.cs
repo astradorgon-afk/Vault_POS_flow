@@ -10,16 +10,17 @@ namespace Pos.Domain.Sales;
 public class CashierShift : AggregateRoot<CashierShiftId>
 {
     private CashierShift(
-        CashierShiftId id,
+        CashierShiftId? shiftId,
         DocumentNumber number,
         LocationId locationId,
         DeviceId deviceId,
         UserId cashierUserId,
         decimal openingFloat,
         DateOnly businessDate,
-        DateTimeOffset openedAtUtc)
+        DateTimeOffset openedAtUtc,
+        CashierShiftId? id = null)
     {
-        Id = id;
+        Id = shiftId ?? CashierShiftId.New();
         Number = number.Value;
         LocationId = locationId;
         DeviceId = deviceId;
@@ -94,7 +95,8 @@ public class CashierShift : AggregateRoot<CashierShiftId>
         UserId cashierUserId,
         decimal openingFloat,
         DateOnly businessDate,
-        DateTimeOffset openedAtUtc)
+        DateTimeOffset openedAtUtc,
+        CashierShiftId? shiftId = null)
     {
         List<Error> errors = [];
 
@@ -138,10 +140,16 @@ public class CashierShift : AggregateRoot<CashierShiftId>
             return Result<CashierShift>.Failure(errors);
         }
 
-        CashierShiftId id = CashierShiftId.New();
-
         return Result<CashierShift>.Success(
-            new CashierShift(id, number, locationId, deviceId, cashierUserId, openingFloat, businessDate, openedAtUtc));
+            new CashierShift(
+                shiftId,
+                number,
+                locationId,
+                deviceId,
+                cashierUserId,
+                openingFloat,
+                businessDate,
+                openedAtUtc));
     }
 
     /// <summary>

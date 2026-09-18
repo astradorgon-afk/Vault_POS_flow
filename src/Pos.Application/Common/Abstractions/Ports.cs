@@ -57,6 +57,33 @@ public interface ICurrentUser
     string? RoleSnapshot { get; }
 }
 
+/// <summary>Scoped identity override used only by trusted server replay workers.</summary>
+public interface ICurrentUserOverride
+{
+    UserId? UserId { get; }
+    DeviceId? DeviceId { get; }
+    LocationId? LocationId { get; }
+    CorrelationId CorrelationId { get; }
+    void Set(UserId userId, DeviceId deviceId, LocationId locationId, CorrelationId correlationId);
+}
+
+/// <summary>Holds an explicit device event identity for one server scope.</summary>
+public sealed class CurrentUserOverride : ICurrentUserOverride
+{
+    public UserId? UserId { get; private set; }
+    public DeviceId? DeviceId { get; private set; }
+    public LocationId? LocationId { get; private set; }
+    public CorrelationId CorrelationId { get; private set; }
+
+    public void Set(UserId userId, DeviceId deviceId, LocationId locationId, CorrelationId correlationId)
+    {
+        UserId = userId;
+        DeviceId = deviceId;
+        LocationId = locationId;
+        CorrelationId = correlationId;
+    }
+}
+
 /// <summary>
 /// Answers permission questions. The implementation resolves roles, overrides
 /// and, on a device, the cached snapshot; callers never reason about roles.

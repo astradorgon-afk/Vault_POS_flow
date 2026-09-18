@@ -254,6 +254,88 @@ public sealed class PosSaleSummary
     public decimal NetTotal { get; set; }
 }
 
+/// <summary>A product/location pair repeatedly refused by the stock policy.</summary>
+public sealed class PosNegativeStockSummary
+{
+    public Guid LocationId { get; set; }
+    public string? LocationCode { get; set; }
+    public Guid ProductId { get; set; }
+    public string? Sku { get; set; }
+    public string? ProductName { get; set; }
+    public int Attempts { get; set; }
+    public decimal TotalShortfall { get; set; }
+}
+
+/// <summary>A product/location pair with repeated physical-count variance.</summary>
+public sealed class PosRepeatVariance
+{
+    public Guid LocationId { get; set; }
+    public Guid ProductId { get; set; }
+    public string? Sku { get; set; }
+    public string? ProductName { get; set; }
+    public int Occurrences { get; set; }
+    public decimal TotalAbsoluteVarianceValue { get; set; }
+}
+
+/// <summary>Scoped inventory availability totals for the owner dashboard.</summary>
+public sealed class PosInventoryOverview
+{
+    public decimal AvailableQuantity { get; set; }
+    public decimal InTransitQuantity { get; set; }
+    public decimal QuarantineQuantity { get; set; }
+    public int LowStockItems { get; set; }
+    public int OutOfStockItems { get; set; }
+    public int OverStockItems { get; set; }
+}
+
+/// <summary>The movement chain for one inventory document.</summary>
+public sealed class PosInventoryTimeline
+{
+    public string DocumentType { get; set; } = string.Empty;
+    public Guid DocumentId { get; set; }
+    public string ReferenceNumber { get; set; } = string.Empty;
+    public List<PosInventoryTimelineGroup> Groups { get; set; } = [];
+}
+
+public sealed class PosInventoryTimelineGroup
+{
+    public Guid MovementGroupId { get; set; }
+    public string MovementType { get; set; } = string.Empty;
+    public string ReferenceNumber { get; set; } = string.Empty;
+    public DateTimeOffset OccurredAtUtc { get; set; }
+    public DateTimeOffset RecordedAtUtc { get; set; }
+    public List<PosInventoryTimelineLeg> Legs { get; set; } = [];
+}
+
+public sealed class PosInventoryTimelineLeg
+{
+    public Guid MovementId { get; set; }
+    public short LegNumber { get; set; }
+    public Guid ProductId { get; set; }
+    public string ProductName { get; set; } = string.Empty;
+    public Guid LocationId { get; set; }
+    public string State { get; set; } = string.Empty;
+    public decimal QuantityDelta { get; set; }
+    public decimal UnitCost { get; set; }
+    public Guid? SourceLocationId { get; set; }
+    public Guid? DestinationLocationId { get; set; }
+    public Guid? ReversesMovementGroupId { get; set; }
+}
+
+/// <summary>An open synchronization failure requiring operator attention.</summary>
+public sealed class PosSyncFailure
+{
+    public Guid Id { get; set; }
+    public Guid EventId { get; set; }
+    public Guid DeviceId { get; set; }
+    public string ErrorCode { get; set; } = string.Empty;
+    public string ErrorMessage { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int AttemptCount { get; set; }
+    public DateTimeOffset? NextRetryAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
 /// <summary>A completed sale as returned by the detail route.</summary>
 public sealed class PosSaleDetail
 {

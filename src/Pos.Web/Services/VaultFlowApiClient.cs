@@ -225,6 +225,56 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return GetAsync<List<PosSaleSummary>>(path, cancellationToken);
     }
 
+    /// <summary>Gets the highest repeated negative-stock attempts in the last window.</summary>
+    public Task<ApiResult<List<PosNegativeStockSummary>>> GetNegativeStockSummaryAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        => GetAsync<List<PosNegativeStockSummary>>(
+            FormattableString.Invariant($"/api/v1/inventory/exceptions/negative-attempts/summary?from={from:O}&to={to:O}"),
+            cancellationToken);
+
+    /// <summary>Gets products with repeated posted count variances in the last window.</summary>
+    public Task<ApiResult<List<PosRepeatVariance>>> GetRepeatVariancesAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        => GetAsync<List<PosRepeatVariance>>(
+            FormattableString.Invariant($"/api/v1/inventory/counts/repeat-variances?from={from:O}&to={to:O}"),
+            cancellationToken);
+
+    /// <summary>Gets scoped inventory availability and threshold totals.</summary>
+    public Task<ApiResult<PosInventoryOverview>> GetInventoryOverviewAsync(
+        CancellationToken cancellationToken)
+        => GetAsync<PosInventoryOverview>(
+            "/api/v1/dashboard/inventory-overview", cancellationToken);
+
+    /// <summary>Gets the authorization-scoped movement chain for a document.</summary>
+    public Task<ApiResult<PosInventoryTimeline>> GetInventoryTimelineAsync(
+        string documentType, Guid documentId, CancellationToken cancellationToken)
+        => GetAsync<PosInventoryTimeline>(
+            FormattableString.Invariant($"/api/v1/inventory/timeline/{Uri.EscapeDataString(documentType)}/{documentId:D}"),
+            cancellationToken);
+
+    /// <summary>Gets open synchronization failures for authorized operators.</summary>
+    public Task<ApiResult<List<PosSyncFailure>>> GetSyncFailuresAsync(
+        int limit, CancellationToken cancellationToken)
+        => GetAsync<List<PosSyncFailure>>(
+            FormattableString.Invariant($"/api/v1/sync/failures?limit={limit}"),
+            cancellationToken);
+
+    /// <summary>Schedules an authorized synchronization failure for retry.</summary>
+    public Task<ApiResult<PosSyncFailure>> RetrySyncFailureAsync(
+        Guid failureId, CancellationToken cancellationToken)
+        => PostAsync<PosSyncFailure>(
+            FormattableString.Invariant($"/api/v1/sync/failures/{failureId:D}/retry"),
+            new { },
+            cancellationToken);
+
+    /// <summary>Dismisses an authorized synchronization failure with a note.</summary>
+    public Task<ApiResult<PosSyncFailure>> DismissSyncFailureAsync(
+        Guid failureId, string note, CancellationToken cancellationToken)
+        => PostAsync<PosSyncFailure>(
+            FormattableString.Invariant($"/api/v1/sync/failures/{failureId:D}/dismiss"),
+            new { note },
+            cancellationToken);
+
     /// <summary>Gets a completed sale with its lines and payments.</summary>
     public Task<ApiResult<PosSaleDetail>> GetSaleAsync(
         Guid saleId, CancellationToken cancellationToken)

@@ -124,6 +124,66 @@ public sealed class PostgresBalanceConcurrencyTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task ParallelSales_AgainstOneBucket_AllSucceed_AndConverge()
+    {
+        Skip.IfNot(DockerAvailable, "Docker is not available on this machine.");
+        const int writerCount = 4;
+        const decimal openingQuantity = 100m;
+        const decimal perSale = 5m;
+
+        await PostAndCommitAsync(Receipt(openingQuantity, 45m));
+
+        using Barrier startGate = new(writerCount);
+        Result<PostedMovementGroup>[] results = await Task.WhenAll(
+            Enumerable.Range(0, writerCount)
+                .Select(_ => Task.Run(() => PostInOwnContextAsync(
+                    startGate,
+                    Sale(perSale, 45m))))
+                .ToArray()).WaitAsync(TimeSpan.FromSeconds(120));
+
+        results.Should().OnlyContain(
+            result => result.IsSuccess,
+            because: string.Join("; ", results.SelectMany(result => result.Errors).Select(error => error.Code)));
+
+        await using PosDbContext verify = new(_options);
+        (await verify.InventoryBalances.SingleAsync(b => b.LocationId == Main && b.State == InventoryState.Available))
+            .Quantity.Should().Be(openingQuantity - writerCount * perSale);
+        (await verify.InventoryBalances.SingleAsync(b => b.LocationId == Supplier && b.State == InventoryState.External))
+            .Quantity.Should().Be(-openingQuantity + writerCount * perSale);
+        (await verify.InventoryMovements.CountAsync()).Should().Be(2 + writerCount * 2);
+    }
+
+    [SkippableFact]
+    public async Task ParallelTransferDispatches_FromOneBucket_AllSucceed_AndConverge()
+    {
+        Skip.IfNot(DockerAvailable, "Docker is not available on this machine.");
+        const int writerCount = 4;
+        const decimal openingQuantity = 100m;
+        const decimal perTransfer = 10m;
+
+        await PostAndCommitAsync(Receipt(openingQuantity, 45m));
+
+        using Barrier startGate = new(writerCount);
+        Result<PostedMovementGroup>[] results = await Task.WhenAll(
+            Enumerable.Range(0, writerCount)
+                .Select(_ => Task.Run(() => PostInOwnContextAsync(
+                    startGate,
+                    TransferDispatch(perTransfer, 45m))))
+                .ToArray()).WaitAsync(TimeSpan.FromSeconds(120));
+
+        results.Should().OnlyContain(
+            result => result.IsSuccess,
+            because: string.Join("; ", results.SelectMany(result => result.Errors).Select(error => error.Code)));
+
+        await using PosDbContext verify = new(_options);
+        (await verify.InventoryBalances.SingleAsync(b => b.LocationId == Main && b.State == InventoryState.Available))
+            .Quantity.Should().Be(openingQuantity - writerCount * perTransfer);
+        (await verify.InventoryBalances.SingleAsync(b => b.LocationId == Main && b.State == InventoryState.InTransit))
+            .Quantity.Should().Be(writerCount * perTransfer);
+        (await verify.InventoryMovements.CountAsync()).Should().Be(2 + writerCount * 2);
+    }
+
+    [SkippableFact]
     public async Task AWriteAgainstAStaleProjection_IsRefusedByTheConcurrencyToken()
     {
         Skip.IfNot(DockerAvailable, "Docker is not available on this machine.");
@@ -211,12 +271,19 @@ public sealed class PostgresBalanceConcurrencyTests : IAsyncLifetime
 
     private async Task<Result<PostedMovementGroup>> PostInOwnContextAsync(Barrier startGate, decimal quantity)
     {
+        return await PostInOwnContextAsync(startGate, Receipt(quantity, 45m));
+    }
+
+    private async Task<Result<PostedMovementGroup>> PostInOwnContextAsync(
+        Barrier startGate,
+        MovementGroupSpec spec)
+    {
         await using PosDbContext context = new(_options);
         InventoryLedger ledger = new(context, new FixedClock(Now), new StrictLedgerPolicyProvider());
 
         startGate.SignalAndWait();
 
-        return await ledger.PostAsync(Receipt(quantity, 45m), CancellationToken.None);
+        return await ledger.PostAsync(spec, CancellationToken.None);
     }
 
     private async Task PostAndCommitAsync(MovementGroupSpec spec)
@@ -239,6 +306,34 @@ public sealed class PostgresBalanceConcurrencyTests : IAsyncLifetime
                 Coke, null, Supplier, LocationKind.External, InventoryState.External, -quantity, unitCost, false),
             new MovementLegSpec(
                 Coke, null, Main, LocationKind.MainWarehouse, InventoryState.Available, quantity, unitCost, false),
+        ],
+        new LedgerActor(Actor, Actor, null, CorrelationId.New()),
+        Now,
+            DateOnly.FromDateTime(Now.UtcDateTime));
+
+    private static MovementGroupSpec Sale(decimal quantity, decimal unitCost) => new(
+        EventId.New(),
+        InventoryMovementType.PosSale,
+        ReferenceDocumentType.Sale,
+        Guid.CreateVersion7(),
+        "SAL-2026-PG-CONCURRENT",
+        [
+            new MovementLegSpec(Coke, null, Main, LocationKind.MainWarehouse, InventoryState.Available, -quantity, unitCost, false),
+            new MovementLegSpec(Coke, null, Supplier, LocationKind.External, InventoryState.External, quantity, unitCost, false),
+        ],
+        new LedgerActor(Actor, Actor, null, CorrelationId.New()),
+        Now,
+        DateOnly.FromDateTime(Now.UtcDateTime));
+
+    private static MovementGroupSpec TransferDispatch(decimal quantity, decimal unitCost) => new(
+        EventId.New(),
+        InventoryMovementType.TransferDispatch,
+        ReferenceDocumentType.TransferShipment,
+        Guid.CreateVersion7(),
+        "SHP-2026-PG-CONCURRENT",
+        [
+            new MovementLegSpec(Coke, null, Main, LocationKind.MainWarehouse, InventoryState.Available, -quantity, unitCost, false),
+            new MovementLegSpec(Coke, null, Main, LocationKind.MainWarehouse, InventoryState.InTransit, quantity, unitCost, false),
         ],
         new LedgerActor(Actor, Actor, null, CorrelationId.New()),
         Now,
