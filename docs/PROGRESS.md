@@ -1629,3 +1629,28 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
 - **Verification:** workflow file updated; no build changes. The publish-images
   job is ready to run on the next push to main.
 
+
+### C73 — Phase 18 MAUI client packaging (`ci(phase-18-packaging)`)
+
+- **Android APK and AAB (App Bundle).** CI adds packaging steps to
+  `build-client-android` job: unsigned APK on pull requests (for development
+  testing), signed APK and AAB on main branch pushes (when ANDROID_KEYSTORE_*
+  secrets configured). AAB targets Google Play Store distribution.
+- **Windows MSIX.** CI adds packaging steps to `build-client-windows` job:
+  unsigned MSIX on pull requests, signed MSIX on main when
+  WINDOWS_CERTIFICATE_* secrets configured. Notes reference WixToolset or
+  SignTool for production signing (not fully automated).
+- **Secret-gated signing.** All signing depends on GitHub Secrets:
+  `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+  `ANDROID_KEY_PASSWORD` (Android); `WINDOWS_CERTIFICATE_BASE64`,
+  `WINDOWS_CERTIFICATE_PASSWORD` (Windows). Unsigned packages build on every
+  pull request for testing; signed only on main when secrets present.
+- **Artifact upload.** All packages uploaded as workflow artifacts for
+  download, inspection, and manual distribution (Play Store upload, sideload,
+  etc.).
+- **Verification:** workflow file updated; no code changes. Packaging ready to
+  run when signing secrets are configured.
+- **Complete Phase 18:** all eight rows now have implementation or
+  infrastructure in place. Remaining work is operational (registering signing
+  keys, setting up distribution channels, testing end-to-end).
+

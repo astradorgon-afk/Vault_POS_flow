@@ -460,8 +460,11 @@ MAUI packaging, CI publishing).)*
       structured logging sinks (Seq, Splunk, ELK). Meters (`System.Diagnostics.Metrics`:
       sale latency, sync rate, ledger append latency) deferred pending exporter
       selection — ARCHITECTURE.md §12 documents their names and purpose.)*
-- [ ] MAUI packaging: MSIX (Windows), signed AAB (Android)
-      *(CI builds the client and packages nothing)*
+- [x] MAUI packaging: MSIX (Windows), signed AAB (Android)
+      *(C73: Android packaging step builds unsigned APK on PR, signed APK and AAB
+      on main (with ANDROID_KEYSTORE_* secrets). Windows packaging publishes unsigned
+      on PR, signed MSIX on main (with WINDOWS_CERTIFICATE_* secrets). Both use
+      release builds; Windows signing notes document the WixToolset requirement.)*
 - [x] CI: build, test, analyze, publish images
       *(C72: publish-images job builds API and Web containers on main branch,
       pushes to GitHub Container Registry (ghcr.io) tagged with commit SHA,
