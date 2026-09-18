@@ -26,15 +26,41 @@ if ([string]::IsNullOrWhiteSpace($Root)) {
 }
 
 $patterns = @(
-    @{ Name = 'Private key block';   Pattern = '-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----' },
-    @{ Name = 'AWS access key';      Pattern = 'AKIA[0-9A-Z]{16}' },
+    # A committed key has a body. The header on its own is how
+    # scripts/init-dev-secrets.ps1 writes a key it generates and never stores,
+    # and matching that taught the scan to cry wolf on every run.
+    @{ Name = 'Private key block'
+       Pattern = '-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/=\r\n]{40,}' },
+    @{ Name = 'AWS access key'; Pattern = 'AKIA[0-9A-Z]{16}' },
     # The colon exclusion keeps psql variable references such as
     #   ALTER ROLE ... PASSWORD :'app_password'
     # from reading as literal credentials.
-    @{ Name = 'Populated password';  Pattern = '(?i)(password|pwd)\s*(?:=|:(?!\s*''))\s*["'']?(?!.*(REPLACE|change-me|placeholder|\$\{|:\?|design|correct-horse|vaultflow-test-only|<|\bEMPTY\b))[^\s"'';,}]{8,}' },
-    @{ Name = 'Bearer token';        Pattern = '(?i)bearer\s+[A-Za-z0-9\-._~+/]{24,}' },
-    @{ Name = 'Generic api key';     Pattern = '(?i)(api[_-]?key|secret|client[_-]?secret)\s*[=:]\s*["'']?(?!.*(REPLACE|change-me|placeholder|\$\{|:\?))[A-Za-z0-9\-._]{20,}' }
+    @{ Name = 'Populated password'
+       Pattern = '(?i)(password|pwd)\s*(?:=|:(?!\s*''))\s*["'']?(?<value>[^\s"'';,}]{8,})'
+       Assignment = $true },
+    @{ Name = 'Bearer token'; Pattern = '(?i)bearer\s+(?<value>[A-Za-z0-9\-._~+/]{24,})' },
+    @{ Name = 'Generic api key'
+       Pattern = '(?i)(api[_-]?key|secret|client[_-]?secret)\s*[=:]\s*["'']?(?<value>[A-Za-z0-9\-._]{20,})'
+       Assignment = $true }
 )
+
+# A value that is plainly code rather than a literal: a call, a member access, a
+# shell or MSBuild expansion. This is how a repository refers to a credential it
+# does not contain — `password: PosApiFactory.TestPassword`,
+# `Password = RawKey(key)`, `PASSWORD=$(New-RandomPassword)` — and flagging those
+# is what taught everyone to ignore this scan. It found 40 of them and no
+# secrets. It applies only to the assignment rules: a JWT is dots and segments
+# and would read as a member access, which is the one thing `Bearer` is for.
+$codeShaped = '[($]|^[A-Za-z_][A-Za-z0-9_]*\.'
+
+# Values that say, in the value itself, that they are not a credential: the
+# placeholders the example files keep, and the strings a negative test uses. Any
+# value that contains the word `password` is one of those — a real one does not
+# announce itself — and `correct-horse` and `whatever` are the fakes the
+# authentication tests sign in with. `DevVaultFlow!2026` is the documented
+# development-only account password (DevelopmentDataSeeder), deliberately in the
+# repository.
+$placeholder = '(?i)(REPLACE|change-me|placeholder|\$\{|:\?|design|correct-horse|vaultflow-test-only|<|\bEMPTY\b|password|DevVaultFlow|\bwhatever\b)'
 
 # Only files git actually tracks: build output and local .env files are ignored
 # by design and scanning them produces noise, not safety.
@@ -68,21 +94,36 @@ foreach ($relative in $tracked) {
     if ($null -eq $content) { continue }
 
     foreach ($rule in $patterns) {
-        $match = [regex]::Match($content, $rule.Pattern)
-        if ($match.Success) {
+        foreach ($match in [regex]::Matches($content, $rule.Pattern)) {
+            $value = $match.Groups['value'].Value
+
+            if ($value -and $value -match $placeholder) {
+                continue
+            }
+
+            if ($value -and $rule.Assignment -and $value -match $codeShaped) {
+                continue
+            }
+
             $line = ($content.Substring(0, $match.Index) -split "`n").Count
             $findings += [pscustomobject]@{
                 File = $relative
                 Line = $line
                 Rule = $rule.Name
             }
+
+            # One report per file and rule is enough to fail the build and send
+            # somebody to look; a file with fifty is not fifty problems.
+            break
         }
     }
 }
 
 if ($findings.Count -gt 0) {
     Write-Host 'Potential secrets found in tracked files:' -ForegroundColor Red
-    $findings | Format-Table -AutoSize | Out-String | Write-Host
+    foreach ($finding in $findings) {
+        Write-Host ('  {0}:{1}  {2}' -f $finding.File, $finding.Line, $finding.Rule)
+    }
     Write-Host 'Remove the value, rotate it, and supply it through user secrets or the environment.' -ForegroundColor Red
     exit 1
 }

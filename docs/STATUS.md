@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 17 complete (C69); Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 complete (C58–C65), opening with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, C62, purchasing and supplier performance, C63, the inventory exception reports, C64, audit, quarantine and expiry, C65, CSV export, C66, the owner dashboard's overview, C67, its exception board, and C68, the document drill-down — Phase 16 complete; C69 closes Phase 17 with the CI coverage gate and the concurrency suites
+**Last updated:** 2026-09-18 · **Milestone:** Phase 17 complete (C69), CI repaired (C70); Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 complete (C58–C65), opening with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, C62, purchasing and supplier performance, C63, the inventory exception reports, C64, audit, quarantine and expiry, C65, CSV export, C66, the owner dashboard's overview, C67, its exception board, and C68, the document drill-down — Phase 16 complete; C69 closes Phase 17 with the CI coverage gate and the concurrency suites, and C70 repairs the two CI jobs that had been failing since the workflow was written
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -1438,6 +1438,48 @@ out.**
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
 
+C70 makes CI able to pass at all. The workflow has run twice since it was
+written, both times on `main`, and both times two of its five jobs failed — which
+is why nothing had noticed: the runs are on `main` only, and the work happens on
+branches.
+
+**`verify-migrations` never restored.** `dotnet ef` builds the project it is
+pointed at, and a build with no assets file fails with `NETSDK1004` before it
+reads a model at all. The job had been failing on that, not on a pending
+migration — so the check that exists to catch a schema drifting from its code has
+never once run. It restores first now; both contexts come back clean.
+
+**The secret scan cried wolf forty times.** Every finding was a reference rather
+than a credential: `password = PosApiFactory.TestPassword` in thirty test files,
+`Password = RawKey(key)`, `PASSWORD=$(New-RandomPassword)` in the generator
+script, and the `-----BEGIN RSA PRIVATE KEY-----` header that same script writes
+into a key it never stores. A gate that fails on every run is not a gate, and
+this one had been failing since the first commit.
+
+Three changes, each aimed at a shape rather than at a file. A private key is now
+matched only with a **body** — a header alone is what a generator writes. A value
+that is plainly **code** — a call, a member access, a shell expansion — is a
+reference to a credential, not one; that test applies only to the assignment
+rules, because a JWT is dots and segments and would otherwise read as a member
+access, and `Bearer` exists for exactly those. And a value that **says it is not
+a credential** is taken at its word: anything containing `password`, the
+placeholders the example files keep, and the two fakes the authentication tests
+sign in with. `DevVaultFlow!2026` is allowed by name, being the documented
+development-only account password.
+
+Verified both ways: the repository comes back clean, and a scratch repository
+carrying a real-shaped PEM key with a body, an `AKIA` key, a populated connection
+string, a password in YAML, an API key and a JWT is caught on all six, while a
+file of the false-positive shapes beside them stays quiet. `Format-Table` had
+also been rendering the findings as blank lines on a host that reports no width,
+so the one run that did fail printed nothing to act on; the rows are written out
+directly now.
+
+**This is fixed but not yet proven green**, because the workflow does not run on
+branches. The next push to `main` is the first run that can pass.
+
+---
+
 C69 opens Phase 17 with the two rows nothing in the repository answered: a gate on
 coverage, and the concurrency tests for parallel sales and transfer races. The
 other six rows were already met by suites built across earlier phases, and were
@@ -2344,6 +2386,7 @@ Stated plainly so they are not mistaken for finished work:
 
 | Gap | Where | Impact |
 |---|---|---|
+| CI has never passed | `.github/workflows/ci.yml` | Two of five jobs failed on both runs to date — `verify-migrations` on a missing restore, `secret-scan` on forty false positives. Both are fixed in C70, and neither fix is proven green yet: the workflow runs on `main` only, so the next push there is the first run that can pass. |
 | Counts cover the Available state only; no per-location auto-approval threshold | Phase 9 | Damaged, quarantined and expired stock is adjusted, not counted; every adjustment needs an approver (ADR-0031). |
 | `inventory_movement` and `audit_log` not partitioned | Phase 4 | By decision (ADR-0030): revisit at about 50 million ledger rows, or with audit archiving (2033). |
 | `AutoPassInspection` per location/category not built | Phase 5 | Receipts always land in `PendingInspection`; the trusted-category fast path is a settings-driven follow-up. |

@@ -145,6 +145,13 @@ jobs:
       - name: Install EF tools
         run: dotnet tool install --global dotnet-ef --version 10.0.9
 
+      # `dotnet ef` builds the project it is pointed at, and a build with no
+      # assets file fails with NETSDK1004 before it ever reads the model. This
+      # job never restored, so it had been failing on that rather than on a
+      # pending migration.
+      - name: Restore
+        run: dotnet restore src/Pos.Infrastructure/Pos.Infrastructure.csproj
+
       # A model change without a matching migration is the classic way a schema
       # drifts from the code that assumes it. The server and device databases
       # have separate contexts and migration sets, so each is checked.

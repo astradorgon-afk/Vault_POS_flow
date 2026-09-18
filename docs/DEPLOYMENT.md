@@ -166,6 +166,11 @@ locally and never transmits a private key.
 7. secret scan
 8. publish API/Web container images on `main`
 
+`verify-migrations` restores before it runs `dotnet ef`: the tool builds the
+project it is pointed at, and without an assets file it fails with `NETSDK1004`
+before it reads the model, which is not the same answer as "the model has
+pending changes".
+
 The MAUI client is built on Windows runners for the Windows target and Linux
 runners for Android. Client builds are gated on the shared projects compiling and
 the shared UI tests passing.

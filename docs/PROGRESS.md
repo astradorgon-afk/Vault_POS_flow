@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is complete at C68**: the overview, the exception board and the document drill-down. **Phase 17 is complete at C69**: the CI coverage gate and the concurrency suites closed the two rows nothing answered; the other six were marked against the suites that already met them. Next is Phase 18, deployment. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is complete at C68**: the overview, the exception board and the document drill-down. **Phase 17 is complete at C69**: the CI coverage gate and the concurrency suites closed the two rows nothing answered; the other six were marked against the suites that already met them. C70 then repaired the two CI jobs that had been failing since the workflow was written. Next is Phase 18, deployment. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -510,6 +510,29 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     unwritten, now recorded there: a sequence-gap **timeout**, which has no
     mechanism at all, and a backlog of the size that matrix names. 4 tests; no
     migration.
+- [x] **CI repair (C70, out of phase):** the workflow has run twice, both on
+  `main`, and both times two of its five jobs failed — unnoticed because the runs
+  are on `main` only and the work happens on branches.
+  **`verify-migrations` never restored**: `dotnet ef` builds the project it is
+  pointed at, and a build with no assets file fails with `NETSDK1004` before it
+  reads a model, so the check meant to catch a schema drifting from its code has
+  never once run. It restores first now and both contexts come back clean.
+  **The secret scan cried wolf forty times**, every finding a reference rather
+  than a credential — `password = PosApiFactory.TestPassword` in thirty test
+  files, `Password = RawKey(key)`, `PASSWORD=$(New-RandomPassword)`, and the
+  `-----BEGIN RSA PRIVATE KEY-----` header the generator script writes into a key
+  it never stores. Three fixes, each aimed at a shape: a private key needs a
+  **body** to match; a value that is plainly **code** is a reference, and that
+  test applies only to the assignment rules because a JWT would otherwise read as
+  a member access and `Bearer` exists for those; and a value that **says it is
+  not a credential** is taken at its word. Verified both ways — the repository
+  comes back clean, and a scratch repository carrying a PEM key with a body, an
+  `AKIA` key, a populated connection string, a password in YAML, an API key and a
+  JWT is caught on all six while the false-positive shapes beside them stay
+  quiet. `Format-Table` had also been printing findings as blank lines on a host
+  that reports no width, so the one run that did fail printed nothing to act on.
+  **Not yet proven green**: the workflow does not run on branches, so the next
+  push to `main` is the first run that can pass.
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
 
 ---
