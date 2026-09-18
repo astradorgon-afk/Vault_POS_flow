@@ -313,7 +313,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       *(C58: margin sits on the rows that earned it rather than in a second
       report. Revenue is net of the VAT collected — not the taxable base, which
       is zero on an exempt line and would report a pharmacy as earning nothing)*
-- [ ] Inventory on hand, valuation, movement history
+- [x] Inventory on hand, valuation, movement history
+      *(C59: the shelf count carries no money and needs only `report.view`;
+      the valuation is the same rows with cost on them behind
+      `report.view.financial`. Counterparty legs are excluded from both, and
+      unit cost is derived from the totals rather than averaged from the buckets)*
 - [ ] Warehouse distribution, transfer reports
 - [ ] Purchase history and supplier performance
 - [ ] Adjustments, expiry, damage, spoilage, shrinkage

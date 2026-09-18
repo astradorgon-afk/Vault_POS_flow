@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin, and C59, the inventory reports
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,249 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 334, Security 52, Architecture 25, API 208** (2026-09-18, through C58 the sales analysis). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C58 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,263 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 345, Security 52, Architecture 25, API 211** (2026-09-18, through C59 the inventory reports). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C59 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1431,6 +1431,54 @@ out.**
 **That closes the last Phase 13 checkbox.** Three named things sit outside the
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
+
+C59 reports the stock itself. `GET /api/v1/reports/inventory/on-hand` lists what
+is on the shelf by product and location, `/inventory/valuation` what it is worth,
+and `/inventory/movement` the ledger legs recorded in a window.
+
+**The shelf count carries no money, and that is the design.** On-hand needs only
+`report.view`; the valuation is the same rows with cost and value on them and
+needs `report.view.financial`. Stockroom staff — who hold the first and not the
+second — can see what is standing there without seeing what it cost. They are two
+routes rather than one route whose columns appear and disappear by permission,
+because a response whose shape depends on who asked is one no client can be
+written against. The API test uses an `InventoryStaff` account precisely because
+the role catalogue already draws that line.
+
+**`available` is a column of its own** because it is the only number a till may
+sell from, and a reader should not have to pick it out of a breakdown. `onHand` is
+everything physically standing there, sellable or not; `inFlight` is stock
+dispatched on a transfer and not yet received — still the business's, but not at
+the location. Those three groupings are read from `InventoryStates` in the domain
+rather than re-listed in a query, so a state added later cannot mean one thing to
+the ledger and another to the report.
+
+**Unit cost is derived from the totals, never averaged from the buckets.** One
+unit at 100 and a thousand at 10 average to 10.09; averaging the two bucket
+averages says 55, and somebody reorders against it. The test is exactly that
+shape. Where the quantity is zero the unit cost is zero: a residual value left
+behind by rounding is something to investigate, not a division to attempt. The
+report's total covers everything that matched rather than the rows that fitted
+under `limit`, because a total that only covers the page is one somebody will put
+in a set of accounts.
+
+**The counterparty leg is excluded from both**, which the movement test found by
+returning every sale twice. Every sale and delivery has a leg at an `External`
+location; counting those buckets as stock would report the whole history of
+everything ever sold as sitting on a shelf, and listing them in a history would
+double its length to answer no question anybody asked.
+
+**Movement history is ordered by when the ledger wrote a leg**, not by when it
+happened. An offline sale uploaded on Tuesday occurred on Monday, and a history
+reordered by occurrence would never tie back to a balance — the test posts exactly
+that pair and asserts the recorded order.
+
+Nothing is re-derived: the reports read the balances the ledger maintains rather
+than recomputing them from the movements, because a report that recomputed would
+sooner or later disagree with the number a till refuses a sale on, and then there
+would be two answers to one question.
+
+---
 
 C58 opens Phase 15. `GET /api/v1/reports/sales` analyses completed sales over a
 period, cut by product, category, store or cashier, and

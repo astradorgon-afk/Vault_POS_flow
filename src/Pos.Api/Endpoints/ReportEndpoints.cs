@@ -48,6 +48,30 @@ public static class ReportEndpoints
             .WithName("GetSalesPaymentBreakdown")
             .WithSummary("Breaks a period's takings down by how they were paid.");
 
+        group.MapGet("/inventory/on-hand", GetOnHandAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetInventoryOnHand")
+            .WithSummary("Lists what is on the shelf, by product and location.");
+
+        group.MapGet("/inventory/valuation", GetValuationAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewFinancialReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetInventoryValuation")
+            .WithSummary("Values the stock held, by product and location.");
+
+        group.MapGet("/inventory/movement", GetMovementsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetInventoryMovement")
+            .WithSummary("Lists the ledger legs recorded in a window.");
+
         return app;
     }
 
@@ -136,6 +160,106 @@ public static class ReportEndpoints
             .ConfigureAwait(false);
 
         return TypedResults.Ok(rows);
+    }
+
+    /// <summary>
+    /// What is on the shelf. Deliberately carries no money: what stock cost is a
+    /// financial question with a permission of its own, and a shelf count that
+    /// discloses margin is an operational report only head office may open.
+    /// </summary>
+    private static async Task<IResult> GetOnHandAsync(
+        [FromServices] IInventoryReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? productId = null,
+        [FromQuery] bool includeEmpty = false,
+        [FromQuery] int limit = 200)
+    {
+        Result<InventoryReportQuery> query = await QueryAsync(
+            evaluator, currentUser, locationId, productId, includeEmpty, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        return query.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<InventoryOnHandRow>>.Failure(query.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetOnHandAsync(query.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetValuationAsync(
+        [FromServices] IInventoryReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? productId = null,
+        [FromQuery] bool includeEmpty = false,
+        [FromQuery] int limit = 200)
+    {
+        Result<InventoryReportQuery> query = await QueryAsync(
+            evaluator, currentUser, locationId, productId, includeEmpty, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        return query.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<InventoryValuationReport>.Failure(query.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetValuationAsync(query.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetMovementsAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IInventoryReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? productId = null,
+        [FromQuery] int limit = 200)
+    {
+        if (to < from || (to - from).TotalDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<InventoryMovementReport>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<InventoryReportQuery> query = await QueryAsync(
+            evaluator, currentUser, locationId, productId, includeEmpty: false, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        return query.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<InventoryMovementReport>.Failure(query.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetMovementsAsync(from, to, query.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<Result<InventoryReportQuery>> QueryAsync(
+        DatabasePermissionEvaluator evaluator,
+        ICurrentUser currentUser,
+        Guid? locationId,
+        Guid? productId,
+        bool includeEmpty,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        Result<IReadOnlyCollection<LocationId>> scope = await ScopeAsync(
+            evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? Result<InventoryReportQuery>.Failure(scope.Errors)
+            : Result<InventoryReportQuery>.Success(new InventoryReportQuery(
+                scope.Value,
+                productId is { } product ? new ProductId(product) : null,
+                includeEmpty,
+                Math.Clamp(limit, 1, MaxRows)));
     }
 
     private static Error? Invalid(DateOnly from, DateOnly to)

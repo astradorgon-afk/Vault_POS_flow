@@ -818,12 +818,15 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58):
+Built (C7, C58, C59):
 
 ```
-GET /api/v1/reports/daily-sales               report.view   (POS day summary, C7)
-GET /api/v1/reports/sales                     report.view   (C58)
-GET /api/v1/reports/sales/payments            report.view   (C58)
+GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
+GET /api/v1/reports/sales                     report.view            (C58)
+GET /api/v1/reports/sales/payments            report.view            (C58)
+GET /api/v1/reports/inventory/on-hand         report.view            (C59)
+GET /api/v1/reports/inventory/valuation       report.view.financial  (C59)
+GET /api/v1/reports/inventory/movement        report.view            (C59)
 ```
 
 `GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
@@ -841,10 +844,6 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/reports/inventory/on-hand         report.view
-GET /api/v1/reports/inventory/on-hand         report.view
-GET /api/v1/reports/inventory/valuation       report.view.financial
-GET /api/v1/reports/inventory/movement        report.view
 GET /api/v1/reports/inventory/ageing          report.view
 GET /api/v1/reports/inventory/dead-stock      report.view
 GET /api/v1/reports/transfers                 report.view
@@ -900,6 +899,43 @@ its reversal never land in different reports.
 **Nothing earned is a margin of nothing.** A line given away inside a paying sale
 reports `marginPercent: 0` and a negative gross profit, rather than dividing by
 zero.
+
+### 11.2 On hand, valuation and movement
+
+**On hand carries no money, and that is the point.** `inventory/on-hand` needs
+only `report.view`; `inventory/valuation` is the same rows with cost and value on
+them and needs `report.view.financial`. Stockroom staff can see what is on the
+shelf without seeing what it cost — a shelf count that quietly discloses margin is
+an operational report only head office may open. The two are separate routes
+rather than one route whose columns appear and disappear, because a response whose
+shape depends on who asked is one no client can be written against.
+
+`available` is a column of its own because it is the only number a till may sell
+from; `onHand` is everything physically standing there, sellable or not; `inFlight`
+is stock dispatched on a transfer and not yet received — still the business's, but
+not at the location. The `byState` breakdown omits states holding nothing. These
+groupings come from `InventoryStates` in the domain rather than being re-listed in
+a query, so a new state cannot appear in one place and not the other.
+
+**Valuation derives unit cost from the totals**, never by averaging the batch
+buckets: an average of averages weights a batch holding one unit the same as one
+holding a thousand. Where the quantity is zero the unit cost is zero, because a
+residual value left by rounding is something to investigate, not a division to
+attempt. The report's own total covers everything that matched, not just the rows
+that fitted under `limit` — a total that only covers the page is one somebody will
+put in a set of accounts.
+
+**Movement history is ordered by `recordedAtUtc`**, when the ledger wrote the leg,
+not by when it happened. An offline sale uploaded on Tuesday occurred on Monday,
+and a history reordered by occurrence would never tie back to a balance.
+
+**Counterparty legs are excluded** from both the shelf counts and the movement
+history. Every sale and delivery has one at an `External` location; counting them
+as stock would report the whole history of everything ever sold as sitting on a
+shelf, and listing them would double the length of every history.
+
+An empty bucket is left out unless `includeEmpty=true`: a catalogue of ten
+thousand products at forty stores is four hundred thousand rows of zero.
 
 ---
 

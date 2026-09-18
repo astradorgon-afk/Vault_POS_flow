@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -264,6 +264,27 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     `false` to business-wide authority whatever the caller holds, which would have
     narrowed an owner to one store — and `locationId` may only narrow, never
     widen. 18 tests.
+  - [x] C59 — inventory on hand, valuation and movement history:
+    `GET /api/v1/reports/inventory/on-hand` carries **no money** and needs only
+    `report.view`; `/inventory/valuation` is the same rows with cost and value on
+    them, behind `report.view.financial`. Stockroom staff can see what is on the
+    shelf without seeing what it cost, which is why they are two routes rather
+    than one route whose columns appear and disappear — a response whose shape
+    depends on who asked is one no client can be written against. `available` is
+    its own column because it is the only number a till may sell from; `onHand`
+    is everything physically standing there; `inFlight` is dispatched and not yet
+    received. Those groupings are read from `InventoryStates` in the domain rather
+    than re-listed in a query, so a new state cannot appear in one place and not
+    the other. Unit cost is derived from the totals, never averaged from the batch
+    buckets — an average of averages weights a batch holding one unit the same as
+    one holding a thousand, and the test uses exactly that shape to pin it. The
+    counterparty leg is excluded from both the shelf counts and the movement
+    history: writing the movement test showed every sale coming back twice, and
+    counting the external bucket as stock would report the whole history of
+    everything ever sold as sitting on a shelf. Movement history is ordered by
+    when the ledger wrote a leg, not when it happened, because an offline sale
+    uploaded on Tuesday occurred on Monday and a history reordered by occurrence
+    would never tie back to a balance. 14 tests; no migration.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1286,9 +1307,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C58):** 1,249 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 334, Security 52, Architecture 25,
-  API 208); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+- **Verification (2026-09-18, through C59):** 1,263 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 345, Security 52, Architecture 25,
+  API 211); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by
