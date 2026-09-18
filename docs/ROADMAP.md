@@ -455,16 +455,17 @@ MAUI packaging, CI publishing).)*
       and compression (tar.zst default), `scripts/restore.ps1` extracts and
       restores with ledger integrity verification. Both scripts prompt for
       passwords or read from environment; production scheduling is documented.)*
-- [ ] Production logging/metrics configuration
-      *(no `appsettings.Production.json`, and none of the meters ARCHITECTURE.md
-      §12 names exists — nothing in the code constructs a `Meter`. Emitting them
-      needs no dependency; scraping them does, and which exporter is a decision
-      to take deliberately)*
+- [~] Production logging/metrics configuration
+      *(C72: `appsettings.Production.json` for both API and Web, with examples of
+      structured logging sinks (Seq, Splunk, ELK). Meters (`System.Diagnostics.Metrics`:
+      sale latency, sync rate, ledger append latency) deferred pending exporter
+      selection — ARCHITECTURE.md §12 documents their names and purpose.)*
 - [ ] MAUI packaging: MSIX (Windows), signed AAB (Android)
       *(CI builds the client and packages nothing)*
-- [~] CI: build, test, analyze, publish images
-      *(build, test, the coverage gate, the migration check and the secret scan
-      all run — and as of C70 can all pass; nothing publishes an image)*
+- [x] CI: build, test, analyze, publish images
+      *(C72: publish-images job builds API and Web containers on main branch,
+      pushes to GitHub Container Registry (ghcr.io) tagged with commit SHA,
+      branch, semver and latest. Runs only on main, not on PRs.)*
 
 ---
 

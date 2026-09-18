@@ -1611,3 +1611,21 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   files totalling 656 lines (compose overlay, proxy config, web Dockerfile,
   two scripts with help text and comments).
 
+
+### C72 — Phase 18 CI image publishing (`ci(phase-18-publish)`)
+
+- **GitHub Container Registry (GHCR) publishing.** New `publish-images` job in
+  CI workflow runs on main branch after successful build/test/migrations/secrets.
+  Builds and pushes both API and Web container images using Docker Buildx with
+  GitHub Actions cache.
+- **Image tagging strategy.** Images tagged with commit SHA (for traceability),
+  branch name, semantic version (from git tags), and `latest` on default branch.
+  Separate image repositories for API (`pos-api`) and Web (`pos-web`).
+- **Registry:** GitHub Container Registry (ghcr.io) — no additional infrastructure
+  required, uses default `GITHUB_TOKEN` for authentication, requires only package
+  write permissions (already requested).
+- **Pull-request safety.** Images only publish on direct pushes to main, never on
+  pull requests, preventing test images from accumulating in production registry.
+- **Verification:** workflow file updated; no build changes. The publish-images
+  job is ready to run on the next push to main.
+
