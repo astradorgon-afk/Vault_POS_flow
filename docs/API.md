@@ -818,7 +818,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58, C59, C60, C61):
+Built (C7, C58–C62):
 
 ```
 GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
@@ -831,6 +831,8 @@ GET /api/v1/reports/inventory/ageing          report.view            (C60)
 GET /api/v1/reports/inventory/dead-stock      report.view            (C60)
 GET /api/v1/reports/transfers                 report.view            (C61)
 GET /api/v1/reports/transfers/distribution    report.view            (C61)
+GET /api/v1/reports/purchases                 report.view            (C62)
+GET /api/v1/reports/supplier-performance      report.view            (C62)
 ```
 
 `GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
@@ -848,8 +850,6 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/reports/purchases                 report.view
-GET /api/v1/reports/supplier-performance      report.view
 GET /api/v1/reports/adjustments               report.view
 GET /api/v1/reports/expiry                    report.view
 GET /api/v1/reports/shrinkage                 report.view.financial
@@ -991,6 +991,32 @@ over the creation date would file this month's shipment under the month it was
 requested. `shortfallQuantity` is what left and has not turned up, damaged or
 otherwise — stock still legitimately in transit included, because the number a
 lane is judged on is what has not arrived yet.
+
+### 11.5 Purchasing and supplier performance
+
+Both need only `report.view`, following this section's own permission table. The
+purchases report does carry the order's value, and that is a deliberate line: what
+the business agreed to pay a supplier is not margin and not a stock valuation, and
+the person who raises and receives orders cannot do the job without seeing it.
+Cost of goods sold and what stock is now worth stay behind
+`report.view.financial`.
+
+**Punctuality is scored only where there is something to score.** `onTimeRate` and
+`averageDaysLate` are null when no order in the window carried both an expected
+date and a receipt; counting an unpromised delivery as on time would reward a
+supplier for refusing to commit to a date. `ordersScoredForTime` is reported
+beside the rate, because a supplier who delivered once, late, scores 0% and reads
+identically to one who failed forty times — the denominator is the difference
+between a verdict and an anecdote. `fillRate` is null when nothing was ordered,
+for the same reason.
+
+Lateness is measured against the **first** goods receipt, not the last:
+punctuality is about when the goods started arriving, and a trickle of back-orders
+months later should not rewrite whether the delivery was on time.
+
+Both reports are scoped by the order's destination location. Suppliers are not
+scoped — they are a business-wide list, and a manager who orders from one may see
+how that supplier has treated their store.
 
 ---
 

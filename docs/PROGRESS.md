@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -320,6 +320,26 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     Approve, Pick, Ready, Dispatch and Receive rather than writing the columns, so
     a fixture cannot pass against a lifecycle the domain would refuse. 7 tests; no
     migration.
+  - [x] C62 — purchase history and supplier performance:
+    `GET /api/v1/reports/purchases` lists what was raised in a window with what has
+    arrived against it, and `/supplier-performance` scores each supplier on
+    punctuality, fill rate and quality. **Every rate comes with the count it was
+    computed from**: a supplier who delivered once, late, scores 0% on time and
+    reads identically to one who failed forty times, so `ordersScoredForTime` sits
+    beside `onTimeRate` — the denominator is the difference between a verdict and
+    an anecdote. Punctuality is scored only where an order was both promised a date
+    and received; an unpromised delivery counted as on time would reward a supplier
+    for refusing to commit to one, so the rate is null rather than perfect.
+    `fillRate` is null when nothing was ordered, for the same reason. Lateness is
+    measured against the **first** goods receipt rather than the last, because a
+    trickle of back-orders months later should not rewrite whether the delivery was
+    on time. The purchases report does carry the order's value under `report.view`,
+    following the API plan's own permission table: what the business agreed to pay
+    a supplier is not margin and not a stock valuation, and the person who raises
+    and receives orders cannot do the job without seeing it. The receipts for a
+    window are read in one query rather than per order, which is the shape that
+    makes a quarterly scorecard time out in production and nowhere else. 7 tests;
+    no migration.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1342,8 +1362,8 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C61):** 1,277 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 358, Security 52, Architecture 25,
+- **Verification (2026-09-18, through C62):** 1,284 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 365, Security 52, Architecture 25,
   API 212); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the

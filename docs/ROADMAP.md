@@ -323,7 +323,11 @@ Substantially delivered in Phase 1, because everything else depends on it.
       alone would hide every incoming shipment from the people waiting for it.
       Requested, dispatched and received stay three columns, and distribution
       counts on dispatch rather than on receipt)*
-- [ ] Purchase history and supplier performance
+- [x] Purchase history and supplier performance
+      *(C62: every rate comes with the count it was computed from, and punctuality
+      is scored only where an order was both promised a date and received —
+      counting an unpromised delivery as on time would reward a supplier for
+      refusing to commit)*
 - [ ] Adjustments, expiry, damage, spoilage, shrinkage
 - [ ] Physical count variance, unauthorized inventory, quarantine
 - [~] Inventory ageing buckets, slow movers, dead stock, turnover

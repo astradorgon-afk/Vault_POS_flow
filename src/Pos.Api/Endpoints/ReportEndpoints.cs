@@ -104,6 +104,22 @@ public static class ReportEndpoints
             .WithName("GetDistributionReport")
             .WithSummary("Rolls dispatched transfers up by the lane they travelled.");
 
+        group.MapGet("/purchases", GetPurchaseOrdersAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetPurchaseOrderReport")
+            .WithSummary("Lists purchase orders raised in a window, with what has arrived against them.");
+
+        group.MapGet("/supplier-performance", GetSupplierPerformanceAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetSupplierPerformanceReport")
+            .WithSummary("Scores each supplier on punctuality, fill rate and quality over a window.");
+
         return app;
     }
 
@@ -399,6 +415,69 @@ public static class ReportEndpoints
                 currentUser.CorrelationId.Value)
             : TypedResults.Ok(await reports
                 .GetDistributionAsync(from, to, scope.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetPurchaseOrdersAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IPurchasingReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? supplierId = null,
+        [FromQuery] int limit = 200)
+    {
+        if (to < from || (to - from).TotalDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<PurchaseOrderReport>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<IReadOnlyCollection<LocationId>> scope = await ScopeAsync(
+            evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<PurchaseOrderReport>.Failure(scope.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetPurchaseOrdersAsync(
+                    from,
+                    to,
+                    scope.Value,
+                    supplierId is { } supplier ? new SupplierId(supplier) : null,
+                    Math.Clamp(limit, 1, MaxRows),
+                    cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetSupplierPerformanceAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IPurchasingReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null)
+    {
+        if (to < from || (to - from).TotalDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<SupplierPerformanceRow>>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<IReadOnlyCollection<LocationId>> scope = await ScopeAsync(
+            evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<SupplierPerformanceRow>>.Failure(scope.Errors),
+                currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetSupplierPerformanceAsync(from, to, scope.Value, cancellationToken)
                 .ConfigureAwait(false));
     }
 

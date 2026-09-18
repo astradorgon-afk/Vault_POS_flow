@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, and C61, the transfer reports
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, and C62, purchasing and supplier performance
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,277 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 358, Security 52, Architecture 25, API 212** (2026-09-18, through C61 the transfer reports). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C61 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,284 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 365, Security 52, Architecture 25, API 212** (2026-09-18, through C62 the purchasing reports). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C62 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1431,6 +1431,40 @@ out.**
 **That closes the last Phase 13 checkbox.** Three named things sit outside the
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
+
+C62 scores the other side of the supply chain. `GET /api/v1/reports/purchases`
+lists what was raised in a window with what has arrived against it, and
+`/supplier-performance` scores each supplier on punctuality, fill rate and
+quality.
+
+**Every rate comes with the count it was computed from.** A supplier who delivered
+once, late, scores 0% on time and reads identically to one who failed forty times,
+so `ordersScoredForTime` sits beside `onTimeRate`. The denominator is the
+difference between a verdict and an anecdote, and a scorecard that hides it is one
+somebody terminates a contract on.
+
+**Punctuality is scored only where there was something to score.** An order with no
+expected date was never promised; counting its delivery as on time would reward a
+supplier for refusing to commit to a date, so the rate is null rather than
+perfect. An order promised and not yet arrived is likewise unscored rather than
+counted as late — it is not late until it is, and the report says how many orders
+are still open instead. Lateness is measured against the **first** goods receipt,
+not the last: punctuality is about when the goods started arriving, and a trickle
+of back-orders months later should not rewrite whether the delivery was on time.
+
+**The purchases report carries the order's value under `report.view`**, following
+the API plan's own permission table rather than the rule the inventory reports
+follow. The line is deliberate: what the business agreed to pay a supplier is not
+margin and not a stock valuation, and the person who raises and receives orders
+cannot do the job without seeing it. Cost of goods sold and what stock is now worth
+stay behind `report.view.financial`.
+
+The goods receipts for a whole window are read in one query and grouped in memory
+rather than fetched per order. A quarterly scorecard would otherwise issue one
+query per purchase order, which is the shape that makes a report time out in
+production and nowhere else.
+
+---
 
 C61 reports the pipeline between locations. `GET /api/v1/reports/transfers` lists
 what was raised in a window, longest in flight first, and `/transfers/distribution`
