@@ -64,6 +64,22 @@ public static class ReportEndpoints
             .WithName("GetInventoryValuation")
             .WithSummary("Values the stock held, by product and location.");
 
+        group.MapGet("/inventory/ageing", GetAgeingAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetInventoryAgeing")
+            .WithSummary("Buckets the stock held by how long it has been standing.");
+
+        group.MapGet("/inventory/dead-stock", GetDeadStockAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetInventoryDeadStock")
+            .WithSummary("Lists stock that is standing there and not selling.");
+
         group.MapGet("/inventory/movement", GetMovementsAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
             {
@@ -209,6 +225,77 @@ public static class ReportEndpoints
             : TypedResults.Ok(await reports
                 .GetValuationAsync(query.Value, cancellationToken)
                 .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// How old the stock is. Measured to today unless a date is given, so the
+    /// same window can be re-run against a month end.
+    /// </summary>
+    private static async Task<IResult> GetAgeingAsync(
+        [FromServices] IInventoryReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        [FromServices] ISystemClock clock,
+        CancellationToken cancellationToken,
+        [FromQuery] DateOnly? asOf = null,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? productId = null,
+        [FromQuery] int limit = 200)
+    {
+        Result<InventoryReportQuery> query = await QueryAsync(
+            evaluator, currentUser, locationId, productId, includeEmpty: false, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        return query.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<InventoryAgeingRow>>.Failure(query.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetAgeingAsync(
+                    asOf ?? DateOnly.FromDateTime(clock.UtcNow.UtcDateTime), query.Value, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Stock that is not moving, over a window of sales.
+    /// </summary>
+    /// <remarks>
+    /// The window is how far back sales are counted, not a filter on the rows:
+    /// a product that has never sold at all has to appear, and it is the worst
+    /// case rather than a missing one.
+    /// </remarks>
+    private static async Task<IResult> GetDeadStockAsync(
+        [FromServices] IInventoryReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        [FromServices] ISystemClock clock,
+        CancellationToken cancellationToken,
+        [FromQuery] int windowDays = 90,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? productId = null,
+        [FromQuery] int limit = 200)
+    {
+        if (windowDays < 1 || windowDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<InventoryDeadStockReport>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<InventoryReportQuery> query = await QueryAsync(
+            evaluator, currentUser, locationId, productId, includeEmpty: false, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (query.IsFailure)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<InventoryDeadStockReport>.Failure(query.Errors), currentUser.CorrelationId.Value);
+        }
+
+        DateTimeOffset to = clock.UtcNow;
+
+        return TypedResults.Ok(await reports
+            .GetDeadStockAsync(to.AddDays(-windowDays), to, query.Value, cancellationToken)
+            .ConfigureAwait(false));
     }
 
     private static async Task<IResult> GetMovementsAsync(

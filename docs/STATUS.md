@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin, and C59, the inventory reports
+**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 opens with C58, the sales analysis and its margin, C59, the inventory reports, and C60, ageing and dead stock
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,7 +13,7 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,263 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 345, Security 52, Architecture 25, API 211** (2026-09-18, through C59 the inventory reports). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C59 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,270 passing without PostgreSQL: Domain 383, Application 247, Infrastructure 351, Security 52, Architecture 25, API 212** (2026-09-18, through C60 ageing and dead stock). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C60 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
 | Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
@@ -1431,6 +1431,41 @@ out.**
 **That closes the last Phase 13 checkbox.** Three named things sit outside the
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
+
+C60 asks how long the stock has been there and what is not shifting. Both reports
+are operational and need only `report.view`; neither carries money, because a
+valuation of stock by age is a provisioning question that belongs with the
+financial reports.
+
+**Age is measured from when the business took custody** — the batch's received
+date. Not from manufacture, which is the supplier's business, and not from the
+last movement, which would reset every time a single unit sold and report a pallet
+standing since spring as new. Stock whose product tracks no batches has no
+received date anywhere in the system, so it is reported in an explicit `Unknown`
+bucket. Folding it into the youngest would make the report say the opposite of the
+truth about exactly the stock most likely to be old, which is why the enum's zero
+value is `Unknown` rather than a range. Only stock physically standing somewhere is
+aged; stock in transit is today's problem.
+
+**Dead stock counts sales, not departures.** It reads `PosSale` legs from the
+ledger rather than any reduction in a balance, so a write-off clearing a dead line
+does not make it look alive — a test posts exactly that and asserts the line still
+reads as never sold. A product that has never sold reports a null last-sold date
+and sorts first: it is the worst case, not a missing one, and a filter written the
+obvious way ("last sold before X") would silently drop precisely what the report
+exists to find. A shelf holding nothing is left out, because that is absence rather
+than dead stock.
+
+**Turnover is deliberately not built, and the report does not pretend otherwise.**
+A turnover ratio needs the average stock held across the period; the system keeps
+balances, not a history of them, so any ratio computed from current stock would be
+a different number wearing turnover's name. What is reported is `daysOfCover` —
+how long the stock would last at the rate it sold over the window — and it is null
+when nothing sold. There is no rate to divide by, and reporting infinity as a large
+number is how a line nobody can shift ends up looking merely slow. Proper turnover
+needs balance snapshots, which is a schema decision rather than a reporting one.
+
+---
 
 C59 reports the stock itself. `GET /api/v1/reports/inventory/on-hand` lists what
 is on the shelf by product and location, `/inventory/valuation` what it is worth,

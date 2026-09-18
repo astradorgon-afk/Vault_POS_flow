@@ -83,6 +83,237 @@ public sealed class InventoryReportRepository(PosDbContext context) : IInventory
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<InventoryAgeingRow>> GetAgeingAsync(
+        DateOnly asOf,
+        InventoryReportQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        List<Bucket> buckets = await BucketsAsync(query, cancellationToken).ConfigureAwait(false);
+
+        // Only stock physically standing somewhere has an age worth reporting.
+        // Stock in transit is somebody's problem today, not stock that has been
+        // sitting since spring.
+        List<Bucket> onHand = [.. buckets.Where(b => InventoryStates.OnHand.Contains(b.State) && b.Quantity != 0m)];
+
+        List<BatchId> batchIds =
+        [
+            .. onHand.Select(b => b.BatchKey).Where(id => id != Guid.Empty).Distinct().Select(id => new BatchId(id)),
+        ];
+
+        Dictionary<Guid, DateOnly> received = await context.Batches
+            .AsNoTracking()
+            .Where(b => batchIds.Contains(b.Id))
+            .Select(b => new { Id = b.Id.Value, b.ReceivedOn })
+            .ToDictionaryAsync(b => b.Id, b => b.ReceivedOn, cancellationToken)
+            .ConfigureAwait(false);
+
+        List<InventoryAgeingRow> rows =
+        [
+            .. onHand
+                .GroupBy(b => (b.ProductId, b.LocationId))
+                .Select(g => AgeingRow(g, asOf, received))
+                .OrderBy(r => r.OldestReceivedOn ?? DateOnly.MaxValue)
+                .ThenByDescending(r => r.OnHand)
+                .ThenBy(r => r.Sku, StringComparer.Ordinal),
+        ];
+
+        return [.. rows.Take(query.Limit)];
+    }
+
+    /// <inheritdoc />
+    public async Task<InventoryDeadStockReport> GetDeadStockAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        InventoryReportQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        List<Bucket> buckets = await BucketsAsync(query, cancellationToken).ConfigureAwait(false);
+
+        var held = buckets
+            .Where(b => InventoryStates.OnHand.Contains(b.State))
+            .GroupBy(b => (b.ProductId, b.LocationId))
+            .Select(g => new
+            {
+                g.Key.ProductId,
+                g.Key.LocationId,
+                First = g.First(),
+                OnHand = g.Sum(b => b.Quantity),
+            })
+
+            // Nothing standing there is not dead stock, it is absent. The question
+            // this answers is what is sitting on a shelf not selling.
+            .Where(r => r.OnHand > 0m)
+            .ToList();
+
+        Dictionary<(Guid, Guid), Sold> sales = await SalesAsync(fromUtc, toUtc, query, cancellationToken)
+            .ConfigureAwait(false);
+
+        decimal windowDays = Math.Max(1m, (decimal)(toUtc - fromUtc).TotalDays);
+
+        List<InventoryDeadStockRow> all =
+        [
+            .. held
+                .Select(r =>
+                {
+                    sales.TryGetValue((r.ProductId, r.LocationId), out Sold? sold);
+                    return DeadStockRow(r.First, r.OnHand, sold, toUtc, windowDays);
+                })
+
+                // Never sold sorts first, then longest unsold. A filter written as
+                // "last sold before X" would drop exactly what this exists to find.
+                .OrderByDescending(r => r.DaysSinceLastSale ?? int.MaxValue)
+                .ThenByDescending(r => r.OnHand)
+                .ThenBy(r => r.Sku, StringComparer.Ordinal),
+        ];
+
+        List<InventoryDeadStockRow> rows = [.. all.Take(query.Limit)];
+
+        return new InventoryDeadStockReport(fromUtc, toUtc, rows, Truncated: all.Count > rows.Count);
+    }
+
+    /// <summary>
+    /// What sold, and when it last did, per product and location.
+    /// </summary>
+    /// <remarks>
+    /// Read from the ledger rather than from sale lines: a sale is not the only
+    /// way stock leaves a shelf, but it is the only one that counts as moving —
+    /// a write-off clearing a dead line would otherwise make it look alive.
+    /// </remarks>
+    private async Task<Dictionary<(Guid, Guid), Sold>> SalesAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        InventoryReportQuery query,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<InventoryMovement> sales = context.InventoryMovements
+            .AsNoTracking()
+            .Where(m => m.MovementType == InventoryMovementType.PosSale
+                        && m.QuantityDelta < 0m
+                        && m.State == InventoryState.Available
+                        && m.RecordedAtUtc >= fromUtc
+                        && m.RecordedAtUtc <= toUtc);
+
+        if (query.Locations.Count > 0)
+        {
+            sales = sales.Where(m => query.Locations.Contains(m.LocationId));
+        }
+
+        if (query.ProductId is { } productId)
+        {
+            sales = sales.Where(m => m.ProductId == productId);
+        }
+
+        var rows = await sales
+            .GroupBy(m => new { m.ProductId, m.LocationId })
+            .Select(g => new
+            {
+                g.Key.ProductId,
+                g.Key.LocationId,
+                Units = g.Sum(m => -m.QuantityDelta),
+                LastAt = g.Max(m => m.RecordedAtUtc),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(
+            r => (r.ProductId.Value, r.LocationId.Value),
+            r => new Sold(r.Units, r.LastAt));
+    }
+
+    private static InventoryAgeingRow AgeingRow(
+        IGrouping<(Guid ProductId, Guid LocationId), Bucket> g,
+        DateOnly asOf,
+        Dictionary<Guid, DateOnly> received)
+    {
+        Bucket first = g.First();
+
+        List<(InventoryAgeBucket Bucket, decimal Quantity, DateOnly? ReceivedOn)> aged =
+        [
+            .. g.Select(b =>
+            {
+                DateOnly? on = b.BatchKey != Guid.Empty && received.TryGetValue(b.BatchKey, out DateOnly found)
+                    ? found
+                    : null;
+
+                return (Age(on, asOf), b.Quantity, on);
+            }),
+        ];
+
+        return new InventoryAgeingRow(
+            first.ProductId,
+            first.Sku,
+            first.ProductName,
+            first.LocationId,
+            first.LocationCode,
+            aged.Sum(a => a.Quantity),
+            aged.Where(a => a.ReceivedOn is not null).Min(a => a.ReceivedOn),
+            [
+                .. aged
+                    .GroupBy(a => a.Bucket)
+                    .Select(b => new InventoryAgeQuantity(b.Key, b.Sum(a => a.Quantity)))
+                    .Where(b => b.Quantity != 0m)
+                    .OrderByDescending(b => b.Bucket),
+            ]);
+    }
+
+    /// <summary>Places one holding in its age bucket.</summary>
+    private static InventoryAgeBucket Age(DateOnly? receivedOn, DateOnly asOf)
+    {
+        if (receivedOn is not { } on)
+        {
+            // Genuinely unknown, not zero. A product that tracks no batches has no
+            // received date anywhere in the system, and calling it new would make
+            // the report say the opposite of the truth about the oldest stock.
+            return InventoryAgeBucket.Unknown;
+        }
+
+        int days = asOf.DayNumber - on.DayNumber;
+
+        return days switch
+        {
+            <= 30 => InventoryAgeBucket.UpTo30Days,
+            <= 60 => InventoryAgeBucket.Days31To60,
+            <= 90 => InventoryAgeBucket.Days61To90,
+            <= 180 => InventoryAgeBucket.Days91To180,
+            _ => InventoryAgeBucket.Over180Days,
+        };
+    }
+
+    private static InventoryDeadStockRow DeadStockRow(
+        Bucket first,
+        decimal onHand,
+        Sold? sold,
+        DateTimeOffset toUtc,
+        decimal windowDays)
+    {
+        decimal units = sold?.Units ?? 0m;
+
+        // No rate to divide by. Reporting infinity as a large number is how a line
+        // nobody can shift ends up looking merely slow.
+        decimal? cover = units <= 0m
+            ? null
+            : decimal.Round(onHand / (units / windowDays), 1, MidpointRounding.AwayFromZero);
+
+        return new InventoryDeadStockRow(
+            first.ProductId,
+            first.Sku,
+            first.ProductName,
+            first.LocationId,
+            first.LocationCode,
+            onHand,
+            units,
+            sold?.LastAtUtc,
+            sold is null ? null : (int)Math.Floor((toUtc - sold.LastAtUtc).TotalDays),
+            cover);
+    }
+
+    private sealed record Sold(decimal Units, DateTimeOffset LastAtUtc);
+
+    /// <inheritdoc />
     public async Task<InventoryMovementReport> GetMovementsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
@@ -203,6 +434,7 @@ public sealed class InventoryReportRepository(PosDbContext context) : IInventory
                 balance.LocationId,
                 location.Code,
                 LocationName = location.Name,
+                balance.BatchKey,
                 balance.State,
                 balance.Quantity,
                 balance.TotalValue,
@@ -219,6 +451,7 @@ public sealed class InventoryReportRepository(PosDbContext context) : IInventory
                 r.LocationId.Value,
                 r.Code,
                 r.LocationName,
+                r.BatchKey.Value,
                 r.State,
                 r.Quantity,
                 r.TotalValue)),
@@ -280,6 +513,7 @@ public sealed class InventoryReportRepository(PosDbContext context) : IInventory
         Guid LocationId,
         string LocationCode,
         string LocationName,
+        Guid BatchKey,
         InventoryState State,
         decimal Quantity,
         decimal TotalValue);

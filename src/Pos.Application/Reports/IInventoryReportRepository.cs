@@ -39,6 +39,28 @@ public interface IInventoryReportRepository
         InventoryReportQuery query,
         CancellationToken cancellationToken);
 
+    /// <summary>How old the stock is, by product and location.</summary>
+    /// <param name="asOf">The date age is measured to.</param>
+    /// <param name="query">What to report on.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The rows, oldest stock first.</returns>
+    Task<IReadOnlyList<InventoryAgeingRow>> GetAgeingAsync(
+        DateOnly asOf,
+        InventoryReportQuery query,
+        CancellationToken cancellationToken);
+
+    /// <summary>Stock that is not moving.</summary>
+    /// <param name="fromUtc">The start of the window sales are counted over.</param>
+    /// <param name="toUtc">The end of it.</param>
+    /// <param name="query">What to report on.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The rows, longest unsold first.</returns>
+    Task<InventoryDeadStockReport> GetDeadStockAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        InventoryReportQuery query,
+        CancellationToken cancellationToken);
+
     /// <summary>Every ledger leg in a window, in the order the ledger wrote them.</summary>
     /// <param name="fromUtc">The start of the window, inclusive.</param>
     /// <param name="toUtc">The end of the window, inclusive.</param>

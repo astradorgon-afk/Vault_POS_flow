@@ -113,6 +113,57 @@ public sealed class InventoryReportEndpointTests(PosApiFactory factory)
         fine.StatusCode.Should().Be(HttpStatusCode.OK, await fine.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task AgeingAndDeadStockAreOperational_AndBounded()
+    {
+        LocationId store = await factory.CreateLocationAsync("IR-S4", "Inventory Report Ageing", LocationKind.Store);
+        ProductId product = await factory.CreateProductAsync("IR-P3", "Report Rice", "7100000003");
+        await InventoryControlTestSupport.SetBucketAsync(factory, store, product, 9m, 12m);
+
+        // Stockroom staff, who hold report.view and not report.view.financial.
+        // Neither report carries money, so both answer.
+        await factory.CreateUserAsync("ir-staff2", Roles.InventoryStaff, locations: [store]);
+
+        using HttpClient client = factory.CreateClient();
+        string staff = await SignInAsync(client, "ir-staff2");
+
+        using HttpResponseMessage ageing = await GetAsync(
+            client, $"/api/v1/reports/inventory/ageing?locationId={store.Value}", staff);
+
+        ageing.StatusCode.Should().Be(HttpStatusCode.OK, await ageing.Content.ReadAsStringAsync());
+
+        using JsonDocument aged = JsonDocument.Parse(await ageing.Content.ReadAsStringAsync());
+        JsonElement row = aged.RootElement.EnumerateArray()
+            .Single(r => r.GetProperty("sku").GetString() == "IR-P3");
+
+        row.GetProperty("onHand").GetDecimal().Should().Be(9m);
+
+        // The product tracks no batches, so there is no received date anywhere in
+        // the system and the report says so rather than calling it new.
+        row.GetProperty("byAge").EnumerateArray().Single()
+            .GetProperty("bucket").GetString().Should().Be("Unknown");
+        row.GetProperty("oldestReceivedOn").ValueKind.Should().Be(JsonValueKind.Null);
+
+        using HttpResponseMessage dead = await GetAsync(
+            client, $"/api/v1/reports/inventory/dead-stock?locationId={store.Value}&windowDays=90", staff);
+
+        dead.StatusCode.Should().Be(HttpStatusCode.OK, await dead.Content.ReadAsStringAsync());
+
+        using JsonDocument deadStock = JsonDocument.Parse(await dead.Content.ReadAsStringAsync());
+        JsonElement unsold = deadStock.RootElement.GetProperty("rows").EnumerateArray()
+            .Single(r => r.GetProperty("sku").GetString() == "IR-P3");
+
+        unsold.GetProperty("lastSoldAtUtc").ValueKind.Should().Be(JsonValueKind.Null);
+        unsold.GetProperty("daysOfCover").ValueKind.Should().Be(
+            JsonValueKind.Null, "nothing sold, so there is no rate to divide by");
+
+        using HttpResponseMessage forever = await GetAsync(
+            client, "/api/v1/reports/inventory/dead-stock?windowDays=100000", staff);
+
+        forever.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCodeAsync(forever)).Should().Be("report.period_invalid");
+    }
+
     private static string Movements(DateTimeOffset from, DateTimeOffset to)
     {
         // Escaped: a round-trip timestamp ends in "+00:00", and an unescaped "+"

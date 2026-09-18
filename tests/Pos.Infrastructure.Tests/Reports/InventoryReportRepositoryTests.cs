@@ -242,6 +242,144 @@ public sealed class InventoryReportRepositoryTests : IAsyncLifetime
         report.Rows.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Ageing_BucketsByWhenTheBusinessTookCustody()
+    {
+        DateOnly asOf = new(2026, 9, 18);
+
+        BatchId fresh = await BatchAsync(this.biscuits, asOf.AddDays(-10));
+        BatchId middling = await BatchAsync(this.biscuits, asOf.AddDays(-75));
+        BatchId ancient = await BatchAsync(this.biscuits, asOf.AddDays(-400));
+
+        await BucketAsync(this.store, this.biscuits, InventoryState.Available, 5m, 10m, batchKey: fresh);
+        await BucketAsync(this.store, this.biscuits, InventoryState.Available, 3m, 10m, batchKey: middling);
+        await BucketAsync(this.store, this.biscuits, InventoryState.Available, 2m, 10m, batchKey: ancient);
+
+        InventoryAgeingRow row = (await AgeingAsync(asOf)).Single();
+
+        row.OnHand.Should().Be(10m);
+        row.OldestReceivedOn.Should().Be(asOf.AddDays(-400));
+
+        Dictionary<InventoryAgeBucket, decimal> byAge = row.ByAge.ToDictionary(b => b.Bucket, b => b.Quantity);
+        byAge[InventoryAgeBucket.UpTo30Days].Should().Be(5m);
+        byAge[InventoryAgeBucket.Days61To90].Should().Be(3m);
+        byAge[InventoryAgeBucket.Over180Days].Should().Be(2m);
+    }
+
+    [Fact]
+    public async Task Ageing_CallsStockWithNoReceivedDateUnknown_NotNew()
+    {
+        DateOnly asOf = new(2026, 9, 18);
+
+        // A product that tracks no batches has no received date anywhere in the
+        // system. Folding it into the youngest bucket would make the report say
+        // the opposite of the truth about the stock most likely to be old.
+        await BucketAsync(this.store, this.soap, InventoryState.Available, 7m, 10m);
+
+        InventoryAgeingRow row = (await AgeingAsync(asOf)).Single();
+
+        row.ByAge.Should().ContainSingle().Which.Bucket.Should().Be(InventoryAgeBucket.Unknown);
+        row.OldestReceivedOn.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Ageing_LeavesOutStockThatIsNotStandingThere()
+    {
+        DateOnly asOf = new(2026, 9, 18);
+
+        await BucketAsync(this.store, this.biscuits, InventoryState.InTransit, 9m, 10m);
+
+        // In transit is somebody's problem today, not stock that has been sitting
+        // since spring.
+        (await AgeingAsync(asOf)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeadStock_PutsWhatHasNeverSoldAtTheTop()
+    {
+        DateTimeOffset now = new(2026, 9, 18, 8, 0, 0, TimeSpan.Zero);
+
+        await BucketAsync(this.store, this.biscuits, InventoryState.Available, 10m, 10m);
+        await BucketAsync(this.store, this.soap, InventoryState.Available, 10m, 10m);
+        await MovementAsync(this.soap, now.AddDays(-5), now.AddDays(-5), -4m);
+
+        InventoryDeadStockReport report = await DeadStockAsync(now.AddDays(-90), now);
+
+        // Never sold is the worst case, not a missing one: a filter written as
+        // "last sold before X" would drop exactly what this exists to find.
+        report.Rows[0].Sku.Should().Be("SKU-1");
+        report.Rows[0].LastSoldAtUtc.Should().BeNull();
+        report.Rows[0].DaysSinceLastSale.Should().BeNull();
+        report.Rows[0].UnitsSold.Should().Be(0m);
+        report.Rows[0].DaysOfCover.Should().BeNull("there is no rate to divide by");
+
+        report.Rows[1].Sku.Should().Be("SKU-2");
+        report.Rows[1].UnitsSold.Should().Be(4m);
+        report.Rows[1].DaysSinceLastSale.Should().Be(5);
+
+        // Ten units at four per ninety days lasts two hundred and twenty-five.
+        report.Rows[1].DaysOfCover.Should().Be(225m);
+    }
+
+    [Fact]
+    public async Task DeadStock_IgnoresAShelfThatIsSimplyEmpty()
+    {
+        DateTimeOffset now = new(2026, 9, 18, 8, 0, 0, TimeSpan.Zero);
+
+        await BucketAsync(this.store, this.biscuits, InventoryState.Available, 0m, 0m);
+
+        // Nothing standing there is not dead stock, it is absent.
+        (await DeadStockAsync(now.AddDays(-90), now)).Rows.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeadStock_DoesNotCountAWriteOffAsMovement()
+    {
+        DateTimeOffset now = new(2026, 9, 18, 8, 0, 0, TimeSpan.Zero);
+
+        await BucketAsync(this.store, this.biscuits, InventoryState.Available, 10m, 10m);
+        await MovementAsync(
+            this.biscuits, now.AddDays(-2), now.AddDays(-2), -3m, InventoryMovementType.Loss);
+
+        InventoryDeadStockRow row = (await DeadStockAsync(now.AddDays(-90), now)).Rows.Single();
+
+        // Stock leaving on a write-off is a dead line being cleared, not a line
+        // that sold. Counting it would make the deadest stock look alive.
+        row.UnitsSold.Should().Be(0m);
+        row.LastSoldAtUtc.Should().BeNull();
+    }
+
+    private Task<IReadOnlyList<InventoryAgeingRow>> AgeingAsync(DateOnly asOf, int limit = 100)
+        => new InventoryReportRepository(this.context).GetAgeingAsync(
+            asOf, new InventoryReportQuery([], null, IncludeEmpty: false, limit), CancellationToken.None);
+
+    private Task<InventoryDeadStockReport> DeadStockAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        int limit = 100)
+        => new InventoryReportRepository(this.context).GetDeadStockAsync(
+            from, to, new InventoryReportQuery([], null, IncludeEmpty: false, limit), CancellationToken.None);
+
+    private async Task<BatchId> BatchAsync(ProductId productId, DateOnly receivedOn)
+    {
+        Batch batch = Batch.Create(
+            productId,
+            SupplierId.New(),
+            FormattableString.Invariant($"LOT-{receivedOn:yyyyMMdd}"),
+            receivedOn,
+            null,
+            null,
+            10m,
+            UserId.New(),
+            new DateTimeOffset(receivedOn, TimeOnly.MinValue, TimeSpan.Zero)).Value;
+
+        this.context.Batches.Add(batch);
+        await this.context.SaveChangesAsync();
+        this.context.ChangeTracker.Clear();
+
+        return batch.Id;
+    }
+
     private Task<IReadOnlyList<InventoryOnHandRow>> OnHandAsync(
         bool includeEmpty = false,
         int limit = 100,
@@ -274,9 +412,11 @@ public sealed class InventoryReportRepositoryTests : IAsyncLifetime
         InventoryState state,
         decimal quantity,
         decimal unitCost,
-        decimal? totalValue = null)
+        decimal? totalValue = null,
+        BatchId? batchKey = null)
     {
-        InventoryBalance balance = InventoryBalance.CreateEmpty(locationId, productId, BatchId.Empty, state);
+        InventoryBalance balance = InventoryBalance.CreateEmpty(
+            locationId, productId, batchKey ?? BatchId.Empty, state);
         this.context.InventoryBalances.Add(balance);
 
         this.context.Entry(balance).Property(b => b.Quantity).CurrentValue = quantity;
@@ -291,17 +431,20 @@ public sealed class InventoryReportRepositoryTests : IAsyncLifetime
         ProductId productId,
         DateTimeOffset occurred,
         DateTimeOffset recorded,
-        decimal delta)
+        decimal delta,
+        InventoryMovementType movementType = InventoryMovementType.PosSale)
     {
         // A real balanced group: stock leaving the shelf has to arrive somewhere,
         // and the counterparty leg is what keeps the ledger balanced. Constructing
         // legs any other way is not possible, which is the point of the design.
         MovementGroupSpec spec = new(
             EventId.New(),
-            InventoryMovementType.PosSale,
-            ReferenceDocumentType.Sale,
+            movementType,
+            movementType == InventoryMovementType.PosSale
+                ? ReferenceDocumentType.Sale
+                : ReferenceDocumentType.StockAdjustment,
             Guid.CreateVersion7(),
-            "SAL-2026-000001",
+            movementType == InventoryMovementType.PosSale ? "SAL-2026-000001" : "ADJ-2026-000001",
             [
                 new MovementLegSpec(
                     productId, null, this.store, LocationKind.Store,
@@ -310,9 +453,19 @@ public sealed class InventoryReportRepositoryTests : IAsyncLifetime
                     productId, null, this.external, LocationKind.External,
                     InventoryState.External, -delta, 50m, ProductTracksBatches: false),
             ],
-            new LedgerActor(UserId.New(), null, null, CorrelationId.New()),
+            new LedgerActor(
+                UserId.New(),
+
+                // A write-off needs an approver and a reason; a sale needs
+                // neither. Supplying both unconditionally keeps the helper to one
+                // shape without pretending a sale was authorised by somebody.
+                movementType == InventoryMovementType.PosSale ? null : UserId.New(),
+                null,
+                CorrelationId.New()),
             occurred,
-            DateOnly.FromDateTime(occurred.UtcDateTime));
+            DateOnly.FromDateTime(occurred.UtcDateTime),
+            movementType == InventoryMovementType.PosSale ? null : AdjustmentReasonCode.Loss,
+            movementType == InventoryMovementType.PosSale ? null : "Written off in a stock check.");
 
         InventoryMovementGroup group = InventoryMovementGroup.Create(spec, recorded).Value;
 

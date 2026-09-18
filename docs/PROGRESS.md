@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -285,6 +285,24 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     when the ledger wrote a leg, not when it happened, because an offline sale
     uploaded on Tuesday occurred on Monday and a history reordered by occurrence
     would never tie back to a balance. 14 tests; no migration.
+  - [~] C60 — ageing, slow movers and dead stock:
+    `GET /api/v1/reports/inventory/ageing` buckets stock by how long the business
+    has held it, measured from the batch's received date — not from manufacture,
+    which is the supplier's business, and not from the last movement, which would
+    reset every time a unit sold and report a pallet standing since spring as new.
+    Stock whose product tracks no batches goes in an explicit `Unknown` bucket
+    rather than the youngest one: it has no received date anywhere in the system,
+    and calling it new makes the report say the opposite of the truth about the
+    stock most likely to be old. `GET /api/v1/reports/inventory/dead-stock` counts
+    `PosSale` legs rather than departures, so a write-off clearing a dead line does
+    not make it look alive; a product that has never sold reports a null last-sold
+    and sorts first, because a filter written as "last sold before X" would drop
+    exactly what the report exists to find. **Turnover is deliberately not built.**
+    A real turnover ratio needs the average stock held across the period and the
+    system keeps balances rather than a history of them, so the report gives
+    `daysOfCover` — null when nothing sold, because there is no rate to divide by
+    and reporting infinity as a large number is how a line nobody can shift ends up
+    looking merely slow. 7 tests; no migration.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1307,9 +1325,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C59):** 1,263 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 345, Security 52, Architecture 25,
-  API 211); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+- **Verification (2026-09-18, through C60):** 1,270 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 351, Security 52, Architecture 25,
+  API 212); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by

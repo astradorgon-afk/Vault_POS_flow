@@ -322,7 +322,13 @@ Substantially delivered in Phase 1, because everything else depends on it.
 - [ ] Purchase history and supplier performance
 - [ ] Adjustments, expiry, damage, spoilage, shrinkage
 - [ ] Physical count variance, unauthorized inventory, quarantine
-- [ ] Inventory ageing buckets, slow movers, dead stock, turnover
+- [~] Inventory ageing buckets, slow movers, dead stock, turnover
+      *(C60: ageing from the batch's received date, with an explicit `Unknown`
+      bucket for stock that tracks no batches; dead stock counts sales rather than
+      departures and puts what has never sold first. Turnover proper is **not**
+      built: a real ratio needs the average stock held across the period, and the
+      system keeps balances rather than a history of them — `daysOfCover` is
+      reported instead and named for what it is)*
 - [ ] Audit activity and sync problem reports
 - [ ] Export (CSV/XLSX)
 

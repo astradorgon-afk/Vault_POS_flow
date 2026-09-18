@@ -818,7 +818,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58, C59):
+Built (C7, C58, C59, C60):
 
 ```
 GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
@@ -827,6 +827,8 @@ GET /api/v1/reports/sales/payments            report.view            (C58)
 GET /api/v1/reports/inventory/on-hand         report.view            (C59)
 GET /api/v1/reports/inventory/valuation       report.view.financial  (C59)
 GET /api/v1/reports/inventory/movement        report.view            (C59)
+GET /api/v1/reports/inventory/ageing          report.view            (C60)
+GET /api/v1/reports/inventory/dead-stock      report.view            (C60)
 ```
 
 `GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
@@ -844,8 +846,6 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/reports/inventory/ageing          report.view
-GET /api/v1/reports/inventory/dead-stock      report.view
 GET /api/v1/reports/transfers                 report.view
 GET /api/v1/reports/purchases                 report.view
 GET /api/v1/reports/supplier-performance      report.view
@@ -936,6 +936,36 @@ shelf, and listing them would double the length of every history.
 
 An empty bucket is left out unless `includeEmpty=true`: a catalogue of ten
 thousand products at forty stores is four hundred thousand rows of zero.
+
+### 11.3 Ageing and dead stock
+
+Both are operational and need only `report.view`; neither carries money. A
+valuation of stock by age is a provisioning question and belongs with the
+financial reports, not here.
+
+**Age is measured from when the business took custody** — the batch's received
+date. Not from manufacture, which is the supplier's business, and not from the
+last movement, which would reset every time a single unit sold and report a pallet
+standing since spring as new. Stock whose product tracks no batches has no
+received date anywhere in the system, so it is reported in an explicit `Unknown`
+bucket rather than folded into the youngest one, which would make the report say
+the opposite of the truth about the stock most likely to be old. Only stock
+physically standing somewhere is aged: stock in transit is today's problem, not
+stock that has been sitting.
+
+**Dead stock counts sales, not departures.** It reads `PosSale` legs from the
+ledger, so a write-off clearing a dead line does not make it look alive. A product
+that has **never** sold reports `lastSoldAtUtc: null` and sorts first: it is the
+worst case rather than a missing one, and a filter written as "last sold before X"
+would drop exactly what the report exists to find. A shelf holding nothing is left
+out — that is absence, not dead stock.
+
+`daysOfCover` is how long the stock would last at the rate it sold over the
+window, and is `null` when nothing sold: there is no rate to divide by, and
+reporting infinity as a large number is how a line nobody can shift ends up
+looking merely slow. It is deliberately **not** called turnover — a true turnover
+ratio needs the average stock held across the period, and the system keeps
+balances rather than a history of them.
 
 ---
 
