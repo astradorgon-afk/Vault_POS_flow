@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is under way**: **Phase 16 is complete at C68**: the overview, the exception board and the document drill-down. Next is Phase 17, testing. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is complete at C68**: the overview, the exception board and the document drill-down. **Phase 17 is complete at C69**: the CI coverage gate and the concurrency suites closed the two rows nothing answered; the other six were marked against the suites that already met them. Next is Phase 18, deployment. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -474,7 +474,42 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     the same loss twice. A document nothing in the caller's stores touched is a
     404 rather than an empty timeline: "you may not see this" and "nothing
     happened" are different answers. 6 tests; no migration.
-- [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
+- [x] **Phase 17 — Testing:** every row met — six by suites built across earlier phases, two by C69
+  - [x] C69 — the coverage gate and the concurrency suites. **Coverage was
+    collected and never looked at**: CI has passed `--collect:"XPlat Code
+    Coverage"` since the workflow was written and gated on nothing. The raw
+    number was 26.9%, which says nothing about the tests — EF's migration
+    designer files and model snapshots are machine-written, never run outside a
+    migration, and are 100,000 of the 160,000 lines counted. Excluding them and
+    the generated OpenAPI file gives the honest figure: **80.4% of lines, 62.0%
+    of branches**. `scripts/check-coverage.ps1` merges the six suites' Cobertura
+    reports — a line counts as covered when any suite covered it — and fails
+    under a total and a per-assembly floor set a couple of points below today's
+    measurement, a ratchet rather than an aspiration. Two details decide whether
+    that merge is arithmetic or fiction: each report's file names are relative to
+    its own `<source>` root, so the same file appears under two names and
+    Pos.Domain reads 14,798 lines at 67.6% instead of 7,403 at 83.8%; and a
+    class's lines appear twice, under `<methods>` and under the class.
+    `ExcludeByAttribute` is deliberately unset — excluding `GeneratedCodeAttribute`
+    drops the whole `Pos.Application` module rather than the generated members in
+    it, reading 36.8% with handlers the API tests drive showing 0%. **The
+    concurrency rows** are the oversell case and the transfer races: four tills
+    selling four each off a shelf of ten land exactly two sales and refuse two
+    with `inventory.insufficient_stock`, six tills within stock all succeed and
+    the projection's version is bumped once per sale. Two dispatchers shipping one
+    transfer produce one shipment, two receivers one receipt — and what arbitrates
+    that is not the aggregate's own guard, which reads the copy its context
+    loaded and lets both writers past, nor a version token, which the transfer row
+    does not have. It is the custody chain's unique `(transfer, sequence)` index,
+    so the loser collides at the database. That index is the whole guard and
+    nothing else would have noticed if it were relaxed. **The empty
+    `Pos.Sync.Tests` was removed**: a `.csproj`, two `InternalsVisibleTo` grants,
+    a place in the solution and no tests, while the sync tests it named live in
+    `Pos.Infrastructure.Tests/Sync`, `/Offline` and `Pos.Api.IntegrationTests`.
+    Reading OFFLINE_SYNC.md §10 against what exists found two rows genuinely
+    unwritten, now recorded there: a sequence-gap **timeout**, which has no
+    mechanism at all, and a backlog of the size that matrix names. 4 tests; no
+    migration.
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
 
 ---
@@ -1495,9 +1530,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C68):** 1,344 passing without PostgreSQL
-  (Domain 402, Application 247, Infrastructure 386, Security 52, Architecture 25,
-  API 232); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+- **Verification (2026-09-18, through C69):** 1,348 passing without PostgreSQL
+  (Domain 402, Application 247, Infrastructure 390, Security 52, Architecture 25,
+  API 232), and the coverage gate green at 80.4% of lines against a 78% floor; 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by

@@ -162,8 +162,9 @@ locally and never transmits a private key.
 3. integration tests with Testcontainers PostgreSQL
 4. sync and security test suites
 5. architecture tests
-6. secret scan
-7. publish API/Web container images on `main`
+6. coverage floors (`scripts/check-coverage.ps1`)
+7. secret scan
+8. publish API/Web container images on `main`
 
 The MAUI client is built on Windows runners for the Windows target and Linux
 runners for Android. Client builds are gated on the shared projects compiling and
@@ -183,3 +184,10 @@ How that is wired (since C29c):
 - Both install their workloads from workload set `10.0.301`, the set matching
   the SDK in `global.json`. When `global.json` moves to another SDK band, move
   the workload set with it (`dotnet workload search version` lists them).
+- The test step runs under `coverlet.runsettings`, which keeps EF's migration
+  designer files, model snapshots and generated sources out of the measurement —
+  they are 100,000 of the 160,000 lines otherwise counted, and none of them runs
+  outside a migration. `scripts/check-coverage.ps1` then merges the per-project
+  Cobertura reports and fails the job under its floors. The floors are a ratchet
+  a couple of points below what the suite covers today: raise them as coverage
+  rises, and say why in the commit message if one ever has to come down.

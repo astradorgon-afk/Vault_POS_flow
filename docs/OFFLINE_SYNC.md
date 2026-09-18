@@ -760,7 +760,24 @@ Both are shown in the client status bar and in the HQ sync-health dashboard:
 
 ---
 
-## 10. Test matrix (`Pos.Sync.Tests`)
+## 10. Test matrix
+
+The sync tests live in two places, because sync has two halves and they need
+different fixtures. `Pos.Infrastructure.Tests/Sync/` and
+`Pos.Infrastructure.Tests/Offline/` hold the processors, appliers, feed recorder
+and the device store — everything below HTTP. `Pos.Api.IntegrationTests` holds
+the push and pull routes and the round trip, where a real register drives the
+real API through an outage and back. A third project (`Pos.Sync.Tests`) was
+scaffolded for this and never filled; it was removed rather than left standing,
+since an empty suite in the solution reads as coverage that exists.
+
+The table below is the matrix this design set out to cover. Most of it exists
+today under behaviour-named tests in those two projects — idempotent replay,
+out-of-order buffering, tamper rejection, whole-transaction rollback, clock skew,
+rebaselining, a withdrawn product, a superseded price, an oversold shelf. Two
+rows do not: a **sequence-gap timeout** has no mechanism at all (a gap defers its
+events and everything behind it, and waits indefinitely), and no test drives a
+**multi-day backlog** of the size named here.
 
 | Test | Asserts |
 |---|---|

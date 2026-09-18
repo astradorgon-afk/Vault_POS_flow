@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-18 · **Milestone:** Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 complete (C58–C65), opening with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, C62, purchasing and supplier performance, C63, the inventory exception reports, C64, audit, quarantine and expiry, C65, CSV export, C66, the owner dashboard's overview, C67, its exception board, and C68, the document drill-down — Phase 16 complete
+**Last updated:** 2026-09-18 · **Milestone:** Phase 17 complete (C69); Phase 12 complete (C28–C33); Phase 13 (synchronization) complete (C34–C56): C34 the device outbox, C35 the ledger running on the device — the same ledger the server runs, not a second one — C36 caching what a sale reads, C37 narrowing the sale's catalogue port, and C38–C42 completing offline POS: open a shift, sell, void, reprint, take a return, refund cash, close and reconcile — every POS entry executes on a device, C43 gives those events somewhere to go, C44 teaches the server what the shift ones mean, C45 lands the sale itself, C46 lets a stale price be recorded honestly, C47 brings the void and the reprint with it, C48 the return and the refund, C49 the retry queue that actually delivers them, C50 the server's own feed for what comes back down, C51 the route that serves it, C52 the conflict rules that decide what a replay means, C53 the queue of what still needs a person, C54 a real register running the whole loop, C55 the baseline that register starts from, and C56 the oversell accepted end to end — Phase 13 complete; C57 closes Phase 14 with the sync-failure alert generator; Phase 15 complete (C58–C65), opening with C58, the sales analysis and its margin, C59, the inventory reports, C60, ageing and dead stock, C61, the transfer reports, C62, purchasing and supplier performance, C63, the inventory exception reports, C64, audit, quarantine and expiry, C65, CSV export, C66, the owner dashboard's overview, C67, its exception board, and C68, the document drill-down — Phase 16 complete; C69 closes Phase 17 with the CI coverage gate and the concurrency suites
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -13,26 +13,32 @@ and what to pick up next.
 | | |
 |---|---|
 | Solution builds | Server, Windows client and Android client clean; warnings-as-errors and analyzers on. `Pos.Client` verified in Release through C32 on 2026-09-17 on Windows with the MAUI workloads: `net10.0-windows10.0.19041.0` and `net10.0-android` both 0 warnings, 0 errors. The same run found `Pos.Infrastructure.Tests` did not compile in Release (two unused `Microsoft.EntityFrameworkCore` directives, IDE0005, from C29/C31); fixed. |
-| Tests | **1,344 passing without PostgreSQL: Domain 402, Application 247, Infrastructure 386, Security 52, Architecture 25, API 232** (2026-09-18, through C68 the document drill-down). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C68 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
+| Tests | **1,348 passing without PostgreSQL: Domain 402, Application 247, Infrastructure 390, Security 52, Architecture 25, API 232** (2026-09-18, through C69 the coverage gate). PostgreSQL tests require Docker; the suites ran in Release through C32 on a machine with Docker (Infrastructure 217 passed, API 176 passed, 0 skipped), including all 21 PostgreSQL tests — after an earlier run under heavy load had silently skipped the 18 Infrastructure ones (see §4). C33–C69 have not been run against PostgreSQL; C43 and C50 add the only PostgreSQL migrations among them. |
 | Migrations | 30 PostgreSQL migrations plus 10 independent SQLite device migrations, all forward-only. The device migrations are exercised against encrypted SQLCipher storage. |
 | API host on PostgreSQL | Covered by `PostgresHostSmokeTests` (start-up, sign-in, numbered documents, ledger posting) and a full compose-stack run through Caddy as `pos_app`. See §3 for what these found. |
-| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device) |
+| Phases complete | 0 (architecture), 1 (foundation), 2 (identity), 3 (master data), 4 (inventory core), 5 (purchasing: PO lifecycle + goods receipts + returns/direct delivery/discrepancy resolution), 6 (transfers: main warehouse → store), 7 (transfers: store-to-store — central review, pre-approval tokens, emergency transfers with dual-manager authorization, replenishment recommendations), 8 (quarantine and unauthorized inventory — incidents, lines, photos, HQ review, release caps), 9 (inventory control — approved stock adjustments, counts with variance posting, repeat-variance detection), 10 (batch and expiration — expiry warning thresholds, expiry run quarantining past-expiry stock as `EXP`-numbered groups), 12 (offline storage — encrypted device database, protected change feed, command boundary, device numbering, snapshot expiry, status surface and the shift lifecycle executing on a device), 13 (synchronization — the outbox, the device ledger, offline POS end to end, the push and pull routes, the conflict rules, the review queue, the baseline), 14 (alerting — the sync-failure generator), 15 (reporting — sales, inventory, transfers, purchasing, exceptions, audit and CSV export), 16 (owner dashboard — overview, exception board, document drill-down) |
 | Out-of-phase | Interim payment receipts (ADR-0026) — RCT-numbered cash documents, issue/view/print |
-| Phases remaining | 13–18 — see §5 |
+| Phases remaining | 17 (testing, under way at C69) and 18 (deployment) — see §5 |
 
 ```
-Pos.Domain.Tests            378 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
-Pos.Infrastructure.Tests    308 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally, with a coverage test tying every queueable event to an applier, the retry queue that drains the outbox, the register's own container resolving every use case it is allowed to run, the server feed recording what those registers download, the route that serves them a page of it, and a real register running the whole loop against the real server
+Pos.Domain.Tests            402 passing   invariants, money, ledger rules, catalog curation and price supersession/cancellation, stock adjustments and counts, purchasing (PO/receipts/returns/DDA/discrepancies), transfers, payment receipts, POS and customer-account rules
+Pos.Infrastructure.Tests    390 passing   non-PostgreSQL ledger, numbering, catalog, migration-order, POS, notifications, encrypted device store and its raw keying, change-feed application and its write guards, device document numbering, offline permission evaluation, the device status surface, the device shift lifecycle end to end, the upload queue and the ledger running against the device store, and the upload engine replaying a shift's lifecycle centrally, with a coverage test tying every queueable event to an applier, the retry queue that drains the outbox, the register's own container resolving every use case it is allowed to run, the server feed recording what those registers download, the route that serves them a page of it, a real register running the whole loop against the real server, the reporting and dashboard queries, and the concurrency suites where several writers contend on one shelf and two dispatchers ship the same transfer
 Pos.Architecture.Tests       25 passing   layering, ledger isolation, permission catalogue, client reference boundary and the device command whitelist
 Pos.Security.Tests           52 passing   authentication, tokens, permission matrix, log scrubbing
 Pos.Application.Tests       247 passing   master-data commands, CQRS behaviours, receipt rendering, POS handlers and named-customer sale validation
-Pos.Api.IntegrationTests    201 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
+Pos.Api.IntegrationTests    232 passing   endpoints through the real pipeline (SQLite), including customer lifecycle, permissions, audit behavior, discount enforcement, the web-terminal checkout surface, sale-lifecycle read routes, the payment-mix checkout flows, the expired-batch override contract, scheduled-price cancellation, and a register uploading a shift and a sale it rang up through an outage, priced from a row since superseded, reprinted and then voided, and goods taken back and refunded
 ```
-
-(Pos.Sync.Tests exists as the Phase 5+ sync shell and currently declares no tests.)
 
 The PostgreSQL suite needs a Docker daemon. The local C11 run excluded tests
 whose fully-qualified names contain `Postgres`; CI runs them with Docker.
+
+Coverage is merged across the six suites and gated in CI by
+`scripts/check-coverage.ps1`: **80.4% of lines and 62.0% of branches**, with
+Pos.Api 86.7%, Pos.Application 86.4%, Pos.Infrastructure 84.6% and Pos.Domain
+83.8%. Pos.Web and Pos.SharedUI are at 0% and still count towards the total,
+which is what keeps an untested UI visible rather than averaged away. The floors
+in that script sit a couple of points under each measured figure, so ordinary
+work never trips them and a regression does.
 
 ---
 
@@ -1432,6 +1438,83 @@ out.**
 phase's list and are written up under "what is left": the scheduling loop that
 calls the uploader, feed retention and pruning, and a `UserChanged` emitter.
 
+C69 opens Phase 17 with the two rows nothing in the repository answered: a gate on
+coverage, and the concurrency tests for parallel sales and transfer races. The
+other six rows were already met by suites built across earlier phases, and were
+marked against what exists rather than written again.
+
+**Coverage was collected and never looked at.** CI has passed
+`--collect:"XPlat Code Coverage"` since the workflow was written, uploaded the
+reports as an artifact, and gated on nothing. Measuring it first was the point:
+the raw number came out at **26.9%**, which is not a statement about the tests
+at all — EF's migration designer files and model snapshots are machine-written
+and never run outside a migration, and they alone are 100,000 of the 160,000
+lines counted. `coverlet.runsettings` excludes them and the generated OpenAPI
+file, and the honest figure is **80.4% of lines, 62.0% of branches**.
+
+**Merging the six reports is where the arithmetic hides.** Each test project
+writes its own Cobertura report measuring every assembly it loaded, so
+`Pos.Domain` looks thin in the API report and thick in its own; a line is covered
+when any suite covered it. Two details make the union harder than it looks. Each
+report's file names are relative to its own `<source>` root, derived from the
+common prefix of the files in that report, so the same file is
+`Pos.Domain/Sales/Sale.cs` in one and `src/Pos.Domain/Sales/Sale.cs` in the next
+— joining the roots back on is what stopped `Pos.Domain` reporting 14,798 lines
+at 67.6% when it has 7,403 at 83.8%. And a class's lines appear twice, once under
+`<methods>` and once under the class, so they are keyed and deduplicated rather
+than summed.
+
+**`ExcludeByAttribute` is deliberately not set.** Asking coverlet to exclude
+`GeneratedCodeAttribute` drops the whole `Pos.Application` module from the report
+rather than the generated members inside it — the layer read 36.8% with handlers
+the API tests drive end to end showing 0%. A gate reading that number would have
+been worse than no gate.
+
+**The floors are a ratchet.** `scripts/check-coverage.ps1` fails under a total
+(78% lines, 58% branches) and a per-assembly floor, each a couple of points under
+what the suite covers today: Pos.Api 84, Pos.Application 84, Pos.Infrastructure
+82, Pos.Domain 81. An assembly that vanishes from the reports fails too, since
+that is the quietest way for a gate like this to stop working. `Pos.Web` and
+`Pos.SharedUI` are at 0% with a floor of 0 rather than left out: they still count
+towards the total, which is what keeps an untested UI visible instead of averaged
+away.
+
+**Four tills selling the last ten sell exactly ten.** The oversell case is the
+one a shop notices: two cashiers scan the same item off the same shelf within the
+same second and both read a figure that says there is enough. The check happens
+before the write, so on its own it proves nothing — the guarantee comes from the
+version token on the balance projection, which makes the loser re-read and decide
+again. Four tills, four units each, ten on the shelf: two sales land, two are
+refused with `inventory.insufficient_stock`, the shelf ends at two and the
+customer side received exactly what left it. Contention within stock is not
+refusal: six tills selling three of forty all succeed, and the projection's
+version is bumped once per sale, so no write was silently lost.
+
+**What stops a transfer being dispatched twice is not what it looks like.** The
+aggregate refuses a second dispatch — "a transfer that already carries a number
+must never be dispatched again" — but that guard reads the copy its own context
+loaded, and two dispatchers with the transfer open both pass it. The transfer row
+carries no version token. What actually arbitrates the race is the custody chain:
+every step appends a custody event and `(transfer, sequence)` is unique, so two
+writers compute the same next sequence and the loser collides at the database.
+One shipment lands, one custody event is written, and the loser's failure is a
+save conflict rather than a refusal. The same holds for two receivers booking in
+one shipment. That index is now the whole guard and nothing else would have
+noticed if it were relaxed, which is why both races are pinned by tests.
+
+**The empty sync suite is gone.** `tests/Pos.Sync.Tests` held a `.csproj`, an
+`InternalsVisibleTo` grant from two projects, a place in the solution, and no
+tests — while the sync tests it named have been living in
+`Pos.Infrastructure.Tests/Sync`, `/Offline` and `Pos.Api.IntegrationTests` all
+along. An empty suite in the solution reads as coverage that exists, so it was
+removed and OFFLINE_SYNC.md §10 now says where the tests are. Reading that matrix
+against what exists found two rows genuinely unwritten: a **sequence-gap
+timeout**, which has no mechanism at all — a gap defers what is behind it and
+waits indefinitely, with nothing to mark it for review — and a backlog of the
+size named there.
+
+---
+
 C68 closes Phase 16 with the drill-down. `GET /api/v1/dashboard/timeline` answers
 "what happened to this document" by merging three sources — the audit log, the
 ledger and the sync verdicts — into one list.
@@ -2282,10 +2365,13 @@ Stated plainly so they are not mistaken for finished work:
 
 ## 5. What to do next
 
-Phase 12 is complete (C28–C33). **Phase 13 is under way:** C34 built the outbox,
-so a device now queues the business events it produces — gaplessly, canonically
-hashed, and in the same transaction as the records they describe. Nothing moves
-those events yet.
+Phases 12 through 16 are complete. **Phase 17 is complete at C69**: the coverage
+gate and the concurrency suites closed the last two rows, and the remaining six
+were marked against the suites that already met them. Phase 18, deployment, is
+what is left.
+
+Three things named in earlier phases are still open, and none of them is a
+testing gap:
 
 1. **The scheduling loop that calls the uploader**, and the device's own
    credentials for it. `SyncUploader` and `HttpSyncTransport` exist and are
@@ -2300,6 +2386,13 @@ those events yet.
    cache is never filled, and the baseline cannot fill it either.
 
 The sync-failure alert generator was the fourth entry here and is built (C57).
+
+Two more, found by C69 reading OFFLINE_SYNC.md §10 against what exists: a
+**sequence-gap timeout** has no mechanism at all — a gap defers what is behind it
+and waits indefinitely, with nothing to mark it for review — and no test drives a
+backlog of the size that matrix names. And the **owner dashboard's web UI** is
+not built: Phase 16 delivered API surface, which is why `Pos.Web` sits at 0%
+coverage.
 
 Two smaller things outstanding:
 

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <!--
+            EF's migration designer files and model snapshots are machine-written
+            and only ever run when a migration is applied, so counting their tens
+            of thousands of lines as untested buries the number that matters. The
+            same goes for the OpenAPI file the source generator drops in obj.
+
+            ExcludeByAttribute is deliberately not set here: asking coverlet to
+            exclude GeneratedCodeAttribute drops the whole Pos.Application module
+            from the report rather than the generated members inside it, which
+            silently understates the layer by every line the API tests drive.
+          -->
+          <ExcludeByFile>**/Persistence/Migrations/**/*.cs,**/artifacts/obj/**/*.cs,**/*.g.cs,**/*.generated.cs</ExcludeByFile>
+          <SkipAutoProps>true</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

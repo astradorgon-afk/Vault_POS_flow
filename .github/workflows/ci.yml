@@ -46,9 +46,16 @@ jobs:
         run: >-
           dotnet test VaultFlow.slnx
           --no-build --configuration Release
+          --settings coverlet.runsettings
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
           --results-directory artifacts/test-results
+
+      # Collecting coverage and never looking at it is how a suite rots while
+      # the badge stays green. The floors live in the script, a couple of points
+      # under what the suite covers today, so only a real regression trips them.
+      - name: Check coverage floors
+        run: pwsh ./scripts/check-coverage.ps1
 
       - name: Upload test results
         if: always()

@@ -29,7 +29,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Pos.Api.IntegrationTests" />
     <InternalsVisibleTo Include="Pos.Security.Tests" />
-    <InternalsVisibleTo Include="Pos.Sync.Tests" />
     <InternalsVisibleTo Include="Pos.Architecture.Tests" />
   </ItemGroup>
 

@@ -384,14 +384,45 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 17 — Testing
 
-- [ ] Domain unit tests
-- [ ] Application use-case tests
-- [ ] Infrastructure/integration tests with Testcontainers
-- [ ] API integration tests
-- [ ] Synchronization test suite
-- [ ] Security test suite
-- [ ] Concurrency tests (parallel sales, transfer races, document numbering)
-- [ ] Coverage gate in CI
+- [x] Domain unit tests
+      *(402 in `Pos.Domain.Tests`: invariants, money, ledger rules, catalogue
+      curation and price supersession, purchasing, transfers, POS and customer
+      accounts)*
+- [x] Application use-case tests
+      *(247 in `Pos.Application.Tests`: master-data commands, the CQRS
+      behaviours, receipt rendering, POS handlers and sale validation)*
+- [x] Infrastructure/integration tests with Testcontainers
+      *(408 in `Pos.Infrastructure.Tests`, of which 18 need a Docker daemon —
+      the PostgreSQL ledger guards, the delete trigger and the role grants,
+      which exist nowhere else)*
+- [x] API integration tests
+      *(234 in `Pos.Api.IntegrationTests`, every endpoint through the real
+      pipeline, plus a register driving the whole sync loop against the real
+      API)*
+- [x] Synchronization test suite
+      *(in `Pos.Infrastructure.Tests/Sync` and `/Offline` for everything below
+      HTTP, and in `Pos.Api.IntegrationTests` for the routes and the round
+      trip. The empty `Pos.Sync.Tests` shell was removed rather than left
+      standing. Two rows of the OFFLINE_SYNC.md §10 matrix remain unwritten: a
+      sequence-gap **timeout**, which has no mechanism at all — a gap defers
+      what is behind it and waits indefinitely — and a backlog of the size
+      named there)*
+- [x] Security test suite
+      *(52 in `Pos.Security.Tests`: authentication, tokens, the permission
+      matrix, log scrubbing)*
+- [x] Concurrency tests (parallel sales, transfer races, document numbering)
+      *(C69: four tills selling the last ten sell exactly ten and the rest are
+      refused, contention within stock never refuses, two dispatchers shipping
+      one transfer produce one shipment and two receivers one receipt. The
+      transfer race is arbitrated by the custody chain's unique (transfer,
+      sequence) index, not by a version token the transfer does not have —
+      which is why it is now pinned by a test. Ledger balances and device
+      document numbering were already covered)*
+- [x] Coverage gate in CI
+      *(C69: `scripts/check-coverage.ps1` merges the six suites' Cobertura
+      reports and fails under per-assembly and total floors. 80.4% of lines and
+      62.0% of branches today; the floors sit a couple of points under that, a
+      ratchet rather than an aspiration)*
 
 ## Phase 18 — Deployment
 

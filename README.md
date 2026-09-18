@@ -53,8 +53,7 @@ src/
   Pos.SharedUI/        Razor components shared by Web and the device client
 tests/
   Pos.Domain.Tests/  Pos.Application.Tests/  Pos.Infrastructure.Tests/
-  Pos.Api.IntegrationTests/  Pos.Sync.Tests/  Pos.Security.Tests/
-  Pos.Architecture.Tests/
+  Pos.Api.IntegrationTests/  Pos.Security.Tests/  Pos.Architecture.Tests/
 ```
 
 `Pos.Client` is the Phase 12 .NET MAUI Blazor Hybrid application. Its SQLCipher
@@ -98,4 +97,6 @@ dotnet ef migrations add <Name> --context PosDeviceDbContext --project src/Pos.I
 - Financial and inventory records are append-only. Corrections are reversals.
 - Warnings are errors, and a package with a published advisory fails the build.
 - No secrets in the repository; `scripts/check-secrets.ps1` runs in CI.
+- Coverage is gated: `scripts/check-coverage.ps1` merges the suites' reports and
+  fails CI under the floors recorded in it.
 # Vault_POS_flow

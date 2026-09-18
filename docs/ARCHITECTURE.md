@@ -138,9 +138,8 @@ VaultFlow.sln
 +-- tests/
     |-- Pos.Domain.Tests/            unit - invariants, state machines, money
     |-- Pos.Application.Tests/       unit - use cases with fakes
-    |-- Pos.Infrastructure.Tests/    integration - EF, ledger, concurrency
+    |-- Pos.Infrastructure.Tests/    integration - EF, ledger, concurrency, sync
     |-- Pos.Api.IntegrationTests/    integration - endpoints, authz, problem details
-    |-- Pos.Sync.Tests/              idempotency, ordering, conflict, offline replay
     |-- Pos.Security.Tests/          authz matrix, tokens, replay, revocation
     +-- Pos.Architecture.Tests/      layering + "no direct stock write" enforcement
 ```

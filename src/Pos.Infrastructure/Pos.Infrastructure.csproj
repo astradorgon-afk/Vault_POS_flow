@@ -32,7 +32,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Pos.Infrastructure.Tests" />
-    <InternalsVisibleTo Include="Pos.Sync.Tests" />
 
     <!-- The alert sweeps are internal so nothing in the application can call one
          out of turn. The API suite runs one against the real container, which is

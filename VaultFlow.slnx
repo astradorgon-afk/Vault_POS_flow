@@ -16,6 +16,5 @@
     <Project Path="tests/Pos.Domain.Tests/Pos.Domain.Tests.csproj" />
     <Project Path="tests/Pos.Infrastructure.Tests/Pos.Infrastructure.Tests.csproj" />
     <Project Path="tests/Pos.Security.Tests/Pos.Security.Tests.csproj" />
-    <Project Path="tests/Pos.Sync.Tests/Pos.Sync.Tests.csproj" />
   </Folder>
 </Solution>
