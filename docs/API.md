@@ -818,7 +818,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58–C64):
+Built (C7, C58–C65):
 
 ```
 GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
@@ -839,6 +839,7 @@ GET /api/v1/reports/count-variance            report.view            (C63)
 GET /api/v1/reports/expiry                    report.view            (C64)
 GET /api/v1/reports/unauthorized-inventory    report.view            (C64)
 GET /api/v1/reports/audit                     audit.view             (C64)
+GET /api/v1/reports/{report}/export           report.export + the report's own (C65)
 ```
 
 The sync-problems report of the original plan is
@@ -861,8 +862,6 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-POST /api/v1/reports/{name}/export            report.export
-
 GET /api/v1/dashboard/overview?range=today|yesterday|last7|last30|month|prev-month|quarter|year|custom
                               &from=&to=&locationId=
 GET /api/v1/dashboard/exceptions
@@ -1072,6 +1071,34 @@ it out.
 forward only: a batch that expired last month is more urgent than one expiring
 next week, not less, so no floor is applied to the window. Stock with nothing left
 in the bucket is not reported — there is nothing there to throw away.
+
+### 11.8 Export
+
+`GET /api/v1/reports/{report}/export` returns CSV. It is a GET rather than the
+POST the original plan named, because it reads and returns; nothing is created.
+
+**`report.export` gets you the file format, not the report.** Each name is checked
+against the permission its own route requires before a row is read, so exporting
+is never a way around `report.view.financial` — which it would be if the route's
+own permission were the only gate. Scope is resolved the same way as the report
+and cannot be widened here either. The table of report names to permissions lives
+in one place, so adding a report to the export list without deciding who may read
+it is a compile error rather than an open door.
+
+**Cells are guarded against formula injection.** A spreadsheet treats a cell
+beginning `=`, `+`, `-` or `@` as a formula, so a product named `=cmd|…` — enterable
+by anyone who can name a product — would run when a manager opened the export.
+Those cells are prefixed with an apostrophe, which spreadsheets read as "this is
+text".
+
+Values go out invariantly: round-trip timestamps and a `.` decimal separator. An
+export formatted for the server's locale changes meaning when the server moves. A
+header row is always written, so an empty period downloads a file that says what
+the columns were rather than an empty one that says nothing.
+
+**XLSX is not built.** It needs a third-party spreadsheet library, which is a
+dependency decision rather than a reporting one; CSV opens in every spreadsheet
+there is.
 
 ---
 

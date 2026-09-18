@@ -350,7 +350,12 @@ Substantially delivered in Phase 1, because everything else depends on it.
       business-wide entry reaches only a caller who is not scoped to particular
       stores. The sync-problems report is `GET /api/v1/sync/failures` from C53 and
       is deliberately not duplicated)*
-- [ ] Export (CSV/XLSX)
+- [~] Export (CSV/XLSX)
+      *(C65: CSV, with the exported report's own permission checked before a row
+      is read — `report.export` gets you the format, not the report — and a
+      formula-injection guard on every cell. XLSX is not built: it needs a
+      third-party spreadsheet library, which is a dependency decision rather than
+      a reporting one)*
 
 ## Phase 16 — Owner Dashboard
 

@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -384,6 +384,25 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     `GET /api/v1/sync/failures` from C53 and is deliberately not duplicated: a
     second surface over the same verdicts could only add a way for the two to
     disagree. 8 tests; no migration.
+  - [~] C65 — CSV export: `GET /api/v1/reports/{report}/export` returns CSV, a GET
+    rather than the POST the API plan named because it reads and returns and
+    creates nothing. **`report.export` gets you the file format, not the report** —
+    each name is checked against the permission its own route requires before a row
+    is read, so exporting is never a way round `report.view.financial`, which it
+    would be if the route's own permission were the only gate. The name-to-permission
+    table lives in one place, so adding a report to the export list without deciding
+    who may read it is a compile error rather than an open door. Cells beginning
+    `=`, `+`, `-` or `@` are prefixed with an apostrophe: a spreadsheet runs those
+    as formulas, and a product named `=cmd|…` — enterable by anyone who can name a
+    product — would otherwise run when a manager opened the file. Values go out
+    invariantly, and a header row is always written so an empty period downloads a
+    file that says what the columns were. **XLSX is not built**: it needs a
+    third-party spreadsheet library, which is a dependency decision rather than a
+    reporting one. Writing the tests surfaced a gap in the spec — `report.export`
+    is granted to `Auditor` alone in the role bundles and the role matrix in
+    PERMISSIONS.md has no row for it at all, so the permission-gap case had to be
+    staged with a real `UserPermissionOverride`; who should be able to export is an
+    open question. 9 tests; no migration.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1406,9 +1425,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C64):** 1,299 passing without PostgreSQL
+- **Verification (2026-09-18, through C65):** 1,308 passing without PostgreSQL
   (Domain 383, Application 247, Infrastructure 380, Security 52, Architecture 25,
-  API 212); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+  API 221); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by

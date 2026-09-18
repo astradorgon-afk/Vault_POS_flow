@@ -8,6 +8,7 @@ using Pos.Application.Sales;
 using Pos.Domain.Common;
 using Pos.Domain.Reports;
 using Pos.Domain.Sales;
+using Pos.Api.Reporting;
 using Pos.Infrastructure.Identity;
 
 namespace Pos.Api.Endpoints;
@@ -167,6 +168,14 @@ public static class ReportEndpoints
             })
             .WithName("GetExpiringStockReport")
             .WithSummary("Lists stock that has expired or is about to, and is still held.");
+
+        group.MapGet("/{report}/export", ExportAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ExportReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ExportReport")
+            .WithSummary("Exports a report as CSV.");
 
         return app;
     }
@@ -701,6 +710,132 @@ public static class ReportEndpoints
                     cancellationToken)
                 .ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Exports one report as CSV.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>report.export</c> gets you the file format; it does not get you the
+    /// report. Each name is checked against the permission its own route requires
+    /// before a row is read, so exporting is never a way around
+    /// <c>report.view.financial</c> — which it would be if the route's own
+    /// permission were the only gate.
+    /// </para>
+    /// <para>
+    /// The parameters are the underlying report's, so a caller exports exactly
+    /// what they were looking at. Scope is resolved the same way and cannot be
+    /// widened here either.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> ExportAsync(
+        string report,
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] ISalesAnalysisRepository sales,
+        [FromServices] IInventoryReportRepository inventory,
+        [FromServices] ITransferReportRepository transfers,
+        [FromServices] IPurchasingReportRepository purchasing,
+        [FromServices] IExceptionReportRepository exceptions,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] SalesAnalysisGrouping groupBy = SalesAnalysisGrouping.Product,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] int limit = MaxRows)
+    {
+        string? required = RequiredPermission(report);
+
+        if (required is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<string>.Failure(Error.NotFound(
+                    "report.unknown", FormattableString.Invariant($"There is no report called {report}."))),
+                currentUser.CorrelationId.Value);
+        }
+
+        if (!await evaluator
+                .HasPermissionAsync(currentUser.UserId ?? UserId.Empty, required, null, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<string>.Failure(Error.Forbidden(
+                    "report.export_not_permitted",
+                    "Exporting a report needs the permission that report itself needs.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<IReadOnlyCollection<LocationId>> scope = await WindowScopeAsync(
+            evaluator, currentUser, from, to, locationId, cancellationToken).ConfigureAwait(false);
+
+        if (scope.IsFailure)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<string>.Failure(scope.Errors), currentUser.CorrelationId.Value);
+        }
+
+        int rows = Math.Clamp(limit, 1, MaxRows);
+
+        string csv = report switch
+        {
+            "sales" => CsvWriter.Write((await sales
+                .GetSalesAnalysisAsync(
+                    new SalesAnalysisQuery(DateOnly.FromDateTime(from.UtcDateTime), DateOnly.FromDateTime(to.UtcDateTime), groupBy, scope.Value, rows),
+                    cancellationToken)
+                .ConfigureAwait(false)).Rows),
+
+            "inventory-on-hand" => CsvWriter.Write(await inventory
+                .GetOnHandAsync(new InventoryReportQuery(scope.Value, null, false, rows), cancellationToken)
+                .ConfigureAwait(false)),
+
+            "inventory-valuation" => CsvWriter.Write((await inventory
+                .GetValuationAsync(new InventoryReportQuery(scope.Value, null, false, rows), cancellationToken)
+                .ConfigureAwait(false)).Rows),
+
+            "transfers" => CsvWriter.Write((await transfers
+                .GetTransfersAsync(from, to, scope.Value, false, rows, cancellationToken)
+                .ConfigureAwait(false)).Rows),
+
+            "purchases" => CsvWriter.Write((await purchasing
+                .GetPurchaseOrdersAsync(from, to, scope.Value, null, rows, cancellationToken)
+                .ConfigureAwait(false)).Rows),
+
+            "supplier-performance" => CsvWriter.Write(await purchasing
+                .GetSupplierPerformanceAsync(from, to, scope.Value, cancellationToken)
+                .ConfigureAwait(false)),
+
+            "adjustments" => CsvWriter.Write(await exceptions
+                .GetAdjustmentsAsync(from, to, scope.Value, cancellationToken)
+                .ConfigureAwait(false)),
+
+            "shrinkage" => CsvWriter.Write((await exceptions
+                .GetShrinkageAsync(from, to, scope.Value, cancellationToken)
+                .ConfigureAwait(false)).Rows),
+
+            _ => string.Empty,
+        };
+
+        return Results.File(
+            System.Text.Encoding.UTF8.GetBytes(csv),
+            "text/csv",
+            FormattableString.Invariant($"{report}-{from:yyyyMMdd}-{to:yyyyMMdd}.csv"));
+    }
+
+    /// <summary>
+    /// The permission a report needs, or null when there is no such report.
+    /// </summary>
+    /// <remarks>
+    /// Kept as one table rather than spread across the export switch, so adding a
+    /// report to the export list without deciding who may read it is a compile
+    /// error rather than an open door.
+    /// </remarks>
+    private static string? RequiredPermission(string report) => report switch
+    {
+        "sales" or "inventory-on-hand" or "transfers" or "purchases"
+            or "supplier-performance" or "adjustments" => Permissions.Administration.ViewReports,
+        "inventory-valuation" or "shrinkage" => Permissions.Administration.ViewFinancialReports,
+        _ => null,
+    };
 
     private static async Task<Result<InventoryReportQuery>> QueryAsync(
         DatabasePermissionEvaluator evaluator,
