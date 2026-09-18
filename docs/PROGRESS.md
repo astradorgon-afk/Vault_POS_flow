@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry, C65 CSV export. **Phase 16 is under way**: C66 lands the owner dashboard's overview. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -410,7 +410,30 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     PERMISSIONS.md has no row for it at all, so the permission-gap case had to be
     staged with a real `UserPermissionOverride`; who should be able to export is an
     open question. 9 tests; no migration.
-- [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
+- [~] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
+  - [x] C66 — the overview: `GET /api/v1/dashboard/overview` gives a period's
+    headline numbers, the store comparison and what the stock looks like now.
+    **The sales half is the sales report** — it composes `ISalesAnalysisRepository`
+    rather than running its own arithmetic, because a dashboard that queried
+    separately would eventually disagree with the report a manager opens to check
+    it, and somebody looking at two numbers for one week has no way to tell which
+    is wrong. **Named ranges resolve in a real timezone**, named in the response:
+    one store's own when a store is named, the organization's otherwise. "Today"
+    in Manila is not the UTC day, and answering in UTC would show a store at nine
+    in the morning a fraction of the day it had already had. `Last7` is seven days
+    inclusive; `Custom` with a missing date is refused rather than falling back to
+    today. **The financial half is withheld, not zeroed** — without
+    `report.view.financial` the cost, profit, margin and stock value come back
+    null, because zero reads as "we made nothing", a statement about the business
+    rather than about the reader. The stock panel is a snapshot of now with its own
+    `asOfUtc` whatever period the sales cover, and out-of-stock is counted apart
+    from low because one is a sale being refused right now and the other a sale
+    that will be refused next week. Running the suite caught a latent flake I had
+    left in C55: `SyncBaselineProcessor` read `DateTimeOffset.UtcNow` directly, so
+    its snapshot-expiry test passed in the morning and failed in the afternoon. The
+    processor now takes `ISystemClock` like everything else. 26 tests (19 on the
+    range resolver alone, where every case is an off-by-one somebody would
+    otherwise find in a comparison and quietly distrust); no migration.
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
 
@@ -1432,9 +1455,9 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C65):** 1,308 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 380, Security 52, Architecture 25,
-  API 221); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
+- **Verification (2026-09-18, through C66):** 1,334 passing without PostgreSQL
+  (Domain 402, Application 247, Infrastructure 380, Security 52, Architecture 25,
+  API 228); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the
   download host the environment blocks — so its wiring is verified by

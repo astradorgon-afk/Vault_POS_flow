@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Pos.Application.Common.Abstractions;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
@@ -46,7 +47,13 @@ namespace Pos.Infrastructure.Sync;
 /// </para>
 /// </remarks>
 /// <param name="context">The server database.</param>
-public sealed class SyncBaselineProcessor(PosDbContext context)
+/// <param name="clock">
+/// The authoritative clock. Read through the port rather than from
+/// <c>DateTimeOffset.UtcNow</c>, because "is this price still effective" and "has
+/// this snapshot expired" are both decided here — and a baseline whose answers
+/// depend on the wall clock is one whose tests pass in the morning.
+/// </param>
+public sealed class SyncBaselineProcessor(PosDbContext context, ISystemClock clock)
 {
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
@@ -72,6 +79,8 @@ public sealed class SyncBaselineProcessor(PosDbContext context)
         {
             return null;
         }
+
+        DateTimeOffset now = clock.UtcNow;
 
         // Read first, project second. The order is the whole guarantee.
         long resumeCursor = await context.ChangeFeed
@@ -138,7 +147,7 @@ public sealed class SyncBaselineProcessor(PosDbContext context)
             // a history: sending the lot would grow without bound.
             foreach (ProductPrice price in product.Prices
                 .Where(p => p.LocationId is null || p.LocationId == locationId)
-                .Where(p => p.EffectiveToUtc is null || p.EffectiveToUtc > DateTimeOffset.UtcNow))
+                .Where(p => p.EffectiveToUtc is null || p.EffectiveToUtc > now))
             {
                 parts.Add((nameof(ProductPriceChanged), sequence => new ProductPriceChanged(
                     sequence,
@@ -153,7 +162,7 @@ public sealed class SyncBaselineProcessor(PosDbContext context)
         }
 
         foreach (PermissionSnapshotIssued snapshot in await LiveSnapshotsAsync(
-            locationId, resumeCursor, cancellationToken).ConfigureAwait(false))
+            locationId, resumeCursor, now, cancellationToken).ConfigureAwait(false))
         {
             parts.Add((nameof(PermissionSnapshotIssued), sequence => snapshot with { Sequence = sequence }));
         }
@@ -206,6 +215,7 @@ public sealed class SyncBaselineProcessor(PosDbContext context)
     private async Task<List<PermissionSnapshotIssued>> LiveSnapshotsAsync(
         LocationId locationId,
         long resumeCursor,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         List<ChangeFeedEntry> rows = await context.ChangeFeed
@@ -240,7 +250,7 @@ public sealed class SyncBaselineProcessor(PosDbContext context)
 
             // Later issues replace earlier ones, which is what the device does
             // with them too — the rows arrive in order, so the last one wins.
-            if (issued is not null && issued.ExpiresAtUtc > DateTimeOffset.UtcNow)
+            if (issued is not null && issued.ExpiresAtUtc > now)
             {
                 live[issued.UserId] = issued;
             }

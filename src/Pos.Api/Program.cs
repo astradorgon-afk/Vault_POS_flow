@@ -260,6 +260,7 @@ try
     app.MapCustomerEndpoints();
     app.MapReturnsEndpoints();
     app.MapReportEndpoints();
+    app.MapDashboardEndpoints();
     app.MapAdministrationEndpoints();
     app.MapNotificationEndpoints();
     app.MapHub<NotificationHub>(NotificationHub.Route).RequireAuthorization();

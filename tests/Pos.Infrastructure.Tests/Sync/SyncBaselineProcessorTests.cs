@@ -180,7 +180,7 @@ public sealed class SyncBaselineProcessorTests : IAsyncLifetime
     }
 
     private Task<SyncBaselineResponse?> BuildAsync(DeviceId id)
-        => new SyncBaselineProcessor(this.context).BuildAsync(id, CancellationToken.None);
+        => new SyncBaselineProcessor(this.context, new FixedClock(Now)).BuildAsync(id, CancellationToken.None);
 
     private async Task AddProductAsync(string sku, string name)
     {

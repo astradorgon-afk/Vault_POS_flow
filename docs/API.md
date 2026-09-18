@@ -862,9 +862,15 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/dashboard/overview?range=today|yesterday|last7|last30|month|prev-month|quarter|year|custom
-                              &from=&to=&locationId=
 GET /api/v1/dashboard/exceptions
+```
+
+Built (C66):
+
+```
+GET /api/v1/dashboard/overview                report.view            (C66)
+    ?range=Today|Yesterday|Last7|Last30|Month|PrevMonth|Quarter|Year|Custom
+    &from=&to=&locationId=
 ```
 
 All report endpoints take the same `range` / `from` / `to` / `locationId`
@@ -1099,6 +1105,39 @@ the columns were rather than an empty one that says nothing.
 **XLSX is not built.** It needs a third-party spreadsheet library, which is a
 dependency decision rather than a reporting one; CSV opens in every spreadsheet
 there is.
+
+## 11.9 The owner dashboard
+
+**The sales half is the sales report.** The dashboard composes
+`ISalesAnalysisRepository` rather than running its own version of the arithmetic:
+a dashboard that queried separately would eventually disagree with the report a
+manager opens to check it, and somebody looking at two numbers for one week has no
+way to tell which is wrong. Being the same code is the only guarantee that holds.
+
+**Named ranges resolve in a real timezone**, named in the response as
+`timeZoneId`. One store's own when a store is named, the organization's otherwise.
+"Today" for a business in Manila is not the UTC day, and a dashboard answering in
+UTC would show a store, at nine in the morning, a fraction of the day it had
+already had. `Last7` is seven days inclusive of today, not eight. `Custom` with a
+missing date is refused rather than quietly falling back to today, which would
+show a number that looks like an answer to the question asked.
+
+**The financial half is withheld, not zeroed.** Without `report.view.financial`,
+`cost`, `grossProfit`, `marginPercent` and the stock `value` come back `null`.
+Zero reads as "we made nothing", which is a statement about the business rather
+than about the reader. One route serves both, because a second would be a second
+place for the arithmetic to drift.
+
+**The stock panel is a snapshot of now**, whatever period the sales figures cover,
+and says so with its own `asOfUtc`. Mixing the two silently is how somebody
+concludes last month's sales emptied a shelf that was restocked on Tuesday. Out of
+stock and low are counted separately: one is a sale being refused right now and
+the other is a sale that will be refused next week, and they go to different
+people.
+
+`shareOfRevenue` is null rather than zero when nothing sold anywhere — a share of
+nothing is not nought per cent, it is not a share. The store comparison is never
+truncated, because a league table missing its tail lies about who is last.
 
 ---
 

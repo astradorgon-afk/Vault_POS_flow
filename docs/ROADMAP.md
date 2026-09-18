@@ -359,9 +359,17 @@ Substantially delivered in Phase 1, because everything else depends on it.
 
 ## Phase 16 — Owner Dashboard
 
-- [ ] Business overview KPIs with date and location filters
-- [ ] Store comparison
-- [ ] Inventory panels (available, in transit, quarantine, low, out, over)
+- [x] Business overview KPIs with date and location filters
+      *(C66: named ranges resolve in a real timezone rather than UTC, and the
+      financial half is withheld rather than zeroed for a caller without
+      `report.view.financial`)*
+- [x] Store comparison
+      *(C66: one row per store on the same basis as the whole, never truncated —
+      a league table missing its tail lies about who is last)*
+- [x] Inventory panels (available, in transit, quarantine, low, out, over)
+      *(C66: a snapshot of now with its own `asOfUtc`, whatever period the sales
+      figures cover; out of stock and low are counted separately because they go
+      to different people)*
 - [ ] Exception panels (unknown products, discrepancies, high-value adjustments,
       negative-stock attempts, expired-still-available, repeated variances,
       failed sync, offline devices, emergency transfers)
