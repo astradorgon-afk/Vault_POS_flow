@@ -818,7 +818,7 @@ Detailed contracts in [OFFLINE_SYNC.md](OFFLINE_SYNC.md).
 
 ## 11. Reporting and dashboard
 
-Built (C7, C58–C63):
+Built (C7, C58–C64):
 
 ```
 GET /api/v1/reports/daily-sales               report.view            (POS day summary, C7)
@@ -836,7 +836,15 @@ GET /api/v1/reports/supplier-performance      report.view            (C62)
 GET /api/v1/reports/adjustments               report.view            (C63)
 GET /api/v1/reports/shrinkage                 report.view.financial  (C63)
 GET /api/v1/reports/count-variance            report.view            (C63)
+GET /api/v1/reports/expiry                    report.view            (C64)
+GET /api/v1/reports/unauthorized-inventory    report.view            (C64)
+GET /api/v1/reports/audit                     audit.view             (C64)
 ```
+
+The sync-problems report of the original plan is
+`GET /api/v1/sync/failures` (C53), which reads the server's own verdicts. It is
+not duplicated here: a second surface over the same rows could only add a way for
+the two to disagree.
 
 `GET /api/v1/reports/sales?from=&to=&groupBy=Product|Category|Location|Cashier&locationId=&limit=`
 is **one** route rather than the four `by-*` routes this section originally
@@ -853,10 +861,6 @@ VAT** and margin is measured on it; see §11.1.
 Planned:
 
 ```
-GET /api/v1/reports/expiry                    report.view
-GET /api/v1/reports/unauthorized-inventory    report.view
-GET /api/v1/reports/audit                     audit.view
-GET /api/v1/reports/sync-problems             sync.manage
 POST /api/v1/reports/{name}/export            report.export
 
 GET /api/v1/dashboard/overview?range=today|yesterday|last7|last30|month|prev-month|quarter|year|custom
@@ -1043,6 +1047,31 @@ reconciling to the accounts it exists to explain.
 "nobody looked" are different facts, and conflating them makes an unfinished count
 read as a clean one. Those lines are excluded by default and returned with
 `includeUncounted=true`, which is what a supervisor closing a count needs.
+
+### 11.7 Audit, unauthorized inventory and expiry
+
+**The activity list carries no before-and-after payloads.** They can hold customer
+details and prices, and a list is read far more often than a single entry is
+examined; whoever needs the payload opens the entry. What is returned is enough to
+see who did what, where, and under what authority — including the role snapshot,
+which is what they held at the time rather than what they hold now.
+
+**An audit entry with no location is business-wide** — a role change, a permission
+grant — and reaches only a caller who is not scoped to particular stores. Showing
+it to a store manager would leak head-office activity through a report about their
+own shop; hiding it from an owner would lose the entries that matter most.
+
+`daysOpen` on an unauthorized-inventory incident ages an open incident to now and
+keeps how long a closed one took, so one number answers both "how long has this
+been sitting" and "how long did that take". `unidentifiedLines` counts the lines
+whose goods the catalogue does not know — unidentifiable stock is the most worth
+investigating, and a report that could only show recognised products would leave
+it out.
+
+**Expired stock is always included, however far back it went.** `withinDays` looks
+forward only: a batch that expired last month is more urgent than one expiring
+next week, not less, so no floor is applied to the window. Stock with nothing left
+in the bucket is not reported — there is nothing there to throw away.
 
 ---
 

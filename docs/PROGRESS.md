@@ -20,7 +20,7 @@ storage is complete (C28–C33). **Phase 13 synchronization is complete at C56**
 outbox, push, every event applier, the retry queue, the change feed, the pull
 route, the baseline a register starts from, the conflict rules and the full round
 trip. Phase 14 notifications is complete at C57. **Phase 15 analytics
-is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports. Phase 11 was built as the "C" batch
+is under way**: C58 lands the sales analysis and margin, C59 the inventory reports, C60 ageing and dead stock, C61 transfers and distribution, C62 purchasing and supplier performance, C63 the inventory exception reports, C64 audit, quarantine and expiry. Phase 11 was built as the "C" batch
 series (customer-return and receipt work was built ahead of the
 shift/sale/payment bulk). C1 (void), C2 (customer return + refund), C3 (receipt
 reprint), C3b (blind return), C4 (blind-return refund), C5 (shift lifecycle
@@ -363,6 +363,27 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
     write-off cannot be reversed by flipping the signs on its own movement type.
     Still to come in this row: a dedicated expiry report, and unauthorized-inventory
     and quarantine reporting. 7 tests; no migration.
+  - [x] C64 — audit activity, unauthorized inventory and expiry:
+    `GET /api/v1/reports/audit` lists recorded actions under `audit.view`,
+    `/unauthorized-inventory` the quarantine incidents, and `/expiry` the stock
+    that has expired or is about to. **The activity list carries no
+    before-and-after payloads** — they can hold customer details and prices, and a
+    list is read far more often than a single entry is examined; whoever needs the
+    payload opens the entry. What is returned includes the role snapshot, which is
+    the authority the actor held at the time rather than now. **An audit entry with
+    no location is business-wide** — a role change, a permission grant — and
+    reaches only a caller who is not scoped to particular stores: showing it to a
+    store manager would leak head-office activity through a report about their own
+    shop, and hiding it from an owner would lose the entries that matter most.
+    `daysOpen` ages an open incident to now and keeps how long a closed one took,
+    so one number answers both questions, and `unidentifiedLines` counts what the
+    catalogue does not know — unidentifiable stock is the most worth investigating.
+    The expiry report always includes what already expired however far back it
+    went, because a batch that expired last month is more urgent than one expiring
+    next week rather than less. The sync-problems report the API plan named is
+    `GET /api/v1/sync/failures` from C53 and is deliberately not duplicated: a
+    second surface over the same verdicts could only add a way for the two to
+    disagree. 8 tests; no migration.
 - [ ] **Phase 16 — Owner dashboard:** KPIs, store comparison, inventory and exception panels, drill-downs
 - [ ] **Phase 17 — Testing:** coverage gate and the remaining suites
 - [ ] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
@@ -1385,8 +1406,8 @@ Full suite: Domain 345, App 200, Infra 64 (+ 18 skipped PostgreSQL guards),
   an outage is the worse failure and the new PII lands in the encrypted device
   store like any other local record; deactivate and reactivate stay online,
   being administrative.
-- **Verification (2026-09-18, through C63):** 1,291 passing without PostgreSQL
-  (Domain 383, Application 247, Infrastructure 372, Security 52, Architecture 25,
+- **Verification (2026-09-18, through C64):** 1,299 passing without PostgreSQL
+  (Domain 383, Application 247, Infrastructure 380, Security 52, Architecture 25,
   API 212); 18 PostgreSQL Infrastructure tests skipped and 2 PostgreSQL API tests
   failing for the same reason — no Docker in the session container.
   `Pos.Client` itself was not compiled here — the MAUI workloads need the

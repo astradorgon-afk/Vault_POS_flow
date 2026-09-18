@@ -144,6 +144,30 @@ public static class ReportEndpoints
             .WithName("GetCountVarianceReport")
             .WithSummary("Lists the physical count lines that did not match the system.");
 
+        group.MapGet("/audit", GetAuditActivityAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewAudit)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetAuditActivityReport")
+            .WithSummary("Lists recorded actions in a window, newest first.");
+
+        group.MapGet("/unauthorized-inventory", GetQuarantineIncidentsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetQuarantineIncidentReport")
+            .WithSummary("Lists unauthorized-inventory incidents, longest open first.");
+
+        group.MapGet("/expiry", GetExpiringStockAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ViewReports)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetExpiringStockReport")
+            .WithSummary("Lists stock that has expired or is about to, and is still held.");
+
         return app;
     }
 
@@ -590,6 +614,93 @@ public static class ReportEndpoints
         => to < from || (to - from).TotalDays >= MaxPeriodDays
             ? Result<IReadOnlyCollection<LocationId>>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays))
             : await ScopeAsync(evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+    private static async Task<IResult> GetAuditActivityAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IAuditReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] Guid? userId = null,
+        [FromQuery] string? action = null,
+        [FromQuery] int limit = 200)
+    {
+        Result<IReadOnlyCollection<LocationId>> scope = await WindowScopeAsync(
+            evaluator, currentUser, from, to, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<AuditActivityReport>.Failure(scope.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetActivityAsync(
+                    from,
+                    to,
+                    scope.Value,
+                    userId is { } actor ? new UserId(actor) : null,
+                    action,
+                    Math.Clamp(limit, 1, MaxRows),
+                    cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetQuarantineIncidentsAsync(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromServices] IAuditReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        [FromServices] ISystemClock clock,
+        CancellationToken cancellationToken,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] bool openOnly = false)
+    {
+        Result<IReadOnlyCollection<LocationId>> scope = await WindowScopeAsync(
+            evaluator, currentUser, from, to, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<QuarantineIncidentRow>>.Failure(scope.Errors),
+                currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetQuarantineIncidentsAsync(from, to, scope.Value, openOnly, clock.UtcNow, cancellationToken)
+                .ConfigureAwait(false));
+    }
+
+    private static async Task<IResult> GetExpiringStockAsync(
+        [FromServices] IAuditReportRepository reports,
+        [FromServices] DatabasePermissionEvaluator evaluator,
+        [FromServices] ICurrentUser currentUser,
+        [FromServices] ISystemClock clock,
+        CancellationToken cancellationToken,
+        [FromQuery] DateOnly? asOf = null,
+        [FromQuery] int withinDays = 30,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] int limit = 200)
+    {
+        if (withinDays < 0 || withinDays >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<ExpiringStockRow>>.Failure(ReportErrors.PeriodInvalid(MaxPeriodDays)),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<IReadOnlyCollection<LocationId>> scope = await ScopeAsync(
+            evaluator, currentUser, locationId, cancellationToken).ConfigureAwait(false);
+
+        return scope.IsFailure
+            ? ProblemDetailsMapping.ToProblem(
+                Result<IReadOnlyList<ExpiringStockRow>>.Failure(scope.Errors), currentUser.CorrelationId.Value)
+            : TypedResults.Ok(await reports
+                .GetExpiringStockAsync(
+                    asOf ?? DateOnly.FromDateTime(clock.UtcNow.UtcDateTime),
+                    withinDays,
+                    scope.Value,
+                    Math.Clamp(limit, 1, MaxRows),
+                    cancellationToken)
+                .ConfigureAwait(false));
+    }
 
     private static async Task<Result<InventoryReportQuery>> QueryAsync(
         DatabasePermissionEvaluator evaluator,
