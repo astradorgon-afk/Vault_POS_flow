@@ -72,7 +72,7 @@ not enrolled is refused with `403 auth.two_factor_enrolment_required` until it
 completes the two enrolment calls above. Enrolment refuses an account that is
 already enrolled (`409 identity.two_factor_already_enabled`) and a wrong code
 (`400 identity.two_factor_code_invalid`).
-| POST | `/api/v1/devices/enrol` | anonymous + enrolment code |
+| POST | `/api/v1/devices/enrol` | anonymous + enrolment code — returns `deviceId`, `shortCode`, `locationId` |
 | GET | `/api/v1/devices` | `device.manage` |
 | POST | `/api/v1/devices/{id}/suspend` \| `/revoke` \| `/reactivate` | `device.manage` |
 | POST | `/api/v1/devices/enrolment-codes` | `device.manage` |

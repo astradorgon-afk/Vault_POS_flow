@@ -1,15 +1,21 @@
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
+using Pos.Application.Identity;
 using Pos.Application.Sales;
 using NSubstitute;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
 using Pos.Domain.Sales;
+using Pos.Infrastructure.Configuration;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 using Pos.Infrastructure.Offline;
 using Pos.Infrastructure.Sync;
@@ -469,6 +475,50 @@ public sealed class SyncPushServiceTests
     }
 
     [Fact]
+    public async Task Baseline_IssuesTheCallersOfflineSnapshotScopedToTheRegistersStore()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        await using (PosDbContext context = host.CreateContext())
+        {
+            Guid roleId = Guid.CreateVersion7();
+            context.Users.Add(new AppUser
+            {
+                Id = host.User.Value,
+                UserName = "cashier1",
+                DisplayName = "Cashier One",
+                CreatedAtUtc = host.Now,
+            });
+            context.Roles.Add(new AppRole { Id = roleId, Name = "Cashier", CreatedAtUtc = host.Now });
+            context.UserRoles.Add(new IdentityUserRole<Guid> { UserId = host.User.Value, RoleId = roleId });
+            foreach (string code in new[] { Permissions.Sales.OpenShift, Permissions.Catalog.Create, Permissions.Administration.AllLocations })
+            {
+                PermissionDefinition definition = Permissions.Find(code)!;
+                context.Permissions.Add(new PermissionRecord
+                {
+                    Code = code,
+                    Module = definition.Module,
+                    Description = definition.Description,
+                    IsOfflineCapable = definition.IsOfflineCapable,
+                    IsReadOnly = definition.IsReadOnly,
+                });
+                context.RolePermissions.Add(new RolePermissionGrant { RoleId = roleId, PermissionCode = code, GrantedAtUtc = host.Now });
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        SyncBaselineResponse response = await host.Baseline.GetAsync(CancellationToken.None);
+
+        response.ErrorCode.Should().BeNull();
+        response.Items.Select(i => i.Type).Should().Equal("UserChanged", "PermissionSnapshotIssued");
+        SyncBaselineItem snapshot = response.Items[1];
+        snapshot.Payload.GetProperty("expiresAtUtc").GetDateTimeOffset().Should().Be(host.Now.AddHours(72));
+        System.Text.Json.JsonElement grant = snapshot.Payload.GetProperty("grants").EnumerateArray().Should().ContainSingle().Subject;
+        grant.GetProperty("permission").GetString().Should().Be(Permissions.Sales.OpenShift, "only offline-capable permissions travel to a device");
+        grant.GetProperty("locationId").GetGuid().Should().Be(host.Location.Value, "a grant is scoped to the register's own store");
+    }
+
+    [Fact]
     public async Task Status_ReturnsDeviceCheckpointFeedCursorAndOpenFailures()
     {
         await using TestHost host = await TestHost.CreateAsync();
@@ -491,6 +541,7 @@ public sealed class SyncPushServiceTests
         private readonly SqliteConnection connection;
         private readonly DbContextOptions<PosDbContext> options;
         private readonly PosDbContext serviceContext;
+        private readonly MemoryCache cache = new(new MemoryCacheOptions());
 
         private TestHost(
             SqliteConnection connection,
@@ -522,10 +573,14 @@ public sealed class SyncPushServiceTests
                 new CurrentUser(user, device.Id),
                 new FixedClock(Now));
             Failures = new SyncFailureService(serviceContext, new FixedClock(Now));
+            PolicyVersionProvider policy = new(serviceContext, cache, new FixedClock(Now));
             Baseline = new SyncBaselineService(
                 serviceContext,
                 new CurrentUser(user, device.Id),
-                new FixedClock(Now));
+                new FixedClock(Now),
+                new DatabasePermissionEvaluator(serviceContext, cache, policy, new FixedClock(Now)),
+                policy,
+                Options.Create(new SecurityOptions()));
             Status = new SyncStatusService(
                 serviceContext,
                 new CurrentUser(user, device.Id),
@@ -583,6 +638,7 @@ public sealed class SyncPushServiceTests
         public async ValueTask DisposeAsync()
         {
             await serviceContext.DisposeAsync();
+            cache.Dispose();
             await connection.DisposeAsync();
         }
     }

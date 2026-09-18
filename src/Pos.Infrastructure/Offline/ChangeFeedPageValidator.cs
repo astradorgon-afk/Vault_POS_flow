@@ -57,6 +57,31 @@ internal static class ChangeFeedPageValidator
         return Result.Success();
     }
 
+    /// <summary>
+    /// Validates every change in a baseline. A baseline replaces the caches
+    /// wholesale and now carries permission snapshots, so it is held to the same
+    /// field rules as a page; only the sequence rules do not apply, because its
+    /// changes carry none.
+    /// </summary>
+    public static Result Validate(ChangeFeedBaseline baseline)
+    {
+        if (baseline.Changes is null)
+        {
+            return Invalid("The baseline carries no change list.");
+        }
+
+        foreach (ChangeFeedChange? change in baseline.Changes)
+        {
+            string? problem = change is null ? "The baseline contains an empty change." : Check(change);
+            if (problem is not null)
+            {
+                return Invalid(problem);
+            }
+        }
+
+        return Result.Success();
+    }
+
     private static string? Check(ChangeFeedChange change) => change switch
     {
         ProductChanged p => Id(p.ProductId, "product")

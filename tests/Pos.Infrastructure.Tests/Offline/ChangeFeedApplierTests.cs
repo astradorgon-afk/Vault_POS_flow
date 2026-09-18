@@ -196,6 +196,21 @@ public sealed class ChangeFeedApplierTests
         (await context.SyncCursors.SingleAsync()).Position.Should().Be(42);
     }
 
+    [Fact]
+    public async Task ReplaceBaselineAsync_AtPositionZero_StillRecordsThatStoreDataArrived()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+
+        Result<ChangeFeedApplyOutcome> result = await database.Applier.ReplaceBaselineAsync(
+            new ChangeFeedBaseline(0, [Product(0, ProductId.New(), "NEW", "New product")]));
+
+        result.IsSuccess.Should().BeTrue();
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+        DeviceSyncCursor cursor = await context.SyncCursors.SingleAsync();
+        cursor.Position.Should().Be(0);
+        cursor.AdvancedAtUtc.Should().Be(TemporaryDeviceDatabase.Now, "the register reports when its store data arrived");
+    }
+
     public static TheoryData<string, ChangeFeedPage> MalformedPages()
     {
         ProductId productId = ProductId.New();

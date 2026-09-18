@@ -227,6 +227,12 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   Architecture 25 tests passed with no failures or skips. Added parallel sale
   and transfer-dispatch race tests; the merged first-party coverage gate passed
   at 95.73% (141,254/147,559) against the required 60%.
+- [x] C64 — the Windows desktop register (`Pos.Client`) now gets past "not set
+  up yet": enrolment with a one-time code (or a manager-issued one), device-bound
+  sign-in that downloads the store baseline and the user's offline permission
+  snapshot, and a searchable catalogue read from the encrypted store. Added the
+  `vaultflow-web` desktop preview trigger (`.claude/launch.json`,
+  `scripts/dev-desktop.ps1`).
 - [~] **Phase 18 — Deployment:** production compose overlay, backups/restore, logging/metrics, client packaging, CI publishing
 
 ---
@@ -325,6 +331,31 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   PostgreSQL 17 and verifies the atomic counter upsert under contention.
 - Focused result: **2 passed, 0 failed**. C63 adds the sale and transfer race
   cases and closes the Docker-backed full-suite gate.
+
+### C64 — Desktop register setup, sign-in and store data
+
+- `Pos.Client` walks a register from unenrolled to trading-ready: a set-up panel
+  (head-office address + one-time code, or a manager account that registers the
+  machine and issues the code), a sign-in panel, and a catalogue panel with
+  search, re-download and sign-out. The register's ECDSA key lives in secure
+  storage; head office records only its thumbprint.
+- `POST /api/v1/devices/enrol` now also returns `shortCode` and `locationId`, so
+  the device writes its own profile.
+- `GET /api/v1/sync/baseline` now adds the caller's `UserChanged` row and a
+  `PermissionSnapshotIssued` with only offline-capable permissions, scoped to
+  the device's location and expiring after `Security:PermissionSnapshotHours`.
+  Without it a signed-in register reported "Ready to sign in" and could not act.
+- `ChangeFeedWire` reads the server's JSON entries into typed changes;
+  `ReplaceBaselineAsync` now validates a baseline like a page and records the
+  cursor even at position zero (an empty server feed left the banner on
+  "Waiting for store data").
+- Desktop trigger: `.claude/launch.json` → `scripts/dev-desktop.ps1` starts the
+  development database, API and Web UI together.
+- Tests: one new baseline-snapshot sync case; four `ChangeFeedWire` cases and
+  one zero-cursor baseline case. Full Docker-backed run: Domain 378, Application
+  247, Infrastructure 252, API 176, Sync 22, Security 52, Architecture 25 —
+  1,152 passed, no failures or skips. Verified in the running app: enrol W01 at
+  Store One, sign in as `cashier1`, banner **Ready**, six products listed.
 
 ## Log
 

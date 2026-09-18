@@ -189,6 +189,7 @@ public static class DeviceEndpoints
     private static async Task<IResult> EnrolAsync(
         [FromBody] EnrolDeviceBody body,
         IDeviceService devices,
+        PosDbContext context,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
@@ -199,9 +200,27 @@ public static class DeviceEndpoints
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return result.IsSuccess
-            ? TypedResults.Ok(new { deviceId = result.Value.Value })
-            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+        if (result.IsFailure)
+        {
+            return ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+        }
+
+        // The device numbers its own documents under this short code and trades
+        // at this location, so it records both before it can do anything else.
+        DeviceId id = result.Value;
+        var enrolled = await context.Devices
+            .AsNoTracking()
+            .Where(d => d.Id == id)
+            .Select(d => new { d.ShortCode, d.LocationId })
+            .SingleAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(new
+        {
+            deviceId = id.Value,
+            shortCode = enrolled.ShortCode,
+            locationId = enrolled.LocationId.Value,
+        });
     }
 
     private static Task<IResult> SuspendAsync(

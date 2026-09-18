@@ -1,9 +1,13 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Pos.Application.Common.Abstractions;
+using Pos.Application.Identity;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
 using Pos.Domain.Organizations;
+using Pos.Infrastructure.Configuration;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
 namespace Pos.Infrastructure.Sync;
@@ -12,7 +16,10 @@ namespace Pos.Infrastructure.Sync;
 public sealed class SyncBaselineService(
     PosDbContext context,
     ICurrentUser currentUser,
-    ISystemClock clock)
+    ISystemClock clock,
+    DatabasePermissionEvaluator authorization,
+    IPolicyVersionProvider policyVersion,
+    IOptions<SecurityOptions> security)
 {
     public async Task<SyncBaselineResponse> GetAsync(CancellationToken cancellationToken)
     {
@@ -117,6 +124,9 @@ public sealed class SyncBaselineService(
             }));
         }
 
+        await AddSignedInUserAsync(items, currentUser.UserId.Value, device.LocationId, cancellationToken)
+            .ConfigureAwait(false);
+
         long cursor = await context.SyncChangeLog
             .AsNoTracking()
             .Select(e => (long?)e.Sequence)
@@ -124,6 +134,64 @@ public sealed class SyncBaselineService(
             .ConfigureAwait(false) ?? 0;
 
         return new SyncBaselineResponse(clock.UtcNow, cursor, items, null, null);
+    }
+
+    /// <summary>
+    /// Adds the caller's cached identity and offline authority. A register signs
+    /// someone in only while it can reach head office, so this is the moment it
+    /// learns what they may do once the connection drops: offline-capable
+    /// permissions only, scoped to the register's own store, and bounded by
+    /// <see cref="SecurityOptions.PermissionSnapshotHours"/>.
+    /// </summary>
+    private async Task AddSignedInUserAsync(
+        List<SyncBaselineItem> items,
+        UserId userId,
+        LocationId deviceLocation,
+        CancellationToken cancellationToken)
+    {
+        AppUser? user = await context.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(u => u.Id == userId.Value, cancellationToken)
+            .ConfigureAwait(false);
+        if (user is null)
+        {
+            return;
+        }
+
+        items.Add(Item("UserChanged", user.Id, new
+        {
+            userId = user.Id,
+            userName = user.UserName ?? string.Empty,
+            displayName = user.DisplayName,
+            isActive = user.IsActive,
+            securityVersion = 0L,
+        }));
+
+        UserAuthorization authority = await authorization
+            .GetAuthorizationAsync(userId, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Someone not assigned to this store is given nothing to hold here, even
+        // if their permissions would allow it somewhere else.
+        bool atThisStore = authority.IsActive
+            && (authority.HasAllLocations || authority.Locations.Contains(deviceLocation));
+        string[] offline = atThisStore
+            ? [.. authority.Permissions
+                .Where(p => Permissions.Find(p)?.IsOfflineCapable == true)
+                .Order(StringComparer.Ordinal)]
+            : [];
+
+        DateTimeOffset issuedAt = clock.UtcNow;
+        long version = await policyVersion.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+
+        items.Add(Item("PermissionSnapshotIssued", user.Id, new
+        {
+            userId = user.Id,
+            policyVersion = version,
+            issuedAtUtc = issuedAt,
+            expiresAtUtc = issuedAt.AddHours(security.Value.PermissionSnapshotHours),
+            grants = offline.Select(p => new { permission = p, locationId = (Guid?)deviceLocation.Value }).ToArray(),
+        }));
     }
 
     private static SyncBaselineItem Item<T>(string type, object key, T payload)

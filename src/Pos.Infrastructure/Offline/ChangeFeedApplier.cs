@@ -118,6 +118,12 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 ChangeFeedErrors.PageInvalid("The baseline cursor cannot be negative."));
         }
 
+        Result validation = ChangeFeedPageValidator.Validate(baseline);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<ChangeFeedApplyOutcome>(validation.Error);
+        }
+
         await using PosDeviceDbContext context =
             await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using IDbContextTransaction transaction =
@@ -145,11 +151,11 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 context.ChangeTracker.Clear();
             }
 
-            if (baseline.Cursor > 0)
-            {
-                context.SyncCursors.Add(new DeviceSyncCursor(ChangeFeed, baseline.Cursor, clock.UtcNow));
-                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
+            // Recorded even at position zero: a baseline taken before the server
+            // feed has any entries is still the store's data arriving, and the
+            // cursor row is what says when it did.
+            context.SyncCursors.Add(new DeviceSyncCursor(ChangeFeed, baseline.Cursor, clock.UtcNow));
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

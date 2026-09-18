@@ -334,7 +334,12 @@ Changes are saved one at a time inside the transaction, so a later change always
 sees an earlier one to the same row exactly as the server ordered them.
 
 Full re-baseline uses `GET /api/v1/sync/baseline`, which returns the scoped
-catalog, prices, barcodes, location and current feed cursor. When
+catalog, prices, barcodes, location and current feed cursor, plus the calling
+user's `UserChanged` row and a `PermissionSnapshotIssued` holding only their
+offline-capable permissions, scoped to the device's location and expiring after
+`Security:PermissionSnapshotHours`. The desktop client downloads it at every
+sign-in; `ReplaceBaselineAsync` validates it like a page and records the cursor
+even at position zero, so the register reports when its store data arrived. When
 `master_data_version` on the server exceeds the device's
 by more than the retained feed window (or the device has been offline beyond
 `FeedRetentionDays`, default 30), the server answers with

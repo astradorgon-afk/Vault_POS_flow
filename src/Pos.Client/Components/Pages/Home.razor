@@ -1,8 +1,9 @@
 @page "/"
 @inject DeviceDatabaseInitializer Database
 @inject DeviceStatusProvider Status
+@inject RegisterService Register
 
-<section class="startup-card" aria-live="polite">
+<section class="startup-card @(Register.Current is null ? string.Empty : "startup-card-wide")" aria-live="polite">
     <div class="eyebrow">VaultFlow device</div>
 
     @if (_error is not null)
@@ -28,6 +29,19 @@
     else
     {
         <DeviceStatusBanner Status="_status" />
+
+        @if (_status.Enrolment == DeviceEnrolmentState.NotEnrolled)
+        {
+            <SetupPanel OnEnrolled="RefreshAsync" />
+        }
+        else if (Register.Current is null)
+        {
+            <SignInPanel OnSignedIn="RefreshAsync" />
+        }
+        else
+        {
+            <CataloguePanel OnSignedOut="RefreshAsync" OnRefreshed="RefreshAsync" />
+        }
     }
 </section>
 
@@ -47,9 +61,10 @@
             return;
         }
 
-        // Read after the store is open, so the banner reports the device rather
-        // than the moment before it was ready. Nobody is signed in on this
-        // screen yet, so there is no authority to report.
-        _status = await Status.GetAsync(null);
+        await RefreshAsync();
     }
+
+    // Read after the store is open and after every change of state, so the
+    // banner reports the register as it is now rather than as it was.
+    private async Task RefreshAsync() => _status = await Status.GetAsync(Register.Current?.UserId);
 }

@@ -1024,6 +1024,24 @@ an audit row behind.
   failure count. The response is device-bound.
 - Added focused coverage; the sync suite now has fifteen passing tests.
 
+#### C64 — desktop register enrolment, sign-in and store data
+
+- The Windows client enrols with a one-time code (`POST /api/v1/devices/enrol`
+  now returns `shortCode` and `locationId`) and writes its local profile. A
+  manager can issue the code from the register itself; it still goes through
+  the same registration and enrolment calls.
+- Sign-in is device-bound (`X-Device-Id`) and downloads the baseline, which now
+  carries the caller's cached user row and an offline permission snapshot:
+  offline-capable permissions only, scoped to the register's store, expiring
+  after `Security:PermissionSnapshotHours` (72). A user not assigned to the
+  store receives an empty grant list.
+- `ChangeFeedWire` maps wire entries to typed changes; `ReplaceBaselineAsync`
+  validates baselines like pages and always records the cursor, so a baseline
+  taken before the server feed has entries still counts as store data received.
+- Known gaps: prices appear only once a manager schedules them (the development
+  seed creates none); tokens are held in memory, so a restart needs a new
+  sign-in; incremental pull and push are not yet driven by the client.
+
 C34 builds the upload queue. `local_outbox_event` holds the business events a
 device has produced but head office has not seen, and a single-row
 `device_sequence` numbers them. Both are written in the caller's transaction, so
@@ -1461,6 +1479,18 @@ The script works in Windows PowerShell 5.1 and PowerShell 7. It writes the
 token-signing key to `.secrets/` (git-ignored, mounted as a Docker secret) and
 creates `.env` with database passwords when there is none. The API is then at
 `https://localhost` behind Caddy, connecting as the least-privilege `pos_app`.
+
+**Desktop register (Windows, C64).** `scripts/dev-desktop.ps1` starts the
+development database container, the API and the Web UI in one step (the Claude
+desktop app runs it as the `vaultflow-web` preview). With it running:
+
+```bash
+dotnet build src/Pos.Client/Pos.Client.csproj -f net10.0-windows10.0.19041.0
+./artifacts/bin/Pos.Client/debug_net10.0-windows10.0.19041.0/Pos.Client.exe
+```
+
+Enrol with a code, or open "No code yet?" and use `admin`; then sign in as
+`cashier1`. See `docs/LOCAL_TESTING.md` for resetting the register.
 
 ```bash
 # Tests; the PostgreSQL suites self-skip when no Docker daemon is reachable

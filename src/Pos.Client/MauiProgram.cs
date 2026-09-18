@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Offline;
 using Pos.Application.Sales;
+using Pos.Client.Services;
 using Pos.Client.Storage;
 using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Offline;
@@ -48,6 +49,15 @@ public static class MauiProgram
         // infrastructure because reachability is a platform question.
         builder.Services.AddSingleton<IDeviceConnectivityProbe, NetworkConnectivityProbe>();
         builder.Services.AddSingleton<DeviceStatusProvider>();
+
+        // Head office: enrolment, sign-in and the store-data download. The
+        // register's key pair lives in the platform's secure store.
+        builder.Services.AddSingleton(_ => new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
+        builder.Services.AddSingleton<HeadOfficeClient>();
+        builder.Services.AddSingleton(SecureStorage.Default);
+        builder.Services.AddSingleton(Preferences.Default);
+        builder.Services.AddSingleton<DeviceKeyStore>();
+        builder.Services.AddSingleton<RegisterService>();
 
         // What a whitelisted use case executes inside: one session per register,
         // the device's own unit of work, its append-only local audit, and the

@@ -1,0 +1,159 @@
+@inject RegisterService Register
+
+@*
+    Enrolment: a one-time code from head office binds this machine's key to a
+    register at a store. A manager who has no code yet can issue one from here
+    with their own account; the code still goes through the same enrolment call.
+*@
+
+<div class="panel">
+    <h2>Set up this register</h2>
+    <p class="panel-lead">Enter the head-office address and the one-time enrolment code a manager issued for this register.</p>
+
+    <form class="form-grid" @onsubmit="EnrolAsync" @onsubmit:preventDefault>
+        <label>
+            <span>Head-office address</span>
+            <input @bind="_server" placeholder="http://localhost:5177" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+            <span>Enrolment code</span>
+            <input @bind="_code" placeholder="One-time code" autocomplete="off" spellcheck="false" class="mono" />
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="button-primary" disabled="@_busy">@(_busy && _step == Step.Enrol ? "Enrolling…" : "Enrol this register")</button>
+        </div>
+    </form>
+
+    @if (_message is not null)
+    {
+        <p class="form-note">@_message</p>
+    }
+
+    @if (_error is not null)
+    {
+        <p class="form-error" role="alert">@_error</p>
+    }
+
+    <details class="panel-more" open="@(_manager is not null)">
+        <summary>No code yet? Issue one with a manager account</summary>
+
+        @if (_manager is null)
+        {
+            <form class="form-grid" @onsubmit="OpenManagerAsync" @onsubmit:preventDefault>
+                <label>
+                    <span>Manager username</span>
+                    <input @bind="_managerUser" autocomplete="username" spellcheck="false" />
+                </label>
+                <label>
+                    <span>Password</span>
+                    <input type="password" @bind="_managerPassword" autocomplete="current-password" />
+                </label>
+                <div class="form-actions">
+                    <button type="submit" class="button-secondary" disabled="@_busy">@(_busy && _step == Step.Manager ? "Signing in…" : "Continue")</button>
+                </div>
+            </form>
+        }
+        else
+        {
+            <form class="form-grid" @onsubmit="IssueCodeAsync" @onsubmit:preventDefault>
+                <label>
+                    <span>Store</span>
+                    <select @bind="_storeId">
+                        @foreach (StoreChoice store in _manager.Stores)
+                        {
+                            <option value="@store.Id">@store.Code · @store.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    <span>Register name</span>
+                    <input @bind="_registerName" maxlength="128" />
+                </label>
+                <label>
+                    <span>Register code <small>2–6 letters or digits, printed on receipts</small></span>
+                    <input @bind="_shortCode" maxlength="6" class="mono" spellcheck="false" />
+                </label>
+                <div class="form-actions">
+                    <button type="submit" class="button-secondary" disabled="@_busy">@(_busy && _step == Step.Issue ? "Issuing…" : "Issue enrolment code")</button>
+                    <button type="button" class="button-link" disabled="@_busy" @onclick="() => _manager = null">Cancel</button>
+                </div>
+            </form>
+        }
+    </details>
+</div>
+
+@code {
+    private enum Step { Enrol, Manager, Issue }
+
+    private string _server = string.Empty;
+    private string _code = string.Empty;
+    private string _managerUser = string.Empty;
+    private string _managerPassword = string.Empty;
+    private string _registerName = "Windows register";
+    private string _shortCode = "W01";
+    private Guid _storeId;
+    private ManagerSetupSession? _manager;
+    private bool _busy;
+    private Step _step;
+    private string? _error;
+    private string? _message;
+
+    /// <summary>Raised once the register has enrolled.</summary>
+    [Parameter]
+    public EventCallback OnEnrolled { get; set; }
+
+    protected override void OnInitialized() => _server = Register.Server.AbsoluteUri.TrimEnd('/');
+
+    private Task EnrolAsync() => RunAsync(Step.Enrol, async () =>
+    {
+        if (string.IsNullOrWhiteSpace(_code))
+        {
+            throw new HeadOfficeException("Enter the enrolment code.");
+        }
+
+        await Register.EnrolAsync(RegisterService.ParseServer(_server), _code);
+        await OnEnrolled.InvokeAsync();
+    });
+
+    private Task OpenManagerAsync() => RunAsync(Step.Manager, async () =>
+    {
+        ManagerSetupSession manager = await Register.OpenManagerSessionAsync(
+            RegisterService.ParseServer(_server), _managerUser, _managerPassword);
+        if (manager.Stores.Count == 0)
+        {
+            throw new HeadOfficeException("That account cannot see any active stores.");
+        }
+
+        _managerPassword = string.Empty;
+        _storeId = manager.Stores[0].Id;
+        _manager = manager;
+    });
+
+    private Task IssueCodeAsync() => RunAsync(Step.Issue, async () =>
+    {
+        ManagerSetupSession manager = _manager!;
+        _manager = null;
+        _code = await Register.IssueEnrolmentCodeAsync(manager, _storeId, _registerName, _shortCode);
+        _message = "Enrolment code issued and filled in above. It works once and expires in 15 minutes — press Enrol this register.";
+    });
+
+    private async Task RunAsync(Step step, Func<Task> action)
+    {
+        _busy = true;
+        _step = step;
+        _error = null;
+        _message = null;
+        try
+        {
+            await action();
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

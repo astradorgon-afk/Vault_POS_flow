@@ -1,0 +1,109 @@
+@inject RegisterService Register
+
+<div class="panel">
+    <div class="panel-head">
+        <div>
+            <h2>@Register.Current?.DisplayName</h2>
+            <p class="panel-lead">Products and prices on this register, read from its encrypted store.</p>
+        </div>
+        <div class="panel-tools">
+            <button type="button" class="button-secondary" disabled="@_busy" @onclick="RefreshAsync">@(_busy ? "Downloading…" : "Download store data")</button>
+            <button type="button" class="button-link" disabled="@_busy" @onclick="SignOutAsync">Sign out</button>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p class="form-error" role="alert">@_error</p>
+    }
+
+    <input class="catalogue-search" type="search" placeholder="Search by name, SKU or barcode"
+           @bind="_search" @bind:event="oninput" spellcheck="false" />
+
+    @if (_items is null)
+    {
+        <p class="panel-lead">Loading products…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="panel-lead">No products have been downloaded for this store yet.</p>
+    }
+    else
+    {
+        <div class="catalogue-scroll">
+            <table class="catalogue">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>SKU</th>
+                        <th>Barcode</th>
+                        <th class="numeric">Price</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (CatalogueItem item in Visible)
+                    {
+                        <tr>
+                            <td>@item.Name</td>
+                            <td class="mono">@item.Sku</td>
+                            <td class="mono">@(item.Barcode ?? "—")</td>
+                            <td class="numeric">@(item.Price is { } price ? $"{item.Currency} {price:N2}" : "No price")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="catalogue-count">@Visible.Count() of @_items.Count products</p>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<CatalogueItem>? _items;
+    private string _search = string.Empty;
+    private bool _busy;
+    private string? _error;
+
+    /// <summary>Raised when the register has been locked.</summary>
+    [Parameter]
+    public EventCallback OnSignedOut { get; set; }
+
+    /// <summary>Raised when store data has been downloaded again.</summary>
+    [Parameter]
+    public EventCallback OnRefreshed { get; set; }
+
+    private IEnumerable<CatalogueItem> Visible => string.IsNullOrWhiteSpace(_search)
+        ? _items ?? []
+        : (_items ?? []).Where(i =>
+            i.Name.Contains(_search.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || i.Sku.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+            || (i.Barcode?.Contains(_search.Trim(), StringComparison.Ordinal) ?? false));
+
+    protected override async Task OnInitializedAsync() => _items = await Register.GetCatalogueAsync();
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Register.RefreshStoreDataAsync();
+            _items = await Register.GetCatalogueAsync();
+            await OnRefreshed.InvokeAsync();
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message + " If your session has expired, sign out and sign in again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SignOutAsync()
+    {
+        _busy = true;
+        await Register.SignOutAsync();
+        await OnSignedOut.InvokeAsync();
+    }
+}

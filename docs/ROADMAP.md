@@ -269,7 +269,10 @@ Substantially delivered in Phase 1, because everything else depends on it.
       live; `IChangeFeedPublisher` now appends typed payloads with database-
       assigned sequence numbers; C41 adds the authenticated baseline snapshot
       and current cursor; C42 atomically replaces feed-owned device caches and
-      returns `410 Gone` when a cursor falls outside the retained window.)*
+      returns `410 Gone` when a cursor falls outside the retained window; C64
+      has the Windows client download the baseline at every sign-in, now
+      carrying the caller's offline permission snapshot. Client-driven
+      incremental pull is still outstanding.)*
 - [~] Retry queue with exponential backoff
       *(C37: durable `sync.sync_failure` rows, bounded retry scheduling,
       operator listing, retry and dismissal endpoints are live; automatic

@@ -26,11 +26,13 @@ body {
 .client-shell {
     min-height: 100vh;
     display: grid;
-    place-items: center;
     padding: clamp(1.25rem, 5vw, 4rem);
 }
 
+/* Auto margins centre the card while it fits and let it grow downwards when it
+   does not; centring alignment would push its top out of scroll reach. */
 .startup-card {
+    margin: auto;
     width: min(42rem, 100%);
     padding: clamp(1.5rem, 5vw, 3.5rem);
     border: 1px solid rgba(229, 177, 99, 0.24);
@@ -100,6 +102,214 @@ h1:focus {
     background: #dda756;
     box-shadow: 0 0 0 0.3rem rgba(221, 167, 86, 0.12);
     animation: pulse 1.4s ease-in-out infinite;
+}
+
+.startup-card-wide {
+    width: min(68rem, 100%);
+}
+
+.panel {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(244, 240, 230, 0.12);
+}
+
+.panel h2 {
+    margin: 0 0 0.35rem;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.6rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+}
+
+.panel-lead {
+    margin: 0 0 1.25rem;
+    color: #aeb8af;
+    line-height: 1.55;
+}
+
+.panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.panel-tools {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.form-grid {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.form-grid label {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.form-grid label > span {
+    color: #d8d2c4;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.form-grid small {
+    margin-left: 0.4rem;
+    color: #8f998f;
+    font-weight: 400;
+}
+
+input,
+select {
+    width: 100%;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid rgba(244, 240, 230, 0.18);
+    border-radius: 0.6rem;
+    background: rgba(10, 13, 11, 0.6);
+    color: #f4f0e6;
+    font: inherit;
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    border-color: #dda756;
+    box-shadow: 0 0 0 0.2rem rgba(221, 167, 86, 0.18);
+}
+
+.mono {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    letter-spacing: 0.02em;
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-top: 0.25rem;
+}
+
+button {
+    padding: 0.7rem 1.2rem;
+    border: 1px solid transparent;
+    border-radius: 0.6rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: progress;
+    opacity: 0.6;
+}
+
+.button-primary {
+    background: #dda756;
+    color: #1a150c;
+}
+
+.button-primary:hover:not(:disabled) {
+    background: #e8b86b;
+}
+
+.button-secondary {
+    border-color: rgba(221, 167, 86, 0.5);
+    background: transparent;
+    color: #f0cf9a;
+}
+
+.button-secondary:hover:not(:disabled) {
+    background: rgba(221, 167, 86, 0.1);
+}
+
+.button-link {
+    padding-inline: 0.4rem;
+    background: transparent;
+    color: #aeb8af;
+    text-decoration: underline;
+}
+
+.form-error {
+    margin: 1rem 0 0;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid rgba(212, 95, 76, 0.55);
+    border-radius: 0.6rem;
+    background: rgba(212, 95, 76, 0.12);
+    color: #ffd9d2;
+}
+
+.form-note {
+    margin: 1rem 0 0;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid rgba(120, 186, 134, 0.45);
+    border-radius: 0.6rem;
+    background: rgba(120, 186, 134, 0.1);
+    color: #d7f0dc;
+}
+
+.panel-more {
+    margin-top: 1.5rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid rgba(244, 240, 230, 0.1);
+    border-radius: 0.75rem;
+}
+
+.panel-more summary {
+    color: #dda756;
+    cursor: pointer;
+}
+
+.panel-more[open] summary {
+    margin-bottom: 1rem;
+}
+
+.catalogue-search {
+    margin-bottom: 1rem;
+}
+
+.catalogue-scroll {
+    max-height: 55vh;
+    overflow: auto;
+    border: 1px solid rgba(244, 240, 230, 0.1);
+    border-radius: 0.75rem;
+}
+
+.catalogue {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.catalogue th,
+.catalogue td {
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid rgba(244, 240, 230, 0.07);
+    text-align: left;
+}
+
+.catalogue th {
+    position: sticky;
+    top: 0;
+    background: #1b221c;
+    color: #aeb8af;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.catalogue .numeric {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.catalogue-count {
+    margin: 0.6rem 0 0;
+    color: #8f998f;
+    font-size: 0.85rem;
 }
 
 #blazor-error-ui {

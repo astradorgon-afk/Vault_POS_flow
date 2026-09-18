@@ -1,0 +1,62 @@
+@inject RegisterService Register
+
+<div class="panel">
+    <h2>Sign in</h2>
+    <p class="panel-lead">Signing in loads this store's products and prices, and what you may do here while the connection is down.</p>
+
+    <form class="form-grid" @onsubmit="SignInAsync" @onsubmit:preventDefault>
+        <label>
+            <span>Username</span>
+            <input @bind="_userName" autocomplete="username" spellcheck="false" />
+        </label>
+        <label>
+            <span>Password</span>
+            <input type="password" @bind="_password" autocomplete="current-password" />
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="button-primary" disabled="@_busy">@(_busy ? "Signing in…" : "Sign in")</button>
+        </div>
+    </form>
+
+    @if (_error is not null)
+    {
+        <p class="form-error" role="alert">@_error</p>
+    }
+</div>
+
+@code {
+    private string _userName = string.Empty;
+    private string _password = string.Empty;
+    private bool _busy;
+    private string? _error;
+
+    /// <summary>Raised once someone has signed in and the store data is on the device.</summary>
+    [Parameter]
+    public EventCallback OnSignedIn { get; set; }
+
+    private async Task SignInAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_userName) || string.IsNullOrEmpty(_password))
+        {
+            _error = "Enter your username and password.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Register.SignInAsync(_userName, _password);
+            _password = string.Empty;
+            await OnSignedIn.InvokeAsync();
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
