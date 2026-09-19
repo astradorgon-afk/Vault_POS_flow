@@ -27,6 +27,14 @@
     {
         <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◫</span> Sales</span>
     }
+    @if (CanViewReceipts)
+    {
+        <NavLink class="nav-link" href="receipts"><span aria-hidden="true">☷</span> Receipts</NavLink>
+    }
+    else
+    {
+        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">☷</span> Receipts</span>
+    }
     <span class="nav-heading">Catalogue</span>
     @if (CanViewCatalog)
     {
@@ -38,7 +46,13 @@
     }
     <span class="nav-heading">Operations</span>
     <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◇</span> Inventory</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⇄</span> Transfers</span>
+    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">↧</span> Purchasing</span>
+    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⇄</span> Transfers <small>3</small></span>
+    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⚠</span> Quarantine <small>2</small></span>
+    <span class="nav-heading">Administration</span>
+    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◎</span> Locations</span>
+    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">☰</span> People &amp; roles</span>
+    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">▤</span> Devices</span>
 </nav>
 
 <AuthorizeView><Authorized><button class="sign-out" type="button" @onclick="SignOutAsync">Sign out</button></Authorized></AuthorizeView>
@@ -48,6 +62,7 @@
     private bool CanCreateSale => Session.Current?.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
     private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
     private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("catalog.view", StringComparer.Ordinal) == true;
+    private bool CanViewReceipts => Session.Current?.User.Permissions.Contains("receipt.view", StringComparer.Ordinal) == true;
 
     private async Task SignOutAsync()
     {

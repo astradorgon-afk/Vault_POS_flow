@@ -1,0 +1,903 @@
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
+@using Pos.Domain.Sales
+@inject RegisterService Register
+
+<div class="till-shell till-shell-sale" @onkeydown="HandleKeyDownAsync">
+    <header class="till-header">
+        <div class="till-header-main">
+            <div class="till-brand-block">
+                <span class="till-brand" aria-hidden="true">V</span>
+                <div class="till-brand-text">
+                    <span class="till-wordmark">VaultFlow</span>
+                    <span class="till-store-line">@(_storeName)@(string.IsNullOrWhiteSpace(_tillCode) ? string.Empty : " · Till " + _tillCode)</span>
+                </div>
+            </div>
+
+            <div class="till-session-block">
+                <span class="till-session">
+                    <small>Cashier</small>
+                    <strong>@(Register.Current?.DisplayName ?? "—")</strong>
+                </span>
+                <span class="till-vr" aria-hidden="true"></span>
+                <span class="till-session">
+                    <small>Shift</small>
+                    <strong>@(_context?.OpenShift is { } shift ? $"{shift.Number} · {shift.CashierName}" : "Not open")</strong>
+                </span>
+                <span class="till-vr" aria-hidden="true"></span>
+                <span class="till-session">
+                    <small>Business date</small>
+                    <strong>@(_context?.BusinessDate is { } date ? date.ToString("ddd, MMM d, yyyy", CultureInfo.InvariantCulture) : "—")</strong>
+                </span>
+            </div>
+        </div>
+
+        <div class="till-header-actions">
+            <span class="till-online" title="Store data loaded from head office"><i aria-hidden="true"></i>Online</span>
+            <button type="button" class="till-icon-button" title="Refresh store data" disabled="@_busy" @onclick="RefreshAsync">
+                @(_refreshing ? "Refreshing…" : "Refresh store")
+            </button>
+            <button type="button" class="till-icon-button till-lock" title="Lock the register" disabled="@_busy" @onclick="SignOutAsync">Lock</button>
+        </div>
+    </header>
+
+    @if (_error is not null)
+    {
+        <p class="form-error till-message" role="alert">@_error</p>
+    }
+
+    @if (_loading)
+    {
+        <div class="till-loading"><span class="status-dot status-dot-working"></span> Preparing the till…</div>
+    }
+    else if (!CanCreateSale)
+    {
+        <div class="till-gate">
+            <span class="eyebrow">Access required</span>
+            <h3>This account cannot create sales.</h3>
+            <p>Ask an administrator for the <code>sale.create</code> permission.</p>
+        </div>
+    }
+    else if (_context?.OpenShift is null)
+    {
+        <section class="shift-open-card">
+            <span class="eyebrow">Drawer closed</span>
+            <h3>Open the shift before the first sale.</h3>
+            <p>@(_context is null ? "Connect to head office to load the store business date." : $"Business date: {_context.BusinessDate:ddd, MMM d yyyy}")</p>
+            <label>
+                <span>Opening cash float</span>
+                <input type="text" inputmode="decimal" placeholder="0.00" @bind="_openingFloat" disabled="@_busy" />
+            </label>
+            <button type="button" class="button-primary" @onclick="OpenShiftAsync" disabled="@(_busy || _context is null)">
+                @(_openingShift ? "Opening shift…" : "Open shift")
+            </button>
+        </section>
+    }
+    else if (_completed is not null)
+    {
+        <section class="sale-success" role="status">
+            <span class="success-mark" aria-hidden="true">✓</span>
+            <span class="eyebrow">Payment accepted</span>
+            <h3>@_completed.Number</h3>
+            <p>The sale, payments, stock movement and audit record were committed together.</p>
+            <button type="button" class="button-primary" @onclick="StartNextSale">Start next sale</button>
+        </section>
+    }
+    else if (_takingPayment)
+    {
+        <section class="payment-workspace" aria-label="Take payment">
+            <div class="pay-grid">
+                <aside class="pay-order">
+                    <button type="button" class="pay-back" @onclick="BackToCart" disabled="@_busy">
+                        <span aria-hidden="true">‹</span> Back to sale <kbd>Esc</kbd>
+                    </button>
+                    <span class="eyebrow">Payment</span>
+                    <h3>@_cart.Count item@(_cart.Count == 1 ? string.Empty : "s")</h3>
+                    <div class="pay-lines">
+                        @foreach (CartLine line in _cart)
+                        {
+                            <div class="pay-line" @key="line.Item.ProductId">
+                                <span><i>@line.Quantity ×</i> @line.Item.Name</span>
+                                <strong>@Money(line.Total)</strong>
+                            </div>
+                        }
+                    </div>
+                    <dl class="pay-summary">
+                        <div><dt>Sale total</dt><dd>@Money(NetTotal)</dd></div>
+                        <div><dt>Payments</dt><dd>@(_payments.Count == 0 ? "—" : $"{_payments.Count} applied")</dd></div>
+                    </dl>
+                    <p class="pay-receipt-note">Receipt <b>prints on completion</b> — customer copy only.</p>
+                </aside>
+
+                <section class="pay-center">
+                    <span class="eyebrow">AMOUNT DUE</span>
+                    <strong class="pay-due">@Money(NetTotal)</strong>
+
+                    <div class="pay-methods" role="group" aria-label="Payment method">
+                        <button type="button" class="@MethodClass(PaymentMethod.Cash)" @onclick="() => SelectMethod(PaymentMethod.Cash)">
+                            <span class="method-dot method-cash"></span>Cash</button>
+                        <button type="button" class="@MethodClass(PaymentMethod.Card)" @onclick="() => SelectMethod(PaymentMethod.Card)">
+                            <span class="method-dot method-card"></span>Card</button>
+                        <button type="button" class="@MethodClass(PaymentMethod.EWallet)" @onclick="() => SelectMethod(PaymentMethod.EWallet)">
+                            <span class="method-dot method-wallet"></span>E-wallet</button>
+                    </div>
+
+                    @if (_paymentMethod == PaymentMethod.Cash)
+                    {
+                        <div class="quick-tender" role="group" aria-label="Quick tender">
+                            <span>QUICK TENDER</span>
+                            <button type="button" @onclick="() => UseQuickCash(NetTotal)">Exact</button>
+                            <button type="button" @onclick="() => UseQuickCash(100m)">₱100</button>
+                            <button type="button" @onclick="() => UseQuickCash(500m)">₱500</button>
+                            <button type="button" @onclick="() => UseQuickCash(1000m)">₱1,000</button>
+                        </div>
+
+                        <label class="pay-field cash-received">
+                            <span>Cash received</span>
+                            <input type="text" inputmode="decimal" placeholder="0.00" @bind="_cashTendered" disabled="@_busy" @ref="_cashInput" />
+                        </label>
+
+                        <div class="change-box">
+                            <span>CHANGE TO GIVE</span>
+                            <strong class="@(CashChangePreview < 0m ? "change-short" : string.Empty)">@Money(CashChangePreview)</strong>
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="pay-field">
+                            <span>Provider reference <small>optional</small></span>
+                            <input type="text" maxlength="128" placeholder="Terminal or wallet reference" @bind="_providerReference" disabled="@_busy" />
+                        </label>
+                        <p class="pay-method-note">Card and e-wallet need a connection — <b>cash works offline.</b></p>
+                    }
+                </section>
+
+                <section class="pay-keypad" aria-label="Numeric keypad">
+                    <div class="keypad-grid">
+                        @foreach (string key in new[] { "1", "2", "3", "4", "5", "6", "7", "8", "9" })
+                        {
+                            <button type="button" @onclick="() => Keypad(key)" disabled="@(!KeypadEnabled)">@key</button>
+                        }
+                        <button type="button" class="keypad-wide" @onclick="KeypadDoubleZero" disabled="@(!KeypadEnabled)">00</button>
+                        <button type="button" @onclick="KeypadZero" disabled="@(!KeypadEnabled)">0</button>
+                        <button type="button" class="keypad-back" @onclick="KeypadBack" disabled="@(!KeypadEnabled)" aria-label="Backspace">⌫</button>
+                    </div>
+                </section>
+            </div>
+
+            <footer class="pay-footer">
+                <p class="pay-hint">Card and e-wallet need a connection — cash works offline.</p>
+                <button type="button" class="pay-back-link" @onclick="BackToCart" disabled="@_busy"><kbd>Esc</kbd> Back to sale</button>
+                <button type="button" class="pay-complete" @onclick="CompleteSaleAsync" disabled="@(_busy || !CanComplete)">
+                    @(_completing ? "Completing sale…" : "Complete sale") <span>@Money(NetTotal)</span><kbd>F10</kbd>
+                </button>
+            </footer>
+        </section>
+    }
+    else
+    {
+        <div class="shift-ribbon">
+            <span><i></i><strong>Shift open</strong> @_context.OpenShift.Number</span>
+            <small>@_context.OpenShift.CashierName · opened with @Money(_context.OpenShift.OpeningFloat)</small>
+        </div>
+
+        @if (_saleHeld)
+        {
+            <div class="held-ribbon" role="status">
+                <span>⊘ Sale held — nothing is on the till.</span>
+                <button type="button" @onclick="RecallHeld"><kbd>F7</kbd> Recall held sale</button>
+            </div>
+        }
+
+        <div class="sale-workspace">
+            <section class="product-browser" aria-label="Catalogue">
+                <form class="scan-input" @onsubmit="ScanAsync" @onsubmit:preventDefault="true">
+                    <span class="scan-icon" aria-hidden="true">▥</span>
+                    <div class="scan-field">
+                        <label for="scan">Scan an item, or type a barcode</label>
+                        <input id="scan" autofocus placeholder="Scan or type a barcode…" @bind="_barcode" @ref="_scanInput" />
+                    </div>
+                    <button type="submit">Add to sale</button>
+                </form>
+
+                <div class="search-row">
+                    <input class="product-search" type="search" placeholder="Search products or SKU" @bind="_search" @bind:event="oninput" @ref="_searchInput" />
+                    <button type="button" class="search-name-button" @onclick="FocusSearchAsync"><kbd>F2</kbd> Search by name</button>
+                </div>
+
+                <div class="chip-row" role="tablist" aria-label="Catalogue group">
+                    <button type="button" class="@("chip" + (_activeFamily is null ? " active" : string.Empty))" role="tab" aria-selected="@(_activeFamily is null)" @onclick="() => SetFamily(null)">
+                        All products<span>@_items.Count</span>
+                    </button>
+                    @foreach (string family in CatalogFamilies)
+                    {
+                        <button type="button" class="@("chip" + (_activeFamily == family ? " active" : string.Empty))" role="tab" aria-selected="@(_activeFamily == family)" @onclick="() => SetFamily(family)">
+                            @family</button>
+                    }
+                </div>
+
+                <div class="product-grid">
+                    @foreach (CatalogueItem item in VisibleProducts)
+                    {
+                        int inSale = _cart.Where(line => line.Item.ProductId == item.ProductId).Sum(line => line.Quantity);
+                        bool sellable = item.Price is not null && item.BaseUnitOfMeasureId is not null;
+                        <button type="button" class="@("tile-card" + (sellable ? string.Empty : " tile-disabled"))" @onclick="() => AddProduct(item)" disabled="@(!sellable)">
+                            <span class="tile-art">@Initials(item.Name)</span>
+                            <span class="tile-copy">
+                                <strong>@item.Name</strong>
+                                <small>@item.Sku@(string.IsNullOrWhiteSpace(item.Barcode) ? " · No barcode" : string.Empty)</small>
+                            </span>
+                            <span class="tile-price">@(item.Price is null ? "No price" : Money(item.Price.Value))</span>
+                            @if (inSale > 0)
+                            {
+                                <span class="in-sale">in sale ×@inSale</span>
+                            }
+                        </button>
+                    }
+                </div>
+            </section>
+
+            <aside class="sale-cart" aria-label="Current sale">
+                <header>
+                    <div>
+                        <span class="eyebrow">Current sale</span>
+                        <h3>@_cart.Count item@(_cart.Count == 1 ? string.Empty : "s")</h3>
+                    </div>
+                    @if (_cart.Count > 0)
+                    {
+                        <button type="button" class="button-link" @onclick="ClearCart" disabled="@_busy">Clear</button>
+                    }
+                </header>
+
+                <div class="cart-list">
+                    @if (_cart.Count == 0)
+                    {
+                        <div class="cart-empty">
+                            <span aria-hidden="true">▢</span>
+                            <strong>Ready for the first scan</strong>
+                            <p>Products appear here as the cashier adds them.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (CartLine line in _cart)
+                        {
+                            bool selected = ReferenceEquals(line, _selected);
+                            <article class="@("cart-row" + (selected ? " cart-selected" : string.Empty))" @key="line.Item.ProductId" @onclick="() => SelectLine(line)">
+                                <div class="cart-line-name">
+                                    <strong>@line.Item.Name</strong>
+                                    <small>@line.Quantity × @Money(line.Item.Price!.Value)</small>
+                                </div>
+                                @if (ReferenceEquals(line, _qtyTarget))
+                                {
+                                    <form class="qty-edit" @onsubmit="CommitQuantity" @onsubmit:preventDefault="true">
+                                        <input type="text" inputmode="numeric" @bind="_qtyInput" @ref="_qtyInputRef" aria-label="Quantity" />
+                                    </form>
+                                }
+                                else
+                                {
+                                    <div class="quantity-stepper">
+                                        <button type="button" aria-label="Decrease quantity" @onclick="() => ChangeQuantity(line, -1)">−</button>
+                                        <span>@line.Quantity</span>
+                                        <button type="button" aria-label="Increase quantity" @onclick="() => ChangeQuantity(line, 1)">+</button>
+                                    </div>
+                                }
+                                <strong class="cart-line-total">@Money(line.Total)</strong>
+                                <button type="button" class="cart-remove" aria-label="Void line" title="Void line (F8)" @onclick="() => RemoveLine(line)">✕</button>
+                            </article>
+                        }
+                    }
+                </div>
+
+                <div class="cart-bottom">
+                    <div class="cart-tools">
+                        <button type="button" class="cart-tool" @onclick="HoldSale" disabled="@(_cart.Count == 0 || _busy)"><kbd>F6</kbd> Hold</button>
+                        <button type="button" class="cart-tool" @onclick="ToggleDiscount"><kbd>F4</kbd> Discount</button>
+                        <button type="button" class="cart-tool cart-tool-danger" @onclick="VoidSelected" disabled="@(_cart.Count == 0 || _busy)"><kbd>F8</kbd> Void line</button>
+                    </div>
+
+                    @if (_discountOpen)
+                    {
+                        <div class="discount-panel" role="note">
+                            Discounts are authorised at head office in this release — this register can’t change a price mid-sale.
+                        </div>
+                    }
+
+                    <div class="cart-total">
+                        <span>Total due</span>
+                        <strong>@Money(NetTotal)</strong>
+                    </div>
+                    <button type="button" class="pay-button" @onclick="BeginPayment" disabled="@(_cart.Count == 0 || _busy)">
+                        Pay <strong>@Money(NetTotal)</strong><kbd>F9</kbd>
+                    </button>
+                </div>
+            </aside>
+        </div>
+
+        <footer class="till-footer" aria-label="Keyboard shortcuts">
+            <span><kbd>F2</kbd> Search</span>
+            <span><kbd>F3</kbd> Quantity</span>
+            <span><kbd>F4</kbd> Discount</span>
+            <span><kbd>F6</kbd> Hold</span>
+            <span><kbd>F7</kbd> Recall</span>
+            <span><kbd>F8</kbd> Void line</span>
+            <span><kbd>F9</kbd> Pay</span>
+            <span><kbd>Esc</kbd> Cancel</span>
+        </footer>
+    }
+</div>
+
+@code {
+    private readonly List<CatalogueItem> _items = [];
+    private readonly List<CartLine> _cart = [];
+    private readonly List<RegisterSalePayment> _payments = [];
+    private RegisterCheckoutContext? _context;
+    private CompletedRegisterSale? _completed;
+    private List<CartLine>? _held;
+    private CartLine? _selected;
+    private CartLine? _qtyTarget;
+    private string _storeName = "VaultFlow";
+    private string _tillCode = string.Empty;
+    private string _search = string.Empty;
+    private string _barcode = string.Empty;
+    private string _openingFloat = "0.00";
+    private string _cashTendered = string.Empty;
+    private string _providerReference = string.Empty;
+    private string _qtyInput = "1";
+    private string? _activeFamily;
+    private string? _error;
+    private bool _loading = true;
+    private bool _refreshing;
+    private bool _openingShift;
+    private bool _takingPayment;
+    private bool _completing;
+    private bool _saleHeld;
+    private bool _discountOpen;
+    private PaymentMethod _paymentMethod = PaymentMethod.Cash;
+    private ElementReference _scanInput;
+    private ElementReference _searchInput;
+    private ElementReference _cashInput;
+    private ElementReference _qtyInputRef;
+
+    /// <summary>Raised when the register has been locked.</summary>
+    [Parameter]
+    public EventCallback OnSignedOut { get; set; }
+
+    /// <summary>Raised after fresh store data has been downloaded.</summary>
+    [Parameter]
+    public EventCallback OnRefreshed { get; set; }
+
+    private bool CanCreateSale => Register.Current?.Session.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
+    private bool _busy => _loading || _refreshing || _openingShift || _completing;
+    private decimal NetTotal => decimal.Round(_cart.Sum(line => line.Total), 4, MidpointRounding.ToEven);
+
+    private bool KeypadEnabled => _paymentMethod == PaymentMethod.Cash && !_busy;
+    private decimal CashReceived => TryMoney(_cashTendered, out decimal cash) ? cash : 0m;
+    private decimal CashChangePreview => CashReceived <= 0m ? 0m : RoundToIncrement(CashReceived - NetTotal);
+    private bool CanComplete => _paymentMethod == PaymentMethod.Cash
+        ? NetTotal > 0m && CashReceived >= NetTotal
+        : NetTotal > 0m;
+
+    private IEnumerable<string> CatalogFamilies
+    {
+        get
+        {
+            List<string> families = _items
+                .Select(item => item.Sku.Split('-', 2)[0].Trim())
+                .Where(prefix => prefix.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(prefix => prefix, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            return families;
+        }
+    }
+
+    private IEnumerable<CatalogueItem> VisibleProducts
+    {
+        get
+        {
+            string term = _search.Trim();
+            IEnumerable<CatalogueItem> filtered = _items;
+            if (_activeFamily is { } family)
+            {
+                filtered = filtered.Where(item =>
+                    item.Sku.StartsWith(family, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (term.Length > 0)
+            {
+                filtered = filtered.Where(item =>
+                    item.Name.Contains(term, StringComparison.CurrentCultureIgnoreCase)
+                    || item.Sku.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || (item.Barcode?.Contains(term, StringComparison.Ordinal) ?? false));
+            }
+
+            return filtered.Take(60);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadTillAsync();
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadTillAsync()
+    {
+        (string name, string tillCode) identity = await Register.GetStoreIdentityAsync();
+        _storeName = identity.name;
+        _tillCode = identity.tillCode;
+        _items.Clear();
+        _items.AddRange(await Register.GetCatalogueAsync());
+        _context = CanCreateSale ? await Register.GetCheckoutContextAsync() : null;
+    }
+
+    private async Task RefreshAsync()
+    {
+        _refreshing = true;
+        _error = null;
+        try
+        {
+            await Register.RefreshStoreDataAsync();
+            await LoadTillAsync();
+            await OnRefreshed.InvokeAsync();
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    private async Task OpenShiftAsync()
+    {
+        if (_context is null || !TryMoney(_openingFloat, out decimal openingFloat) || openingFloat < 0m)
+        {
+            _error = "Enter a valid opening cash float.";
+            return;
+        }
+
+        _openingShift = true;
+        _error = null;
+        try
+        {
+            _context = await Register.OpenShiftAsync(openingFloat, _context.BusinessDate);
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _openingShift = false;
+        }
+    }
+
+    private void AddProduct(CatalogueItem item)
+    {
+        if (item.Price is null || item.BaseUnitOfMeasureId is null)
+        {
+            _error = "This product is missing a price or sale unit and cannot be added.";
+            return;
+        }
+
+        CartLine? existing = _cart.FirstOrDefault(line => line.Item.ProductId == item.ProductId);
+        if (existing is null)
+        {
+            CartLine line = new(item);
+            _cart.Add(line);
+        }
+        else
+        {
+            existing.Quantity++;
+        }
+
+        _error = null;
+        _barcode = string.Empty;
+        if (_saleHeld)
+        {
+            _held = null;
+            _saleHeld = false;
+        }
+    }
+
+    private Task ScanAsync()
+    {
+        string code = _barcode.Trim();
+        CatalogueItem? match = _items.FirstOrDefault(item => string.Equals(item.Barcode, code, StringComparison.Ordinal));
+        if (match is null)
+        {
+            _error = "No active product matches that barcode.";
+        }
+        else
+        {
+            AddProduct(match);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void ChangeQuantity(CartLine line, int change)
+    {
+        line.Quantity += change;
+        if (line.Quantity <= 0)
+        {
+            _cart.Remove(line);
+            if (ReferenceEquals(_selected, line))
+            {
+                _selected = null;
+            }
+            if (ReferenceEquals(_qtyTarget, line))
+            {
+                _qtyTarget = null;
+            }
+        }
+    }
+
+    private void RemoveLine(CartLine line)
+    {
+        _cart.Remove(line);
+        if (ReferenceEquals(_selected, line))
+        {
+            _selected = null;
+        }
+        if (ReferenceEquals(_qtyTarget, line))
+        {
+            _qtyTarget = null;
+        }
+    }
+
+    private void ClearCart()
+    {
+        _cart.Clear();
+        _selected = null;
+        _qtyTarget = null;
+    }
+
+    private void SelectLine(CartLine line) => _selected = line;
+
+    private void HoldSale()
+    {
+        if (_cart.Count == 0)
+        {
+            _error = "Hold an item first — the till has nothing to hold.";
+            return;
+        }
+
+        _held = [.. _cart.Select(line => new CartLine(line.Item, line.Quantity))];
+        _cart.Clear();
+        _selected = null;
+        _qtyTarget = null;
+        _saleHeld = true;
+        _error = null;
+        _barcode = string.Empty;
+    }
+
+    private void RecallHeld()
+    {
+        if (_held is null)
+        {
+            _error = "There is no held sale on this register.";
+            return;
+        }
+
+        _cart.AddRange(_held);
+        _held = null;
+        _saleHeld = false;
+        _error = null;
+    }
+
+    private void ToggleDiscount() => _discountOpen = !_discountOpen;
+
+    private void VoidSelected()
+    {
+        if (_cart.Count == 0)
+        {
+            _error = "Nothing to void — the till is empty.";
+            return;
+        }
+
+        CartLine target = _selected ?? _cart[^1];
+        RemoveLine(target);
+        _error = null;
+    }
+
+    private void QtyEditSelected(CartLine line)
+    {
+        _qtyTarget = line;
+        _selected = line;
+        _qtyInput = line.Quantity.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void CommitQuantity()
+    {
+        if (_qtyTarget is null)
+        {
+            return;
+        }
+
+        if (int.TryParse(_qtyInput, NumberStyles.None, CultureInfo.InvariantCulture, out int quantity) && quantity > 0)
+        {
+            _qtyTarget.Quantity = quantity;
+            _error = null;
+        }
+        else
+        {
+            _error = "Enter a whole quantity of at least 1.";
+        }
+
+        _qtyTarget = null;
+    }
+
+    private void SetFamily(string? family)
+    {
+        _activeFamily = family;
+        _search = string.Empty;
+    }
+
+    private void BeginPayment()
+    {
+        if (_cart.Count == 0)
+        {
+            return;
+        }
+
+        _payments.Clear();
+        _takingPayment = true;
+        _discountOpen = false;
+        _error = null;
+        SelectMethod(PaymentMethod.Cash);
+    }
+
+    private void BackToCart()
+    {
+        _takingPayment = false;
+        _payments.Clear();
+        _cashTendered = string.Empty;
+        _providerReference = string.Empty;
+        _error = null;
+    }
+
+    private void SelectMethod(PaymentMethod method)
+    {
+        _paymentMethod = method;
+        _providerReference = string.Empty;
+        _cashTendered = string.Empty;
+    }
+
+    private void UseQuickCash(decimal tender)
+    {
+        _cashTendered = tender.ToString("0.00", CultureInfo.InvariantCulture);
+        _error = null;
+    }
+
+    private void Keypad(string digit)
+    {
+        if (!KeypadEnabled)
+        {
+            return;
+        }
+
+        string value = _cashTendered.Replace(",", string.Empty, StringComparison.Ordinal).Replace(".", string.Empty, StringComparison.Ordinal);
+        _cashTendered = (value + digit).Length > 10 ? _cashTendered : value + digit;
+        _error = null;
+    }
+
+    private void KeypadBack()
+    {
+        if (!KeypadEnabled)
+        {
+            return;
+        }
+
+        _cashTendered = _cashTendered.Length > 0 ? _cashTendered[..^1] : string.Empty;
+        _error = null;
+    }
+
+    private void KeypadDoubleZero() => Keypad("00");
+    private void KeypadZero() => Keypad("0");
+
+    private async Task CompleteSaleAsync()
+    {
+        if (_context?.OpenShift is not { } shift || !CanComplete)
+        {
+            return;
+        }
+
+        _completing = true;
+        _error = null;
+        try
+        {
+            List<RegisterSaleLine> lines = [.. _cart.Select(line => new RegisterSaleLine(
+                line.Item.ProductId,
+                line.Item.BaseUnitOfMeasureId!.Value,
+                line.Item.Barcode,
+                line.Quantity))];
+
+            decimal? tendered = _paymentMethod == PaymentMethod.Cash ? CashReceived : null;
+            string? reference = _paymentMethod == PaymentMethod.Cash || string.IsNullOrWhiteSpace(_providerReference)
+                ? null
+                : _providerReference.Trim();
+
+            _payments.Clear();
+            _payments.Add(new RegisterSalePayment(_paymentMethod, NetTotal, tendered, reference));
+
+            _completed = await Register.CompleteSaleAsync(
+                shift.ShiftId,
+                shift.BusinessDate,
+                lines,
+                _payments);
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _completing = false;
+        }
+    }
+
+    private void StartNextSale()
+    {
+        _completed = null;
+        _takingPayment = false;
+        _cart.Clear();
+        _payments.Clear();
+        _selected = null;
+        _qtyTarget = null;
+        _held = null;
+        _saleHeld = false;
+        _discountOpen = false;
+        _search = string.Empty;
+        _barcode = string.Empty;
+        _cashTendered = string.Empty;
+        _providerReference = string.Empty;
+        _error = null;
+    }
+
+    private async Task SignOutAsync()
+    {
+        await Register.SignOutAsync();
+        await OnSignedOut.InvokeAsync();
+    }
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "F2":
+                await FocusAsync(_searchInput);
+                break;
+            case "F3":
+                EditQuantityForFocused();
+                break;
+            case "F4":
+                if (!_takingPayment)
+                {
+                    ToggleDiscount();
+                }
+                break;
+            case "F6":
+                if (!_takingPayment)
+                {
+                    HoldSale();
+                }
+                break;
+            case "F7":
+                if (!_takingPayment && !_saleHeld)
+                {
+                    RecallHeld();
+                }
+                break;
+            case "F8":
+                if (!_takingPayment)
+                {
+                    VoidSelected();
+                }
+                break;
+            case "F9":
+                if (!_takingPayment && _cart.Count > 0)
+                {
+                    BeginPayment();
+                }
+                break;
+            case "Escape":
+                HandleEscape();
+                break;
+        }
+    }
+
+    private void EditQuantityForFocused()
+    {
+        if (_cart.Count == 0 || _takingPayment)
+        {
+            return;
+        }
+
+        CartLine target = _selected ?? _cart[^1];
+        // Hitting F3 again on the same line steps through it; each press is idempotent here.
+        QtyEditSelected(target);
+    }
+
+    private void HandleEscape()
+    {
+        if (_takingPayment)
+        {
+            BackToCart();
+            return;
+        }
+
+        if (_qtyTarget is not null)
+        {
+            _qtyTarget = null;
+            return;
+        }
+
+        if (_discountOpen)
+        {
+            _discountOpen = false;
+            return;
+        }
+
+        _error = null;
+    }
+
+    private static async Task FocusAsync(ElementReference reference)
+    {
+        try
+        {
+            await reference.FocusAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task FocusSearchAsync()
+    {
+        _error = null;
+        await FocusAsync(_searchInput);
+    }
+
+    private decimal RoundToIncrement(decimal amount)
+    {
+        decimal increment = _context?.CashRoundingIncrement ?? 0.01m;
+        increment = increment > 0m ? increment : 0.01m;
+        return decimal.Round(amount / increment, 0, MidpointRounding.AwayFromZero) * increment;
+    }
+
+    private string MethodClass(PaymentMethod method) => _paymentMethod == method ? "selected" : string.Empty;
+    private static string MethodLabel(PaymentMethod method) => method == PaymentMethod.EWallet ? "E-wallet" : method.ToString();
+    private static bool TryMoney(string? value, out decimal amount) => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out amount);
+    private static string Money(decimal value) => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string Initials(string name)
+    {
+        string[] words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return string.Concat(words.Take(2).Select(word => char.ToUpperInvariant(word[0])));
+    }
+
+    private sealed class CartLine(CatalogueItem item, int quantity = 1)
+    {
+        public CatalogueItem Item { get; } = item;
+        public int Quantity { get; set; } = quantity;
+        public decimal Total => Item.Price!.Value * Quantity;
+    }
+}

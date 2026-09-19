@@ -7,9 +7,9 @@
     The Claude desktop app starts this from .claude/launch.json so the Web UI
     can be previewed with one trigger. It can also be run by hand.
 
-    1. Starts the development PostgreSQL container that the API's user secrets
-       point at (ConnectionStrings:Postgres), and waits until it accepts
-       connections.
+    1. Creates or starts the development PostgreSQL container that the API's
+       user secrets point at (ConnectionStrings:Postgres), and waits until it
+       accepts connections.
     2. Builds the API, then the Web project. They share Pos.Infrastructure, so
        building them side by side would fight over the same outputs.
     3. Starts the API in the background and waits for /health/live. In
@@ -59,10 +59,73 @@ function Start-DevelopmentDatabase {
     # errors under 'Stop'; exit codes are checked explicitly instead.
     $ErrorActionPreference = 'Continue'
 
+    if ($null -eq (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI was not found. Install Docker Desktop before starting VaultFlow.'
+    }
+
+    & docker info --format '{{.ServerVersion}}' 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker Desktop is not running. Start Docker Desktop, wait until its engine is ready, then run this command again.'
+    }
+
     $state =& docker inspect --format '{{.State.Status}}' $DatabaseContainer 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Container $DatabaseContainer does not exist. The API will use whatever ConnectionStrings:Postgres in its user secrets points at."
-        return
+        # user-secrets emits a short comment before and after its JSON. Remove
+        # only those comment lines; never print the resulting object because it
+        # also contains the private JWT signing key.
+        $secretOutput = @(& dotnet user-secrets list --json --project $apiProject 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not read the API user secrets. Run scripts/init-dev-secrets.ps1 first.'
+        }
+
+        $secretJson = ($secretOutput | Where-Object { -not ([string]$_).TrimStart().StartsWith('//') }) -join "`n"
+        try {
+            $secrets = $secretJson | ConvertFrom-Json
+        }
+        catch {
+            throw 'The API user secrets could not be read as JSON. Run scripts/init-dev-secrets.ps1 again.'
+        }
+
+        $connectionString = $secrets.'ConnectionStrings:Postgres'
+        if ([string]::IsNullOrWhiteSpace($connectionString)) {
+            throw 'ConnectionStrings:Postgres is missing from the API user secrets. Follow docs/LOCAL_TESTING.md to configure it.'
+        }
+
+        $connection = @{}
+        foreach ($part in $connectionString.Split(';')) {
+            $separator = $part.IndexOf('=')
+            if ($separator -gt 0) {
+                $connection[$part.Substring(0, $separator).Trim()] = $part.Substring($separator + 1).Trim()
+            }
+        }
+
+        $hostName = $connection['Host']
+        $port = $connection['Port']
+        $database = $connection['Database']
+        $userName = $connection['Username']
+        $password = $connection['Password']
+
+        if ($hostName -notin @('localhost', '127.0.0.1') -or
+            [string]::IsNullOrWhiteSpace($port) -or
+            [string]::IsNullOrWhiteSpace($database) -or
+            [string]::IsNullOrWhiteSpace($userName) -or
+            [string]::IsNullOrWhiteSpace($password)) {
+            throw 'The development connection string must contain a local Host, Port, Database, Username and Password.'
+        }
+
+        Write-Host "Creating $DatabaseContainer on 127.0.0.1:$port" -ForegroundColor Cyan
+        & docker run --detach --name $DatabaseContainer `
+            --env "POSTGRES_DB=$database" `
+            --env "POSTGRES_USER=$userName" `
+            --env "POSTGRES_PASSWORD=$password" `
+            --publish "127.0.0.1:${port}:5432" `
+            --volume "${DatabaseContainer}data:/var/lib/postgresql/data" `
+            postgres:17-alpine | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not create $DatabaseContainer. Check Docker Desktop and whether port $port is already in use."
+        }
+
+        $state = 'running'
     }
 
     if ($state -ne 'running') {

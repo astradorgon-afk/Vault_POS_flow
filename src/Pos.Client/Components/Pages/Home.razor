@@ -2,52 +2,144 @@
 @inject DeviceDatabaseInitializer Database
 @inject DeviceStatusProvider Status
 @inject RegisterService Register
+@inject NavigationManager Navigation
 
-<section class="startup-card @(Register.Current is null ? string.Empty : "startup-card-wide")" aria-live="polite">
-    <div class="eyebrow">VaultFlow device</div>
-
-    @if (_error is not null)
-    {
-        <div class="status status-error">
-            <span class="status-dot"></span>
-            <div>
-                <strong>Secure storage could not start</strong>
-                <p>@_error</p>
-            </div>
+<div class="register-app">
+    <header class="app-topbar">
+        <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">V</span>
+            <span class="brand-wordmark">VaultFlow</span>
+            <span class="brand-context">REGISTER CONSOLE</span>
         </div>
-    }
-    else if (_status is null)
-    {
-        <div class="status">
-            <span class="status-dot status-dot-working"></span>
-            <div>
-                <strong>Opening encrypted local storage</strong>
-                <p>Applying device schema updates and checking the store.</p>
-            </div>
+        <div class="topbar-status">
+            <span class="topbar-lamp" aria-hidden="true"></span>
+            <span>Local register</span>
+            <span class="topbar-divider" aria-hidden="true"></span>
+            <span>Windows desktop</span>
         </div>
-    }
-    else
-    {
-        <DeviceStatusBanner Status="_status" />
+    </header>
 
-        @if (_status.Enrolment == DeviceEnrolmentState.NotEnrolled)
-        {
-            <SetupPanel OnEnrolled="RefreshAsync" />
-        }
-        else if (Register.Current is null)
-        {
-            <SignInPanel OnSignedIn="RefreshAsync" />
-        }
-        else
-        {
-            <CataloguePanel OnSignedOut="RefreshAsync" OnRefreshed="RefreshAsync" />
-        }
-    }
-</section>
+    <main class="register-stage">
+        <aside class="identity-rail">
+            <div>
+                <p class="rail-kicker">STORE OPERATIONS / 01</p>
+                <h1>Keep the shop moving.</h1>
+                <p class="rail-copy">A dependable register for the moments when the queue cannot wait for a connection.</p>
+            </div>
+
+            <div class="rail-guide" aria-label="Register setup progress">
+                <div class="rail-guide-item @RailClass(1)">
+                    <span class="rail-guide-number">01</span>
+                    <span><strong>Connect this register</strong><small>Pair it with head office</small></span>
+                </div>
+                <div class="rail-guide-item @RailClass(2)">
+                    <span class="rail-guide-number">02</span>
+                    <span><strong>Open the shift</strong><small>Use your staff account</small></span>
+                </div>
+                <div class="rail-guide-item @RailClass(3)">
+                    <span class="rail-guide-number">03</span>
+                    <span><strong>Trade with confidence</strong><small>Keep selling, even offline</small></span>
+                </div>
+            </div>
+
+            <footer class="rail-footer">
+                <span class="rail-footer-mark">VF</span>
+                <span>Built for accountable retail.</span>
+            </footer>
+        </aside>
+
+        <section class="workspace" aria-live="polite">
+            <div class="workspace-heading">
+                <div>
+                    <p class="section-kicker">@StepLabel</p>
+                    <h2>@StepTitle</h2>
+                    <p class="workspace-lead">@StepDescription</p>
+                </div>
+                <span class="workspace-index">@StepIndex</span>
+            </div>
+
+            @if (_error is not null)
+            {
+                <div class="status status-error">
+                    <span class="status-dot"></span>
+                    <div>
+                        <strong>Secure storage could not start</strong>
+                        <p>@_error</p>
+                    </div>
+                </div>
+            }
+            else if (_status is null)
+            {
+                <div class="status status-loading">
+                    <span class="status-dot status-dot-working"></span>
+                    <div>
+                        <strong>Opening encrypted local storage</strong>
+                        <p>Applying device schema updates and checking the register.</p>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <DeviceStatusBanner Status="_status" />
+
+                @if (_status.Enrolment == DeviceEnrolmentState.NotEnrolled)
+                {
+                    <SetupPanel OnEnrolled="RefreshAsync" />
+                }
+                else if (Register.Current is null)
+                {
+                    <SignInPanel OnSignedIn="OpenRegisterAsync" />
+                }
+            }
+        </section>
+    </main>
+</div>
 
 @code {
     private DeviceStatusView? _status;
     private string? _error;
+
+    private string StepLabel => _status is null
+        ? "Register startup"
+        : _status.Enrolment == DeviceEnrolmentState.NotEnrolled
+            ? "Register setup"
+        : "Shift access";
+
+    private string StepTitle => _status is null
+        ? "Preparing your register"
+        : _error is not null
+            ? "We need to restart this register"
+            : _status.Enrolment == DeviceEnrolmentState.NotEnrolled
+                ? "Connect this register"
+                : "Sign in to open a shift";
+
+    private string StepDescription => _status is null
+        ? "Your local encrypted workspace is starting securely."
+        : _error is not null
+            ? "The local workspace did not open correctly."
+            : _status.Enrolment == DeviceEnrolmentState.NotEnrolled
+                ? "Pair this machine with a store before the first sale."
+                : "Your account will load the permissions and products for this register.";
+
+    private string StepIndex => _status is null
+        ? "00 / 03"
+        : _status.Enrolment == DeviceEnrolmentState.NotEnrolled
+            ? "01 / 03"
+            : "02 / 03";
+
+    private string RailClass(int step)
+    {
+        if (_status is null)
+        {
+            return step == 1 ? "rail-guide-active" : string.Empty;
+        }
+
+        int current = _status.Enrolment == DeviceEnrolmentState.NotEnrolled
+            ? 1
+            : 2;
+
+        return step < current ? "rail-guide-done" : step == current ? "rail-guide-active" : string.Empty;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -62,9 +154,19 @@
         }
 
         await RefreshAsync();
+        if (Register.Current is not null)
+        {
+            Navigation.NavigateTo("/register", replace: true);
+        }
     }
 
     // Read after the store is open and after every change of state, so the
     // banner reports the register as it is now rather than as it was.
     private async Task RefreshAsync() => _status = await Status.GetAsync(Register.Current?.UserId);
+
+    private async Task OpenRegisterAsync()
+    {
+        await RefreshAsync();
+        Navigation.NavigateTo("/register");
+    }
 }

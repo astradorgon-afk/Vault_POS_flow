@@ -1446,13 +1446,14 @@ migrations and seeds in Development:
 ```bash
 # 1. A development database (owner role, so Development can migrate on start-up)
 docker run -d --name vaultflow-dev-pg -e POSTGRES_DB=vaultflow -e POSTGRES_USER=pos_migrator \
-  -e POSTGRES_PASSWORD=<choose-one> -p 127.0.0.1:55432:5432 postgres:17-alpine
+  -e POSTGRES_PASSWORD=<choose-one> -p 127.0.0.1:15432:5432 \
+  -v vaultflow-dev-pgdata:/var/lib/postgresql/data postgres:17-alpine
 
 # 2. One-time secrets, kept in the user-secrets store (never the repo)
 openssl genrsa -out jwt-dev.pem 2048   # Git Bash ships openssl; keep the file outside the repo
 dotnet user-secrets set "Jwt:SigningKeyPem" "$(cat jwt-dev.pem)" --project src/Pos.Api
 dotnet user-secrets set "ConnectionStrings:Postgres" \
-  "Host=localhost;Port=55432;Database=vaultflow;Username=pos_migrator;Password=<choose-one>" --project src/Pos.Api
+  "Host=localhost;Port=15432;Database=vaultflow;Username=pos_migrator;Password=<choose-one>" --project src/Pos.Api
 dotnet user-secrets set "BootstrapOwner:Enabled" "false" --project src/Pos.Api
 
 # 3. Run: http://localhost:5177, OpenAPI document at /openapi/v1.json
@@ -1490,7 +1491,8 @@ dotnet build src/Pos.Client/Pos.Client.csproj -f net10.0-windows10.0.19041.0
 ```
 
 Enrol with a code, or open "No code yet?" and use `admin`; then sign in as
-`cashier1`. See `docs/LOCAL_TESTING.md` for resetting the register.
+`s1.cashier` (any development account signs in with the shared password
+`cash1234`). See `docs/LOCAL_TESTING.md` for resetting the register.
 
 ```bash
 # Tests; the PostgreSQL suites self-skip when no Docker daemon is reachable
@@ -1503,6 +1505,9 @@ Sign in, change it, then turn the flag off.
 
 The development seed runs only when `Database:SeedDevelopmentData` is true (the
 Development configuration sets it). Staff accounts additionally need
-`Seeding:EnableDevelopmentAccounts`; their shared password is
-`DevVaultFlow!2026`, documented so nobody mistakes it for a deployed credential.
+`Seeding:EnableDevelopmentAccounts`; they share the password `cash1234`,
+documented so nobody mistakes it for a deployed credential. The seed also
+creates a selling price and an opening stock balance (Main Warehouse plus
+STORE01/02/03) for every catalogue product, so a register sale completes
+against real availability.
 ```

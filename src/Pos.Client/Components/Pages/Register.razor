@@ -1,0 +1,99 @@
+@page "/register"
+@inject DeviceDatabaseInitializer Database
+@inject DeviceStatusProvider Status
+@inject RegisterService RegisterService
+@inject NavigationManager Navigation
+
+<div class="register-app cashier-app">
+    <header class="app-topbar">
+        <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">V</span>
+            <span class="brand-wordmark">VaultFlow</span>
+            <span class="brand-context">REGISTER CONSOLE</span>
+        </div>
+        <div class="topbar-status">
+            <span class="topbar-lamp" aria-hidden="true"></span>
+            <span>Local register</span>
+            <span class="topbar-divider" aria-hidden="true"></span>
+            <span>Windows desktop</span>
+        </div>
+    </header>
+
+    <main class="cashier-stage" aria-live="polite">
+        <div class="cashier-heading">
+            <div>
+                <p class="section-kicker">STORE OPERATIONS / LIVE TILL</p>
+                <h1>Sell with certainty.</h1>
+                <p class="workspace-lead">Build the basket, take payment and commit the sale to inventory in one flow.</p>
+            </div>
+            <span class="workspace-index">POINT OF SALE / 03</span>
+        </div>
+
+        @if (_error is not null)
+        {
+            <div class="status status-error">
+                <span class="status-dot"></span>
+                <div>
+                    <strong>The register could not open</strong>
+                    <p>@_error</p>
+                </div>
+            </div>
+        }
+        else if (_status is null)
+        {
+            <div class="status status-loading">
+                <span class="status-dot status-dot-working"></span>
+                <div>
+                    <strong>Opening the till</strong>
+                    <p>Checking this register and loading the current store state.</p>
+                </div>
+            </div>
+        }
+        else if (RegisterService.Current is not null)
+        {
+            <DeviceStatusBanner Status="_status" />
+            <SalePanel OnSignedOut="ReturnToSignInAsync" OnRefreshed="RefreshAsync" />
+        }
+    </main>
+</div>
+
+@code {
+    private DeviceStatusView? _status;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Database.InitializeAsync();
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Restart the app. If the problem continues, re-enrol this device.";
+            return;
+        }
+
+        if (_status?.Enrolment == DeviceEnrolmentState.NotEnrolled || RegisterService.Current is null)
+        {
+            Navigation.NavigateTo("/", replace: true);
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (RegisterService.Current is null)
+        {
+            Navigation.NavigateTo("/", replace: true);
+            return;
+        }
+
+        _status = await Status.GetAsync(RegisterService.Current.UserId);
+    }
+
+    private async Task ReturnToSignInAsync()
+    {
+        _status = await Status.GetAsync(null);
+        Navigation.NavigateTo("/", replace: true);
+    }
+}

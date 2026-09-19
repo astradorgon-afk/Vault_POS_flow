@@ -225,6 +225,59 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return GetAsync<List<PosSaleSummary>>(path, cancellationToken);
     }
 
+    /// <summary>Lists payment receipts newest first, optionally filtered by store,
+    /// kind or an issued-window. The API re-checks <c>receipt.view</c>.</summary>
+    public Task<ApiResult<List<PosReceiptSummary>>> GetReceiptsAsync(
+        Guid? locationId,
+        string? kindName,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        string path = "/api/v1/receipts?";
+        if (locationId is { } location)
+        {
+            path += FormattableString.Invariant($"locationId={location:D}&");
+        }
+
+        if (!string.IsNullOrWhiteSpace(kindName))
+        {
+            path += $"kind={Uri.EscapeDataString(kindName)}&";
+        }
+
+        if (from is { } fromDate)
+        {
+            path += FormattableString.Invariant($"from={fromDate:O}&");
+        }
+
+        if (to is { } toDate)
+        {
+            path += FormattableString.Invariant($"to={toDate:O}&");
+        }
+
+        path += FormattableString.Invariant($"limit={limit}");
+        return GetAsync<List<PosReceiptSummary>>(path, cancellationToken);
+    }
+
+    /// <summary>Issues an RCT-numbered payment receipt for a cash event.</summary>
+    public Task<ApiResult<PosNewReceipt>> IssueReceiptAsync(
+        PosIssueReceiptRequest body, CancellationToken cancellationToken)
+        => PostAsync<PosNewReceipt>("/api/v1/receipts", body, cancellationToken);
+
+    /// <summary>Renders a payment receipt as printable plain text (or HTML when requested).</summary>
+    public Task<ApiResult<string>> GetReceiptPrintTextAsync(
+        Guid receiptId, string? format, CancellationToken cancellationToken)
+    {
+        string path = FormattableString.Invariant($"/api/v1/receipts/{receiptId:D}/print");
+        if (!string.IsNullOrWhiteSpace(format))
+        {
+            path += $"?format={Uri.EscapeDataString(format)}";
+        }
+
+        return GetTextAsync(path, cancellationToken);
+    }
+
     /// <summary>Gets the highest repeated negative-stock attempts in the last window.</summary>
     public Task<ApiResult<List<PosNegativeStockSummary>>> GetNegativeStockSummaryAsync(
         DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)

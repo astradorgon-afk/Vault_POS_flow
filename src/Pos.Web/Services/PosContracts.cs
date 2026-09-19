@@ -602,3 +602,60 @@ public sealed class PosReference
     /// <summary>Gets or sets the referenced document identifier.</summary>
     public Guid Id { get; set; }
 }
+
+/// <summary>A payment receipt as returned by the receipts list.</summary>
+public sealed class PosReceiptSummary
+{
+    /// <summary>Gets or sets the receipt identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the RCT number, for example RCT-2026-D03-000012.</summary>
+    public string Number { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the kind name: WalkInSale, BranchExpense or OwnerWithdrawal.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the store the cash event happened at.</summary>
+    public Guid LocationId { get; set; }
+
+    /// <summary>Gets or sets the amount recorded.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>Gets or sets the counterparty, if any.</summary>
+    public string? Counterparty { get; set; }
+
+    /// <summary>Gets or sets who issued the receipt.</summary>
+    public Guid IssuedByUserId { get; set; }
+
+    /// <summary>Gets or sets when the receipt was issued.</summary>
+    public DateTimeOffset IssuedAtUtc { get; set; }
+}
+
+/// <summary>The body of a payment receipt issue.</summary>
+public sealed class PosIssueReceiptRequest
+{
+    /// <summary>Gets or sets the store the cash event happened at.</summary>
+    public Guid LocationId { get; set; }
+
+    /// <summary>Gets or sets the receipt kind: 1 Walk-in sale, 2 Branch expense, 3 Owner withdrawal.</summary>
+    public int Kind { get; set; }
+
+    /// <summary>Gets or sets the amount recorded, greater than zero.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>Gets or sets the optional counterparty name, for example a customer or supplier.</summary>
+    public string? Counterparty { get; set; }
+
+    /// <summary>Gets or sets the optional purpose note.</summary>
+    public string? Note { get; set; }
+
+    /// <summary>Gets or sets the optional number of a related document, such as a sale.</summary>
+    public string? ReferenceNumber { get; set; }
+}
+
+/// <summary>The response of a payment receipt issue.</summary>
+public sealed class PosNewReceipt
+{
+    /// <summary>Gets or sets the created receipt identifier.</summary>
+    public Guid Id { get; set; }
+}

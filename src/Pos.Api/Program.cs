@@ -168,7 +168,14 @@ try
         app.UseHsts();
     }
 
-    app.UseHttpsRedirection();
+    // Health probes are exempt from the HTTP-to-HTTPS redirect. Probes sent over
+    // plain HTTP by a TLS-terminating proxy - or by the local development
+    // launcher - must receive 200, not a bounce to https that the caller cannot
+    // follow.
+    app.UseWhen(
+        context => !context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase),
+        builder => builder.UseHttpsRedirection());
+
     app.UseRateLimiter();
 
     // Unhandled exceptions never reach the client as detail: the log carries the
@@ -345,9 +352,12 @@ internal static class DatabaseStartup
         if (developmentSummary != DevelopmentDataSummary.None)
         {
             Log.Information(
-                "Development seed complete: {Locations} locations, {Products} products, {Accounts} accounts.",
+                "Development seed complete: {Locations} locations, {Products} products, {Prices} prices, " +
+                "{StockGroups} stock events, {Accounts} accounts.",
                 developmentSummary.LocationsCreated,
                 developmentSummary.ProductsCreated,
+                developmentSummary.PricesCreated,
+                developmentSummary.StockGroupsCreated,
                 developmentSummary.AccountsCreated);
         }
 

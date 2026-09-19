@@ -36,6 +36,7 @@ else. The load-bearing documents are
 [`OFFLINE_SYNC.md`](docs/OFFLINE_SYNC.md),
 [`SECURITY.md`](docs/SECURITY.md) and
 [`PERMISSIONS.md`](docs/PERMISSIONS.md).
+The visual system overview is in [`docs/SYSTEM_DIAGRAM.md`](docs/SYSTEM_DIAGRAM.md).
 Progress is tracked in [`ROADMAP.md`](docs/ROADMAP.md), and every significant
 choice is recorded in [`DECISIONS.md`](docs/DECISIONS.md). Client artifact
 handoff and the remaining signing requirements are in
@@ -86,6 +87,28 @@ when no daemon is reachable:
 ```bash
 dotnet test VaultFlow.slnx
 ```
+
+### Run the Blazor Web UI
+
+`Pos.Web` is the Blazor owner/admin dashboard. It runs separately from the API
+at `http://localhost:5215`. Start the development PostgreSQL container, API,
+and Blazor Web UI together with:
+
+```powershell
+.\scripts\dev-desktop.ps1
+```
+
+Keep that terminal running, then open `http://localhost:5215`. The Web UI calls
+the API at `http://localhost:5177`.
+
+On a fresh machine, initialize local secrets first:
+
+```powershell
+.\scripts\init-dev-secrets.ps1
+```
+
+See [`docs/LOCAL_TESTING.md`](docs/LOCAL_TESTING.md) for the complete setup,
+including the local PostgreSQL container.
 
 Generate a migration after changing the model:
 

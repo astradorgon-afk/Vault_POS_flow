@@ -7,6 +7,7 @@ using Pos.Application.Identity;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Identity;
+using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 using Pos.Infrastructure.Configuration;
@@ -17,21 +18,25 @@ namespace Pos.Infrastructure.Identity;
 /// <summary>What the development seeder created or found already present.</summary>
 /// <param name="LocationsCreated">Physical and external locations created.</param>
 /// <param name="ProductsCreated">Products created.</param>
+/// <param name="PricesCreated">Selling prices created.</param>
 /// <param name="AccountsCreated">Staff accounts created, when account seeding is enabled.</param>
+/// <param name="StockGroupsCreated">Opening-balance inventory events created.</param>
 public sealed record DevelopmentDataSummary(
     int LocationsCreated,
     int ProductsCreated,
-    int AccountsCreated)
+    int PricesCreated,
+    int AccountsCreated,
+    int StockGroupsCreated)
 {
     /// <summary>The summary when seeding was not requested.</summary>
-    public static DevelopmentDataSummary None { get; } = new(0, 0, 0);
+    public static DevelopmentDataSummary None { get; } = new(0, 0, 0, 0, 0);
 }
 
 /// <summary>
 /// Seeds the development database with a usable topology: the three system
 /// counterparties, one Main Warehouse, three stores, reference master data, a
-/// small product catalogue and — when explicitly enabled — staff accounts with a
-/// known password.
+/// small product catalogue, opening stock balances at every physical location
+/// and — when explicitly enabled — staff accounts with a known password.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -49,6 +54,7 @@ public sealed record DevelopmentDataSummary(
 /// </remarks>
 /// <param name="context">The database context.</param>
 /// <param name="users">Identity's user manager.</param>
+/// <param name="ledger">The inventory ledger used to post opening balances.</param>
 /// <param name="database">Database configuration.</param>
 /// <param name="seeding">Seeding configuration.</param>
 /// <param name="clock">The authoritative clock.</param>
@@ -56,21 +62,25 @@ public sealed record DevelopmentDataSummary(
 public sealed class DevelopmentDataSeeder(
     PosDbContext context,
     UserManager<AppUser> users,
+    IInventoryLedger ledger,
     IOptions<DatabaseOptions> database,
     IOptions<SeedingOptions> seeding,
     ISystemClock clock,
     ILogger<DevelopmentDataSeeder> logger)
 {
     /// <summary>The password every development account shares. Development only,
-    /// and documented so nobody mistakes it for a deployed credential.</summary>
-    private const string DevelopmentPassword = "DevVaultFlow!2026";
+    /// and deliberately easy to type on a store register. It must never be used
+    /// outside a development database.</summary>
+    private const string DevelopmentPassword = "cash1234";
 
     private readonly IOptions<DatabaseOptions> _database = database;
     private readonly IOptions<SeedingOptions> _seeding = seeding;
 
     private int _locationsCreated;
     private int _productsCreated;
+    private int _pricesCreated;
     private int _accountsCreated;
+    private int _stockGroupsCreated;
 
     /// <summary>Seeds the development data when configured.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -88,6 +98,7 @@ public sealed class DevelopmentDataSeeder(
         await SeedExternalLocationsAsync(cancellationToken).ConfigureAwait(false);
         await SeedPhysicalLocationsAsync(cancellationToken).ConfigureAwait(false);
         await SeedReferenceMasterDataAsync(cancellationToken).ConfigureAwait(false);
+        await SeedStockAsync(cancellationToken).ConfigureAwait(false);
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -100,13 +111,16 @@ public sealed class DevelopmentDataSeeder(
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.LogInformation(
-                "Development seed complete: {Locations} locations, {Products} products, {Accounts} accounts.",
+                "Development seed complete: {Locations} locations, {Products} products, {Prices} prices, " +
+                "{StockGroups} stock events, {Accounts} accounts.",
                 _locationsCreated,
                 _productsCreated,
+                _pricesCreated,
+                _stockGroupsCreated,
                 _accountsCreated);
         }
 
-        return new DevelopmentDataSummary(_locationsCreated, _productsCreated, _accountsCreated);
+        return new DevelopmentDataSummary(_locationsCreated, _productsCreated, _pricesCreated, _accountsCreated, _stockGroupsCreated);
     }
 
     private async Task SeedExternalLocationsAsync(CancellationToken cancellationToken)
@@ -179,60 +193,220 @@ public sealed class DevelopmentDataSeeder(
         Dictionary<string, BrandId> brandByName = await EnsureBrandsAsync(cancellationToken);
         Dictionary<string, SupplierId> supplierByCode = await EnsureSuppliersAsync(cancellationToken);
 
-        (string Sku, string Name, string Category, string Brand, string Supplier, string Unit, string Barcode)[]
+        (string Sku, string Name, string Category, string Brand, string Supplier, string Unit, string Barcode, decimal Price)[]
             catalogue =
             [
-                ("RICE-01", "Premium Rice 5kg", "GROCERIES", "Green Valley", "SUP1", "KG", "4800000000017"),
-                ("COFFEE-200", "Ground Coffee 200g", "GROCERIES", "Sunrise", "SUP1", "KG", "4800000000024"),
-                ("SUGAR-1K", "Refined Sugar 1kg", "GROCERIES", "Green Valley", "SUP2", "KG", "4800000000031"),
-                ("OIL-1L", "Cooking Oil 1L", "GROCERIES", "Sunrise", "SUP2", "L", "4800000000048"),
-                ("MILK-370", "Evaporated Milk 370ml", "DAIRY", "Green Valley", "SUP1", "L", "4800000000055"),
-                ("EGGS-DZ", "Large Eggs (Dozen)", "DAIRY", "Green Valley", "SUP2", "PC", "4800000000062"),
+                ("RICE-01", "Premium Rice 5kg", "GROCERIES", "Green Valley", "SUP1", "KG", "4800000000017", 285m),
+                ("COFFEE-200", "Ground Coffee 200g", "GROCERIES", "Sunrise", "SUP1", "KG", "4800000000024", 165m),
+                ("SUGAR-1K", "Refined Sugar 1kg", "GROCERIES", "Green Valley", "SUP2", "KG", "4800000000031", 78m),
+                ("OIL-1L", "Cooking Oil 1L", "GROCERIES", "Sunrise", "SUP2", "L", "4800000000048", 125m),
+                ("MILK-370", "Evaporated Milk 370ml", "DAIRY", "Green Valley", "SUP1", "L", "4800000000055", 42m),
+                ("EGGS-DZ", "Large Eggs (Dozen)", "DAIRY", "Green Valley", "SUP2", "PC", "4800000000062", 110m),
+                ("WATER-500", "Mineral Water 500ml", "BEVERAGES", "Sunrise", "SUP1", "L", "4800000000079", 12m),
+                ("SODA-1L", "Premium Soda 1L", "BEVERAGES", "Sunrise", "SUP2", "L", "4800000000086", 58m),
+                ("DETER-400", "Laundry Powder 400g", "HOUSEHOLD", "Green Valley", "SUP1", "PC", "4800000000093", 135m),
             ];
 
-        foreach ((string sku, string name, string category, string brand, string supplier, string unit, string barcode) in
+        DateTimeOffset now = clock.UtcNow;
+
+        foreach ((string sku, string name, string category, string brand, string supplier, string unit, string barcode, decimal price) in
                  catalogue)
         {
-            if (await context.Products
-                .AnyAsync(p => p.Sku == Sku.FromTrustedSource(sku), cancellationToken)
-                .ConfigureAwait(false))
+            Product? product = await context.Products
+                .Include(p => p.Prices)
+                .FirstOrDefaultAsync(p => p.Sku == Sku.FromTrustedSource(sku), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (product is null)
             {
-                continue;
+                Result<Product> productResult = Product.Create(
+                    sku,
+                    name,
+                    categoryByCode[category],
+                    uomByCode[unit],
+                    UserId.Empty,
+                    brandId: brandByName[brand],
+                    primarySupplierId: supplierByCode[supplier]);
+
+                if (productResult.IsFailure)
+                {
+                    throw new InvalidOperationException(productResult.Error.Message);
+                }
+
+                product = productResult.Value;
+
+                Result barcodeAttached = product.AddBarcode(
+                    barcode,
+                    uomByCode[unit],
+                    packQuantity: 1m,
+                    isPrimary: true,
+                    UserId.Empty,
+                    requireChecksum: false);
+
+                if (barcodeAttached.IsFailure)
+                {
+                    throw new InvalidOperationException(barcodeAttached.Error.Message);
+                }
+
+                context.Products.Add(product);
+                _productsCreated++;
             }
 
-            Result<Product> productResult = Product.Create(
-                sku,
-                name,
-                categoryByCode[category],
-                uomByCode[unit],
-                UserId.Empty,
-                brandId: brandByName[brand],
-                primarySupplierId: supplierByCode[supplier]);
+            bool hasCurrentOrFutureBusinessPrice = product.Prices.Any(p =>
+                p.LocationId is null && (p.EffectiveToUtc is null || p.EffectiveToUtc > now));
 
-            if (productResult.IsFailure)
+            if (!hasCurrentOrFutureBusinessPrice)
             {
-                throw new InvalidOperationException(productResult.Error.Message);
+                Result<ProductPriceId> priceScheduled = product.SchedulePrice(
+                    locationId: null,
+                    amount: price,
+                    effectiveFromUtc: now,
+                    effectiveToUtc: null,
+                    createdByUserId: UserId.Empty,
+                    reason: "Development catalogue price.",
+                    nowUtc: now);
+
+                if (priceScheduled.IsFailure)
+                {
+                    throw new InvalidOperationException(priceScheduled.Error.Message);
+                }
+
+                // Prices are exposed by the aggregate as a defensive copy. Add
+                // the newly scheduled row explicitly so EF tracks it even when
+                // the product itself was already present and tracked.
+                context.ProductPrices.Add(product.Prices.Single(p => p.Id == priceScheduled.Value));
+                _pricesCreated++;
             }
-
-            Product product = productResult.Value;
-
-            Result barcodeAttached = product.AddBarcode(
-                barcode,
-                uomByCode[unit],
-                packQuantity: 1m,
-                isPrimary: true,
-                UserId.Empty,
-                requireChecksum: false);
-
-            if (barcodeAttached.IsFailure)
-            {
-                throw new InvalidOperationException(barcodeAttached.Error.Message);
-            }
-
-            context.Products.Add(product);
-            _productsCreated++;
         }
     }
+
+    /// <summary>Stock levels for the demo: what each store holds and what the
+    /// Main Warehouse holds, with the acquisition cost used to value the
+    /// opening balance.</summary>
+    private static readonly (string Sku, decimal StoreOnHand, decimal WarehouseOnHand, decimal UnitCost)[] Stock =
+    [
+        ("RICE-01", 25m, 300m, 240m),
+        ("COFFEE-200", 20m, 220m, 132m),
+        ("SUGAR-1K", 40m, 320m, 63m),
+        ("OIL-1L", 30m, 280m, 99m),
+        ("MILK-370", 60m, 500m, 33m),
+        ("EGGS-DZ", 15m, 120m, 86m),
+        ("WATER-500", 120m, 800m, 9m),
+        ("SODA-1L", 48m, 240m, 44m),
+        ("DETER-400", 36m, 200m, 106m),
+    ];
+
+    private async Task SeedStockAsync(CancellationToken cancellationToken)
+    {
+        Dictionary<string, (LocationId Id, LocationKind Kind)> locations = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Code == SystemLocationCodes.ExternalSupplier
+                        || l.Code == MainLocationCode
+                        || l.Code == StoreOneCode
+                        || l.Code == StoreTwoCode
+                        || l.Code == StoreThreeCode)
+            .Select(l => new { l.Code, l.Id, l.Kind })
+            .ToDictionaryAsync(l => l.Code, l => (l.Id, l.Kind), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!locations.TryGetValue(SystemLocationCodes.ExternalSupplier, out (LocationId Id, LocationKind Kind) external))
+        {
+            throw new InvalidOperationException("The external supplier location is missing for stock seeding.");
+        }
+
+        DateTimeOffset now = clock.UtcNow;
+        DateOnly businessDate = clock.BusinessDateFor("Asia/Manila");
+
+        foreach ((string sku, decimal storeOnHand, decimal warehouseOnHand, decimal unitCost) in Stock)
+        {
+            ProductId productId = await context.Products
+                .AsNoTracking()
+                .Where(p => p.Sku == Sku.FromTrustedSource(sku))
+                .Select(p => p.Id)
+                .SingleAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach ((string code, decimal quantity) in new[]
+                     {
+                         (MainLocationCode, warehouseOnHand),
+                         (StoreOneCode, storeOnHand),
+                         (StoreTwoCode, storeOnHand),
+                         (StoreThreeCode, storeOnHand),
+                     })
+            {
+                (LocationId id, LocationKind kind) = locations[code];
+
+                bool alreadySeeded = await context.InventoryMovements
+                    .AsNoTracking()
+                    .AnyAsync(
+                        m => m.MovementType == InventoryMovementType.OpeningBalance
+                             && m.ProductId == productId
+                             && m.LocationId == id
+                             && m.QuantityDelta > 0m,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (alreadySeeded)
+                {
+                    continue;
+                }
+
+                MovementGroupSpec seed = new(
+                    EventId: Pos.Domain.Common.EventId.New(),
+                    MovementType: InventoryMovementType.OpeningBalance,
+                    ReferenceDocumentType: ReferenceDocumentType.None,
+                    ReferenceDocumentId: null,
+                    ReferenceNumber: string.Empty,
+                    Legs:
+                    [
+                        new MovementLegSpec(
+                            productId,
+                            BatchId: null,
+                            external.Id,
+                            LocationKind.External,
+                            InventoryState.External,
+                            -quantity,
+                            unitCost,
+                            ProductTracksBatches: false),
+                        new MovementLegSpec(
+                            productId,
+                            BatchId: null,
+                            id,
+                            kind,
+                            InventoryState.Available,
+                            quantity,
+                            unitCost,
+                            ProductTracksBatches: false),
+                    ],
+                    Actor: new LedgerActor(UserId.Empty, UserId.Empty, null, CorrelationId.Empty),
+                    OccurredAtUtc: now,
+                    BusinessDate: businessDate,
+                    Notes: "Development opening balance for the demo catalogue.");
+
+                Result<PostedMovementGroup> posted = await ledger.PostAsync(seed, cancellationToken).ConfigureAwait(false);
+
+                if (posted.IsFailure)
+                {
+                    throw new InvalidOperationException(posted.Error.Message);
+                }
+
+                // The ledger stages into this same context. Because an opening
+                // balance is a pair of legs, the external supplier bucket for a
+                // product is touched again on the very next call; the change
+                // tracker must be flushed and cleared so that bucket is loaded
+                // from persistence instead of being created a second time.
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                context.ChangeTracker.Clear();
+
+                _stockGroupsCreated++;
+            }
+        }
+    }
+
+    private const string MainLocationCode = "MAIN";
+    private const string StoreOneCode = "STORE01";
+    private const string StoreTwoCode = "STORE02";
+    private const string StoreThreeCode = "STORE03";
 
     private async Task<Dictionary<string, UnitOfMeasureId>> EnsureUnitsOfMeasureAsync(CancellationToken ct)
     {
@@ -381,13 +555,14 @@ public sealed class DevelopmentDataSeeder(
             [
                 ("owner", "Development Owner", Roles.Owner, ApprovalTier.Unlimited, null),
                 ("admin", "System Administrator", Roles.Administrator, ApprovalTier.Tier3, null),
-                ("main.mgr", "Main Inventory Manager", Roles.MainInventoryManager, ApprovalTier.Tier2, null),
-                ("store1.mgr", "Store One Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE01"),
-                ("store2.mgr", "Store Two Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE02"),
-                ("store3.mgr", "Store Three Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE03"),
+                ("main.manager", "Main Warehouse Manager", Roles.MainInventoryManager, ApprovalTier.Tier2, null),
+                ("s1.manager", "Store One Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE01"),
+                ("s2.manager", "Store Two Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE02"),
+                ("s3.manager", "Store Three Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE03"),
                 ("inv.staff", "Inventory Staff", Roles.InventoryStaff, ApprovalTier.None, "MAIN"),
-                ("cashier1", "Cashier One", Roles.Cashier, ApprovalTier.None, "STORE01"),
-                ("cashier2", "Cashier Two", Roles.Cashier, ApprovalTier.None, "STORE01"),
+                ("s1.cashier", "Cashier One", Roles.Cashier, ApprovalTier.None, "STORE01"),
+                ("s2.cashier", "Cashier Two", Roles.Cashier, ApprovalTier.None, "STORE02"),
+                ("s3.cashier", "Cashier Three", Roles.Cashier, ApprovalTier.None, "STORE03"),
                 ("auditor", "Auditor", Roles.Auditor, ApprovalTier.None, null),
             ];
 
@@ -399,6 +574,38 @@ public sealed class DevelopmentDataSeeder(
 
             if (existing is not null)
             {
+                // Keep every development account on the shared password: when the
+                // constant changes, existing accounts are rotated to it so the
+                // credential set stays uniform and the demo never splits by age.
+                if (!await users.CheckPasswordAsync(existing, DevelopmentPassword).ConfigureAwait(false))
+                {
+                    // The identity setup is AddIdentityCore-based and registers no
+                    // token providers, so a token-based reset is not available.
+                    // Removing and re-adding the password achieves the same result
+                    // without one, and rotates the security stamp in the process.
+                    IdentityResult removed = await users.RemovePasswordAsync(existing).ConfigureAwait(false);
+
+                    if (!removed.Succeeded)
+                    {
+                        throw new InvalidOperationException(
+                            FormattableString.Invariant(
+                                $"Could not clear the password for {userName}: {string.Join("; ", removed.Errors.Select(e => e.Description))}"));
+                    }
+
+                    IdentityResult added = await users
+                        .AddPasswordAsync(existing, DevelopmentPassword)
+                        .ConfigureAwait(false);
+
+                    if (!added.Succeeded)
+                    {
+                        throw new InvalidOperationException(
+                            FormattableString.Invariant(
+                                $"Could not rotate the password for {userName}: {string.Join("; ", added.Errors.Select(e => e.Description))}"));
+                    }
+
+                    logger.LogWarning("Rotated the password for development account {UserName}.", userName);
+                }
+
                 continue;
             }
 

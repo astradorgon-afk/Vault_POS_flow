@@ -80,8 +80,9 @@ docker compose up -d --build
 ```
 
 The stack is served by Caddy at `https://localhost` with a locally trusted
-certificate; in Development the seeded staff accounts use `DevVaultFlow!2026`.
-Set `SITE_ADDRESS` in `.env` to serve other names or addresses too (for example
+certificate; in Development the seeded staff accounts share the password
+`cash1234` (development only — see `docs/LOCAL_TESTING.md`). Set
+`SITE_ADDRESS` in `.env` to serve other names or addresses too (for example
 `SITE_ADDRESS=localhost, pos.store.lan`), so tills on the store network reach the
 same certificate-backed site.
 

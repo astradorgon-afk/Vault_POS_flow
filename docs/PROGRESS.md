@@ -359,6 +359,37 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
 
 ## Log
 
+### 2026-09-19 — register restyle, web receipts, demo-ready seed
+
+- **POS sale/payment restyle (`Pos.Client`).** `SalePanel.razor` and `app.css`
+  remodelled to the three reference images, theme preserved: account header
+  with store name and till tag (`RegisterService.GetStoreIdentityAsync`),
+  category chips, single-payment keypad surface; replaced the
+  `@onclick="() => Keypad("0")"` markup-quoting bug with a `KeypadZero()`
+  handler. Layout only; no behaviour change.
+- **Web Receipts page (`Pos.Web`).** `Receipts.razor` at `/receipts` with
+  `Receipts.razor.css`, fed by `VaultFlowApiClient`
+  (`GetReceiptsAsync`/`IssueReceiptAsync`/`GetReceiptPrintTextAsync`) and the
+  `PosContracts` records; NavMenu link added.
+- **Demo seed overhaul (`DevelopmentDataSeeder`).** Accounts renamed to the
+  per-store convention (`s1.cashier`, `s1.manager`, `main.manager`, …), all
+  sharing the password `cash1234` (dev `MinimumPasswordLength` 8; production
+  stays 12). The seeder now also writes a selling price per product, expands
+  the catalogue to 9 items, and posts 36 opening-balance stock events through
+  `IInventoryLedger` (MAIN + STORE01/02/03, External-leg pairs). Existing dev
+  accounts are rotated onto the shared password on every run
+  (`RemovePasswordAsync` + `AddPasswordAsync`; `AddIdentityCore` has no token
+  providers). Still idempotent and transaction-scoped.
+- **Development-launch fixes.** `/health*` is exempt from `UseHttpsRedirection`
+  in `Program.cs`; the register's *"Head office could not be reached"* came from
+  running the API under the `https` launch profile (every plain-HTTP call was
+  307-redirected to the HTTPS port and failed on the untrusted dev cert), so
+  local runs use the `http` profile — documented in `docs/LOCAL_TESTING.md`.
+- Verification: all three apps plus Infrastructure build with zero warnings
+  and zero errors; seeded API serves `/health/live` and `/api/v1/meta` with no
+  redirect; `scripts/dev-desktop.ps1` reuses the running API and starts the Web
+  UI. Session notes: `docs/SESSION-2026-09-19-pos-restyle-receipts-demo-seed.md`.
+
 ### 2026-09-14
 
 - **Checkpoint commit `d9a97b5`.** Interim payment receipts (ADR-0026); removed

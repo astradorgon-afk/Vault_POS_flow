@@ -40,6 +40,37 @@ The full test command exercises the Docker-backed PostgreSQL suites when Docker
 is available. The Phase 17 baseline passed 1,144 tests with no failures or
 skips.
 
+## Run the Blazor Web UI
+
+The owner/admin dashboard is the `Pos.Web` Blazor application. It runs at
+`http://localhost:5215` and calls the development API at
+`http://localhost:5177`.
+
+From the repository root, run:
+
+```powershell
+.\scripts\dev-desktop.ps1
+```
+
+Despite its historical filename, this starts the API and Blazor Web UI; it
+does not start the MAUI desktop register. Open `http://localhost:5215` after
+the command reports that the Web UI is running.
+
+The helper creates `vaultflow-dev-pg` automatically from the API's configured
+`ConnectionStrings:Postgres` user secret and stores its data in the
+`vaultflow-dev-pgdata` Docker volume. Docker Desktop must be running. On a fresh
+machine, initialize the secret and signing key first:
+
+```powershell
+.\scripts\init-dev-secrets.ps1
+$dbPassword = 'VaultFlowDevOnly-ChangeMe-2026'
+dotnet user-secrets set 'ConnectionStrings:Postgres' `
+  "Host=localhost;Port=15432;Database=vaultflow;Username=pos_migrator;Password=$dbPassword" `
+  --project src/Pos.Api/Pos.Api.csproj
+```
+
+The API applies migrations and seeds the development users on first start.
+
 ## Run the desktop register (Windows)
 
 The desktop register is the .NET MAUI Blazor Hybrid app in `src/Pos.Client`. It
@@ -70,14 +101,26 @@ Visual Studio works too: set **Pos.Client** as the startup project, pick
    pick a store, name the register and give it an unused 2–6 character code;
    the issued code fills in, then enrol.
 2. **Sign in** as a user assigned to the register's store, for example
-   `cashier1` or `store1.mgr` for Store One. Signing in downloads the store's
+   `s1.cashier` or `s1.manager` for Store One (any development account signs
+   in with the shared password `cash1234`). Signing in downloads the store's
    products and the user's offline permissions; the banner turns **Ready**.
-3. The catalogue lists the store's products. The development seed creates no
-   prices, so each shows **No price** until a manager schedules one.
+3. The catalogue lists the store's products. The development seed creates a
+   selling price for every product and an opening stock balance at the Main
+   Warehouse and each store, so a sale completes against real
+   availability.
 
 To set a register up again, close the app and delete
 `%LOCALAPPDATA%\User Name\com.vaultflow.pos\Data\device.db`, then use a new
 register code: codes are unique even after a register is revoked.
+
+> **The API must run on the `http` launch profile for the register to connect.**
+> `scripts/dev-desktop.ps1` always launches it that way. Running the API with
+> the `https` launch profile binds `https://localhost:7256` and makes
+> `UseHttpsRedirection` bounce every plain-HTTP call to the HTTPS port; the
+> register's connection then fails on the untrusted development certificate
+> with *"Head office could not be reached at http://localhost:5177/"*. The
+> `/health*` endpoints are exempt from the redirect so liveness probes keep
+> working either way.
 
 ## Exercise backup and restore locally
 

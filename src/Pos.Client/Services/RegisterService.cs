@@ -20,12 +20,21 @@ public sealed record RegisterUser(UserId UserId, string DisplayName, HeadOfficeS
 public sealed record ManagerSetupSession(Uri Server, HeadOfficeSession Session, IReadOnlyList<StoreChoice> Stores);
 
 /// <summary>One product as the register would ring it up.</summary>
+/// <param name="ProductId">The product identifier sent on a sale line.</param>
+/// <param name="BaseUnitOfMeasureId">The inventory unit sent on a sale line, when head office supplied it.</param>
 /// <param name="Sku">The SKU.</param>
 /// <param name="Name">The product name.</param>
 /// <param name="Barcode">The primary barcode, if any.</param>
 /// <param name="Price">The price in force at this store now, if any.</param>
 /// <param name="Currency">The price's currency.</param>
-public sealed record CatalogueItem(string Sku, string Name, string? Barcode, decimal? Price, string? Currency);
+public sealed record CatalogueItem(
+    Guid ProductId,
+    Guid? BaseUnitOfMeasureId,
+    string Sku,
+    string Name,
+    string? Barcode,
+    decimal? Price,
+    string? Currency);
 
 /// <summary>
 /// Sets the register up and signs people in at it: enrolment writes the local
@@ -39,6 +48,7 @@ public sealed record CatalogueItem(string Sku, string Name, string? Barcode, dec
 /// <param name="session">The register's session.</param>
 /// <param name="clock">The device clock.</param>
 /// <param name="preferences">Where the head-office address is remembered.</param>
+/// <param name="scopes">Creates a short-lived scope for the device's atomic document-number generator.</param>
 public sealed class RegisterService(
     HeadOfficeClient headOffice,
     DeviceKeyStore keys,
@@ -46,9 +56,12 @@ public sealed class RegisterService(
     ChangeFeedApplier applier,
     DeviceSession session,
     ISystemClock clock,
-    IPreferences preferences)
+    IPreferences preferences,
+    IServiceScopeFactory scopes)
 {
     private const string ServerPreference = "vaultflow.headoffice.address";
+    private IReadOnlyDictionary<Guid, ProductSaleReference> productReferences =
+        new Dictionary<Guid, ProductSaleReference>();
 
     /// <summary>The address a development register points at until a manager changes it.</summary>
     public static readonly Uri DefaultServer = new("http://localhost:5177/");
@@ -166,6 +179,13 @@ public sealed class RegisterService(
         try
         {
             await DownloadStoreDataAsync(profile, signedIn.AccessToken, cancellationToken).ConfigureAwait(false);
+            productReferences = await headOffice
+                .GetProductSaleReferencesAsync(
+                    Server,
+                    signedIn.AccessToken,
+                    profile.DeviceId.Value,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch
         {
@@ -186,6 +206,13 @@ public sealed class RegisterService(
             ?? throw new HeadOfficeException("This register is not enrolled yet.");
 
         await DownloadStoreDataAsync(profile, user.Session.AccessToken, cancellationToken).ConfigureAwait(false);
+        productReferences = await headOffice
+            .GetProductSaleReferencesAsync(
+                Server,
+                user.Session.AccessToken,
+                profile.DeviceId.Value,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Locks the register. Anything waiting to be sent stays on the device.</summary>
@@ -193,6 +220,7 @@ public sealed class RegisterService(
     {
         RegisterUser? user = Current;
         Current = null;
+        productReferences = new Dictionary<Guid, ProductSaleReference>();
         DeviceId? device = session.DeviceId;
         session.SignOut();
 
@@ -241,8 +269,122 @@ public sealed class RegisterService(
                     .Select(b => b.Barcode)
                     .FirstOrDefault();
 
-                return new CatalogueItem(p.Sku, p.Name, barcode, price?.Amount, price?.Currency);
+                productReferences.TryGetValue(p.Id.Value, out ProductSaleReference? reference);
+                return new CatalogueItem(
+                    p.Id.Value,
+                    reference?.BaseUnitOfMeasureId,
+                    p.Sku,
+                    p.Name,
+                    barcode,
+                    price?.Amount,
+                    price?.Currency);
             })];
+    }
+
+    /// <summary>Reads the enrolled store's name and this register's till code.</summary>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The store display name and the till short code.</returns>
+    public async Task<(string Name, string TillCode)> GetStoreIdentityAsync(CancellationToken cancellationToken = default)
+    {
+        await using PosDeviceDbContext context =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        DeviceStoreProfile? profile = await context.DeviceProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+
+        if (profile is null)
+        {
+            return ("This store", string.Empty);
+        }
+
+        string? name = await context.Locations.AsNoTracking()
+            .Where(l => l.Id == profile.LocationId)
+            .Select(l => l.Name)
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+
+        return (string.IsNullOrWhiteSpace(name) ? "This store" : name, profile.ShortCode);
+    }
+
+    /// <summary>Loads the current shift and server-owned checkout facts for this register.</summary>
+    public Task<RegisterCheckoutContext> GetCheckoutContextAsync(CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        return headOffice.GetCheckoutContextAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            locationId.Value,
+            cancellationToken);
+    }
+
+    /// <summary>Opens a shift using this device's gap-safe SHF counter.</summary>
+    public async Task<RegisterCheckoutContext> OpenShiftAsync(
+        decimal openingFloat,
+        DateOnly businessDate,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        DocumentNumber number = await NextNumberAsync(DocumentType.CashierShift, cancellationToken)
+            .ConfigureAwait(false);
+
+        await headOffice.OpenShiftAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            number.Value,
+            locationId.Value,
+            businessDate,
+            openingFloat,
+            cancellationToken).ConfigureAwait(false);
+
+        return await GetCheckoutContextAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Posts a fully paid cart through the server sale, ledger and audit transaction.</summary>
+    public async Task<CompletedRegisterSale> CompleteSaleAsync(
+        Guid shiftId,
+        DateOnly businessDate,
+        IReadOnlyList<RegisterSaleLine> lines,
+        IReadOnlyList<RegisterSalePayment> payments,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(payments);
+
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        DocumentNumber number = await NextNumberAsync(DocumentType.Sale, cancellationToken).ConfigureAwait(false);
+        Guid saleId = await headOffice.CompleteSaleAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            number.Value,
+            Guid.CreateVersion7(),
+            locationId.Value,
+            shiftId,
+            businessDate,
+            clock.UtcNow,
+            lines,
+            payments,
+            cancellationToken).ConfigureAwait(false);
+
+        return new CompletedRegisterSale(saleId, number.Value);
+    }
+
+    private async Task<DocumentNumber> NextNumberAsync(
+        DocumentType type,
+        CancellationToken cancellationToken)
+    {
+        using IServiceScope scope = scopes.CreateScope();
+        IDocumentNumberGenerator generator = scope.ServiceProvider.GetRequiredService<IDocumentNumberGenerator>();
+        return await generator.NextAsync(type, cancellationToken).ConfigureAwait(false);
+    }
+
+    private (RegisterUser User, DeviceId DeviceId, LocationId LocationId) RequireActiveSession()
+    {
+        RegisterUser user = Current ?? throw new HeadOfficeException("Sign in before using the till.");
+        DeviceId deviceId = session.DeviceId ?? throw new HeadOfficeException("This register has no device identity.");
+        LocationId locationId = session.LocationId ?? throw new HeadOfficeException("This register has no store identity.");
+        return (user, deviceId, locationId);
     }
 
     private async Task DownloadStoreDataAsync(
