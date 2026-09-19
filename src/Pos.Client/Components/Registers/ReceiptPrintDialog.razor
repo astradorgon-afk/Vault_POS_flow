@@ -1,0 +1,54 @@
+@if (Open)
+{
+    <div class="dialog-backdrop" @onclick="OnDismiss">
+        <section class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="receipt-title" @onclick:stopPropagation>
+            <h3 id="receipt-title">Receipt — @SaleNumber</h3>
+            <p class="dialog-lead">
+                The reprint is logged against the sale. Select the text below to copy it, or print from the browser menu.
+            </p>
+
+            @if (Busy)
+            {
+                <div class="receipt-loading">Fetching the receipt…</div>
+            }
+            else if (Error is not null)
+            {
+                <p class="form-error" role="alert">@Error</p>
+            }
+            else if (!string.IsNullOrWhiteSpace(ReceiptText))
+            {
+                <textarea class="receipt-text" readonly rows="18" aria-label="Receipt text">@ReceiptText</textarea>
+            }
+
+            <div class="dialog-actions">
+                <button type="button" class="button-secondary" @onclick="OnDismiss">Close</button>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the dialog is showing.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>The sale number the receipt belongs to.</summary>
+    [Parameter]
+    public string SaleNumber { get; set; } = string.Empty;
+
+    /// <summary>The printable receipt text.</summary>
+    [Parameter]
+    public string ReceiptText { get; set; } = string.Empty;
+
+    /// <summary>True while the receipt is loading.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Head office's refusal, if any.</summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>Raised when the cashier closes the dialog.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+}

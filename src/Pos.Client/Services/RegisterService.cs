@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
 using Pos.Client.Storage;
 using Pos.Domain.Common;
+using Pos.Domain.Sales;
 using Pos.Infrastructure.Offline;
 using Pos.Infrastructure.Sync;
 
@@ -364,6 +365,7 @@ public sealed class RegisterService(
     public async Task<CompletedRegisterSale> CompleteSaleAsync(
         Guid shiftId,
         DateOnly businessDate,
+        Guid? customerId,
         IReadOnlyList<RegisterSaleLine> lines,
         IReadOnlyList<RegisterSalePayment> payments,
         CancellationToken cancellationToken = default)
@@ -381,6 +383,7 @@ public sealed class RegisterService(
             Guid.CreateVersion7(),
             locationId.Value,
             shiftId,
+            customerId,
             businessDate,
             clock.UtcNow,
             lines,
@@ -388,6 +391,189 @@ public sealed class RegisterService(
             cancellationToken).ConfigureAwait(false);
 
         return new CompletedRegisterSale(saleId, number.Value);
+    }
+
+    /// <summary>Gets the X-REPORT facts for the shift open on this register.</summary>
+    public async Task<RegisterShiftSummary> GetShiftSummaryAsync(
+        Guid shiftId,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, _) = RequireActiveSession();
+        return await headOffice.GetShiftSummaryAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            shiftId,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Declares and counts the drawer, then closes the shift.</summary>
+    public async Task CloseShiftAsync(
+        Guid shiftId,
+        decimal declaredCash,
+        decimal countedCash,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        await headOffice.CloseShiftAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            shiftId,
+            locationId.Value,
+            declaredCash,
+            countedCash,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Finds completed sales at this register's store.</summary>
+    public async Task<IReadOnlyList<RegisterSaleSummary>> SearchSalesAsync(
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        return await headOffice.SearchSalesAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            locationId.Value,
+            from,
+            to,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Loads a completed sale's lines, ready for a return.</summary>
+    public async Task<RegisterSaleDetail> GetSaleDetailAsync(
+        Guid saleId,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, _) = RequireActiveSession();
+        return await headOffice.GetSaleDetailAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            saleId,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Accepts a return against a completed sale using this device's gap-safe RET counter.</summary>
+    public async Task<AcceptedRegisterReturn> AcceptReturnAsync(
+        Guid saleId,
+        Guid shiftId,
+        DateOnly businessDate,
+        Guid? customerId,
+        IReadOnlyList<RegisterReturnLine> lines,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        DocumentNumber number = await NextNumberAsync(DocumentType.SalesReturn, cancellationToken).ConfigureAwait(false);
+        Guid returnId = await headOffice.CreateReturnAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            number.Value,
+            Guid.CreateVersion7(),
+            saleId,
+            locationId.Value,
+            shiftId,
+            customerId,
+            businessDate,
+            clock.UtcNow,
+            lines,
+            cancellationToken).ConfigureAwait(false);
+
+        return new AcceptedRegisterReturn(returnId, number.Value);
+    }
+
+    /// <summary>Issues a refund against a return through the open shift.</summary>
+    public async Task<Guid> RefundReturnAsync(
+        Guid returnId,
+        Guid? saleId,
+        Guid shiftId,
+        PaymentMethod method,
+        decimal amount,
+        decimal? tendered,
+        string? providerReference,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        return await headOffice.RefundReturnAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            returnId,
+            saleId,
+            Guid.CreateVersion7(),
+            locationId.Value,
+            shiftId,
+            method,
+            amount,
+            tendered,
+            providerReference,
+            clock.UtcNow,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Searches customer records by name, phone or email.</summary>
+    public async Task<IReadOnlyList<RegisterCustomer>> SearchCustomersAsync(
+        string? search,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, _) = RequireActiveSession();
+        return await headOffice.SearchCustomersAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            search,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Creates a new customer record.</summary>
+    public async Task<Guid> CreateCustomerAsync(
+        string displayName,
+        string? phone,
+        string? email,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, _) = RequireActiveSession();
+        return await headOffice.CreateCustomerAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            displayName,
+            phone,
+            email,
+            tin: null,
+            note: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Renders a completed sale receipt as text and logs the reprint.</summary>
+    public async Task<string> GetReceiptTextAsync(
+        Guid saleId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireActiveSession();
+        await headOffice.LogReprintAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            saleId,
+            locationId.Value,
+            reason,
+            clock.UtcNow,
+            cancellationToken).ConfigureAwait(false);
+
+        return await headOffice.GetSaleReceiptAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            saleId,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<DocumentNumber> NextNumberAsync(

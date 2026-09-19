@@ -1,0 +1,118 @@
+@using System.Globalization
+@using Pos.Client.Models
+@using Pos.Client.Services
+
+@if (Open && Summary is not null)
+{
+    <div class="dialog-backdrop" @onclick="OnDismiss">
+        <section class="dialog dialog-wide" role="alertdialog" aria-modal="true" aria-labelledby="shift-close-title" @onclick:stopPropagation>
+            <h3 id="shift-close-title">Close shift</h3>
+            <p class="dialog-lead">
+                X-REPORT for <strong>@Summary.Number</strong> opened @Summary.OpenedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture).
+                Count the drawer and enter what you find before closing.
+            </p>
+
+            <div class="xreport-grid">
+                <span>Business date</span><strong>@Summary.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</strong>
+                <span>Opening float</span><strong>@MoneyFormat.Php(Summary.OpeningFloat)</strong>
+                <span>Cash sales</span><strong>@MoneyFormat.Php(Summary.CashSales)</strong>
+                <span>Cash refunds</span><strong>@MoneyFormat.Php(Summary.CashRefunds)</strong>
+                <span>Payouts</span><strong>@MoneyFormat.Php(Summary.Payouts)</strong>
+                <span>Expected cash</span><strong>@MoneyFormat.Php(Summary.ExpectedCash)</strong>
+            </div>
+
+            <div class="drawer-row">
+                <label class="dialog-field">
+                    <span>Declared cash</span>
+                    <input value="@_declared" @oninput="OnDeclaredInput" inputmode="decimal" placeholder="0.00" aria-label="Declared cash" />
+                </label>
+                <label class="dialog-field">
+                    <span>Counted cash</span>
+                    <input value="@_counted" @oninput="OnCountedInput" inputmode="decimal" placeholder="0.00" aria-label="Counted cash" />
+                </label>
+            </div>
+
+            @if (_variance is { } variance)
+            {
+                <p class="drawer-variance @(variance == 0m ? "drawer-variance-clean" : "drawer-variance-over")">
+                    <strong>Variance @(variance >= 0m ? "over" : "short")</strong>
+                    <span>@MoneyFormat.Php(Math.Abs(variance)) vs expected @MoneyFormat.Php(Summary.ExpectedCash)</span>
+                </p>
+            }
+
+            @if (Error is not null)
+            {
+                <p class="form-error" role="alert">@Error</p>
+            }
+
+            <div class="dialog-actions">
+                <button type="button" class="button-secondary" @onclick="OnDismiss" disabled="@Busy">Cancel</button>
+                <button type="button" class="button-primary" @onclick="ConfirmAsync" disabled="@Busy">@(Busy ? "Closing…" : "Close shift")</button>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private string _declared = string.Empty;
+    private string _counted = string.Empty;
+
+    /// <summary>Whether the dialog is showing.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>The X-REPORT facts for the open shift.</summary>
+    [Parameter]
+    public RegisterShiftSummary? Summary { get; set; }
+
+    /// <summary>True while the shift is being closed.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Head office's refusal, if any.</summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>Raised with the declared and counted drawer amounts.</summary>
+    [Parameter]
+    public EventCallback<(decimal Declared, decimal Counted)> OnConfirm { get; set; }
+
+    /// <summary>Raised when the cashier backs out.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    private decimal? _variance
+    {
+        get
+        {
+            if (Summary is null
+                || !decimal.TryParse(_counted, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal counted))
+            {
+                return null;
+            }
+
+            return counted - Summary.ExpectedCash;
+        }
+    }
+
+    private void OnDeclaredInput(ChangeEventArgs args) => _declared = args.Value?.ToString() ?? string.Empty;
+
+    private void OnCountedInput(ChangeEventArgs args) => _counted = args.Value?.ToString() ?? string.Empty;
+
+    private async Task ConfirmAsync()
+    {
+        if (Busy)
+        {
+            return;
+        }
+
+        _ = decimal.TryParse(_declared, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal declared);
+        _ = decimal.TryParse(_counted, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal counted);
+        if (declared < 0m || counted < 0m)
+        {
+            return;
+        }
+
+        await OnConfirm.InvokeAsync((declared, counted));
+    }
+}

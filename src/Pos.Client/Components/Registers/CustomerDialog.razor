@@ -1,0 +1,213 @@
+@using Pos.Client.Services
+
+@if (Open)
+{
+    <div class="dialog-backdrop" @onclick="OnDismiss">
+        <section class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="customer-title" @onclick:stopPropagation>
+            <h3 id="customer-title">Add a customer</h3>
+            <p class="dialog-lead">
+                Find the customer this sale is for, or create a new record. The customer is printed on the receipt.
+            </p>
+
+            @if (!_showCreate)
+            {
+                <label class="dialog-field">
+                    <span>Search by name, phone or email</span>
+                    <input value="@_search" @oninput="OnSearchInput" @onkeydown="OnSearchKeyDown" placeholder="Type to search…" aria-label="Search customers" />
+                </label>
+                <button type="button" class="customer-search-button" @onclick="SearchAsync" disabled="@(Busy || string.IsNullOrWhiteSpace(_search))">
+                    @(Busy ? "Searching…" : "Search")
+                </button>
+
+                <div class="customer-results" aria-live="polite">
+                    @if (Searching)
+                    {
+                        <p class="customer-empty">Searching customer records…</p>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_searchedFor) && Results.Count == 0)
+                    {
+                        <p class="customer-empty">No customer matches “@_searchedFor”.</p>
+                    }
+                    @foreach (RegisterCustomer customer in Results)
+                    {
+                        <button type="button" class="customer-row" @onclick="() => SelectAsync(customer)">
+                            <span class="customer-initial">@InitialOf(customer.DisplayName)</span>
+                            <span class="customer-details">
+                                <strong>@customer.DisplayName</strong>
+                                <small>@CustomerContact(customer)</small>
+                            </span>
+                        </button>
+                    }
+                </div>
+
+                @if (CanCreate)
+                {
+                    <button type="button" class="button-link customer-new" @onclick="ShowCreate">+ New customer</button>
+                }
+            }
+            else
+            {
+                <div class="customer-form">
+                    <label class="dialog-field">
+                        <span>Display name</span>
+                        <input value="@_newName" @oninput="OnNewNameInput" placeholder="Juan Dela Cruz" aria-label="Display name" />
+                    </label>
+                    <label class="dialog-field">
+                        <span>Phone</span>
+                        <input value="@_newPhone" @oninput="OnNewPhoneInput" inputmode="tel" placeholder="Optional" aria-label="Phone" />
+                    </label>
+                    <label class="dialog-field">
+                        <span>Email</span>
+                        <input value="@_newEmail" @oninput="OnNewEmailInput" inputmode="email" placeholder="Optional" aria-label="Email" />
+                    </label>
+                </div>
+            }
+
+            @if (_error is not null)
+            {
+                <p class="form-error" role="alert">@_error</p>
+            }
+
+            <div class="dialog-actions">
+                @if (_showCreate)
+                {
+                    <button type="button" class="button-secondary" @onclick="HideCreate" disabled="@Busy">Back</button>
+                    <button type="button" class="button-primary" @onclick="CreateAsync" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName))">@(Busy ? "Creating…" : "Create customer")</button>
+                }
+                else
+                {
+                    <button type="button" class="button-secondary" @onclick="OnDismiss">Cancel</button>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private readonly List<RegisterCustomer> Results = [];
+    private string _search = string.Empty;
+    private string _searchedFor = string.Empty;
+    private string _newName = string.Empty;
+    private string _newPhone = string.Empty;
+    private string _newEmail = string.Empty;
+    private bool _showCreate;
+    private bool Searching;
+    private string? _error;
+
+    /// <summary>Whether the dialog is showing.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>True when the operator may create customer records.</summary>
+    [Parameter]
+    public bool CanCreate { get; set; }
+
+    /// <summary>True while a head-office call is running.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Raised when the operator picks a customer, or creates one.</summary>
+    [Parameter]
+    public EventCallback<RegisterCustomer> OnSelect { get; set; }
+
+    /// <summary>Raised when the dialog is dismissed.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    /// <summary>Raised when the dialog needs customer search from the service.</summary>
+    [Parameter]
+    public Func<string?, Task<IReadOnlyList<RegisterCustomer>>>? SearchCustomers { get; set; }
+
+    /// <summary>Raised when the dialog needs a customer created.</summary>
+    [Parameter]
+    public Func<string, string?, string?, Task<Guid>>? CreateCustomer { get; set; }
+
+    private void OnSearchInput(ChangeEventArgs args) => _search = args.Value?.ToString() ?? string.Empty;
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (Busy || SearchCustomers is null || string.IsNullOrWhiteSpace(_search))
+        {
+            return;
+        }
+
+        Searching = true;
+        _error = null;
+        Results.Clear();
+        _searchedFor = _search;
+        try
+        {
+            Results.AddRange(await SearchCustomers(_search.Trim()));
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            Searching = false;
+        }
+    }
+
+    private async Task SelectAsync(RegisterCustomer customer)
+    {
+        if (!Busy)
+        {
+            await OnSelect.InvokeAsync(customer);
+        }
+    }
+
+    private void ShowCreate()
+    {
+        _showCreate = true;
+        _error = null;
+    }
+
+    private void HideCreate() => _showCreate = false;
+
+    private void OnNewNameInput(ChangeEventArgs args) => _newName = args.Value?.ToString() ?? string.Empty;
+
+    private void OnNewPhoneInput(ChangeEventArgs args) => _newPhone = args.Value?.ToString() ?? string.Empty;
+
+    private void OnNewEmailInput(ChangeEventArgs args) => _newEmail = args.Value?.ToString() ?? string.Empty;
+
+    private async Task CreateAsync()
+    {
+        if (Busy || CreateCustomer is null || string.IsNullOrWhiteSpace(_newName))
+        {
+            return;
+        }
+
+        _error = null;
+        try
+        {
+            Guid id = await CreateCustomer(_newName.Trim(), _newPhone?.Trim(), _newEmail?.Trim());
+            await OnSelect.InvokeAsync(new RegisterCustomer(id, _newName.Trim(), _newPhone?.Trim(), _newEmail?.Trim()));
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private static string InitialOf(string name)
+        => string.IsNullOrWhiteSpace(name) ? "?" : name.Trim()[..1].ToUpperInvariant();
+
+    private static string CustomerContact(RegisterCustomer customer)
+    {
+        if (!string.IsNullOrWhiteSpace(customer.Phone))
+        {
+            return customer.Phone;
+        }
+
+        return string.IsNullOrWhiteSpace(customer.Email) ? "No contact on file" : customer.Email;
+    }
+}

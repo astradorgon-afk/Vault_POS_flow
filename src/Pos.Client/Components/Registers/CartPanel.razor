@@ -5,6 +5,17 @@
             <span class="cart-title-meta">@ItemCount @(ItemCount == 1 ? "item" : "items")</span>
         </div>
         <div class="cart-title-right">
+            @if (Customer is not null)
+            {
+                <span class="cart-customer-pill" title="Receipt customer">
+                    @Customer.DisplayName
+                    <button type="button" class="cart-customer-clear" @onclick:stopPropagation="true" @onclick="OnCustomerClear" aria-label="Remove customer">×</button>
+                </span>
+            }
+            else if (ShowCustomerButton)
+            {
+                <button type="button" class="button-link cart-customer" @onclick="OnCustomer">Add customer</button>
+            }
             @if (HeldCount > 0)
             {
                 <span class="cart-held-pill" title="Sales held at this till">@HeldCount held</span>
@@ -120,6 +131,22 @@
     /// <summary>How many sales are already held at this till.</summary>
     [Parameter]
     public int HeldCount { get; set; }
+
+    /// <summary>The customer attached to this sale, if any.</summary>
+    [Parameter]
+    public RegisterCustomer? Customer { get; set; }
+
+    /// <summary>Whether the “Add customer” button is shown (customer view right).</summary>
+    [Parameter]
+    public bool ShowCustomerButton { get; set; }
+
+    /// <summary>Raised when the cashier taps a customer's clear button.</summary>
+    [Parameter]
+    public EventCallback OnCustomerClear { get; set; }
+
+    /// <summary>Raised when the cashier taps “Add customer”.</summary>
+    [Parameter]
+    public EventCallback OnCustomer { get; set; }
 
     private bool PayDisabled => ItemCount == 0;
     private bool HoldDisabled => ItemCount == 0;

@@ -6,9 +6,31 @@
             <span class="more-item-name">Held sales</span>
             <span class="more-item-badge">@HeldCount</span>
         </button>
+        @if (ShowReturns)
+        {
+            <button type="button" class="more-item" @onclick="OnReturnItems">
+                <span class="more-item-name">Return items</span>
+            </button>
+        }
         <button type="button" class="more-item" @onclick="OnRefreshStore">
             <span class="more-item-name">Refresh store data</span>
         </button>
+        @if (ShowCloseShift)
+        {
+            <button type="button" class="more-item" @onclick="OnCloseShift">
+                <span class="more-item-name">Close shift</span>
+            </button>
+        }
+        @if (ShowReprint)
+        {
+            <button type="button" class="more-item" @onclick="OnReprint" disabled="@(!ReprintEnabled)">
+                <span class="more-item-name">Reprint last receipt</span>
+                @if (!ReprintEnabled)
+                {
+                    <span class="more-item-badge">awaiting first sale</span>
+                }
+            </button>
+        }
         <button type="button" class="more-item more-item-danger" @onclick="OnLock">
             <span class="more-item-name">Lock register</span>
         </button>
@@ -28,13 +50,41 @@
     [Parameter]
     public bool OverLeft { get; set; }
 
+    /// <summary>Whether the “Return items” entry is shown (open shift + return right).</summary>
+    [Parameter]
+    public bool ShowReturns { get; set; }
+
+    /// <summary>Whether the “Close shift” entry is shown (open shift + close right).</summary>
+    [Parameter]
+    public bool ShowCloseShift { get; set; }
+
+    /// <summary>Whether the “Reprint last receipt” entry is shown at all.</summary>
+    [Parameter]
+    public bool ShowReprint { get; set; }
+
+    /// <summary>Whether the last receipt is available to reprint.</summary>
+    [Parameter]
+    public bool ReprintEnabled { get; set; }
+
     /// <summary>Raised when the cashier picks “Held sales”.</summary>
     [Parameter]
     public EventCallback OnHeldSales { get; set; }
 
+    /// <summary>Raised when the cashier picks “Return items”.</summary>
+    [Parameter]
+    public EventCallback OnReturnItems { get; set; }
+
     /// <summary>Raised when the cashier picks “Refresh store data”.</summary>
     [Parameter]
     public EventCallback OnRefreshStore { get; set; }
+
+    /// <summary>Raised when the cashier picks “Close shift”.</summary>
+    [Parameter]
+    public EventCallback OnCloseShift { get; set; }
+
+    /// <summary>Raised when the cashier picks “Reprint last receipt”.</summary>
+    [Parameter]
+    public EventCallback OnReprint { get; set; }
 
     /// <summary>Raised when the cashier picks “Lock register”.</summary>
     [Parameter]

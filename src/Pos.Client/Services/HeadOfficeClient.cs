@@ -85,6 +85,97 @@ public sealed record RegisterSalePayment(
 /// <param name="Number">The printed sale number.</param>
 public sealed record CompletedRegisterSale(Guid Id, string Number);
 
+/// <summary>The X-REPORT facts head office keeps for a cashier shift.</summary>
+/// <param name="ShiftId">The shift identifier.</param>
+/// <param name="Number">The SHF document number.</param>
+/// <param name="Status">The shift status, for example Open or Closed.</param>
+/// <param name="BusinessDate">The business date the shift belongs to.</param>
+/// <param name="OpenedAtUtc">When the shift opened.</param>
+/// <param name="OpeningFloat">The cash in the drawer at open.</param>
+/// <param name="CashSales">Cash settled on sales.</param>
+/// <param name="CashRefunds">Cash refunded on returns.</param>
+/// <param name="Payouts">Cash paid out on expenses and withdrawals.</param>
+/// <param name="ExpectedCash">Opening float plus cash sales minus refunds and payouts.</param>
+public sealed record RegisterShiftSummary(
+    Guid ShiftId,
+    string Number,
+    string Status,
+    DateOnly BusinessDate,
+    DateTimeOffset OpenedAtUtc,
+    decimal OpeningFloat,
+    decimal CashSales,
+    decimal CashRefunds,
+    decimal Payouts,
+    decimal ExpectedCash);
+
+/// <summary>A completed sale as returned by the sales search.</summary>
+/// <param name="Id">The sale identifier.</param>
+/// <param name="Number">The SAL document number.</param>
+/// <param name="BusinessDate">The business date the sale belongs to.</param>
+/// <param name="CompletedAtUtc">When the sale was completed.</param>
+/// <param name="NetTotal">The amount settled.</param>
+public sealed record RegisterSaleSummary(
+    Guid Id,
+    string Number,
+    DateOnly BusinessDate,
+    DateTimeOffset CompletedAtUtc,
+    decimal NetTotal);
+
+/// <summary>A completed sale with its lines, as loaded for a return.</summary>
+/// <param name="Id">The sale identifier.</param>
+/// <param name="Number">The SAL document number.</param>
+/// <param name="Status">The sale status, for example Completed or Voided.</param>
+/// <param name="LocationId">The store the sale was completed at.</param>
+/// <param name="BusinessDate">The business date the sale belongs to.</param>
+/// <param name="CompletedAtUtc">When the sale was completed.</param>
+/// <param name="Lines">The sale lines, ordered by line number.</param>
+public sealed record RegisterSaleDetail(
+    Guid Id,
+    string Number,
+    string Status,
+    Guid LocationId,
+    DateOnly BusinessDate,
+    DateTimeOffset CompletedAtUtc,
+    IReadOnlyList<RegisterSaleDetailLine> Lines);
+
+/// <summary>One line of a completed sale, as loaded for a return.</summary>
+/// <param name="LineNumber">The line number on the sale.</param>
+/// <param name="ProductId">The product sold.</param>
+/// <param name="ProductName">The product display name.</param>
+/// <param name="Barcode">The scanned barcode, if any.</param>
+/// <param name="Quantity">The quantity sold.</param>
+/// <param name="UnitPrice">The selling unit price.</param>
+/// <param name="NetAmount">The net line amount.</param>
+public sealed record RegisterSaleDetailLine(
+    int LineNumber,
+    Guid ProductId,
+    string ProductName,
+    string? Barcode,
+    decimal Quantity,
+    decimal UnitPrice,
+    decimal NetAmount);
+
+/// <summary>One line accepted on a return against a sale.</summary>
+/// <param name="ProductId">The product returned.</param>
+/// <param name="Quantity">The quantity returned.</param>
+public sealed record RegisterReturnLine(Guid ProductId, decimal Quantity);
+
+/// <summary>A return accepted by head office.</summary>
+/// <param name="Id">The return identifier.</param>
+/// <param name="Number">The printed RET number.</param>
+public sealed record AcceptedRegisterReturn(Guid Id, string Number);
+
+/// <summary>A customer as returned by the customer search.</summary>
+/// <param name="Id">The customer identifier.</param>
+/// <param name="DisplayName">The customer's display name.</param>
+/// <param name="Phone">The customer's phone number, if any.</param>
+/// <param name="Email">The customer's email address, if any.</param>
+public sealed record RegisterCustomer(
+    Guid Id,
+    string DisplayName,
+    string? Phone,
+    string? Email);
+
 /// <summary>A refusal or failure reported by head office, in words a manager can act on.</summary>
 public sealed class HeadOfficeException : Exception
 {
@@ -317,6 +408,7 @@ public sealed class HeadOfficeClient(HttpClient http)
         Guid eventId,
         Guid locationId,
         Guid shiftId,
+        Guid? customerId,
         DateOnly businessDate,
         DateTimeOffset completedAtUtc,
         IReadOnlyList<RegisterSaleLine> lines,
@@ -334,7 +426,7 @@ public sealed class HeadOfficeClient(HttpClient http)
                 locationId,
                 cashierShiftId = shiftId,
                 deviceId,
-                customerId = (Guid?)null,
+                customerId,
                 businessDate,
                 completedAtUtc,
                 lines = lines.Select(line => new
@@ -376,15 +468,7 @@ public sealed class HeadOfficeClient(HttpClient http)
             request.Content = JsonContent.Create(body, options: Json);
         }
 
-        if (accessToken is not null)
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        }
-
-        if (deviceId is { } device)
-        {
-            request.Headers.Add(DeviceHeader, device.ToString());
-        }
+        ApplyAuth(request, accessToken, deviceId);
 
         HttpResponseMessage response;
         try
@@ -420,7 +504,287 @@ public sealed class HeadOfficeClient(HttpClient http)
         }
     }
 
-    private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    /// <summary>Gets the X-REPORT facts for a shift at this register's store.</summary>
+    public Task<RegisterShiftSummary> GetShiftSummaryAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid shiftId,
+        CancellationToken cancellationToken)
+        => SendAsync<RegisterShiftSummary>(
+            HttpMethod.Get,
+            server,
+            FormattableString.Invariant($"api/v1/shifts/{shiftId:D}/summary"),
+            null,
+            accessToken,
+            deviceId,
+            cancellationToken);
+
+    /// <summary>Declares and counts the drawer, then closes the shift.</summary>
+    public async Task<Guid> CloseShiftAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid shiftId,
+        Guid locationId,
+        decimal declaredCash,
+        decimal countedCash,
+        CancellationToken cancellationToken)
+    {
+        IdResponse response = await SendAsync<IdResponse>(
+            HttpMethod.Post,
+            server,
+            FormattableString.Invariant($"api/v1/shifts/{shiftId:D}/close"),
+            new { locationId, declaredCash, countedCash },
+            accessToken,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Id;
+    }
+
+    /// <summary>Finds completed sales at a store for a business-date window.</summary>
+    public async Task<IReadOnlyList<RegisterSaleSummary>> SearchSalesAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid locationId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken)
+    {
+        string path = FormattableString.Invariant($"api/v1/sales?locationId={locationId:D}");
+        if (from is { } fromDate)
+        {
+            path += FormattableString.Invariant($"&from={fromDate:yyyy-MM-dd}");
+        }
+
+        if (to is { } toDate)
+        {
+            path += FormattableString.Invariant($"&to={toDate:yyyy-MM-dd}");
+        }
+
+        List<SaleSearchRow> rows = await SendAsync<List<SaleSearchRow>>(
+            HttpMethod.Get, server, path, null, accessToken, deviceId, cancellationToken).ConfigureAwait(false);
+
+        return [.. rows.Select(row => new RegisterSaleSummary(
+            row.Id, row.Number, row.BusinessDate, row.CompletedAtUtc, row.NetTotal))];
+    }
+
+    /// <summary>Loads a completed sale with its lines, ready for a return.</summary>
+    public async Task<RegisterSaleDetail> GetSaleDetailAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid saleId,
+        CancellationToken cancellationToken)
+    {
+        SaleDetailRow row = await SendAsync<SaleDetailRow>(
+            HttpMethod.Get,
+            server,
+            FormattableString.Invariant($"api/v1/sales/{saleId:D}"),
+            null,
+            accessToken,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return new RegisterSaleDetail(
+            row.Id,
+            row.Number,
+            row.Status,
+            row.LocationId,
+            row.BusinessDate,
+            row.CompletedAtUtc,
+            [.. row.Lines.Select(line => new RegisterSaleDetailLine(
+                line.LineNumber, line.ProductId, line.ProductName, line.Barcode,
+                line.Quantity, line.UnitPrice, line.NetAmount))]);
+    }
+
+    /// <summary>Accepts a return against a completed sale.</summary>
+    public async Task<Guid> CreateReturnAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        string number,
+        Guid eventId,
+        Guid saleId,
+        Guid locationId,
+        Guid shiftId,
+        Guid? customerId,
+        DateOnly businessDate,
+        DateTimeOffset returnedAtUtc,
+        IReadOnlyList<RegisterReturnLine> lines,
+        CancellationToken cancellationToken)
+    {
+        IdResponse response = await SendAsync<IdResponse>(
+            HttpMethod.Post,
+            server,
+            "api/v1/returns/",
+            new
+            {
+                number,
+                eventId,
+                saleId,
+                locationId,
+                shiftId,
+                deviceId,
+                customerId,
+                businessDate,
+                returnedAtUtc,
+                lines = lines.Select(line => new { line.ProductId, line.Quantity }),
+            },
+            accessToken,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Id;
+    }
+
+    /// <summary>Issues a refund against a return through the open shift.</summary>
+    public async Task<Guid> RefundReturnAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid returnId,
+        Guid? saleId,
+        Guid eventId,
+        Guid locationId,
+        Guid shiftId,
+        PaymentMethod method,
+        decimal amount,
+        decimal? tendered,
+        string? providerReference,
+        DateTimeOffset refundedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        IdResponse response = await SendAsync<IdResponse>(
+            HttpMethod.Post,
+            server,
+            FormattableString.Invariant($"api/v1/returns/{returnId:D}/refund"),
+            new
+            {
+                saleId,
+                eventId,
+                locationId,
+                shiftId,
+                deviceId,
+                method,
+                amount,
+                tendered,
+                providerReference,
+                refundedAtUtc,
+            },
+            accessToken,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Id;
+    }
+
+    /// <summary>Searches customer records by name, phone or email.</summary>
+    public async Task<IReadOnlyList<RegisterCustomer>> SearchCustomersAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        string? search,
+        CancellationToken cancellationToken)
+    {
+        string path = "api/v1/customers?pageSize=20";
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            path += $"&search={Uri.EscapeDataString(search)}";
+        }
+
+        CustomerSearchRow row = await SendAsync<CustomerSearchRow>(
+            HttpMethod.Get, server, path, null, accessToken, deviceId, cancellationToken).ConfigureAwait(false);
+
+        return [.. row.Customers.Select(customer => new RegisterCustomer(
+            customer.Id, customer.DisplayName, customer.Phone, customer.Email))];
+    }
+
+    /// <summary>Creates a new customer record.</summary>
+    public async Task<Guid> CreateCustomerAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        string displayName,
+        string? phone,
+        string? email,
+        string? tin,
+        string? note,
+        CancellationToken cancellationToken)
+    {
+        IdResponse response = await SendAsync<IdResponse>(
+            HttpMethod.Post,
+            server,
+            "api/v1/customers/",
+            new { displayName, phone, email, tin, note },
+            accessToken,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Id;
+    }
+
+    /// <summary>Logs a permissioned reprint of a sale receipt.</summary>
+    public async Task<Guid> LogReprintAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid saleId,
+        Guid locationId,
+        string reason,
+        DateTimeOffset reprintedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        IdResponse response = await SendAsync<IdResponse>(
+            HttpMethod.Post,
+            server,
+            FormattableString.Invariant($"api/v1/sales/{saleId:D}/reprint"),
+            new { locationId, deviceId, reason, reprintedAtUtc },
+            accessToken,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Id;
+    }
+
+    /// <summary>Renders a completed sale receipt as printable plain text.</summary>
+    public async Task<string> GetSaleReceiptAsync(
+        Uri server,
+        string accessToken,
+        Guid deviceId,
+        Guid saleId,
+        CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = new(
+            HttpMethod.Get,
+            new Uri(server, FormattableString.Invariant($"api/v1/sales/{saleId:D}/receipt")));
+        ApplyAuth(request, accessToken, deviceId);
+
+        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+        }
+
+        return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void ApplyAuth(HttpRequestMessage request, string? accessToken, Guid? deviceId)
+    {
+        if (accessToken is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        }
+
+        if (deviceId is { } device)
+        {
+            request.Headers.Add(DeviceHeader, device.ToString());
+        }
+    }
+
+        private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
         {
@@ -464,6 +828,43 @@ public sealed class HeadOfficeClient(HttpClient http)
         DateOnly BusinessDate,
         decimal CashRoundingIncrement,
         OpenShiftRow? OpenShift);
+
+    private sealed record SaleSearchRow(
+        Guid Id,
+        string Number,
+        DateOnly BusinessDate,
+        DateTimeOffset CompletedAtUtc,
+        decimal NetTotal);
+
+    private sealed record SaleDetailRow(
+        Guid Id,
+        string Number,
+        string Status,
+        Guid LocationId,
+        DateOnly BusinessDate,
+        DateTimeOffset CompletedAtUtc,
+        IReadOnlyList<SaleDetailLineRow> Lines);
+
+    private sealed record SaleDetailLineRow(
+        int LineNumber,
+        Guid ProductId,
+        string ProductName,
+        string? Barcode,
+        decimal Quantity,
+        decimal UnitPrice,
+        decimal NetAmount);
+
+    private sealed record CustomerSearchRow(
+        IReadOnlyList<CustomerRow> Customers,
+        int Total,
+        int Page,
+        int PageSize);
+
+    private sealed record CustomerRow(
+        Guid Id,
+        string DisplayName,
+        string? Phone,
+        string? Email);
 
     private sealed record IdResponse(Guid Id);
 

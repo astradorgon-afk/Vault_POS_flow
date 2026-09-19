@@ -1,0 +1,409 @@
+@using System.Globalization
+@using Pos.Client.Models
+@using Pos.Client.Services
+@using Pos.Domain.Sales
+
+@if (Open)
+{
+    <div class="dialog-backdrop" @onclick="OnDismiss">
+        <section class="dialog dialog-wide return-panel" role="dialog" aria-modal="true" aria-labelledby="return-title" @onclick:stopPropagation>
+            <h3 id="return-title">Return items</h3>
+
+            @if (_step == ReturnStep.Pick)
+            {
+                <p class="dialog-lead">
+                    Today's completed sales at this register. Pick the sale the customer is returning from.
+                </p>
+
+                @if (_busy && _sales.Count == 0)
+                {
+                    <div class="return-loading">Loading today's sales…</div>
+                }
+                else if (_sales.Count == 0)
+                {
+                    <p class="customer-empty">No completed sales today. Returns need an original sale in this release.</p>
+                }
+                else
+                {
+                    <div class="return-list" aria-live="polite">
+                        @foreach (RegisterSaleSummary sale in _sales)
+                        {
+                            <button type="button" class="customer-row" @onclick="() => LoadSaleAsync(sale.Id)">
+                                <span class="customer-initial">RET</span>
+                                <span class="customer-details">
+                                    <strong>@sale.Number</strong>
+                                    <small>@sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</small>
+                                </span>
+                                <strong class="return-amount">@MoneyFormat.Php(sale.NetTotal)</strong>
+                            </button>
+                        }
+                    </div>
+                }
+            }
+            else if (_step == ReturnStep.Lines && _sale is not null)
+            {
+                <p class="dialog-lead">
+                    Returning from <strong>@_sale.Number</strong> on
+                    @_sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture). Set the quantities being returned.
+                </p>
+
+                <div class="return-lines" aria-live="polite">
+                    @foreach (var edit in _edits)
+                    {
+                        <div class="return-line">
+                            <div class="return-line-name">
+                                <strong>@edit.Line.ProductName</strong>
+                                <small>@(edit.Line.Barcode ?? edit.Line.ProductId.ToString("D", CultureInfo.InvariantCulture)) · @edit.Line.Quantity sold</small>
+                            </div>
+                            <div class="cart-line-controls">
+                                <button type="button" class="qty-btn" @onclick="() => Decrement(edit)" disabled="@(edit.Quantity <= 0m || _busy)">−</button>
+                                <span class="qty-value">@edit.Quantity</span>
+                                <button type="button" class="qty-btn" @onclick="() => Increment(edit)" disabled="@(edit.Quantity >= edit.Line.Quantity || _busy)">+</button>
+                                <span class="cart-line-total">@MoneyFormat.Php(edit.Quantity * UnitNet(edit.Line))</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="return-total">
+                    <span>Return total</span>
+                    <strong>@MoneyFormat.Php(ReturnTotal)</strong>
+                </div>
+
+                @if (_error is not null)
+                {
+                    <p class="form-error" role="alert">@_error</p>
+                }
+
+                <div class="dialog-actions">
+                    <button type="button" class="button-secondary" @onclick="BackToPick" disabled="@_busy">Back</button>
+                    <button type="button" class="button-primary" @onclick="AcceptAsync" disabled="@(_busy || ReturnQuantity == 0m)">@(_busy ? "Accepting…" : "Accept return")</button>
+                </div>
+            }
+            else if (_step == ReturnStep.Accepted && _accepted is not null)
+            {
+                <div class="return-accepted">
+                    <span class="eyebrow">Return accepted</span>
+                    <p class="return-accepted-number">@_accepted.Number</p>
+                    <p class="dialog-lead">The returned goods are back on the ledger. @(CanRefund ? "Refund the customer below, if owed." : "Ask a manager with refund rights to pay the refund.")</p>
+                </div>
+
+                @if (CanRefund)
+                {
+                    <div class="refund-box">
+                        <div class="refund-methods">
+                            <button type="button" class="refund-method @(_refundMethod == PaymentMethod.Cash ? "refund-method-active" : string.Empty)"
+                                    @onclick="() => _refundMethod = PaymentMethod.Cash" disabled="@_refunding">Cash</button>
+                            <button type="button" class="refund-method @(_refundMethod == PaymentMethod.Card ? "refund-method-active" : string.Empty)"
+                                    @onclick="() => _refundMethod = PaymentMethod.Card" disabled="@_refunding">Card</button>
+                            <button type="button" class="refund-method @(_refundMethod == PaymentMethod.EWallet ? "refund-method-active" : string.Empty)"
+                                    @onclick="() => _refundMethod = PaymentMethod.EWallet" disabled="@_refunding">E-wallet</button>
+                        </div>
+
+                        <label class="dialog-field refund-field">
+                            <span>Refund amount</span>
+                            <input value="@_refundAmount" @oninput="OnRefundAmountInput" inputmode="decimal" aria-label="Refund amount" />
+                        </label>
+
+                        @if (_refundMethod == PaymentMethod.Cash)
+                        {
+                            <label class="dialog-field refund-field">
+                                <span>Cash handed to customer</span>
+                                <input value="@_tendered" @oninput="OnTenderedInput" inputmode="decimal" aria-label="Cash handed to customer" />
+                            </label>
+                        }
+
+                        @if (_refundResult is { } refunded)
+                        {
+                            <p class="form-note" role="status">Refunded @MoneyFormat.Php(refunded).</p>
+                        }
+
+                        @if (_error is not null)
+                        {
+                            <p class="form-error" role="alert">@_error</p>
+                        }
+
+                        <button type="button" class="button-primary refund-button" @onclick="RefundAsync"
+                                disabled="@(_refunding ||!decimal.TryParse(_refundAmount, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal a) || a <= 0m)">
+                            @(_refunding ? "Refunding…" : "Refund")
+                        </button>
+                    </div>
+                }
+                else if (_error is not null)
+                {
+                    <p class="form-error" role="alert">@_error</p>
+                }
+
+                <div class="dialog-actions">
+                    <button type="button" class="button-secondary" @onclick="OnDismiss">Done</button>
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private enum ReturnStep
+    {
+        Pick,
+        Lines,
+        Accepted,
+    }
+
+    private readonly List<RegisterSaleSummary> _sales = [];
+    private readonly List<ReturnLineEdit> _edits = [];
+    private ReturnStep _step = ReturnStep.Pick;
+    private RegisterSaleDetail? _sale;
+    private AcceptedRegisterReturn? _accepted;
+    private PaymentMethod? _refundMethod;
+    private string _refundAmount = string.Empty;
+    private string _tendered = string.Empty;
+    private decimal? _refundResult;
+    private string? _error;
+    private bool _busy;
+    private bool _refunding;
+    private bool _opened;
+
+    /// <summary>Whether the panel is showing.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>The store's current business date.</summary>
+    [Parameter]
+    public DateOnly BusinessDate { get; set; }
+
+    /// <summary>The shift the return and refund post through.</summary>
+    [Parameter]
+    public Guid ShiftId { get; set; }
+
+    /// <summary>True when the operator may view sales.</summary>
+    [Parameter]
+    public bool CanViewSales { get; set; }
+
+    /// <summary>True when the operator may accept returns.</summary>
+    [Parameter]
+    public bool CanCreateReturn { get; set; }
+
+    /// <summary>True when the operator may issue refunds.</summary>
+    [Parameter]
+    public bool CanRefund { get; set; }
+
+    /// <summary>Raised when the panel is dismissed.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    /// <summary>Loads completed sales for a business-date window.</summary>
+    [Parameter]
+    public Func<DateOnly?, DateOnly?, Task<IReadOnlyList<RegisterSaleSummary>>>? SearchSales { get; set; }
+
+    /// <summary>Loads a completed sale's lines.</summary>
+    [Parameter]
+    public Func<Guid, Task<RegisterSaleDetail>>? GetSaleDetail { get; set; }
+
+    /// <summary>Accepts a return against a completed sale.</summary>
+    [Parameter]
+    public Func<Guid, IReadOnlyList<RegisterReturnLine>, Task<AcceptedRegisterReturn>>? AcceptReturn { get; set; }
+
+    /// <summary>Issues a refund against the accepted return.</summary>
+    [Parameter]
+    public Func<Guid, PaymentMethod, decimal, decimal?, string?, Task<Guid>>? RefundReturn { get; set; }
+
+    private decimal ReturnQuantity => _edits.Sum(edit => edit.Quantity);
+
+    private decimal ReturnTotal => _edits.Sum(edit => edit.Quantity * UnitNet(edit.Line));
+
+    private static decimal UnitNet(RegisterSaleDetailLine line)
+        => line.Quantity == 0m ? 0m : decimal.Round(line.NetAmount / line.Quantity, 4, MidpointRounding.ToEven);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Open)
+        {
+            _opened = false;
+            return;
+        }
+
+        if (_opened)
+        {
+            return;
+        }
+
+        _opened = true;
+        _step = ReturnStep.Pick;
+        _sale = null;
+        _edits.Clear();
+        _accepted = null;
+        _refundResult = null;
+        _error = null;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!CanViewSales || SearchSales is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _sales.Clear();
+        _step = ReturnStep.Pick;
+        try
+        {
+            _sales.AddRange(await SearchSales(BusinessDate, BusinessDate));
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadSaleAsync(Guid saleId)
+    {
+        if (_busy || GetSaleDetail is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            RegisterSaleDetail sale = await GetSaleDetail(saleId);
+            if (!string.Equals(sale.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                _error = $"Only completed sales can be returned from. That sale is {sale.Status}.";
+                return;
+            }
+
+            _sale = sale;
+            _edits.Clear();
+            foreach (RegisterSaleDetailLine line in sale.Lines)
+            {
+                if (line.Quantity > 0m)
+                {
+                    _edits.Add(new ReturnLineEdit(line));
+                }
+            }
+
+            _step = ReturnStep.Lines;
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BackToPick()
+    {
+        _step = ReturnStep.Pick;
+        _sale = null;
+        _edits.Clear();
+        _error = null;
+    }
+
+    private void Increment(ReturnLineEdit edit)
+    {
+        if (edit.Quantity < edit.Line.Quantity)
+        {
+            edit.Quantity++;
+            _error = null;
+        }
+    }
+
+    private void Decrement(ReturnLineEdit edit)
+    {
+        if (edit.Quantity > 0m)
+        {
+            edit.Quantity--;
+        }
+    }
+
+    private async Task AcceptAsync()
+    {
+        if (_busy || _sale is null || AcceptReturn is null || ReturnQuantity == 0m)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            List<RegisterReturnLine> lines = [.. _edits
+                .Where(edit => edit.Quantity > 0m)
+                .Select(edit => new RegisterReturnLine(edit.Line.ProductId, edit.Quantity))];
+            _accepted = await AcceptReturn(_sale.Id, lines);
+            _refundAmount = ReturnTotal.ToString("0.00", CultureInfo.InvariantCulture);
+            _tendered = string.Empty;
+            _refundMethod = null;
+            _refundResult = null;
+            _step = ReturnStep.Accepted;
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OnRefundAmountInput(ChangeEventArgs args) => _refundAmount = args.Value?.ToString() ?? string.Empty;
+
+    private void OnTenderedInput(ChangeEventArgs args) => _tendered = args.Value?.ToString() ?? string.Empty;
+
+    private async Task RefundAsync()
+    {
+        if (_refunding || RefundReturn is null || _accepted is null || _sale is null || _refundMethod is not { } method)
+        {
+            return;
+        }
+
+        if (!decimal.TryParse(_refundAmount, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal amount) || amount <= 0m)
+        {
+            return;
+        }
+
+        _refunding = true;
+        _error = null;
+        try
+        {
+            decimal? tendered = null;
+            if (method == PaymentMethod.Cash)
+            {
+                _ = decimal.TryParse(_tendered, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal t);
+                tendered = t > 0m ? t : amount;
+            }
+
+            await RefundReturn(_accepted.Id, method, amount, tendered, null);
+            _refundResult = amount;
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _refunding = false;
+        }
+    }
+
+    /// <summary>One editable line chosen for a return.</summary>
+    private sealed class ReturnLineEdit(RegisterSaleDetailLine line)
+    {
+        public RegisterSaleDetailLine Line { get; } = line;
+
+        public decimal Quantity { get; set; }
+    }
+}

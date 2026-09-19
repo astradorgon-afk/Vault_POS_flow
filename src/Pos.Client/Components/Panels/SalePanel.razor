@@ -108,6 +108,10 @@
                     <CartPanel
                         Lines="_cart"
                         SelectedProductId="_selectedProductId"
+                        Customer="_customer"
+                        ShowCustomerButton="CanViewCustomers"
+                        OnCustomer="OpenCustomerAsync"
+                        OnCustomerClear="ClearCustomer"
                         OnSelectLine="(id) => _selectedProductId = id"
                         OnIncrement="IncrementLine"
                         OnDecrement="DecrementLine"
@@ -143,13 +147,69 @@
         <HeldSalesPanel Held="_heldSales" OnRecall="RecallHeldAsync" OnDismiss="() => _heldPanelOpen = false" />
     }
 
+    @if (_shiftCloseOpen)
+    {
+        <ShiftCloseDialog
+            Open="true"
+            Summary="_shiftSummary"
+            Busy="_closingShift"
+            Error="@_shiftCloseError"
+            OnConfirm="ConfirmShiftCloseAsync"
+            OnDismiss="DismissShiftClose" />
+    }
+
+    @if (_returnsOpen)
+    {
+        <ReturnsPanel
+            Open="true"
+            BusinessDate="@(_context?.BusinessDate ?? default(DateOnly))"
+            ShiftId="@(_context?.OpenShift?.ShiftId ?? Guid.Empty)"
+            CanViewSales="CanViewSales"
+            CanCreateReturn="CanReturn"
+            CanRefund="CanRefund"
+            SearchSales="@((from, to) => Register.SearchSalesAsync(from, to))"
+            GetSaleDetail="LoadReturnSaleAsync"
+            AcceptReturn="AcceptReturnAsync"
+            RefundReturn="RefundReturnAsync"
+            OnDismiss="DismissReturns" />
+    }
+
+    @if (_receiptOpen)
+    {
+        <ReceiptPrintDialog
+            Open="true"
+            SaleNumber="@(_lastSale?.Number ?? string.Empty)"
+            ReceiptText="@_receiptText"
+            Busy="_receiptBusy"
+            Error="@_receiptError"
+            OnDismiss="() => _receiptOpen = false" />
+    }
+
+    @if (_customerDialogOpen)
+    {
+        <CustomerDialog
+            Open="true"
+            CanCreate="CanCreateCustomer"
+            SearchCustomers="@(query => Register.SearchCustomersAsync(query))"
+            CreateCustomer="@((name, phone, email) => Register.CreateCustomerAsync(name, phone, email))"
+            OnSelect="SelectCustomerAsync"
+            OnDismiss="DismissCustomer" />
+    }
+
     @if (_moreOpen)
     {
         <RegisterMoreMenu
             Open="true"
             HeldCount="_heldSales.Count"
+            ShowReturns="CanReturn && _context?.OpenShift is not null"
+            ShowCloseShift="CanCloseShift && _context?.OpenShift is not null"
+            ShowReprint="CanReprint"
+            ReprintEnabled="_lastSale is not null"
             OnHeldSales="MoreHeldAsync"
+            OnReturnItems="MoreReturnsAsync"
             OnRefreshStore="RefreshAsync"
+            OnCloseShift="MoreCloseShiftAsync"
+            OnReprint="MoreReprintAsync"
             OnLock="SignOutAsync"
             OnDismiss="CloseMore" />
     }
@@ -221,6 +281,19 @@
     private int _cashTicket;
     private CancellationTokenSource? _completionCts;
     private PaymentPanel? _payPanel;
+    private CompletedRegisterSale? _lastSale;
+    private bool _returnsOpen;
+    private Guid? _returnsSaleId;
+    private bool _shiftCloseOpen;
+    private RegisterShiftSummary? _shiftSummary;
+    private bool _closingShift;
+    private string? _shiftCloseError;
+    private bool _receiptOpen;
+    private bool _receiptBusy;
+    private string _receiptText = string.Empty;
+    private string? _receiptError;
+    private bool _customerDialogOpen;
+    private RegisterCustomer? _customer;
 
     /// <summary>The register's status, fed down for the strip and messaging.</summary>
     [Parameter]
@@ -236,6 +309,27 @@
 
     private bool CanCreateSale =>
         Register.Current?.Session.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
+
+    private bool CanReturn =>
+        Register.Current?.Session.User.Permissions.Contains("sale.return", StringComparer.Ordinal) == true;
+
+    private bool CanRefund =>
+        Register.Current?.Session.User.Permissions.Contains("sale.refund", StringComparer.Ordinal) == true;
+
+    private bool CanReprint =>
+        Register.Current?.Session.User.Permissions.Contains("sale.reprint", StringComparer.Ordinal) == true;
+
+    private bool CanCloseShift =>
+        Register.Current?.Session.User.Permissions.Contains("shift.close", StringComparer.Ordinal) == true;
+
+    private bool CanViewSales =>
+        Register.Current?.Session.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
+
+    private bool CanViewCustomers =>
+        Register.Current?.Session.User.Permissions.Contains("customer.view", StringComparer.Ordinal) == true;
+
+    private bool CanCreateCustomer =>
+        Register.Current?.Session.User.Permissions.Contains("customer.manage", StringComparer.Ordinal) == true;
 
     private bool _busy => _refreshing || _openingShift || _screen is SaleScreen.Completing or SaleScreen.Loading;
 
@@ -678,8 +772,11 @@
             _completed = await Register.CompleteSaleAsync(
                 shift.ShiftId,
                 shift.BusinessDate,
+                _customer?.Id,
                 lines,
                 payments);
+
+            _lastSale = _completed;
 
             _changeDue = payment.Method == PaymentMethod.Cash && payment.Tendered is { } tendered && tendered > NetTotal
                 ? RoundToIncrement(tendered - NetTotal)
@@ -730,6 +827,7 @@
         _selectedProductId = null;
         _qtyTarget = null;
         _discountOpen = false;
+        _customer = null;
         _search = string.Empty;
         _activeFamily = null;
         _barcode = string.Empty;
@@ -758,6 +856,164 @@
     {
         _moreOpen = false;
         await OpenHeldAsync();
+    }
+
+    private async Task MoreReturnsAsync()
+    {
+        _moreOpen = false;
+        if (!CanReturn || _context?.OpenShift is null)
+        {
+            return;
+        }
+
+        _returnsOpen = true;
+        _error = null;
+        await Task.CompletedTask;
+    }
+
+    private void DismissReturns() => _returnsOpen = false;
+
+    private async Task MoreCloseShiftAsync()
+    {
+        _moreOpen = false;
+        if (_context?.OpenShift is not { } shift || !CanCloseShift || _closingShift)
+        {
+            return;
+        }
+
+        _closingShift = true;
+        _shiftCloseError = null;
+        try
+        {
+            _shiftSummary = await Register.GetShiftSummaryAsync(shift.ShiftId);
+            _shiftCloseOpen = true;
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _closingShift = false;
+        }
+    }
+
+    private void DismissShiftClose()
+    {
+        if (!_closingShift)
+        {
+            _shiftCloseOpen = false;
+            _shiftSummary = null;
+            _shiftCloseError = null;
+        }
+    }
+
+    private async Task ConfirmShiftCloseAsync((decimal Declared, decimal Counted) drawer)
+    {
+        if (_context?.OpenShift is not { } shift || _closingShift)
+        {
+            return;
+        }
+
+        _closingShift = true;
+        _shiftCloseError = null;
+        try
+        {
+            await Register.CloseShiftAsync(shift.ShiftId, drawer.Declared, drawer.Counted);
+            _shiftCloseOpen = false;
+            _shiftSummary = null;
+            _cart.Clear();
+            _selectedProductId = null;
+            _qtyTarget = null;
+            _customer = null;
+            _error = null;
+            _context = await Register.GetCheckoutContextAsync();
+            _contextError = null;
+            _screen = _context?.OpenShift is null ? SaleScreen.NeedsShift : SaleScreen.Selling;
+        }
+        catch (HeadOfficeException ex)
+        {
+            _shiftCloseError = ex.Message;
+        }
+        finally
+        {
+            _closingShift = false;
+        }
+    }
+
+    private async Task MoreReprintAsync()
+    {
+        _moreOpen = false;
+        if (_lastSale is null || !CanReprint)
+        {
+            return;
+        }
+
+        _receiptOpen = true;
+        _receiptBusy = true;
+        _receiptError = null;
+        _receiptText = string.Empty;
+        try
+        {
+            _receiptText = await Register.GetReceiptTextAsync(_lastSale.Id, "Reprinted from the register menu");
+        }
+        catch (HeadOfficeException ex)
+        {
+            _receiptError = ex.Message;
+        }
+        finally
+        {
+            _receiptBusy = false;
+        }
+    }
+
+    private Task OpenCustomerAsync()
+    {
+        if (CanViewCustomers)
+        {
+            _customerDialogOpen = true;
+            _error = null;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void DismissCustomer() => _customerDialogOpen = false;
+
+    private Task SelectCustomerAsync(RegisterCustomer customer)
+    {
+        _customer = customer;
+        _customerDialogOpen = false;
+        _error = null;
+        return Task.CompletedTask;
+    }
+
+    private void ClearCustomer() => _customer = null;
+
+    private Task<RegisterSaleDetail> LoadReturnSaleAsync(Guid saleId)
+    {
+        _returnsSaleId = saleId;
+        return Register.GetSaleDetailAsync(saleId);
+    }
+
+    private Task<AcceptedRegisterReturn> AcceptReturnAsync(Guid saleId, IReadOnlyList<RegisterReturnLine> lines)
+    {
+        if (_context?.OpenShift is not { } shift || _context is null)
+        {
+            return Task.FromException<AcceptedRegisterReturn>(new HeadOfficeException("Open a shift before returning items."));
+        }
+
+        return Register.AcceptReturnAsync(saleId, shift.ShiftId, _context.BusinessDate, _customer?.Id, lines);
+    }
+
+    private Task<Guid> RefundReturnAsync(Guid returnId, PaymentMethod method, decimal amount, decimal? tendered, string? providerReference)
+    {
+        if (_context?.OpenShift is not { } shift || _context is null)
+        {
+            return Task.FromException<Guid>(new HeadOfficeException("Open a shift before refunding."));
+        }
+
+        return Register.RefundReturnAsync(returnId, _returnsSaleId, shift.ShiftId, method, amount, tendered, providerReference);
     }
 
     private async Task HandleKeyDownAsync(KeyboardEventArgs args)
@@ -883,6 +1139,30 @@
         if (_shiftDialogOpen)
         {
             DismissShiftOpen();
+            return;
+        }
+
+        if (_shiftCloseOpen)
+        {
+            DismissShiftClose();
+            return;
+        }
+
+        if (_returnsOpen)
+        {
+            _returnsOpen = false;
+            return;
+        }
+
+        if (_receiptOpen)
+        {
+            _receiptOpen = false;
+            return;
+        }
+
+        if (_customerDialogOpen)
+        {
+            _customerDialogOpen = false;
             return;
         }
 
