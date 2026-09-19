@@ -1,0 +1,91 @@
+<header class="vf-header">
+    <div class="vf-header-brand">
+        <span class="brand-mark vf-header-mark" aria-hidden="true">V</span>
+        <span class="vf-header-title">VaultFlow</span>
+    </div>
+
+    <div class="vf-header-fact" title="Store">
+        <small>Store</small>
+        <strong>@StoreName</strong>
+    </div>
+    <span class="vf-header-sep" aria-hidden="true"></span>
+    <div class="vf-header-fact" title="Till / register">
+        <small>Till</small>
+        <strong>@TillCode</strong>
+    </div>
+    <span class="vf-header-sep" aria-hidden="true"></span>
+    <div class="vf-header-fact" title="Cashier">
+        <small>Cashier</small>
+        <strong>@CashierName</strong>
+    </div>
+    <span class="vf-header-sep" aria-hidden="true"></span>
+    <div class="vf-header-fact" title="Shift">
+        <small>Shift</small>
+        <strong>@ShiftLabel</strong>
+    </div>
+    <span class="vf-header-sep" aria-hidden="true"></span>
+    <div class="vf-header-fact vf-header-hide-narrow" title="Business date">
+        <small>Business date</small>
+        <strong>@BusinessDateText</strong>
+    </div>
+
+    <span class="vf-header-spacer" aria-hidden="true"></span>
+
+    <div class="vf-header-status">
+        <span class="vf-connect @(Online ? "vf-connect-online" : "vf-connect-offline")">
+            <i aria-hidden="true"></i>@(Online ? "Online" : "Offline")
+        </span>
+        <span class="vf-header-sync vf-header-hide-narrow" title="When store data was last received">Synced @SyncTime</span>
+        <span class="vf-header-pending">@Pending pending</span>
+    </div>
+
+    <div class="vf-header-actions">
+        <button type="button" class="vf-icon-button vf-more-button" @onclick="OnMore" title="More actions" aria-label="More actions">⋮ More</button>
+        <button type="button" class="vf-icon-button vf-lock-button" @onclick="OnLock" title="Lock the register" aria-label="Lock the register">Lock</button>
+    </div>
+</header>
+
+@code {
+    /// <summary>Gets or sets the store display name.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string StoreName { get; set; } = "This store";
+
+    /// <summary>Gets or sets the till short code (e.g. W01).</summary>
+    [Parameter]
+    public string TillCode { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the signed-in cashier's name.</summary>
+    [Parameter]
+    public string? CashierName { get; set; }
+
+    /// <summary>Gets or sets the open shift number, or null.</summary>
+    [Parameter]
+    public string? ShiftNumber { get; set; }
+
+    /// <summary>Gets or sets the business date text.</summary>
+    [Parameter]
+    public string BusinessDateText { get; set; } = "—";
+
+    /// <summary>Gets or sets a value indicating whether head office is reachable.</summary>
+    [Parameter]
+    public bool Online { get; set; }
+
+    /// <summary>Gets or sets the last store-data sync time (HH:mm).</summary>
+    [Parameter]
+    public string SyncTime { get; set; } = "—";
+
+    /// <summary>Gets or sets how many records are waiting to sync.</summary>
+    [Parameter]
+    public int Pending { get; set; }
+
+    /// <summary>Raised when the cashier asks for the More menu.</summary>
+    [Parameter]
+    public EventCallback OnMore { get; set; }
+
+    /// <summary>Raised when the register is locked.</summary>
+    [Parameter]
+    public EventCallback OnLock { get; set; }
+
+    private string ShiftLabel => string.IsNullOrWhiteSpace(ShiftNumber) ? "No shift" : $"#{ShiftNumber}";
+}

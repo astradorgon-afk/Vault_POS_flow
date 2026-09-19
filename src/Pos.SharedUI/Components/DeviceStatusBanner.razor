@@ -9,59 +9,25 @@
     It is in Pos.SharedUI so the same banner can front a device and a browser
     terminal, and because Pos.SharedUI cannot reference infrastructure — the
     component is handed a finished view and has nothing else it could show.
+
+    Normal status is a compact strip; a large bordered banner only appears when
+    the register needs someone to act.
 *@
 
-<section class="device-status @StateClass" aria-live="polite">
-    <header class="device-status-head">
-        <span class="device-status-lamp" aria-hidden="true"></span>
-        <div>
-            <strong>@Headline</strong>
-            <p class="device-status-detail">@Detail</p>
-        </div>
-    </header>
-
-    <dl class="device-status-facts">
-        @if (Status.DeviceCode is { Length: > 0 } register)
-        {
-            <div>
-                <dt>Register</dt>
-                <dd>@register@(Status.LocationName is { Length: > 0 } store ? $" · {store}" : string.Empty)</dd>
-            </div>
-        }
-
-        <div>
-            <dt>Head office</dt>
-            <dd>@(Status.Connectivity == DeviceConnectivityState.Online ? "Connected" : "Not connected")</dd>
-        </div>
-
-        <div>
-            <dt>Store data</dt>
-            <dd>
-                @if (Status.LastSynchronisedUtc is { } received)
-                {
-                    <text>Received @received.ToLocalTime().ToString("d MMM, HH:mm")</text>
-                }
-                else
-                {
-                    <text>Not received yet</text>
-                }
-            </dd>
-        </div>
-
-        <div>
-            <dt>Waiting to send</dt>
-            <dd>@(Status.UnsentEvents == 0 ? "Nothing" : $"{Status.UnsentEvents} record{(Status.UnsentEvents == 1 ? string.Empty : "s")}")</dd>
-        </div>
-
-        @if (Status.AuthorityExpiresUtc is { } expires)
-        {
-            <div>
-                <dt>Sign-in valid until</dt>
-                <dd>@expires.ToLocalTime().ToString("d MMM, HH:mm")</dd>
-            </div>
-        }
-    </dl>
-</section>
+<div class="device-status @StateClass" aria-live="polite">
+    <span class="device-status-lamp" aria-hidden="true"></span>
+    <span class="device-status-headline">@Headline</span>
+    @if (Detail is { Length: > 0 } detail)
+    {
+        <span class="device-status-sep" aria-hidden="true">·</span>
+        <span class="device-status-detail">@detail</span>
+    }
+    @if (Status.UnsentEvents > 0)
+    {
+        <span class="device-status-sep" aria-hidden="true">·</span>
+        <span class="device-status-pending">@Status.UnsentEvents pending</span>
+    }
+</div>
 
 @code {
     /// <summary>The status to render.</summary>
@@ -103,9 +69,8 @@
             "Connect to head office to sign in again. Until then this register can only look things up.",
         DeviceStatusConcern.AuthorityExpiringSoon =>
             "Connect to head office before the end of this shift, or the register will stop taking sales.",
-        DeviceStatusConcern.WorkingOffline => Status.UnsentEvents == 0
-            ? "Everything so far has been sent. New sales will be recorded here until the connection returns."
-            : "Sales are being recorded here and will be sent when the connection returns.",
+        DeviceStatusConcern.WorkingOffline =>
+            "Sales are held on this register and sent when the connection returns.",
         _ => "Connected, up to date and taking sales.",
     };
 }

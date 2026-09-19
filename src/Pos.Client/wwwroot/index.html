@@ -24,6 +24,18 @@
 
     <script src="_framework/blazor.webview.js" autostart="false"></script>
 
+    <script>
+        // Focus a field and select its text. ElementReference has no built-in
+        // select, so the register components ask the window for it (scan/repeat
+        // entries and quantity edits depend on typing replacing the old value).
+        window.VaultFlowRegister = {
+            focusSelect: function (element) {
+                if (!element) { return; }
+                try { element.focus(); element.select(); } catch (_) { /* readonly/disconnected inputs */ }
+            }
+        };
+    </script>
+
 </body>
 
 </html>

@@ -73,6 +73,17 @@ public sealed class DevelopmentDataSeeder(
     /// outside a development database.</summary>
     private const string DevelopmentPassword = "cash1234";
 
+    /// <summary>Development accounts created by older seeds with the per-store
+    /// naming convention. Databases seeded before the credential set was
+    /// simplified keep them; they are retired (not created) on every run so the
+    /// login list stays short with no manual cleanup.</summary>
+    private static readonly string[] ObsoleteDevelopmentAccounts =
+    [
+        "main.manager", "inv.staff",
+        "s1.manager", "s2.manager", "s3.manager",
+        "s1.cashier", "s2.cashier", "s3.cashier",
+    ];
+
     private readonly IOptions<DatabaseOptions> _database = database;
     private readonly IOptions<SeedingOptions> _seeding = seeding;
 
@@ -555,14 +566,9 @@ public sealed class DevelopmentDataSeeder(
             [
                 ("owner", "Development Owner", Roles.Owner, ApprovalTier.Unlimited, null),
                 ("admin", "System Administrator", Roles.Administrator, ApprovalTier.Tier3, null),
-                ("main.manager", "Main Warehouse Manager", Roles.MainInventoryManager, ApprovalTier.Tier2, null),
-                ("s1.manager", "Store One Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE01"),
-                ("s2.manager", "Store Two Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE02"),
-                ("s3.manager", "Store Three Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE03"),
-                ("inv.staff", "Inventory Staff", Roles.InventoryStaff, ApprovalTier.None, "MAIN"),
-                ("s1.cashier", "Cashier One", Roles.Cashier, ApprovalTier.None, "STORE01"),
-                ("s2.cashier", "Cashier Two", Roles.Cashier, ApprovalTier.None, "STORE02"),
-                ("s3.cashier", "Cashier Three", Roles.Cashier, ApprovalTier.None, "STORE03"),
+                ("manager", "Store One Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE01"),
+                ("cashier", "Store One Cashier", Roles.Cashier, ApprovalTier.None, "STORE01"),
+                ("inventory", "Inventory Staff", Roles.InventoryStaff, ApprovalTier.None, "MAIN"),
                 ("auditor", "Auditor", Roles.Auditor, ApprovalTier.None, null),
             ];
 
@@ -667,6 +673,37 @@ public sealed class DevelopmentDataSeeder(
         }
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        // Retire the old per-store accounts so databases seeded before the
+        // simplification present the same short login list. Accounts are
+        // deactivated rather than deleted: historical sales, receipts and audit
+        // rows reference them, and CanAuthenticate==false already stops every
+        // sign-in path. Only seeder-created accounts (CreatedByUserId == Empty)
+        // are touched; a real user that happens to share a username is left alone.
+        foreach (string userName in ObsoleteDevelopmentAccounts)
+        {
+            AppUser? stale = await users.FindByNameAsync(userName).ConfigureAwait(false);
+
+            if (stale is null || stale.CreatedByUserId != Guid.Empty || !stale.CanAuthenticate)
+            {
+                continue;
+            }
+
+            stale.IsActive = false;
+            stale.DisabledAtUtc = now;
+            stale.DisabledReason = "Retired by the simplified development credential set.";
+
+            IdentityResult updated = await users.UpdateAsync(stale).ConfigureAwait(false);
+
+            if (!updated.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    FormattableString.Invariant(
+                        $"Could not retire obsolete development account {userName}: {string.Join("; ", updated.Errors.Select(e => e.Description))}"));
+            }
+
+            logger.LogWarning("Retired obsolete development account {UserName}.", userName);
+        }
 
         if (_accountsCreated > 0)
         {

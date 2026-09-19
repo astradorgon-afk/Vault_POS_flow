@@ -1,0 +1,33 @@
+<div class="vf-alert vf-alert-@Variant" role="alert">
+    <span class="vf-alert-mark" aria-hidden="true">@Mark</span>
+    <span class="vf-alert-text">@Message</span>
+    @if (Details is { Length: > 0 } details)
+    {
+        <small class="vf-alert-details">@details</small>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the message shown.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Optional supporting line, kept subtle.</summary>
+    [Parameter]
+    public string? Details { get; set; }
+
+    /// <summary>
+    /// Gets or sets the variant: <c>error</c>, <c>caution</c> or <c>info</c>.
+    /// Drove by the colour and mark in CSS.
+    /// </summary>
+    [Parameter]
+    public string Variant { get; set; } = "error";
+
+    private string Mark => Variant switch
+    {
+        "error" => "✕",
+        "caution" => "⚠",
+        _ => "ⓘ",
+    };
+}

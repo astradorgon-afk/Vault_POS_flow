@@ -101,13 +101,25 @@ Visual Studio works too: set **Pos.Client** as the startup project, pick
    pick a store, name the register and give it an unused 2–6 character code;
    the issued code fills in, then enrol.
 2. **Sign in** as a user assigned to the register's store, for example
-   `s1.cashier` or `s1.manager` for Store One (any development account signs
-   in with the shared password `cash1234`). Signing in downloads the store's
+   `cashier` or `manager` for Store One (any development account signs in with
+   the shared password `cash1234`). Signing in downloads the store's
    products and the user's offline permissions; the banner turns **Ready**.
 3. The catalogue lists the store's products. The development seed creates a
    selling price for every product and an opening stock balance at the Main
    Warehouse and each store, so a sale completes against real
    availability.
+
+The development accounts are a deliberately short set (one per role), with the
+same password `cash1234`:
+
+| Username    | Role               | Scope                                  |
+|-------------|--------------------|----------------------------------------|
+| `owner`     | Owner              | Business-wide                          |
+| `admin`     | Administrator      | Business-wide                          |
+| `manager`   | Store Manager      | Store One                              |
+| `cashier`   | Cashier            | Store One                              |
+| `inventory` | Inventory Staff    | Main Warehouse                         |
+| `auditor`   | Auditor            | Business-wide (read-only)              |
 
 To set a register up again, close the app and delete
 `%LOCALAPPDATA%\User Name\com.vaultflow.pos\Data\device.db`, then use a new

@@ -1,0 +1,174 @@
+@using Microsoft.AspNetCore.Components.Web
+@inject IJSRuntime JS
+
+<div class="catalogue">
+    <div class="catalogue-search" role="search">
+        <input
+            @bind="Search"
+            @ref="_searchInput"
+            placeholder="Search by name, SKU or barcode"
+            aria-label="Search products"
+            spellcheck="false" />
+        <span class="catalogue-search-hint">F2 · by name</span>
+    </div>
+
+    <div class="catalogue-families" role="tablist" aria-label="Product families">
+        <button type="button" class="family-chip @(ActiveFamily is null ? "chip-active" : "")" @onclick="() => ChooseFamily(null)" role="tab">
+            All
+        </button>
+        @foreach (var family in Families)
+        {
+            <button type="button" class="family-chip @(ActiveFamily == family ? "chip-active" : "")" @onclick="() => ChooseFamily(family)" role="tab">
+                @family
+            </button>
+        }
+    </div>
+
+    <div class="catalogue-grid">
+        @if (VisibleProducts.Count == 0)
+        {
+            <p class="catalogue-empty">No products match “@Search”.</p>
+        }
+        @foreach (var item in VisibleProducts)
+        {
+            var inBasket = InSaleQuantity(item.ProductId);
+            var sellable = item.Price is not null;
+            <button
+                type="button"
+                class="product-tile @(sellable ? "product-tile-sellable" : "product-tile-blocked")"
+                @onclick="() => OnAdd.InvokeAsync(item)"
+                title="@(sellable ? $"Add {item.Name} to sale" : "Cannot be rung up — no price")">
+                <span class="product-tile-name">@item.Name</span>
+                <span class="product-tile-sku">@item.Sku@(string.IsNullOrWhiteSpace(item.Barcode) ? string.Empty : $" · {item.Barcode}")</span>
+                <span class="product-tile-price">
+                    @if (sellable)
+                    {
+                        @PriceOf(item)
+                    }
+                    else
+                    {
+                        <span class="product-tile-noprice">No price</span>
+                    }
+                    @if (inBasket > 0)
+                    {
+                        <span class="product-tile-count">in sale ×@inBasket</span>
+                    }
+                </span>
+            </button>
+        }
+    </div>
+</div>
+
+@code {
+    private string _search = string.Empty;
+    private ElementReference _searchInput;
+    private int _lastSearchTicket;
+
+    /// <summary>The products to browse.</summary>
+    [Parameter]
+    [EditorRequired]
+    public IReadOnlyList<CatalogueItem> Items { get; set; } = Array.Empty<CatalogueItem>();
+
+    /// <summary>Raised when a product is added to the sale.</summary>
+    [Parameter]
+    [EditorRequired]
+    public EventCallback<CatalogueItem> OnAdd { get; set; }
+
+    /// <summary>Returns how many of a product are already in the sale.</summary>
+    [Parameter]
+    public Func<Guid, int> InSaleQuantity { get; set; } = _ => 0;
+
+    /// <summary>Gets or sets the search text (linked to the parent's search state).</summary>
+    [Parameter]
+    public string Search { get; set; } = string.Empty;
+
+    /// <summary>Raised when the search text changes.</summary>
+    [Parameter]
+    public EventCallback<string> SearchChanged { get; set; }
+
+    /// <summary>Gets or sets the selected family; null means All, owned by the parent.</summary>
+    [Parameter]
+    public string? ActiveFamily { get; set; }
+
+    /// <summary>Raised when the active family changes.</summary>
+    [Parameter]
+    public EventCallback<string?> ActiveFamilyChanged { get; set; }
+
+    /// <summary>Bumped by the parent to move focus to the search box (F2).</summary>
+    [Parameter]
+    public int SearchFocusTicket { get; set; }
+
+    /// <summary>The tile's family is the SKU's dash-prefix, exactly as a
+    /// till without a category feed groups its products.</summary>
+    internal IReadOnlyList<string> Families { get; private set; } = Array.Empty<string>();
+
+    internal List<CatalogueItem> VisibleProducts { get; private set; } = new();
+
+    // The filter a cashier sees is the one a paper list would respect:
+    // whole-word-ish containment, prices only, families in handy order.
+    protected override void OnParametersSet()
+    {
+        var here = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in Items)
+        {
+            var family = item.Sku.Split('-', 2)[0].Trim();
+            if (family.Length > 0)
+            {
+                here.Add(family);
+            }
+        }
+
+        Families = here.OrderBy(family => family, StringComparer.CurrentCultureIgnoreCase).ToArray();
+        RecalculateVisible();
+    }
+
+    private void ChooseFamily(string? family) => ActiveFamilyChanged.InvokeAsync(family);
+
+    private void RecalculateVisible()
+    {
+        IEnumerable<CatalogueItem> visible = Items;
+        if (ActiveFamily is { } family)
+        {
+            visible = visible.Where(item =>
+                item.Sku.StartsWith(family, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(Search))
+        {
+            var sought = Search.Trim();
+            visible = visible.Where(item =>
+                item.Name.Contains(sought, StringComparison.CurrentCultureIgnoreCase)
+                || item.Sku.Contains(sought, StringComparison.OrdinalIgnoreCase)
+                || (item.Barcode?.Contains(sought, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        VisibleProducts = visible
+            .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(item => item.Sku, StringComparer.OrdinalIgnoreCase)
+            .Take(60)
+            .ToList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (SearchFocusTicket != _lastSearchTicket && SearchFocusTicket > 0)
+        {
+            _lastSearchTicket = SearchFocusTicket;
+            try
+            {
+                await JS.InvokeVoidAsync("VaultFlowRegister.focusSelect", _searchInput);
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (TaskCanceledException)
+            {
+            }
+        }
+    }
+
+    private string PriceOf(CatalogueItem item)
+        => item.Price is { } price
+            ? price.ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-PH"))
+            : string.Empty;
+}

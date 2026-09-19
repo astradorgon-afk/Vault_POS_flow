@@ -1,0 +1,81 @@
+@using Pos.Client.Services
+
+<div class="vf-statusstrip @StateClass" aria-live="polite">
+    <span class="vf-statusstrip-lamp" aria-hidden="true"></span>
+    <strong class="vf-statusstrip-headline">@Headline</strong>
+    @if (Detail is { Length: > 0 } detail)
+    {
+        <span class="vf-statusstrip-detail">@detail</span>
+    }
+</div>
+
+@code {
+    /// <summary>The register status to present.</summary>
+    [Parameter]
+    public DeviceStatusView? Status { get; set; }
+
+    /// <summary>
+    /// When the checkout context (shift / business date) could not be loaded, why.
+    /// A register without its context cannot take payments at all.
+    /// </summary>
+    [Parameter]
+    public string? ContextError { get; set; }
+
+    private bool Offline => Status?.Connectivity == DeviceConnectivityState.Offline || ContextError is not null;
+
+    private string StateClass => ContextError is not null || Status?.Severity == DeviceStatusSeverity.Blocked
+        ? "vf-statusstrip-blocked"
+        : Status?.Severity == DeviceStatusSeverity.Warning || Offline
+            ? "vf-statusstrip-warning"
+            : "vf-statusstrip-ready";
+
+    private string Headline
+    {
+        get
+        {
+            if (ContextError is not null)
+            {
+                return "Connection needed";
+            }
+
+            return Status?.Concern switch
+            {
+                DeviceStatusConcern.AuthorityExpired => "Sign-in has expired",
+                DeviceStatusConcern.AuthorityExpiringSoon => "Sign-in expires soon",
+                DeviceStatusConcern.WorkingOffline => "Offline",
+                _ => "Online",
+            };
+        }
+    }
+
+    private string Detail
+    {
+        get
+        {
+            if (ContextError is { Length: > 0 } context)
+            {
+                return $"{context} {RegisterService.OfflineSaleMessaging}";
+            }
+
+            if (Offline)
+            {
+                return RegisterService.OfflineSaleMessaging;
+            }
+
+            if (Status?.Concern == DeviceStatusConcern.AuthorityExpiringSoon)
+            {
+                return $"Connect to head office before {Status.AuthorityExpiresUtc?.ToLocalTime():HH:mm}, or this register stops taking sales.";
+            }
+
+            if (Status?.Concern == DeviceStatusConcern.AuthorityExpired)
+            {
+                return "Connect to head office to sign in again. Until then this register can only browse products.";
+            }
+
+            string sync = Status?.LastSynchronisedUtc is { } received
+                ? received.ToLocalTime().ToString("HH:mm")
+                : "never";
+            return $"store data synced {sync} · {Status?.UnsentEvents ?? 0} pending";
+        }
+    }
+}

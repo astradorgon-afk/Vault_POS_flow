@@ -1,0 +1,41 @@
+<div class="vf-overlay">
+    <div class="completion">
+        <span class="completion-check" aria-hidden="true">✓</span>
+        <h3 class="completion-title">SALE COMPLETE</h3>
+        <p class="completion-sale-no">@SaleNumber</p>
+
+        @if (ChangeDue is not null)
+        {
+            <div class="completion-change">
+                <span>CHANGE DUE</span>
+                <strong>@PriceOf(ChangeDue.Value)</strong>
+            </div>
+        }
+
+        <button type="button" class="button-primary completion-btn" @onclick="OnNext">
+            Next sale <kbd>Enter</kbd>
+        </button>
+        <p class="completion-hint">
+            Enter starts the next sale. The receipt can be reprinted later from head office;
+            receipt printing isn’t set up on this register.
+        </p>
+    </div>
+</div>
+
+@code {
+    /// <summary>The completed sale's printed number.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string SaleNumber { get; set; } = string.Empty;
+
+    /// <summary>Cash change to give the customer, when the tender exceeded the total.</summary>
+    [Parameter]
+    public decimal? ChangeDue { get; set; }
+
+    /// <summary>Raised to clear the till and start the next sale.</summary>
+    [Parameter]
+    public EventCallback OnNext { get; set; }
+
+    private static string PriceOf(decimal value)
+        => value.ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-PH"));
+}

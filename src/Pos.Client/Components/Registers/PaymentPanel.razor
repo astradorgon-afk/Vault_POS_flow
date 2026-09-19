@@ -1,0 +1,301 @@
+@using System.Globalization
+@using Pos.Domain.Sales
+@inject IJSRuntime JS
+
+<div class="pay-panel">
+    <div class="pay-identity">
+        <strong>PAYMENT</strong>
+        <span class="pay-back" @onclick="OnBack">← Back to cart <kbd>Esc</kbd></span>
+    </div>
+
+    <div class="pay-total">
+        <span class="pay-total-label">Amount due</span>
+        <strong class="pay-total-value">@PriceOf(Total)</strong>
+    </div>
+
+    @if (PaymentBlockedMessage is { Length: > 0 } blocked)
+    {
+        <div class="vf-alert vf-alert-error" role="alert">
+            <span class="vf-alert-mark" aria-hidden="true">⚠</span>
+            <span class="vf-alert-text">@blocked</span>
+            <small class="vf-alert-details">@PaymentBlockedDetail</small>
+        </div>
+    }
+
+    <div class="pay-methods" role="group" aria-label="Payment method">
+        <button type="button" class="@MethodClass(PaymentMethod.Cash)" @onclick="() => SelectMethod(PaymentMethod.Cash)">
+            <i class="method-dot method-cash" aria-hidden="true"></i>Cash</button>
+        <button type="button" class="@MethodClass(PaymentMethod.Card)" @onclick="() => SelectMethod(PaymentMethod.Card)">
+            <i class="method-dot method-card" aria-hidden="true"></i>Card</button>
+        <button type="button" class="@MethodClass(PaymentMethod.EWallet)" @onclick="() => SelectMethod(PaymentMethod.EWallet)">
+            <i class="method-dot method-wallet" aria-hidden="true"></i>E-wallet</button>
+    </div>
+
+    @if (Method == PaymentMethod.Cash)
+    {
+        <div class="pay-cash-area">
+            <div class="pay-quick" role="group" aria-label="Quick tender">
+                @foreach (var tender in QuickTenders)
+                {
+                    <button type="button" class="pay-quick-chip" @onclick="() => ApplyTender(tender)">₱@TenderText(tender)</button>
+                }
+            </div>
+
+            <label class="pay-cash-row">
+                <span class="pay-cash-symbol">₱</span>
+                <input
+                    value="@_cashTendered"
+                    @oninput="OnCashInput"
+                    inputmode="decimal"
+                    placeholder="0.00"
+                    aria-label="Cash received"
+                    @ref="_cashInput"
+                    @onkeydown="HandleCashKeyDown" />
+            </label>
+
+            @if (ValidationMessage is not null)
+            {
+                <span class="pay-validation" role="alert">@ValidationMessage</span>
+            }
+
+            <div class="pay-change">
+                <span>CHANGE TO GIVE</span>
+                <strong class="@(ChangeDue < 0m ? "change-short" : string.Empty)">@PriceOf(ChangeDue)</strong>
+            </div>
+        </div>
+    }
+    else
+    {
+        <label class="pay-provider">
+            <span>Provider reference <em>optional</em></span>
+            <input
+                value="@_providerReference"
+                @oninput="OnProviderInput"
+                maxlength="128"
+                placeholder="Terminal or wallet reference"
+                spellcheck="false" />
+        </label>
+        <p class="pay-method-note">Card and e-wallet need a connection. Every payment is applied only after head office accepts the sale.</p>
+    }
+
+    <div class="pay-actions">
+        <button type="button" class="pay-confirm" disabled="@(!CanConfirm)" @onclick="TryCompleteAsync">
+            @(Busy ? "Completing sale…" : ConfirmLabel) <kbd>F10</kbd>
+        </button>
+        @if (Method == PaymentMethod.Cash && ChangeDue > 0m && !Busy)
+        {
+            <span class="pay-change-hint">Change: @PriceOf(ChangeDue)</span>
+        }
+    </div>
+</div>
+
+@code {
+    private string _cashTendered = string.Empty;
+    private string _providerReference = string.Empty;
+    private ElementReference _cashInput;
+    private int _lastTicket;
+    private PaymentMethod _method = PaymentMethod.Cash;
+
+    /// <summary>The amount to collect.</summary>
+    [Parameter]
+    [EditorRequired]
+    public decimal Total { get; set; }
+
+    /// <summary>Head office's cash rounding increment, for the change figure.</summary>
+    [Parameter]
+    public decimal CashRoundingIncrement { get; set; } = 0.01m;
+
+    /// <summary>True when the register can complete this sale (shift open and head office reachable).</summary>
+    [Parameter]
+    public bool PaymentAllowed { get; set; } = true;
+
+    /// <summary>The headline to show when <see cref="PaymentAllowed"/> is false.</summary>
+    [Parameter]
+    public string? PaymentBlockedMessage { get; set; }
+
+    /// <summary>Detail lines under the blocked headline.</summary>
+    [Parameter]
+    public string? PaymentBlockedDetail { get; set; }
+
+    /// <summary>Raised when the cashier completes the sale (F10).</summary>
+    [Parameter]
+    public EventCallback<RegisterPaymentInput> OnComplete { get; set; }
+
+    /// <summary>Raised to return to the cart (Esc).</summary>
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    /// <summary>Bumped to focus the amount box when payment begins.</summary>
+    [Parameter]
+    public int FocusTicket { get; set; }
+
+    /// <summary>True while the sale is being committed to head office.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    private PaymentMethod Method => _method;
+
+    private bool CanConfirm => Method == PaymentMethod.Cash
+        ? PaymentAllowed && !Busy && Total > 0m && Tendered >= Total
+        : PaymentAllowed && !Busy && Total > 0m;
+
+    private decimal Tendered => MoneyFormat.TryParseAmount(_cashTendered, out var amount) ? amount : 0m;
+
+    private decimal ChangeDue => Method == PaymentMethod.Cash && Tendered > 0m
+        ? RoundToIncrement(Tendered - Total)
+        : 0m;
+
+    private List<decimal> QuickTenders { get; set; } = new();
+
+    private string? ValidationMessage
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_cashTendered) && Tendered == 0m)
+            {
+                return "That doesn’t read as an amount.";
+            }
+
+            if (Tendered < Total)
+            {
+                return "The cash covers less than the amount due.";
+            }
+
+            return null;
+        }
+    }
+
+    private string ConfirmLabel => Method == PaymentMethod.Cash
+        ? $"Complete — change {PriceOf(ChangeDue)}"
+        : $"Complete — {MethodLabel(Method)}";
+
+    protected override void OnParametersSet()
+    {
+        if (Total != _lastTotal)
+        {
+            _lastTotal = Total;
+            QuickTenders = ComputeQuickTenders(Total);
+        }
+    }
+
+    private decimal _lastTotal;
+
+    // Rounded-note algorithm that never offers less than the total and never
+    // abandons a note the cashier can simply hand over:
+    //   · {100, 500, 1000}: round the total up to the note, unless the total is
+    //     already an exact multiple (then exact cash is the natural answer);
+    //   · whole-thousand banknotes above the total fill the rest.
+    internal static List<decimal> ComputeQuickTenders(decimal total)
+    {
+        if (total <= 0)
+        {
+            return new List<decimal>();
+        }
+
+        var candidates = new List<decimal>();
+        foreach (var denomination in new[] { 100m, 500m, 1000m })
+        {
+            if (total % denomination == 0m && total >= denomination)
+            {
+                continue;
+            }
+
+            var rounded = Math.Ceiling(total / denomination) * denomination;
+            if (rounded > total)
+            {
+                candidates.Add(rounded);
+            }
+        }
+
+        var firstNote = total % 1000m == 0m ? total : Math.Ceiling(total / 1000m) * 1000m;
+        for (var note = firstNote; note <= total + 3000m; note += 1000m)
+        {
+            if (note > total)
+            {
+                candidates.Add(note);
+            }
+        }
+
+        return candidates
+            .Where(candidate => candidate > total)
+            .Distinct()
+            .OrderBy(candidate => candidate)
+            .Take(3)
+            .ToList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (FocusTicket != _lastTicket && FocusTicket > 0)
+        {
+            _lastTicket = FocusTicket;
+            try
+            {
+                await JS.InvokeVoidAsync("VaultFlowRegister.focusSelect", _cashInput);
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (TaskCanceledException)
+            {
+            }
+        }
+    }
+
+    private void OnCashInput(ChangeEventArgs args) => _cashTendered = args.Value?.ToString() ?? string.Empty;
+
+    private void OnProviderInput(ChangeEventArgs args) => _providerReference = args.Value?.ToString() ?? string.Empty;
+
+    private void SelectMethod(PaymentMethod method)
+    {
+        _method = method;
+        _providerReference = string.Empty;
+        _cashTendered = string.Empty;
+    }
+
+    private void ApplyTender(decimal tender)
+    {
+        _cashTendered = tender.ToString("0.00", CultureInfo.InvariantCulture);
+    }
+
+    private async Task HandleCashKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && CanConfirm)
+        {
+            await TryCompleteAsync();
+        }
+    }
+
+    /// <summary>The F10 primary action of the payment pane.</summary>
+    public async Task TryCompleteAsync()
+    {
+        if (!CanConfirm)
+        {
+            return;
+        }
+
+        string? reference = Method == PaymentMethod.Cash || string.IsNullOrWhiteSpace(_providerReference)
+            ? null
+            : _providerReference.Trim();
+
+        await OnComplete.InvokeAsync(new RegisterPaymentInput(
+            Method,
+            Total,
+            Method == PaymentMethod.Cash ? Tendered : null,
+            reference));
+    }
+
+    private decimal RoundToIncrement(decimal amount)
+    {
+        decimal increment = CashRoundingIncrement > 0m ? CashRoundingIncrement : 0.01m;
+        return decimal.Round(amount / increment, 0, MidpointRounding.AwayFromZero) * increment;
+    }
+
+    private string MethodClass(PaymentMethod method) => Method == method ? "selected" : string.Empty;
+
+    private static string MethodLabel(PaymentMethod method) => method == PaymentMethod.EWallet ? "E-wallet" : method.ToString();
+
+    private static string TenderText(decimal tender) => ((long)tender).ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string PriceOf(decimal value) => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

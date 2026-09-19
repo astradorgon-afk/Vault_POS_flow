@@ -1,0 +1,142 @@
+<div class="cart-panel">
+    <div class="cart-title">
+        <div>
+            <strong>CURRENT SALE</strong>
+            <span class="cart-title-meta">@ItemCount @(ItemCount == 1 ? "item" : "items")</span>
+        </div>
+        <div class="cart-title-right">
+            @if (HeldCount > 0)
+            {
+                <span class="cart-held-pill" title="Sales held at this till">@HeldCount held</span>
+            }
+            @if (Lines.Count > 0)
+            {
+                <button type="button" class="button-link cart-clear" @onclick="OnClear">Clear</button>
+            }
+        </div>
+    </div>
+
+    <div class="cart-lines" aria-live="polite">
+        @if (Lines.Count == 0)
+        {
+            <p class="cart-empty">
+                Nothing in this sale yet.
+                <span>Scan or tap a product to add it.</span>
+            </p>
+        }
+        @foreach (var line in Lines)
+        {
+            var selected = line.Item.ProductId == SelectedProductId;
+            var linePrice = PriceOf(line.Item.Price, line.Item.Currency);
+            <div class="cart-line @(selected ? "cart-line-selected" : string.Empty)" @onclick="() => SelectLine(line.Item.ProductId)">
+                <div class="cart-line-main">
+                    <div class="cart-line-name">@line.Item.Name</div>
+                    <div class="cart-line-sub">@line.Item.Sku<span class="cart-line-sep" aria-hidden="true"></span>@linePrice each</div>
+                </div>
+                <div class="cart-line-controls">
+                    <button type="button" class="qty-btn" title="Decrease quantity" aria-label="Decrease quantity of @line.Item.Name" @onclick="() => OnDecrement.InvokeAsync(line.Item.ProductId)">−</button>
+                    <span class="qty-value" @onclick="() => OnEditQuantity.InvokeAsync(line.Item.ProductId)" title="Tap to set exact quantity">@line.Quantity</span>
+                    <button type="button" class="qty-btn" title="Increase quantity" aria-label="Increase quantity of @line.Item.Name" @onclick="() => OnIncrement.InvokeAsync(line.Item.ProductId)">+</button>
+                    <span class="cart-line-total">@PriceOf(line.Total, line.Item.Currency)</span>
+                </div>
+                @if (selected)
+                {
+                    <button type="button" class="cart-void" @onclick:stopPropagation="true" @onclick="() => OnVoid.InvokeAsync(line.Item.ProductId)">Void line <kbd>F8</kbd></button>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="cart-summary">
+        <div class="cart-tools">
+            <button type="button" class="cart-tool" @onclick="OnHold" disabled="@(ItemCount == 0)"><kbd>F6</kbd> Hold</button>
+            <button type="button" class="cart-tool" @onclick="OnDiscount"><kbd>F4</kbd> Discount</button>
+            <button type="button" class="cart-tool" @onclick="VoidSelected" disabled="@(ItemCount == 0)"><kbd>F8</kbd> Void line</button>
+        </div>
+        <div class="cart-summary-row">
+            <span>Items</span>
+            <strong>@ItemCount</strong>
+        </div>
+        <div class="cart-summary-row cart-summary-total">
+            <span>Total due</span>
+            <strong>@PriceOf(Total, null)</strong>
+        </div>
+    </div>
+
+    <div class="cart-actions">
+        <button type="button" class="cart-pay" disabled="@PayDisabled" @onclick="OnPay">Pay <kbd>F9</kbd> @PriceOf(Total, null)</button>
+        <button type="button" class="cart-hold" disabled="@HoldDisabled" @onclick="OnHold">Hold</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>The lines in the current sale.</summary>
+    [Parameter]
+    public IReadOnlyList<SaleCartLine> Lines { get; set; } = Array.Empty<SaleCartLine>();
+
+    /// <summary>The product id of the selected line; voiding acts on it.</summary>
+    [Parameter]
+    public Guid? SelectedProductId { get; set; }
+
+    /// <summary>Raised when a line is selected.</summary>
+    [Parameter]
+    public EventCallback<Guid> OnSelectLine { get; set; }
+
+    /// <summary>Raised to add one to a line.</summary>
+    [Parameter]
+    public EventCallback<Guid> OnIncrement { get; set; }
+
+    /// <summary>Raised to take one off a line.</summary>
+    [Parameter]
+    public EventCallback<Guid> OnDecrement { get; set; }
+
+    /// <summary>Raised to edit a line's quantity exactly (usually F3).</summary>
+    [Parameter]
+    public EventCallback<Guid> OnEditQuantity { get; set; }
+
+    /// <summary>Raised to void the selected line.</summary>
+    [Parameter]
+    public EventCallback<Guid> OnVoid { get; set; }
+
+    /// <summary>Raised when the cashier presses Pay (F9).</summary>
+    [Parameter]
+    public EventCallback OnPay { get; set; }
+
+    /// <summary>Raised when the cashier holds the sale (F6).</summary>
+    [Parameter]
+    public EventCallback OnHold { get; set; }
+
+    /// <summary>Raised when the cashier asks about discounts (F4).</summary>
+    [Parameter]
+    public EventCallback OnDiscount { get; set; }
+
+    /// <summary>Raised when the cashier clears the whole cart.</summary>
+    [Parameter]
+    public EventCallback OnClear { get; set; }
+
+    private int ItemCount => Lines.Sum(line => line.Quantity);
+    private decimal Total => Lines.Sum(line => line.Total);
+
+    /// <summary>How many sales are already held at this till.</summary>
+    [Parameter]
+    public int HeldCount { get; set; }
+
+    private bool PayDisabled => ItemCount == 0;
+    private bool HoldDisabled => ItemCount == 0;
+
+    private void SelectLine(Guid productId) => OnSelectLine.InvokeAsync(productId);
+
+    private void VoidSelected()
+    {
+        var target = SelectedProductId ?? Lines.LastOrDefault()?.Item.ProductId;
+        if (target is { } productId && Lines.Count > 0)
+        {
+            OnVoid.InvokeAsync(productId);
+        }
+    }
+
+    private static string PriceOf(decimal? value, string? currency)
+        => value is { } amount
+            ? amount.ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-PH"))
+            : string.Empty;
+}

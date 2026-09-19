@@ -1491,8 +1491,9 @@ dotnet build src/Pos.Client/Pos.Client.csproj -f net10.0-windows10.0.19041.0
 ```
 
 Enrol with a code, or open "No code yet?" and use `admin`; then sign in as
-`s1.cashier` (any development account signs in with the shared password
-`cash1234`). See `docs/LOCAL_TESTING.md` for resetting the register.
+`cashier` (any development account signs in with the shared password
+`cash1234`). See `docs/LOCAL_TESTING.md` for the account set and for
+resetting the register.
 
 ```bash
 # Tests; the PostgreSQL suites self-skip when no Docker daemon is reachable

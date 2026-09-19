@@ -1,0 +1,75 @@
+@using Microsoft.AspNetCore.Components.Web
+@inject IJSRuntime JS
+
+<form class="scan-input" @onsubmit="Submit" @onsubmit:preventDefault="true">
+    <span class="scan-icon" aria-hidden="true">▥</span>
+    <div class="scan-field">
+        <label for="scan">Scan an item, or type a barcode</label>
+        <input id="scan" autofocus placeholder="Scan or type a barcode…" @bind="Value" @ref="_input" disabled="@Disabled" aria-describedby="scan-message" />
+        @if (Message is { Length: > 0 } message)
+        {
+            <span id="scan-message" class="scan-message" role="alert">@message</span>
+        }
+    </div>
+    <button type="submit" class="scan-add" disabled="@Disabled">Add</button>
+</form>
+
+@code {
+    private ElementReference _input;
+    private int _lastTicket;
+
+    /// <summary>Gets or sets the barcode text the cashier scanned or typed.</summary>
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>Raised when the barcode changes.</summary>
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Inline feedback for the last scan (kept next to the field, not a modal).</summary>
+    [Parameter]
+    public string? Message { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether scanning is available.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>
+    /// Raised when the cashier submits the barcode (Enter or Add). The value is
+    /// already applied through <see cref="ValueChanged"/>.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnSubmit { get; set; }
+
+    /// <summary>
+    /// Every time this increases, the field is focused and selected. The parent
+    /// bumps it to return the cashier to scanning.
+    /// </summary>
+    [Parameter]
+    public int FocusTicket { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (FocusTicket != _lastTicket && FocusTicket > 0)
+        {
+            _lastTicket = FocusTicket;
+            await FocusSelectAsync(_input);
+        }
+    }
+
+    private async Task FocusSelectAsync(ElementReference element)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("VaultFlowRegister.focusSelect", element);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private Task Submit() => OnSubmit.InvokeAsync();
+}

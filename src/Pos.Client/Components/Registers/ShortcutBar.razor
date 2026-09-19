@@ -1,0 +1,40 @@
+<footer class="till-footer" aria-label="Keyboard shortcuts">
+    @if (PaymentMode)
+    {
+        <span class="till-footer-right"><kbd>F10</kbd> Complete sale</span>
+        <span class="till-footer-left"><kbd>Esc</kbd> Back to cart</span>
+    }
+    else if (HeldPanelOpen)
+    {
+        <span class="till-footer-right"><kbd>Esc</kbd> Close held sales</span>
+    }
+    else if (MoreOpen)
+    {
+        <span class="till-footer-right"><kbd>Esc</kbd> Close menu</span>
+    }
+    else
+    {
+        <span class="till-footer-left"><kbd>F2</kbd> Search</span>
+        <span><kbd>F3</kbd> Quantity</span>
+        <span><kbd>F4</kbd> Discount</span>
+        <span><kbd>F6</kbd> Hold</span>
+        <span><kbd>F7</kbd> Recall</span>
+        <span><kbd>F8</kbd> Void line</span>
+        <span><kbd>F9</kbd> Pay</span>
+        <span class="till-footer-right"><kbd>Esc</kbd> Cancel</span>
+    }
+</footer>
+
+@code {
+    /// <summary>When true, shows the payment shortcuts rather than the sale shortcuts.</summary>
+    [Parameter]
+    public bool PaymentMode { get; set; }
+
+    /// <summary>When true, shows shortcuts for the held-sales panel.</summary>
+    [Parameter]
+    public bool HeldPanelOpen { get; set; }
+
+    /// <summary>When true, shows shortcuts for the More menu.</summary>
+    [Parameter]
+    public bool MoreOpen { get; set; }
+}

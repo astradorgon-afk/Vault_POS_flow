@@ -1,0 +1,79 @@
+<div class="dialog-backdrop" @onclick="OnDismiss">
+    <section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="shift-open-title" @onclick:stopPropagation>
+        <h3 id="shift-open-title">Open shift</h3>
+        <p class="dialog-lead">
+            Business date is <strong>@BusinessDateText</strong>. Enter the cash counted into the
+            drawer at the start of this shift.
+        </p>
+
+        <label class="dialog-field">
+            <span>Opening cash</span>
+            <input
+                value="@_openingCash"
+                @oninput="OnOpeningCashInput"
+                inputmode="decimal"
+                placeholder="0.00"
+                aria-label="Opening cash" />
+        </label>
+
+        @if (Error is not null)
+        {
+            <p class="form-error" role="alert">@Error</p>
+        }
+
+        <div class="dialog-actions">
+            <button type="button" class="button-secondary" @onclick="OnDismiss" disabled="@Busy">Cancel</button>
+            <button type="button" class="button-primary" @onclick="ConfirmAsync" disabled="@Busy">@(Busy ? "Opening…" : "Open shift")</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    private string _openingCash = string.Empty;
+
+    /// <summary>The business date copy, e.g. "Sat, 19 Sep 2026".</summary>
+    [Parameter]
+    [EditorRequired]
+    public string BusinessDateText { get; set; } = string.Empty;
+
+    /// <summary>True while the shift is being opened.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Head office's refusal, if any.</summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>Raised with a valid opening float.</summary>
+    [Parameter]
+    public EventCallback<decimal> OnConfirm { get; set; }
+
+    /// <summary>Raised when the cashier backs out.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    private void OnOpeningCashInput(ChangeEventArgs args)
+    {
+        _openingCash = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (Busy)
+        {
+            return;
+        }
+
+        if (!decimal.TryParse(_openingCash, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var opening))
+        {
+            opening = 0m;
+        }
+
+        if (opening < 0m)
+        {
+            return;
+        }
+
+        await OnConfirm.InvokeAsync(opening);
+    }
+}

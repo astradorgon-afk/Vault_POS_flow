@@ -66,6 +66,26 @@ public sealed class RegisterService(
     /// <summary>The address a development register points at until a manager changes it.</summary>
     public static readonly Uri DefaultServer = new("http://localhost:5177/");
 
+    /// <summary>
+    /// Gets a value indicating whether <see cref="CompleteSaleAsync"/> can run while
+    /// head office is unreachable. It is intentionally false: the shared offline
+    /// pipeline declares <c>CompleteSaleCommand</c> but its device-side sale and
+    /// product repositories have not been built or registered yet
+    /// (<see cref="Pos.Application.Common.Offline.OfflineCommandState.Pending"/>),
+    /// so completing a sale always needs the server. The UI must say so rather
+    /// than pretend cash works offline.
+    /// </summary>
+    public const bool OfflineSaleCompletionSupported = false;
+
+    /// <summary>What a cashier is told when the register is offline.</summary>
+    public const string OfflineSaleMessaging =
+        "Head office can’t be reached. You can scan and build a sale, but opening a shift " +
+        "and completing a sale need a connection on this register.";
+
+    /// <summary>What a cashier is told when the checkout context cannot be loaded.</summary>
+    public const string ContextUnavailableMessaging =
+        "This register needs a connection to head office to load its shift and business date.";
+
     /// <summary>Gets the head-office address this register uses.</summary>
     public Uri Server =>
         Uri.TryCreate(preferences.Get(ServerPreference, string.Empty), UriKind.Absolute, out Uri? saved)

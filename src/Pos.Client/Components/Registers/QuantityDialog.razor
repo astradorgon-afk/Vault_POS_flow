@@ -1,0 +1,99 @@
+<div class="dialog-backdrop" @onclick="OnDismiss">
+    <section class="dialog dialog-narrow" role="alertdialog" aria-modal="true" aria-labelledby="qty-title" @onclick:stopPropagation>
+        <h3 id="qty-title">Set quantity</h3>
+        <p class="dialog-lead">@ProductName</p>
+        <label class="dialog-field">
+            <span>Quantity</span>
+            <input
+                value="@_qty"
+                @oninput="OnQtyInput"
+                inputmode="numeric"
+                @ref="_input"
+                @onkeydown="HandleKeyDown"
+                aria-label="Quantity" />
+        </label>
+        @if (_message is not null)
+        {
+            <p class="form-error" role="alert">@_message</p>
+        }
+        <div class="dialog-actions">
+            <button type="button" class="button-secondary" @onclick="OnDismiss">Cancel</button>
+            <button type="button" class="button-primary" @onclick="CommitAsync">Apply</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    [Inject]
+    private IJSRuntime JS { get; set; } = default!;
+    private string _qty = "1";
+    private string? _message;
+    private ElementReference _input;
+
+    /// <summary>The product whose quantity is being set.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string ProductName { get; set; } = string.Empty;
+
+    /// <summary>The quantity to start the editor at.</summary>
+    [Parameter]
+    public int StartQuantity { get; set; } = 1;
+
+    /// <summary>Raised with a validated whole quantity.</summary>
+    [Parameter]
+    public EventCallback<int> OnCommit { get; set; }
+
+    /// <summary>Raised when the cashier cancels (Esc or backdrop).</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    protected override Task OnInitializedAsync()
+    {
+        _qty = StartQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _message = null;
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("VaultFlowRegister.focusSelect", _input);
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (TaskCanceledException)
+            {
+            }
+        }
+    }
+
+    private void OnQtyInput(ChangeEventArgs args) => _qty = args.Value?.ToString() ?? string.Empty;
+
+    private async Task HandleKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await CommitAsync();
+        }
+        else if (args.Key == "Escape")
+        {
+            await OnDismiss.InvokeAsync();
+        }
+    }
+
+    private async Task CommitAsync()
+    {
+        if (int.TryParse(_qty, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int quantity)
+            && quantity > 0)
+        {
+            await OnCommit.InvokeAsync(quantity);
+            return;
+        }
+
+        _message = "Enter a whole quantity of at least 1.";
+    }
+}

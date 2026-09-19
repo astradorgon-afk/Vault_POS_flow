@@ -371,15 +371,18 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
   `Receipts.razor.css`, fed by `VaultFlowApiClient`
   (`GetReceiptsAsync`/`IssueReceiptAsync`/`GetReceiptPrintTextAsync`) and the
   `PosContracts` records; NavMenu link added.
-- **Demo seed overhaul (`DevelopmentDataSeeder`).** Accounts renamed to the
-  per-store convention (`s1.cashier`, `s1.manager`, `main.manager`, …), all
-  sharing the password `cash1234` (dev `MinimumPasswordLength` 8; production
-  stays 12). The seeder now also writes a selling price per product, expands
-  the catalogue to 9 items, and posts 36 opening-balance stock events through
-  `IInventoryLedger` (MAIN + STORE01/02/03, External-leg pairs). Existing dev
-  accounts are rotated onto the shared password on every run
-  (`RemovePasswordAsync` + `AddPasswordAsync`; `AddIdentityCore` has no token
-  providers). Still idempotent and transaction-scoped.
+- **Demo seed overhaul (`DevelopmentDataSeeder`).** Accounts simplified to one
+  per role with short unqualified names (`owner`, `admin`, `manager`, `cashier`,
+  `inventory`, `auditor`), all sharing the password `cash1234` (dev
+  `MinimumPasswordLength` 8; production stays 12). Old per-store accounts
+  (`s1.cashier`, `s1.manager`, `main.manager`, …) are retired on every run so
+  existing databases converge on the same login list. The seeder now also
+  writes a selling price per product, expands the catalogue to 9 items, and
+  posts 36 opening-balance stock events through `IInventoryLedger`
+  (MAIN + STORE01/02/03, External-leg pairs). Existing dev accounts are
+  rotated onto the shared password on every run (`RemovePasswordAsync` +
+  `AddPasswordAsync`; `AddIdentityCore` has no token providers). Still
+  idempotent and transaction-scoped.
 - **Development-launch fixes.** `/health*` is exempt from `UseHttpsRedirection`
   in `Program.cs`; the register's *"Head office could not be reached"* came from
   running the API under the `https` launch profile (every plain-HTTP call was

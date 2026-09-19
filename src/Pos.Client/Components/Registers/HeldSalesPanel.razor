@@ -1,0 +1,48 @@
+<div class="dialog-backdrop" @onclick="OnDismiss">
+    <section class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="held-title" @onclick:stopPropagation>
+        <h3 id="held-title">Held sales</h3>
+        <p class="dialog-lead">
+            A held sale stays on this till until it’s recalled, the register is locked, or you
+            sign out. @Held.Count @(Held.Count == 1 ? "sale is" : "sales are") held.
+        </p>
+
+        @if (Held.Count == 0)
+        {
+            <p class="cart-empty">Nothing held yet. <span>Press <kbd>F6</kbd> on a sale to hold it.</span></p>
+        }
+        else
+        {
+            <div class="held-list">
+                @foreach (var held in Held)
+                {
+                    <div class="held-row">
+                        <div class="held-meta">
+                            <strong>@held.Id</strong>
+                            <span>@held.CreatedAtUtc.ToLocalTime().ToString("HH:mm") · @held.ItemCount items</span>
+                        </div>
+                        <span class="held-total">@MoneyFormat.Php(held.Total)</span>
+                        <button type="button" class="button-secondary" @onclick="() => OnRecall.InvokeAsync(held)">Recall</button>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="dialog-actions">
+            <button type="button" class="button-secondary" @onclick="OnDismiss">Close</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    /// <summary>The sales held at this till.</summary>
+    [Parameter]
+    public IReadOnlyList<HeldSale> Held { get; set; } = Array.Empty<HeldSale>();
+
+    /// <summary>Raised when a held sale is recalled.</summary>
+    [Parameter]
+    public EventCallback<HeldSale> OnRecall { get; set; }
+
+    /// <summary>Raised when the panel is closed.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+}

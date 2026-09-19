@@ -1,0 +1,46 @@
+@if (Open)
+{
+    <div class="more-backdrop" @onclick="OnDismiss" aria-hidden="true"></div>
+    <nav class="more-menu" aria-label="More actions">
+        <button type="button" class="more-item" @onclick="OnHeldSales">
+            <span class="more-item-name">Held sales</span>
+            <span class="more-item-badge">@HeldCount</span>
+        </button>
+        <button type="button" class="more-item" @onclick="OnRefreshStore">
+            <span class="more-item-name">Refresh store data</span>
+        </button>
+        <button type="button" class="more-item more-item-danger" @onclick="OnLock">
+            <span class="more-item-name">Lock register</span>
+        </button>
+    </nav>
+}
+
+@code {
+    /// <summary>Whether the menu is showing.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>How many sales are held, shown as a badge.</summary>
+    [Parameter]
+    public int HeldCount { get; set; }
+
+    /// <summary>Gets or sets whether the menu floats above the left pane.</summary>
+    [Parameter]
+    public bool OverLeft { get; set; }
+
+    /// <summary>Raised when the cashier picks “Held sales”.</summary>
+    [Parameter]
+    public EventCallback OnHeldSales { get; set; }
+
+    /// <summary>Raised when the cashier picks “Refresh store data”.</summary>
+    [Parameter]
+    public EventCallback OnRefreshStore { get; set; }
+
+    /// <summary>Raised when the cashier picks “Lock register”.</summary>
+    [Parameter]
+    public EventCallback OnLock { get; set; }
+
+    /// <summary>Raised when the backdrop or an Escape tells the menu to close.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+}
