@@ -83,66 +83,117 @@ public static class StoreMonitoringEndpoints
         stores = [.. stores.Where(s => authorization.HasAllLocations || authorization.Locations.Contains(s.Id))];
         List<LocationId> storeIds = [.. stores.Select(s => s.Id)];
 
-        List<Sale> sales = await context.Sales
+        // PostgreSQL sums everything itself: a busy chain rings up thousands of
+        // sales a week and the report must count every one of them. SQLite keeps
+        // money and instants as text, so there the same query runs over the rows.
+        IQueryable<Sale> inPeriod = context.Sales
             .AsNoTracking()
-            .Include(s => s.Items)
-            .Include(s => s.Payments)
-            .AsSplitQuery()
-            .Where(s => storeIds.Contains(s.LocationId) && s.BusinessDate >= start && s.BusinessDate <= end)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .Where(s => storeIds.Contains(s.LocationId) && s.BusinessDate >= start && s.BusinessDate <= end);
 
-        List<SalesReturn> returns = await context.SalesReturns
-            .AsNoTracking()
-            .Include(r => r.Refunds)
-            .Where(r => storeIds.Contains(r.LocationId) && r.BusinessDate >= start && r.BusinessDate <= end)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var days = await AggregateAsync(
+            context,
+            inPeriod.Select(s => new { s.LocationId, s.BusinessDate, s.Status, s.NetTotal, s.GrossTotal, s.DiscountTotal, s.CompletedAtUtc }),
+            rows => rows
+                .GroupBy(s => new { s.LocationId, s.BusinessDate, s.Status })
+                .Select(g => new
+                {
+                    g.Key.LocationId,
+                    g.Key.BusinessDate,
+                    g.Key.Status,
+                    Count = g.Count(),
+                    Net = g.Sum(s => s.NetTotal),
+                    Gross = g.Sum(s => s.GrossTotal),
+                    Discount = g.Sum(s => s.DiscountTotal),
+                    LastAt = g.Max(s => s.CompletedAtUtc),
+                }),
+            cancellationToken).ConfigureAwait(false);
+
+        var payments = await AggregateAsync(
+            context,
+            context.Payments.AsNoTracking().Join(
+                inPeriod.Where(s => s.Status == SaleStatus.Completed),
+                p => EF.Property<SaleId>(p, "SaleId"),
+                s => s.Id,
+                (p, s) => new { s.LocationId, p.Method, p.Amount }),
+            rows => rows
+                .GroupBy(p => new { p.LocationId, p.Method })
+                .Select(g => new { g.Key.LocationId, g.Key.Method, Amount = g.Sum(p => p.Amount) }),
+            cancellationToken).ConfigureAwait(false);
+
+        var refunds = await AggregateAsync(
+            context,
+            context.Refunds.AsNoTracking().Join(
+                context.SalesReturns.Where(r => storeIds.Contains(r.LocationId) && r.BusinessDate >= start && r.BusinessDate <= end),
+                f => f.SalesReturnId,
+                r => r.Id,
+                (f, r) => new { r.LocationId, f.Amount }),
+            rows => rows
+                .GroupBy(f => f.LocationId)
+                .Select(g => new { LocationId = g.Key, Amount = g.Sum(f => f.Amount) }),
+            cancellationToken).ConfigureAwait(false);
+
+        var products = await AggregateAsync(
+            context,
+            context.SaleItems.AsNoTracking().Join(
+                inPeriod.Where(s => s.Status == SaleStatus.Completed),
+                i => i.SaleId,
+                s => s.Id,
+                (i, s) => new { s.LocationId, i.ProductId, i.ProductName, i.Quantity, i.NetAmount }),
+            rows => rows
+                .GroupBy(i => new { i.LocationId, i.ProductId })
+                .Select(g => new
+                {
+                    g.Key.LocationId,
+                    g.Key.ProductId,
+                    Name = g.Max(i => i.ProductName),
+                    Quantity = g.Sum(i => i.Quantity),
+                    Net = g.Sum(i => i.NetAmount),
+                }),
+            cancellationToken).ConfigureAwait(false);
 
         List<StorePerformance> performance = [];
         foreach (Location store in stores)
         {
-            List<Sale> storeSales = [.. sales.Where(s => s.LocationId == store.Id)];
-            List<Sale> completed = [.. storeSales.Where(s => s.Status == SaleStatus.Completed)];
-            List<Sale> voided = [.. storeSales.Where(s => s.Status == SaleStatus.Voided)];
-            decimal refunded = returns
-                .Where(r => r.LocationId == store.Id)
-                .SelectMany(r => r.Refunds)
-                .Sum(f => f.Amount);
-            decimal net = completed.Sum(s => s.NetTotal);
+            var storeDays = days.Where(d => d.LocationId == store.Id).ToList();
+            var completed = storeDays.Where(d => d.Status == SaleStatus.Completed).ToList();
+            var voided = storeDays.Where(d => d.Status == SaleStatus.Voided).ToList();
+            decimal refunded = refunds.Where(r => r.LocationId == store.Id).Sum(r => r.Amount);
+            decimal net = completed.Sum(d => d.Net);
+            int transactions = completed.Sum(d => d.Count);
 
             List<StoreDailySales> daily = [];
             for (DateOnly day = start; day <= end; day = day.AddDays(1))
             {
-                List<Sale> onDay = [.. completed.Where(s => s.BusinessDate == day)];
-                daily.Add(new StoreDailySales(day, onDay.Sum(s => s.NetTotal), onDay.Count));
+                var onDay = completed.Where(d => d.BusinessDate == day).ToList();
+                daily.Add(new StoreDailySales(day, onDay.Sum(d => d.Net), onDay.Sum(d => d.Count), onDay.Sum(d => d.Gross)));
             }
 
-            List<StoreTopProduct> topProducts = [.. completed
-                .SelectMany(s => s.Items)
-                .GroupBy(i => (i.ProductId, i.ProductName))
-                .Select(g => new StoreTopProduct(
-                    g.Key.ProductId.Value, g.Key.ProductName, g.Sum(i => i.Quantity), g.Sum(i => i.NetAmount)))
-                .OrderByDescending(p => p.NetSales)
-                .Take(5)];
+            List<StoreTopProduct> topProducts = [.. products
+                .Where(p => p.LocationId == store.Id)
+                .OrderByDescending(p => p.Net)
+                .Take(5)
+                .Select(p => new StoreTopProduct(p.ProductId.Value, p.Name ?? string.Empty, p.Quantity, p.Net))];
+
+            decimal PaymentTotal(PaymentMethod method)
+                => payments.Where(p => p.LocationId == store.Id && p.Method == method).Sum(p => p.Amount);
 
             performance.Add(new StorePerformance(
                 store.Id.Value,
                 store.Code,
                 store.Name,
                 net,
-                completed.Sum(s => s.GrossTotal),
-                completed.Sum(s => s.DiscountTotal),
-                completed.Count,
-                completed.Count == 0 ? 0m : decimal.Round(net / completed.Count, 2),
-                voided.Count,
-                voided.Sum(s => s.NetTotal),
+                completed.Sum(d => d.Gross),
+                completed.Sum(d => d.Discount),
+                transactions,
+                transactions == 0 ? 0m : decimal.Round(net / transactions, 2),
+                voided.Sum(d => d.Count),
+                voided.Sum(d => d.Net),
                 refunded,
                 net - refunded,
-                PaymentTotal(completed, PaymentMethod.Cash),
-                PaymentTotal(completed, PaymentMethod.Card),
-                PaymentTotal(completed, PaymentMethod.EWallet),
-                storeSales.Count == 0 ? null : storeSales.Max(s => s.CompletedAtUtc),
+                PaymentTotal(PaymentMethod.Cash),
+                PaymentTotal(PaymentMethod.Card),
+                PaymentTotal(PaymentMethod.EWallet),
+                storeDays.Count == 0 ? null : storeDays.Max(d => d.LastAt),
                 daily,
                 topProducts));
         }
@@ -150,8 +201,24 @@ public static class StoreMonitoringEndpoints
         return TypedResults.Ok(new StorePerformanceReport(start, end, performance));
     }
 
-    private static decimal PaymentTotal(IEnumerable<Sale> sales, PaymentMethod method)
-        => sales.SelectMany(s => s.Payments).Where(p => p.Method == method).Sum(p => p.Amount);
+    /// <summary>
+    /// Runs a grouping over <paramref name="rows"/> in the database, or, on
+    /// SQLite (which stores money and instants as text), over the loaded rows.
+    /// </summary>
+    private static async Task<List<TResult>> AggregateAsync<TRow, TResult>(
+        PosDbContext context,
+        IQueryable<TRow> rows,
+        Func<IQueryable<TRow>, IQueryable<TResult>> aggregate,
+        CancellationToken cancellationToken)
+    {
+        if (!context.IsSqlite)
+        {
+            return await aggregate(rows).ToListAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        List<TRow> loaded = await rows.ToListAsync(cancellationToken).ConfigureAwait(false);
+        return [.. aggregate(loaded.AsQueryable())];
+    }
 
     private static async Task<IResult> GetStockLevelsAsync(
         PosDbContext context,
@@ -333,7 +400,7 @@ public sealed record StorePerformance(
     IReadOnlyList<StoreTopProduct> TopProducts);
 
 /// <summary>One business date's completed sales at a store.</summary>
-public sealed record StoreDailySales(DateOnly Date, decimal NetSales, int Transactions);
+public sealed record StoreDailySales(DateOnly Date, decimal NetSales, int Transactions, decimal GrossSales);
 
 /// <summary>One of a store's best sellers over the period.</summary>
 public sealed record StoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);

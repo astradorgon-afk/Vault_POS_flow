@@ -12,16 +12,33 @@
             @if (_step == ReturnStep.Pick)
             {
                 <p class="dialog-lead">
-                    Today's completed sales at this register. Pick the sale the customer is returning from.
+                    Sales from the last @ReturnWindowDays days at this store, newest first. Scan or type the
+                    receipt number to find the one the customer is returning from.
                 </p>
+
+                <label class="dialog-field">
+                    <span>Receipt number</span>
+                    <input value="@_number" @oninput="e => _number = e.Value?.ToString() ?? string.Empty" @onkeydown="OnNumberKeyDown"
+                           placeholder="Scan or type, e.g. 000812" aria-label="Receipt number" autocomplete="off" />
+                </label>
+                <button type="button" class="customer-search-button" @onclick="ReloadAsync" disabled="@_busy">
+                    @(_busy ? "Searching…" : string.IsNullOrWhiteSpace(_number) ? "Show recent sales" : "Find sale")
+                </button>
+
+                @if (_error is not null)
+                {
+                    <p class="form-error" role="alert">@_error</p>
+                }
 
                 @if (_busy && _sales.Count == 0)
                 {
-                    <div class="return-loading">Loading today's sales…</div>
+                    <div class="return-loading">Loading sales…</div>
                 }
                 else if (_sales.Count == 0)
                 {
-                    <p class="customer-empty">No completed sales today. Returns need an original sale in this release.</p>
+                    <p class="customer-empty">@(string.IsNullOrWhiteSpace(_searched)
+                        ? $"No completed sales in the last {ReturnWindowDays} days. Returns need an original sale."
+                        : $"No sale in the last {ReturnWindowDays} days has a receipt number containing “{_searched}”.")</p>
                 }
                 else
                 {
@@ -150,7 +167,13 @@
         Accepted,
     }
 
+    /// <summary>How far back a customer may bring goods back for a refund, as
+    /// printed on the receipt.</summary>
+    private const int ReturnWindowDays = 7;
+
     private readonly List<RegisterSaleSummary> _sales = [];
+    private string _number = string.Empty;
+    private string _searched = string.Empty;
     private readonly List<ReturnLineEdit> _edits = [];
     private ReturnStep _step = ReturnStep.Pick;
     private RegisterSaleDetail? _sale;
@@ -194,7 +217,7 @@
 
     /// <summary>Loads completed sales for a business-date window.</summary>
     [Parameter]
-    public Func<DateOnly?, DateOnly?, Task<IReadOnlyList<RegisterSaleSummary>>>? SearchSales { get; set; }
+    public Func<DateOnly?, DateOnly?, string?, Task<IReadOnlyList<RegisterSaleSummary>>>? SearchSales { get; set; }
 
     /// <summary>Loads a completed sale's lines.</summary>
     [Parameter]
@@ -235,6 +258,7 @@
         _accepted = null;
         _refundResult = null;
         _error = null;
+        _number = string.Empty;
         await ReloadAsync();
     }
 
@@ -249,9 +273,13 @@
         _error = null;
         _sales.Clear();
         _step = ReturnStep.Pick;
+        _searched = _number.Trim();
         try
         {
-            _sales.AddRange(await SearchSales(BusinessDate, BusinessDate));
+            _sales.AddRange(await SearchSales(
+                BusinessDate.AddDays(-(ReturnWindowDays - 1)),
+                BusinessDate,
+                string.IsNullOrEmpty(_searched) ? null : _searched));
         }
         catch (HeadOfficeException ex)
         {
@@ -260,6 +288,14 @@
         finally
         {
             _busy = false;
+        }
+    }
+
+    private async Task OnNumberKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_busy)
+        {
+            await ReloadAsync();
         }
     }
 

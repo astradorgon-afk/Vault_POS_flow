@@ -1,13 +1,15 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
-using Pos.Application.Common.Messaging;
 using Pos.Application.Sales;
 using Pos.Client.Storage;
 using Pos.Domain.Common;
 using Pos.Domain.Sales;
 using Pos.Infrastructure.Offline;
 using Pos.Infrastructure.Sync;
+
+// MAUI puts its own IDispatcher (UI-thread dispatching) in every file's scope.
+using IDispatcher = Pos.Application.Common.Messaging.IDispatcher;
 
 namespace Pos.Client.Services;
 
@@ -81,6 +83,10 @@ public sealed class RegisterService(
 {
     private const string ServerPreference = "vaultflow.headoffice.address";
     private const int UploadBatchSize = 100;
+
+    /// <summary>How many sales one lookup shows: a busy store rings up several
+    /// hundred a day, so older ones are found by receipt number.</summary>
+    private const int SaleSearchLimit = 100;
     private static readonly TimeSpan SyncInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DeferredRetryDelay = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions ResultJson = new(JsonSerializerDefaults.Web);
@@ -446,6 +452,32 @@ public sealed class RegisterService(
     }
 
     /// <summary>
+    /// The store's receipt header and footer as head office last sent them, so
+    /// a receipt printed offline carries the same branch details and return
+    /// policy as one head office renders.
+    /// </summary>
+    public async Task<(string Header, string Footer)> GetReceiptTextAsync(CancellationToken cancellationToken = default)
+    {
+        await using PosDeviceDbContext context =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        DeviceStoreProfile? profile = await context.DeviceProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        if (profile is null)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        string? settingsJson = await context.Locations.AsNoTracking()
+            .Where(l => l.Id == profile.LocationId)
+            .Select(l => l.SettingsJson)
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+
+        Pos.Domain.Organizations.LocationSettings settings = Pos.Domain.Organizations.LocationSettings.FromJson(settingsJson);
+        return (settings.ReceiptHeader, settings.ReceiptFooter);
+    }
+
+    /// <summary>
     /// Loads the current shift and checkout facts for this register: from head
     /// office when it answers, otherwise from what the device holds.
     /// </summary>
@@ -618,10 +650,12 @@ public sealed class RegisterService(
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Finds completed sales at this register's store.</summary>
+    /// <summary>Finds this register's store's newest sales in a business-date
+    /// window, optionally by part of the receipt number.</summary>
     public async Task<IReadOnlyList<RegisterSaleSummary>> SearchSalesAsync(
         DateOnly? from,
         DateOnly? to,
+        string? number = null,
         CancellationToken cancellationToken = default)
     {
         (RegisterUser user, DeviceId deviceId, LocationId locationId) = RequireOnlineSession();
@@ -632,6 +666,8 @@ public sealed class RegisterService(
             locationId.Value,
             from,
             to,
+            number,
+            SaleSearchLimit,
             cancellationToken).ConfigureAwait(false);
     }
 

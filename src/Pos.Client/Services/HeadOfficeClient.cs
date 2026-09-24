@@ -593,7 +593,8 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
         return response.Id;
     }
 
-    /// <summary>Finds completed sales at a store for a business-date window.</summary>
+    /// <summary>Finds a store's newest sales in a business-date window, optionally
+    /// only those whose receipt number contains <paramref name="number"/>.</summary>
     public async Task<IReadOnlyList<RegisterSaleSummary>> SearchSalesAsync(
         Uri server,
         string accessToken,
@@ -601,9 +602,16 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
         Guid locationId,
         DateOnly? from,
         DateOnly? to,
+        string? number,
+        int limit,
         CancellationToken cancellationToken)
     {
-        string path = FormattableString.Invariant($"api/v1/sales?locationId={locationId:D}");
+        string path = FormattableString.Invariant($"api/v1/sales?locationId={locationId:D}&limit={limit}");
+        if (!string.IsNullOrWhiteSpace(number))
+        {
+            path += "&number=" + Uri.EscapeDataString(number.Trim());
+        }
+
         if (from is { } fromDate)
         {
             path += FormattableString.Invariant($"&from={fromDate:yyyy-MM-dd}");

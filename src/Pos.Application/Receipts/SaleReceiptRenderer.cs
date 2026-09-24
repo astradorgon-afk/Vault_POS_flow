@@ -23,13 +23,17 @@ public static class SaleReceiptRenderer
     /// prints as the branch's wall-clock time; UTC is printed when it is unknown.</param>
     /// <param name="issuedByName">The display name of the cashier, when known.</param>
     /// <param name="lineSeparator">The line separator to use (defaults to LF, the wire form).</param>
+    /// <param name="header">The branch's receipt header (business name, TIN), printed first; one line per line break.</param>
+    /// <param name="footer">The branch's receipt footer (return policy, thanks), printed last in place of the default.</param>
     /// <returns>The rendering.</returns>
     public static string RenderPlainText(
         Sale sale,
         string locationName,
         string? timeZoneId,
         string? issuedByName,
-        string lineSeparator = "\n")
+        string lineSeparator = "\n",
+        string? header = null,
+        string? footer = null)
     {
         ArgumentNullException.ThrowIfNull(sale);
 
@@ -37,6 +41,12 @@ public static class SaleReceiptRenderer
         string number = sale.Number;
 
         List<string> lines = [];
+
+        if (TextLines(header) is { Count: > 0 } headerLines)
+        {
+            lines.AddRange(headerLines);
+            lines.Add(string.Empty);
+        }
 
         lines.Add("SALE RECEIPT");
         lines.Add(string.Concat(Enumerable.Repeat("=", Math.Max(8, number.Length))));
@@ -55,7 +65,7 @@ public static class SaleReceiptRenderer
         lines.AddRange(RenderTotals(sale));
         lines.AddRange(RenderPayments(sale));
         lines.Add(string.Empty);
-        lines.Add("Thank you.");
+        lines.AddRange(TextLines(footer) is { Count: > 0 } footerLines ? footerLines : ["Thank you."]);
 
         return string.Join(line, lines) + line;
     }
@@ -70,12 +80,14 @@ public static class SaleReceiptRenderer
         string? timeZoneId,
         string? issuedByName,
         ReceiptFormat format,
-        string lineSeparator = "\n")
+        string lineSeparator = "\n",
+        string? header = null,
+        string? footer = null)
         => format switch
         {
-            ReceiptFormat.Thermal => RenderThermal(sale, locationName, timeZoneId, issuedByName, lineSeparator),
-            ReceiptFormat.Html => RenderHtml(sale, locationName, timeZoneId, issuedByName),
-            _ => RenderPlainText(sale, locationName, timeZoneId, issuedByName, lineSeparator),
+            ReceiptFormat.Thermal => RenderThermal(sale, locationName, timeZoneId, issuedByName, lineSeparator, header, footer),
+            ReceiptFormat.Html => RenderHtml(sale, locationName, timeZoneId, issuedByName, header, footer),
+            _ => RenderPlainText(sale, locationName, timeZoneId, issuedByName, lineSeparator, header, footer),
         };
 
     /// <summary>
@@ -88,13 +100,22 @@ public static class SaleReceiptRenderer
         string locationName,
         string? timeZoneId,
         string? issuedByName,
-        string lineSeparator = "\n")
+        string lineSeparator = "\n",
+        string? header = null,
+        string? footer = null)
     {
         ArgumentNullException.ThrowIfNull(sale);
 
         string number = sale.Number;
 
-        List<string> lines =
+        List<string> lines = [];
+        if (TextLines(header) is { Count: > 0 } headerLines)
+        {
+            lines.AddRange(headerLines.SelectMany(WrapThermal).Select(ReceiptThermal.Center));
+            lines.Add(ReceiptThermal.Line());
+        }
+
+        lines.AddRange(
         [
             ReceiptThermal.Center("SALE RECEIPT"),
             ReceiptThermal.Center(new string('=', Math.Max(8, number.Length))),
@@ -103,7 +124,7 @@ public static class SaleReceiptRenderer
             ReceiptThermal.Line($"Location: {locationName}"),
             ReceiptThermal.Line($"Cashier: {issuedByName ?? string.Empty}"),
             ReceiptThermal.Divider,
-        ];
+        ]);
 
         foreach (SaleItem item in sale.Items)
         {
@@ -114,7 +135,9 @@ public static class SaleReceiptRenderer
         lines.AddRange(RenderThermalTotals(sale));
         lines.AddRange(RenderThermalPayments(sale));
         lines.Add(ReceiptThermal.Divider);
-        lines.Add(ReceiptThermal.Center("Thank you."));
+        lines.AddRange(TextLines(footer) is { Count: > 0 } footerLines
+            ? footerLines.SelectMany(WrapThermal).Select(ReceiptThermal.Center)
+            : [ReceiptThermal.Center("Thank you.")]);
 
         return string.Join(lineSeparator, lines) + lineSeparator;
     }
@@ -128,7 +151,9 @@ public static class SaleReceiptRenderer
         Sale sale,
         string locationName,
         string? timeZoneId,
-        string? issuedByName)
+        string? issuedByName,
+        string? header = null,
+        string? footer = null)
     {
         ArgumentNullException.ThrowIfNull(sale);
 
@@ -136,6 +161,11 @@ public static class SaleReceiptRenderer
 
         body.Append("<div class=\"receipt\">").Append('\n');
         body.Append("  <header class=\"receipt-head\">").Append('\n');
+        foreach (string headerLine in TextLines(header))
+        {
+            body.Append("    <div class=\"brand\">").Append(ReceiptHtml.Escape(headerLine)).Append("</div>").Append('\n');
+        }
+
         body.Append("    <h1>Sale Receipt</h1>").Append('\n');
         body.Append("    <div class=\"number\">").Append(ReceiptHtml.Escape(sale.Number)).Append("</div>").Append('\n');
         body.Append("    <div class=\"meta\">").Append('\n');
@@ -221,10 +251,45 @@ public static class SaleReceiptRenderer
 
         body.Append("    </tbody>").Append('\n');
         body.Append("  </table>").Append('\n');
-        body.Append("  <footer>Thank you.</footer>").Append('\n');
+        List<string> footerLines = TextLines(footer);
+        body.Append("  <footer>")
+            .Append(footerLines.Count == 0 ? "Thank you." : string.Join("<br />", footerLines.Select(ReceiptHtml.Escape)))
+            .Append("</footer>").Append('\n');
         body.Append("</div>").Append('\n');
 
         return ReceiptHtml.Document($"SALE RECEIPT — {sale.Number}", body.ToString());
+    }
+
+    /// <summary>A branch's configured receipt text as trimmed, non-empty lines.</summary>
+    private static List<string> TextLines(string? text)
+        => string.IsNullOrWhiteSpace(text)
+            ? []
+            : [.. text.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => l.Length > 0)];
+
+    /// <summary>Word-wraps a line to the thermal width instead of cutting it off.</summary>
+    private static IEnumerable<string> WrapThermal(string text)
+    {
+        string current = string.Empty;
+        foreach (string word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (current.Length > 0 && current.Length + 1 + word.Length > ReceiptThermal.Width)
+            {
+                yield return current;
+                current = word;
+            }
+            else
+            {
+                current = current.Length == 0 ? word : current + " " + word;
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            yield return current;
+        }
     }
 
     private static IEnumerable<string> RenderThermalItem(SaleItem item)

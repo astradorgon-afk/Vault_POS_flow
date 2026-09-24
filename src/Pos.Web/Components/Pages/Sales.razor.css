@@ -21,6 +21,10 @@
 .sales-table tbody tr { cursor:pointer; }
 .sales-table tbody tr:hover { background:#f6f9f6; }
 .sales-table tbody tr:last-child td { border-bottom:0; }
+.results-more { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-top:1px solid var(--line); color:var(--muted); font-size:.82rem; }
+.more-action { height:36px; padding:0 14px; border:1px solid var(--line-strong); border-radius:8px; background:white; color:var(--forest); font-weight:700; cursor:pointer; }
+.more-action:hover:not(:disabled) { background:#f6f9f6; }
+.more-action:disabled { opacity:.55; }
 .sale-number { font: 700 .86rem "DM Sans"; color: var(--forest); font-weight: 600; letter-spacing: .01em; }
 .status-chip { padding:3px 9px; border-radius:999px; font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 .status-completed { background:#e7f0ea; color:#245a42; }

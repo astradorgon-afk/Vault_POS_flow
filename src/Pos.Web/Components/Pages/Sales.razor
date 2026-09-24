@@ -55,7 +55,7 @@
 else
 {
     <section class="search-strip">
-        <span>@(results.Count) transaction@(results.Count == 1 ? "" : "s")@(searched ? $" · {searchedRange}" : "")</span>
+        <span>@SummaryLabel@(searched ? $" · {searchedRange}" : "")</span>
     </section>
 
     @if (!string.IsNullOrWhiteSpace(message))
@@ -92,6 +92,15 @@ else
                     }
                 </tbody>
             </table>
+            @if (results.Count < total)
+            {
+                <footer class="results-more">
+                    <span>Showing @results.Count.ToString("N0", CultureInfo.InvariantCulture) of @total.ToString("N0", CultureInfo.InvariantCulture)</span>
+                    <button type="button" class="more-action" @onclick="LoadMoreAsync" disabled="@loadingMore">
+                        @(loadingMore ? "Loading…" : $"Show {Math.Min(PageSize, total - results.Count):N0} more")
+                    </button>
+                </footer>
+            }
         }
     </section>
 }
@@ -103,10 +112,17 @@ else
     private DateOnly? from;
     private DateOnly? to;
     private bool loadingLocations = true;
+    private const int PageSize = 100;
+    private int total;
     private bool searching;
+    private bool loadingMore;
     private bool searched;
     private string? message;
     private string searchedRange = string.Empty;
+
+    private string SummaryLabel => searched
+        ? $"{total.ToString("N0", CultureInfo.InvariantCulture)} transaction{(total == 1 ? "" : "s")}"
+        : "No search yet";
 
     private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
 
@@ -162,6 +178,7 @@ else
     {
         selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
         results.Clear();
+        total = 0;
         searched = false;
         message = null;
     }
@@ -178,13 +195,15 @@ else
         searched = true;
         message = null;
         results.Clear();
+        total = 0;
         try
         {
-            ApiResult<List<PosSaleSummary>> response = await Api.SearchSalesAsync(
-                locationId, from, to, CancellationToken.None);
+            ApiResult<PosSalePage> response = await Api.SearchSalesAsync(
+                locationId, from, to, 0, PageSize, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
 
-            results.AddRange(response.Value);
+            results.AddRange(response.Value.Sales);
+            total = response.Value.Total;
             searchedRange = BuildRangeLabel();
             if (results.Count == 0)
             {
@@ -193,6 +212,26 @@ else
         }
         catch (HttpRequestException) { message = "The sales ledger is unavailable. Try again shortly."; }
         finally { searching = false; }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (selectedLocationId is not { } locationId) return;
+
+        loadingMore = true;
+        try
+        {
+            ApiResult<PosSalePage> response = await Api.SearchSalesAsync(
+                locationId, from, to, results.Count, PageSize, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+
+            // New sales may have synced since the first page; skip any already shown.
+            HashSet<Guid> shown = [.. results.Select(sale => sale.Id)];
+            results.AddRange(response.Value.Sales.Where(sale => !shown.Contains(sale.Id)));
+            total = Math.Max(response.Value.Total, results.Count);
+        }
+        catch (HttpRequestException) { message = "The sales ledger is unavailable. Try again shortly."; }
+        finally { loadingMore = false; }
     }
 
     private string BuildRangeLabel()

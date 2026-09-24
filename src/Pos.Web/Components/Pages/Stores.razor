@@ -133,8 +133,7 @@ else if (report is not null)
     private bool loading = true;
     private string? message;
 
-    private DateOnly Today => DateOnly.FromDateTime(
-        TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila")).DateTime);
+    private static DateOnly Today => StoreClock.Today;
 
     private (DateOnly From, DateOnly To) Range => period switch
     {
@@ -174,9 +173,7 @@ else if (report is not null)
         try
         {
             (DateOnly from, DateOnly to) = Range;
-            ApiResult<PosStorePerformanceReport> response = await Api.GetAsync<PosStorePerformanceReport>(
-                FormattableString.Invariant($"/api/v1/dashboard/store-performance?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
-                CancellationToken.None);
+            ApiResult<PosStorePerformanceReport> response = await Api.GetStorePerformanceAsync(from, to, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null)
             {
                 message = response.Error;

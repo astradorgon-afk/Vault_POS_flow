@@ -268,7 +268,7 @@
             CanViewSales="CanViewSales"
             CanCreateReturn="CanReturn"
             CanRefund="CanRefund"
-            SearchSales="@((from, to) => Register.SearchSalesAsync(from, to))"
+            SearchSales="@((from, to, number) => Register.SearchSalesAsync(from, to, number))"
             GetSaleDetail="LoadReturnSaleAsync"
             AcceptReturn="AcceptReturnAsync"
             RefundReturn="RefundReturnAsync"
@@ -358,6 +358,8 @@
     private SaleScreen _screen = SaleScreen.Loading;
     private string _storeName = "VaultFlow";
     private string _tillCode = string.Empty;
+    private string _receiptHeader = string.Empty;
+    private string _receiptFooter = string.Empty;
     private string _search = string.Empty;
     private string _barcode = string.Empty;
     private string? BarcodeError { get; set; }
@@ -578,6 +580,7 @@
         (string name, string tillCode) identity = await Register.GetStoreIdentityAsync();
         _storeName = identity.name;
         _tillCode = identity.tillCode;
+        (_receiptHeader, _receiptFooter) = await Register.GetReceiptTextAsync();
         _items.Clear();
         _items.AddRange(await Register.GetCatalogueAsync());
 
@@ -1411,7 +1414,13 @@
         string rule = new('-', width);
         StringBuilder text = new();
 
-        text.AppendLine(_storeName);
+        // The branch's own header, as on every receipt head office prints.
+        List<string> header = ReceiptLines(_receiptHeader, width);
+        foreach (string line in header.Count > 0 ? header : [_storeName])
+        {
+            text.AppendLine(line);
+        }
+
         if (_tillCode.Length > 0)
         {
             text.AppendLine("Register " + _tillCode);
@@ -1443,9 +1452,43 @@
         }
 
         text.AppendLine(rule);
+        foreach (string line in ReceiptLines(_receiptFooter, width))
+        {
+            text.AppendLine(line);
+        }
+
         text.AppendLine("Recorded while offline. Head office");
         text.AppendLine("confirms this sale when the register");
         text.AppendLine("reconnects.");
         return text.ToString();
+    }
+
+    /// <summary>Splits configured receipt text into its lines, word-wrapped to the paper.</summary>
+    private static List<string> ReceiptLines(string text, int width)
+    {
+        List<string> lines = [];
+        foreach (string paragraph in text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            string current = string.Empty;
+            foreach (string word in paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (current.Length > 0 && current.Length + 1 + word.Length > width)
+                {
+                    lines.Add(current);
+                    current = word;
+                }
+                else
+                {
+                    current = current.Length == 0 ? word : current + " " + word;
+                }
+            }
+
+            if (current.Length > 0)
+            {
+                lines.Add(current);
+            }
+        }
+
+        return lines;
     }
 }

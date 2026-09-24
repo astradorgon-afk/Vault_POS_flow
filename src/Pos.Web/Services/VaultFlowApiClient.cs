@@ -136,12 +136,21 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return ApiResult<string>.Success(text);
     }
 
-    /// <summary>Finds completed sales by store and a business-date window.
+    /// <summary>Gets what each store the operator may see sold and took in over
+    /// a period of business dates, summed over every sale by the API.</summary>
+    public Task<ApiResult<PosStorePerformanceReport>> GetStorePerformanceAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken)
+        => GetAsync<PosStorePerformanceReport>(
+            FormattableString.Invariant($"/api/v1/dashboard/store-performance?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
+            cancellationToken);
+
+    /// <summary>Finds one page of a store's sales in a business-date window, newest
+    /// first, with the total that matched so a list can page through all of them.
     /// Pass a store the operator may operate; the API re-checks <c>sale.view</c>.</summary>
-    public Task<ApiResult<List<PosSaleSummary>>> SearchSalesAsync(
-        Guid locationId, DateOnly? from, DateOnly? to, CancellationToken cancellationToken)
+    public async Task<ApiResult<PosSalePage>> SearchSalesAsync(
+        Guid locationId, DateOnly? from, DateOnly? to, int offset, int limit, CancellationToken cancellationToken)
     {
-        string path = FormattableString.Invariant($"/api/v1/sales?locationId={locationId:D}");
+        string path = FormattableString.Invariant($"/api/v1/sales?locationId={locationId:D}&offset={offset}&limit={limit}");
         if (from is { } fromDate)
         {
             path += FormattableString.Invariant($"&from={fromDate:yyyy-MM-dd}");
@@ -152,7 +161,29 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             path += FormattableString.Invariant($"&to={toDate:yyyy-MM-dd}");
         }
 
-        return GetAsync<List<PosSaleSummary>>(path, cancellationToken);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
+        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
+            return ApiResult<PosSalePage>.Failure(
+                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                problem?.ErrorCode);
+        }
+
+        List<PosSaleSummary>? sales = await response.Content
+            .ReadFromJsonAsync<List<PosSaleSummary>>(cancellationToken)
+            .ConfigureAwait(false);
+        if (sales is null)
+        {
+            return ApiResult<PosSalePage>.Failure("The API returned an unreadable response.");
+        }
+
+        int total = response.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? values)
+            && int.TryParse(values.FirstOrDefault(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int count)
+                ? count
+                : offset + sales.Count;
+        return ApiResult<PosSalePage>.Success(new PosSalePage(sales, total));
     }
 
     /// <summary>Gets the highest repeated negative-stock attempts in the last window.</summary>

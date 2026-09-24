@@ -93,7 +93,7 @@ else
 @code {
     private readonly List<PosLocation> locations = [];
     private string selectedLocationId = string.Empty;
-    private DateOnly selectedDate = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly selectedDate = StoreClock.Today;
     private PosDailySalesReport? report;
     private bool loading;
     private string? message;

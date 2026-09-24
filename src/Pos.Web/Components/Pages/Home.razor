@@ -293,8 +293,8 @@ else
     private readonly List<PosRepeatVariance> repeatVarianceRows = [];
     private readonly List<PosSyncFailure> syncFailures = [];
     private readonly List<string> dashboardMessages = [];
-    private readonly DateOnly dashboardFrom = DateOnly.FromDateTime(DateTime.Today).AddDays(-(PeriodDays - 1));
-    private readonly DateOnly dashboardTo = DateOnly.FromDateTime(DateTime.Today);
+    private readonly DateOnly dashboardFrom = StoreClock.Today.AddDays(-(PeriodDays - 1));
+    private readonly DateOnly dashboardTo = StoreClock.Today;
     private bool loadingDashboard = true;
     private decimal totalNet;
     private decimal totalGross;
@@ -315,7 +315,7 @@ else
 
     private bool HasSales => CanViewSales && storeKpis.Count > 0;
 
-    private static string DayGreeting => DateTime.Now.Hour switch
+    private static string DayGreeting => StoreClock.Now.Hour switch
     {
         var hour when hour < 12 => "Good morning",
         var hour when hour < 18 => "Good afternoon",
@@ -430,70 +430,72 @@ else
 
     private async Task LoadSalesAsync()
     {
-        ApiResult<List<PosLocation>> locationsResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
-        if (!locationsResponse.IsSuccess || locationsResponse.Value is null)
+        // The same report the Stores page reads, for this week and the week
+        // before, so the overview and the store figures always agree.
+        Task<ApiResult<PosStorePerformanceReport>> currentTask = Api.GetStorePerformanceAsync(
+            dashboardFrom, dashboardTo, CancellationToken.None);
+        Task<ApiResult<PosStorePerformanceReport>> previousTask = Api.GetStorePerformanceAsync(
+            dashboardFrom.AddDays(-PeriodDays), dashboardFrom.AddDays(-1), CancellationToken.None);
+        await Task.WhenAll(currentTask, previousTask);
+
+        if (currentTask.Result is not { IsSuccess: true, Value: { } report })
         {
-            dashboardMessages.Add(locationsResponse.Error ?? "Sales totals could not load.");
+            dashboardMessages.Add(currentTask.Result.Error ?? "Sales totals could not load.");
             return;
         }
 
-        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
-        List<PosLocation> stores = [.. locationsResponse.Value.Where(location =>
-            location.Kind == 1 && (Session.Current?.User.HasAllLocations == true || assigned.Contains(location.Id)))];
-        if (stores.Count == 0)
+        if (report.Stores.Count == 0)
         {
             dashboardMessages.Add("No active store is assigned to this account.");
             return;
         }
 
-        // One request per store covers the current and the previous period so trends compare like for like.
-        DateOnly previousFrom = dashboardFrom.AddDays(-PeriodDays);
-        ApiResult<List<PosSaleSummary>>[] results = await Task.WhenAll(stores.Select(store =>
-            Api.SearchSalesAsync(store.Id, previousFrom, dashboardTo, CancellationToken.None)));
-
         Dictionary<DateOnly, DayPoint> byDay = Enumerable.Range(0, PeriodDays)
             .Select(offset => new DayPoint(dashboardFrom.AddDays(offset)))
             .ToDictionary(day => day.Date);
 
-        decimal largestNet = 0m;
-        for (int index = 0; index < stores.Count; index++)
+        foreach (PosStorePerformance store in report.Stores)
         {
-            if (!results[index].IsSuccess || results[index].Value is not { } sales) continue;
+            storeKpis.Add(new(store.Code, store.Name, store.NetSales, store.Transactions));
+            totalNet += store.NetSales;
+            totalGross += store.GrossSales;
+            totalTransactions += store.Transactions;
 
-            List<PosSaleSummary> current = [.. sales.Where(sale => sale.BusinessDate >= dashboardFrom)];
-            List<PosSaleSummary> counted = [.. current.Where(sale => !IsVoided(sale))];
-            decimal net = counted.Sum(sale => sale.NetTotal);
-            storeKpis.Add(new(stores[index].Code, stores[index].Name, net, counted.Count));
-            totalNet += net;
-            totalGross += counted.Sum(sale => sale.GrossTotal);
-            totalTransactions += counted.Count;
-            largestNet = Math.Max(largestNet, net);
-
-            foreach (PosSaleSummary sale in counted)
+            foreach (PosStoreDailySales daily in store.Daily)
             {
-                if (!byDay.TryGetValue(sale.BusinessDate, out DayPoint? day)) continue;
-                day.Net += sale.NetTotal;
-                day.Gross += sale.GrossTotal;
-                day.Count++;
+                if (!byDay.TryGetValue(daily.Date, out DayPoint? day)) continue;
+                day.Net += daily.NetSales;
+                day.Gross += daily.GrossSales;
+                day.Count += daily.Transactions;
             }
+        }
 
-            List<PosSaleSummary> previous = [.. sales.Where(sale => sale.BusinessDate < dashboardFrom && !IsVoided(sale))];
-            previousNet += previous.Sum(sale => sale.NetTotal);
-            previousGross += previous.Sum(sale => sale.GrossTotal);
-            previousTransactions += previous.Count;
-
-            recentSales.AddRange(current.Select(sale => new RecentSale(sale, stores[index].Name)));
+        if (previousTask.Result is { IsSuccess: true, Value: { } previous })
+        {
+            previousNet = previous.Stores.Sum(store => store.NetSales);
+            previousGross = previous.Stores.Sum(store => store.GrossSales);
+            previousTransactions = previous.Stores.Sum(store => store.Transactions);
         }
 
         days.AddRange(byDay.Values.OrderBy(day => day.Date));
-        List<RecentSale> latest = [.. recentSales.OrderByDescending(entry => entry.Sale.CompletedAtUtc).Take(5)];
-        recentSales.Clear();
-        recentSales.AddRange(latest);
-
+        decimal largestNet = storeKpis.Max(store => store.NetSales);
         foreach (StoreKpi store in storeKpis)
         {
             store.BarWidth = largestNet == 0 ? 0 : (int)Math.Round(store.NetSales / largestNet * 100m);
         }
+
+        // The activity feed needs only the newest few sales from each store.
+        ApiResult<PosSalePage>[] latest = await Task.WhenAll(report.Stores.Select(store =>
+            Api.SearchSalesAsync(store.LocationId, dashboardFrom, dashboardTo, 0, 5, CancellationToken.None)));
+        for (int index = 0; index < latest.Length; index++)
+        {
+            if (latest[index] is not { IsSuccess: true, Value: { } page }) continue;
+            recentSales.AddRange(page.Sales.Select(sale => new RecentSale(sale, report.Stores[index].Name)));
+        }
+
+        List<RecentSale> newest = [.. recentSales.OrderByDescending(entry => entry.Sale.CompletedAtUtc).Take(5)];
+        recentSales.Clear();
+        recentSales.AddRange(newest);
     }
 
     private async Task LoadInventoryAsync()

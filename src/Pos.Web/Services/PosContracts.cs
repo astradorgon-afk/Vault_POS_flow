@@ -50,6 +50,9 @@ public sealed class PosLocation
     public int Kind { get; set; }
 }
 
+/// <summary>One page of a store's sales and how many matched in all.</summary>
+public sealed record PosSalePage(IReadOnlyList<PosSaleSummary> Sales, int Total);
+
 /// <summary>One completed sale as returned by the sales search.</summary>
 public sealed class PosSaleSummary
 {
@@ -615,7 +618,7 @@ public sealed record PosStorePerformance(
     IReadOnlyList<PosStoreTopProduct> TopProducts);
 
 /// <summary>One business date's completed sales at a store.</summary>
-public sealed record PosStoreDailySales(DateOnly Date, decimal NetSales, int Transactions);
+public sealed record PosStoreDailySales(DateOnly Date, decimal NetSales, int Transactions, decimal GrossSales);
 
 /// <summary>One of a store's best sellers over the period.</summary>
 public sealed record PosStoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);

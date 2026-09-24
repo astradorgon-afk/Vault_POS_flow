@@ -39,6 +39,7 @@ internal static class ReceiptHtml
         "body { font-family: 'Courier New', Courier, monospace; font-size: 12px; line-height: 1.4; color: #111; background: #fff; }" +
         ".receipt { width: 72mm; margin: 0 auto; }" +
         ".receipt-head { text-align: center; margin-bottom: 3mm; }" +
+        ".receipt-head .brand:first-child { font-weight: bold; font-size: 13px; }" +
         ".receipt-head h1 { font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 1mm; }" +
         ".receipt-head .number { font-weight: bold; margin-bottom: 1mm; }" +
         ".meta span { display: block; white-space: nowrap; }" +
