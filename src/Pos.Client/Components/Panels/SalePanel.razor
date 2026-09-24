@@ -1,7 +1,9 @@
 @using System.Globalization
+@using System.Text
 @using Microsoft.AspNetCore.Components.Web
 @using Pos.Client.Models
 @using Pos.Domain.Sales
+@implements IDisposable
 @inject RegisterService Register
 @inject NavigationManager Navigation
 
@@ -27,7 +29,7 @@
         <section class="sale-complete-strip" aria-label="Completed sale">
             <span class="sale-complete-check" aria-hidden="true">✓</span>
             <div class="sale-complete-identity" role="status" aria-live="polite">
-                <strong>Sale complete</strong>
+                <strong>@(_lastSale.QueuedOffline ? "Sale saved offline" : "Sale complete")</strong>
                 <span>@_lastSale.Number</span>
             </div>
             @if (_changeDue is { } changeDue)
@@ -37,7 +39,9 @@
                     <strong>@PriceOf(changeDue)</strong>
                 </div>
             }
-            <span class="sale-complete-ready">Ready for the next scan</span>
+            <span class="sale-complete-ready">
+                @(_lastSale.QueuedOffline ? "Sends to head office when the connection is back" : "Ready for the next scan")
+            </span>
             <button type="button" class="button-secondary sale-complete-receipt" @onclick="OpenOriginalReceiptAsync">
                 View receipt
             </button>
@@ -91,9 +95,15 @@
                         <h3>Open the shift before the first sale.</h3>
                         <p>
                             @(_context is null
-                                ? "Connect to head office so this register can load its business date and shift."
+                                ? "This register could not load its business date. Lock it and sign in again."
                                 : $"Business date: {@_context.BusinessDate.ToString("ddd, MMM d yyyy", CultureInfo.InvariantCulture)}")
                         </p>
+                        @if (_context is not null && !_online)
+                        {
+                            <p class="shift-open-offline">
+                                Head office is offline. The shift opens on this register and is sent when the connection is back.
+                            </p>
+                        }
                         <button type="button" class="button-primary" @onclick="StartShiftOpen" disabled="@(_context is null || _busy)">
                             Open shift
                         </button>
@@ -133,9 +143,10 @@
                         CashRoundingIncrement="_context?.CashRoundingIncrement ?? 0.01m"
                         PaymentAllowed="PaymentAllowed"
                         PaymentBlockedMessage="@PaymentBlockedMessage"
-                        PaymentBlockedDetail="@RegisterService.OfflineSaleMessaging"
+                        PaymentBlockedDetail="Sales already taken are safe on this register and are sent when it reconnects."
                         FocusTicket="_cashTicket"
                         Busy="_screen == SaleScreen.Completing"
+                        CashOnly="!_online"
                         OnComplete="CompleteSaleAsync"
                         OnBack="BackToCartAsync" />
                 }
@@ -453,22 +464,18 @@
 
     private decimal NetTotal => decimal.Round(_cart.Sum(line => line.Total), 4, MidpointRounding.ToEven);
 
-    private bool _online => Status?.Connectivity != DeviceConnectivityState.Offline && _contextError is null;
+    private bool _online => !Register.IsOffline && Status?.Connectivity != DeviceConnectivityState.Offline && _contextError is null;
 
-    private bool PaymentAllowed => _context?.OpenShift is not null && _online && Status?.Authority != DeviceAuthorityState.Expired;
+    // Offline, cash still sells: the sale is queued on the device. What stops a
+    // sale is a missing shift or an offline authority that has run out.
+    private bool PaymentAllowed => _context?.OpenShift is not null && Status?.Authority != DeviceAuthorityState.Expired;
 
     private string? PaymentBlockedMessage
-    {
-        get
-        {
-            if (!_online || Status?.Authority == DeviceAuthorityState.Expired)
-            {
-                return "This sale can only be completed with head office.";
-            }
+        => Status?.Authority == DeviceAuthorityState.Expired
+            ? "This register’s offline sign-in has expired. Connect to head office and sign in again to take payments."
+            : null;
 
-            return null;
-        }
-    }
+    private string _offlineReceiptText = string.Empty;
 
     private string BusinessDateText =>
         _context?.BusinessDate is { } date
@@ -479,6 +486,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Register.StateChanged += OnRegisterStateChanged;
         try
         {
             await LoadTillAsync();
@@ -495,6 +503,36 @@
             }
         }
     }
+
+    public void Dispose() => Register.StateChanged -= OnRegisterStateChanged;
+
+    // Raised from the background sync loop: the register went back online, or
+    // queued sales were sent. Refresh the banner, and once reconnected, reload
+    // the shift from head office while the till is idle.
+    private void OnRegisterStateChanged()
+        => _ = InvokeAsync(async () =>
+        {
+            bool reconnected = !Register.IsOffline && _wasOffline;
+            _wasOffline = Register.IsOffline;
+            await OnRefreshed.InvokeAsync();
+
+            if (reconnected && !_busy && _cart.Count == 0 && _screen is SaleScreen.Selling or SaleScreen.NeedsShift)
+            {
+                try
+                {
+                    await LoadTillAsync();
+                    _screen = ShiftScreenForContext();
+                }
+                catch (HeadOfficeException ex)
+                {
+                    _error = ex.Message;
+                }
+            }
+
+            StateHasChanged();
+        });
+
+    private bool _wasOffline;
 
     private SaleScreen ApplyPostLoadScreen()
     {
@@ -536,6 +574,7 @@
 
     private async Task LoadTillAsync()
     {
+        _wasOffline = Register.IsOffline;
         (string name, string tillCode) identity = await Register.GetStoreIdentityAsync();
         _storeName = identity.name;
         _tillCode = identity.tillCode;
@@ -918,6 +957,9 @@
                 : null;
 
             decimal? completedSaleChange = _changeDue;
+            _offlineReceiptText = _lastSale.QueuedOffline
+                ? BuildOfflineReceipt(_lastSale, payment, completedSaleChange)
+                : string.Empty;
 
             // Return directly to a fresh basket. The slim completion strip keeps
             // the sale number and change visible without replacing the cart.
@@ -1075,8 +1117,18 @@
 
         _receiptAfterSale = afterSale;
         _receiptOpen = true;
-        _receiptBusy = true;
         _receiptError = null;
+
+        if (_lastSale.QueuedOffline)
+        {
+            // Head office has not seen this sale yet, so it has no receipt for
+            // it; the register prints its own customer copy.
+            _receiptBusy = false;
+            _receiptText = _offlineReceiptText;
+            return;
+        }
+
+        _receiptBusy = true;
         _receiptText = string.Empty;
         await InvokeAsync(StateHasChanged);
         try
@@ -1350,4 +1402,50 @@
 
     private static string PriceOf(decimal value)
         => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    // The customer copy for a sale queued on the register. It is built from
+    // the cart before it is cleared, with the prices the till charged.
+    private string BuildOfflineReceipt(CompletedRegisterSale sale, RegisterPaymentInput payment, decimal? change)
+    {
+        const int width = 36;
+        string rule = new('-', width);
+        StringBuilder text = new();
+
+        text.AppendLine(_storeName);
+        if (_tillCode.Length > 0)
+        {
+            text.AppendLine("Register " + _tillCode);
+        }
+
+        text.AppendLine(sale.Number);
+        text.AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture));
+        text.AppendLine("Cashier: " + (Register.Current?.DisplayName ?? string.Empty));
+        text.AppendLine(rule);
+
+        foreach (SaleCartLine line in _cart)
+        {
+            text.AppendLine(line.Item.Name);
+            string detail = line.Quantity.ToString(CultureInfo.InvariantCulture) + " x " + PriceOf(line.Item.Price ?? 0m);
+            string amount = PriceOf(line.Total);
+            text.AppendLine("  " + detail.PadRight(Math.Max(0, width - amount.Length - 2)) + amount);
+        }
+
+        text.AppendLine(rule);
+        text.AppendLine("TOTAL".PadRight(Math.Max(0, width - PriceOf(NetTotal).Length)) + PriceOf(NetTotal));
+        if (payment.Tendered is { } tendered)
+        {
+            text.AppendLine("Cash".PadRight(Math.Max(0, width - PriceOf(tendered).Length)) + PriceOf(tendered));
+        }
+
+        if (change is { } due)
+        {
+            text.AppendLine("Change".PadRight(Math.Max(0, width - PriceOf(due).Length)) + PriceOf(due));
+        }
+
+        text.AppendLine(rule);
+        text.AppendLine("Recorded while offline. Head office");
+        text.AppendLine("confirms this sale when the register");
+        text.AppendLine("reconnects.");
+        return text.ToString();
+    }
 }

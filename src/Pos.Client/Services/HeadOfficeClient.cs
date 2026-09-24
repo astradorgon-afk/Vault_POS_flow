@@ -82,10 +82,11 @@ public sealed record RegisterSalePayment(
     decimal? Tendered,
     string? ProviderReference);
 
-/// <summary>A sale accepted by head office.</summary>
-/// <param name="Id">The sale identifier.</param>
+/// <summary>A sale accepted by head office, or queued on the register while it was offline.</summary>
+/// <param name="Id">The sale identifier, or the queued event's identifier for an offline sale.</param>
 /// <param name="Number">The printed sale number.</param>
-public sealed record CompletedRegisterSale(Guid Id, string Number);
+/// <param name="QueuedOffline">Whether the sale is waiting on the register to be sent to head office.</param>
+public sealed record CompletedRegisterSale(Guid Id, string Number, bool QueuedOffline = false);
 
 /// <summary>The X-REPORT facts head office keeps for a cashier shift.</summary>
 /// <param name="ShiftId">The shift identifier.</param>
@@ -200,6 +201,17 @@ public sealed class HeadOfficeException : Exception
         : base(message, innerException)
     {
     }
+
+    /// <summary>
+    /// Gets a value indicating whether head office could not be reached or could
+    /// not answer at all (no route, timeout, or a 5xx from it or its proxy), as
+    /// opposed to answering with a refusal. Only this kind of failure lets the
+    /// register fall back to working offline.
+    /// </summary>
+    public bool IsUnreachable { get; init; }
+
+    /// <summary>Gets the HTTP status head office answered with, when it answered.</summary>
+    public int? StatusCode { get; init; }
 }
 
 /// <summary>
@@ -207,7 +219,8 @@ public sealed class HeadOfficeException : Exception
 /// because a manager chooses it at set-up; nothing here remembers it.
 /// </summary>
 /// <param name="http">The shared HTTP client.</param>
-public sealed class HeadOfficeClient(HttpClient http)
+/// <param name="reachability">Where each call's reachability is reported for the status banner.</param>
+public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability reachability)
 {
     private const string DeviceHeader = "X-Device-Id";
 
@@ -246,6 +259,22 @@ public sealed class HeadOfficeClient(HttpClient http)
             server,
             "api/v1/auth/login",
             new { userName, password },
+            accessToken: null,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return new HeadOfficeSession(response.AccessToken, response.RefreshToken, response.User);
+    }
+
+    /// <summary>Exchanges a session's single-use refresh token for a new pair.</summary>
+    public async Task<HeadOfficeSession> RefreshAsync(
+        Uri server, string refreshToken, Guid deviceId, CancellationToken cancellationToken)
+    {
+        SignInResponse response = await SendAsync<SignInResponse>(
+            HttpMethod.Post,
+            server,
+            "api/v1/auth/refresh",
+            new { refreshToken },
             accessToken: null,
             deviceId,
             cancellationToken).ConfigureAwait(false);
@@ -315,6 +344,12 @@ public sealed class HeadOfficeClient(HttpClient http)
         Uri server, string accessToken, Guid deviceId, CancellationToken cancellationToken)
         => SendAsync<SyncBaselineResponse>(
             HttpMethod.Get, server, "api/v1/sync/baseline", null, accessToken, deviceId, cancellationToken);
+
+    /// <summary>Uploads a batch of business events this register queued while it was offline.</summary>
+    public Task<SyncPushResponse> PushEventsAsync(
+        Uri server, string accessToken, Guid deviceId, SyncPushRequest batch, CancellationToken cancellationToken)
+        => SendAsync<SyncPushResponse>(
+            HttpMethod.Post, server, "api/v1/sync/push", batch, accessToken, deviceId, cancellationToken);
 
     /// <summary>Loads the product identifiers needed to turn cached catalogue rows into sale lines.</summary>
     public async Task<IReadOnlyDictionary<Guid, ProductSaleReference>> GetProductSaleReferencesAsync(
@@ -480,20 +515,32 @@ public sealed class HeadOfficeClient(HttpClient http)
         }
         catch (HttpRequestException ex)
         {
+            reachability.Report(reachable: false);
             throw new HeadOfficeException(
                 FormattableString.Invariant($"Head office could not be reached at {server}. Check the address and that it is running."),
-                ex);
+                ex)
+            { IsUnreachable = true };
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new HeadOfficeException("Head office took too long to answer. Try again.", ex);
+            reachability.Report(reachable: false);
+            throw new HeadOfficeException("Head office took too long to answer. Try again.", ex) { IsUnreachable = true };
         }
 
         using (response)
         {
+            // A 5xx is head office (or the proxy in front of it) failing to
+            // answer, not a decision about this request: treat it like no route.
+            bool serverDown = (int)response.StatusCode >= 500;
+            reachability.Report(reachable: !serverDown);
+
             if (!response.IsSuccessStatusCode)
             {
-                throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+                throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false))
+                {
+                    IsUnreachable = serverDown,
+                    StatusCode = (int)response.StatusCode,
+                };
             }
 
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent

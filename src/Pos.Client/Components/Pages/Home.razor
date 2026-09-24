@@ -173,8 +173,10 @@
     // A sign-in lands on the office when the account holds any back-office
     // permission, and on the till otherwise. A cashier should not bounce
     // through an empty office hub.
+    // The office console reads everything from head office, so an offline
+    // sign-in always lands on the till, which keeps working for cash sales.
     private static bool BackOfficeAccessible(RegisterUser? user)
-        => user is not null
+        => user is { Offline: false }
             && user.Session.User.Permissions.Any(perm =>
                 perm == "inventory.view" || perm == "transfer.view"
                 || perm == "purchase.view" || perm == "report.view");

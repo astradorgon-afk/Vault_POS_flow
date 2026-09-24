@@ -34,6 +34,13 @@
             <span>To</span>
             <input type="date" @bind="to" disabled="@(selectedLocationId is null)"/>
         </label>
+        @if (CanViewSales)
+        {
+            <button type="button" class="search-action" @onclick="SearchAsync"
+                    disabled="@(searching || selectedLocationId is null)">
+                @(searching ? "Searching…" : "Find sales")
+            </button>
+        }
     </div>
 </section>
 
@@ -49,10 +56,6 @@ else
 {
     <section class="search-strip">
         <span>@(results.Count) transaction@(results.Count == 1 ? "" : "s")@(searched ? $" · {searchedRange}" : "")</span>
-        <button type="button" class="search-action" @onclick="SearchAsync"
-                disabled="@(searching || selectedLocationId is null)">
-            @(searching ? "Searching…" : "Find sales")
-        </button>
     </section>
 
     @if (!string.IsNullOrWhiteSpace(message))

@@ -47,7 +47,7 @@
             {
                 DeviceStatusConcern.AuthorityExpired => "Sign-in has expired",
                 DeviceStatusConcern.AuthorityExpiringSoon => "Sign-in expires soon",
-                DeviceStatusConcern.WorkingOffline => "Offline",
+                DeviceStatusConcern.WorkingOffline => "Working offline",
                 _ => "Online",
             };
         }
@@ -64,7 +64,10 @@
 
             if (Offline)
             {
-                return RegisterService.OfflineSaleMessaging;
+                int waiting = Status?.UnsentEvents ?? 0;
+                return waiting == 0
+                    ? RegisterService.OfflineSaleMessaging
+                    : $"{RegisterService.OfflineSaleMessaging} {waiting} waiting to send.";
             }
 
             if (Status?.Concern == DeviceStatusConcern.AuthorityExpiringSoon)

@@ -48,6 +48,30 @@ of. Creating and editing a customer is allowed, because the alternative is
 refusing a customer at the till during an outage; deactivation is not, because
 nothing at a till depends on it.
 
+### 1.1 What the desktop register does today when head office is down
+
+The register no longer needs the API to open. When sign-in gets no answer
+(no route, timeout, or a 5xx from the API or its proxy):
+
+- **Sign-in** falls back to a salted PBKDF2 verifier the device kept from that
+  user's last online sign-in (secure store, valid 7 days). A wrong password
+  or an unknown account is still refused. What the user may do is still
+  decided by the cached permission snapshot and its expiry.
+- **Opening a shift** runs `OpenShiftCommand` on the device and queues
+  `ShiftOpened`.
+- **Cash sales** are queued as `SaleCompleted` events under a device `SAL`
+  number, after checking `sale.create` in the snapshot. The register prints
+  its own customer copy. Card and e-wallet payments, returns, refunds,
+  reprints, customer lookup and shift close still need the connection.
+- A background loop (every 30 s) signs the offline session back in once the
+  API answers, downloads fresh store data, and uploads the outbox in device
+  order through `/api/v1/sync/push`, refreshing an expired access token once
+  per round. Head office accepts an event only from the user who produced
+  it, so a batch stops at the first event queued by another cashier.
+- If an online sale or shift open fails mid-request, the offline copy reuses
+  the same document number, so a request that did land is refused as a
+  duplicate on replay rather than recorded twice.
+
 ---
 
 ## 2. Local data model

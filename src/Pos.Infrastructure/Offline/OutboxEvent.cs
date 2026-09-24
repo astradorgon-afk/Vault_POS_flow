@@ -153,6 +153,94 @@ public sealed class OutboxEvent
 
     /// <summary>Gets the server's last response, kept verbatim for escalation.</summary>
     public string? ServerResponseJson { get; private set; }
+
+    /// <summary>Consecutive transport failures after which the event is surfaced as failed.</summary>
+    public const int AttemptsBeforeFailed = 8;
+
+    /// <summary>The longest wait between two attempts (OFFLINE_SYNC.md §3.2).</summary>
+    public static readonly TimeSpan MaximumRetryDelay = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Reports whether the uploader should send this event now: a pending event
+    /// whose back-off has elapsed, or a failed one still on a retry schedule.
+    /// An event the server rejected outright has no schedule and waits for an operator.
+    /// </summary>
+    /// <param name="now">The device clock.</param>
+    /// <returns><see langword="true"/> if the event is due.</returns>
+    public bool IsDue(DateTimeOffset now)
+        => Status switch
+        {
+            OutboxStatus.Pending or OutboxStatus.Sending => NextRetryAtUtc is null || NextRetryAtUtc <= now,
+            OutboxStatus.Failed => NextRetryAtUtc is { } retryAt && retryAt <= now,
+            _ => false,
+        };
+
+    /// <summary>Records the server's per-event verdict.</summary>
+    /// <param name="outcome">
+    /// Where the event now stands: <see cref="OutboxStatus.Synchronized"/>,
+    /// <see cref="OutboxStatus.RequiresReview"/>, <see cref="OutboxStatus.Conflict"/>
+    /// or <see cref="OutboxStatus.Failed"/> for an outright rejection.
+    /// </param>
+    /// <param name="attemptedAtUtc">When the upload was made.</param>
+    /// <param name="error">The server's reason, if it gave one.</param>
+    /// <param name="serverResponseJson">The server's result for this event, verbatim.</param>
+    public void RecordServerOutcome(
+        OutboxStatus outcome,
+        DateTimeOffset attemptedAtUtc,
+        string? error,
+        string? serverResponseJson)
+    {
+        if (outcome is OutboxStatus.Pending or OutboxStatus.Sending)
+        {
+            throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "A server verdict is final for this attempt.");
+        }
+
+        Status = outcome;
+        AttemptCount++;
+        LastAttemptAtUtc = attemptedAtUtc;
+        NextRetryAtUtc = null;
+        LastError = Truncate(error, 2000);
+        ServerResponseJson = Truncate(serverResponseJson, 8000);
+    }
+
+    /// <summary>
+    /// Records that the server asked the device to wait, for example because an
+    /// earlier sequence has not arrived yet. The event stays pending.
+    /// </summary>
+    /// <param name="attemptedAtUtc">When the upload was made.</param>
+    /// <param name="retryAtUtc">When to try again.</param>
+    /// <param name="reason">Why the server deferred it.</param>
+    public void RecordDeferred(DateTimeOffset attemptedAtUtc, DateTimeOffset retryAtUtc, string? reason)
+    {
+        Status = OutboxStatus.Pending;
+        LastAttemptAtUtc = attemptedAtUtc;
+        NextRetryAtUtc = retryAtUtc;
+        LastError = Truncate(reason, 2000);
+    }
+
+    /// <summary>
+    /// Records an upload that never got a verdict (no route, timeout, server
+    /// error), and schedules the next attempt with exponential back-off.
+    /// Retries are never abandoned: after <see cref="AttemptsBeforeFailed"/>
+    /// attempts the event is surfaced as failed but stays on its schedule.
+    /// </summary>
+    /// <param name="attemptedAtUtc">When the upload was made.</param>
+    /// <param name="error">What went wrong.</param>
+    public void RecordTransportFailure(DateTimeOffset attemptedAtUtc, string error)
+    {
+        AttemptCount++;
+        LastAttemptAtUtc = attemptedAtUtc;
+        LastError = Truncate(error, 2000);
+
+        double seconds = Math.Min(
+            Math.Pow(2, Math.Min(AttemptCount - 1, 20)) * 5d,
+            MaximumRetryDelay.TotalSeconds);
+        NextRetryAtUtc = attemptedAtUtc.AddSeconds(seconds);
+        Status = AttemptCount >= AttemptsBeforeFailed ? OutboxStatus.Failed : OutboxStatus.Pending;
+    }
+
+    private static string? Truncate(string? value, int length)
+        => value is null || value.Length <= length ? value : value[..length];
 }
 
 /// <summary>

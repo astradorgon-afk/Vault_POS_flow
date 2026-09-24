@@ -54,6 +54,7 @@ public static class MauiProgram
 
         // What the register shows about itself. The probe is here rather than in
         // infrastructure because reachability is a platform question.
+        builder.Services.AddSingleton<HeadOfficeReachability>();
         builder.Services.AddSingleton<IDeviceConnectivityProbe, NetworkConnectivityProbe>();
         builder.Services.AddSingleton<DeviceStatusProvider>();
 
@@ -64,6 +65,13 @@ public static class MauiProgram
         builder.Services.AddSingleton(SecureStorage.Default);
         builder.Services.AddSingleton(Preferences.Default);
         builder.Services.AddSingleton<DeviceKeyStore>();
+
+        // What lets the register keep trading when head office is down: an
+        // offline sign-in verifier for people who have signed in here before,
+        // and the sale units and checkout context from the last online session.
+        builder.Services.AddSingleton<OfflineCredentialStore>();
+        builder.Services.AddSingleton(sp => new OfflineRegisterCache(
+            sp.GetRequiredService<IPreferences>(), FileSystem.Current.AppDataDirectory));
         builder.Services.AddSingleton<RegisterService>();
 
         // The office console: the same signed-in session drives the head-office
