@@ -54,7 +54,7 @@ else
         <div><span>Route</span><strong class="route">@SourceLabel → @DestinationLabel</strong></div>
         <div><span>Kind</span><strong>@KindLabel</strong></div>
         <div><span>Mode</span><strong>@ModeLabel</strong></div>
-        <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
+        <div><span>Value</span><strong>@(detail.Transfer.TotalValue > 0 ? Money(detail.Transfer.TotalValue) : "Not picked yet")</strong></div>
         <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
         <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
         <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
@@ -375,7 +375,7 @@ else
         ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
         if (response.IsSuccess && response.Value is not null)
         {
-            locations.AddRange(response.Value.Where(location => location.Kind == 1));
+            locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1));
         }
     }
 

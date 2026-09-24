@@ -100,7 +100,11 @@ public sealed class PickTransferCommandHandler(
     {
         List<Error> errors = [];
 
-        Dictionary<BatchId, PickableStockItem> pickableByBatch = buckets.ToDictionary(b => b.BatchKey);
+        // Keyed by product as well as batch: every product that does not track
+        // batches shares the empty batch key, so a transfer carrying two such
+        // products would otherwise collide (and check the wrong product's stock).
+        Dictionary<(ProductId ProductId, BatchId BatchKey), PickableStockItem> pickable =
+            buckets.ToDictionary(b => (b.ProductId, b.BatchKey));
 
         foreach (IGrouping<int, TransferPickRequestItem> group in command.Allocations.GroupBy(a => a.LineNo))
         {
@@ -144,13 +148,13 @@ public sealed class PickTransferCommandHandler(
                         continue;
                     }
 
-                    if (!pickableByBatch.TryGetValue(batchKey, out PickableStockItem? bucket)
+                    if (!pickable.TryGetValue((product.Id, batchKey), out PickableStockItem? bucket)
                         || bucket.AvailableQuantity < allocation.Quantity)
                     {
                         errors.Add(TransferErrors.StockUnavailable(lineNo, allocation.Quantity));
                     }
                 }
-                else if (!pickableByBatch.TryGetValue(BatchId.Empty, out PickableStockItem? bucket)
+                else if (!pickable.TryGetValue((product.Id, BatchId.Empty), out PickableStockItem? bucket)
                          || bucket.AvailableQuantity < allocation.Quantity)
                 {
                     errors.Add(TransferErrors.StockUnavailable(lineNo, allocation.Quantity));

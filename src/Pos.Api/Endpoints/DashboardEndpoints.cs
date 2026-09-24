@@ -5,6 +5,7 @@ using Pos.Application.Identity;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.Endpoints;
@@ -28,12 +29,20 @@ public static class DashboardEndpoints
 
     private static async Task<IResult> GetInventoryOverviewAsync(
         PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
-        LocationId[]? assigned = currentUser.HasAllLocations
+        // Scope from the stored authorization, as the other inventory endpoints
+        // do: the token carries only the primary location, so a business-wide
+        // owner would otherwise see an empty business.
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        LocationId[]? assigned = authorization.HasAllLocations
             ? null
-            : [.. currentUser.AssignedLocations];
+            : [.. authorization.Locations];
 
         IQueryable<InventoryBalance> balances = context.InventoryBalances.AsNoTracking();
         IQueryable<ProductLocationSetting> settings = context.ProductLocationSettings

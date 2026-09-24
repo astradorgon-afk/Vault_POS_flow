@@ -411,6 +411,20 @@ public static class TransferEndpoints
         return app;
     }
 
+    /// <summary>Summarizes a transfer loaded with its lines and allocations.</summary>
+    private static TransferSummary Summary(Transfer t) => new(
+        t.Id.Value,
+        t.Number,
+        t.Status.ToString(),
+        t.SourceLocationId.Value,
+        t.DestinationLocationId.Value,
+        t.CreatedByUserId.Value,
+        t.CreatedAtUtc,
+        t.DispatchedAtUtc,
+        t.ReceivedAtUtc,
+        t.TotalValue,
+        t.Lines.Count);
+
     private static async Task<IResult> ListTransfersAsync(
         PosDbContext context,
         DatabasePermissionEvaluator evaluator,
@@ -433,22 +447,17 @@ public static class TransferEndpoints
                 || authorization.Locations.Contains(t.DestinationLocationId));
         }
 
-        List<TransferSummary> summaries = await query
+        // TotalValue sums the picked allocations in memory; a SQL projection
+        // never loads them and reported every transfer as worth zero.
+        List<Transfer> transfers = await query
+            .Include(t => t.Lines)
+            .Include(t => t.Allocations)
+            .AsSplitQuery()
             .OrderByDescending(t => t.CreatedAtUtc)
-            .Select(t => new TransferSummary(
-                t.Id.Value,
-                t.Number,
-                t.Status.ToString(),
-                t.SourceLocationId.Value,
-                t.DestinationLocationId.Value,
-                t.CreatedByUserId.Value,
-                t.CreatedAtUtc,
-                t.DispatchedAtUtc,
-                t.ReceivedAtUtc,
-                t.TotalValue,
-                t.Lines.Count))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        List<TransferSummary> summaries = [.. transfers.Select(Summary)];
 
         return TypedResults.Ok(summaries);
     }
@@ -796,24 +805,17 @@ public static class TransferEndpoints
         PosDbContext context,
         CancellationToken cancellationToken)
     {
-        List<TransferSummary> summaries = await context.Transfers
+        List<Transfer> transfers = await context.Transfers
             .AsNoTracking()
+            .Include(t => t.Lines)
+            .Include(t => t.Allocations)
+            .AsSplitQuery()
             .Where(t => t.Status == TransferStatus.PendingCentralReview)
             .OrderBy(t => t.CreatedAtUtc)
-            .Select(t => new TransferSummary(
-                t.Id.Value,
-                t.Number,
-                t.Status.ToString(),
-                t.SourceLocationId.Value,
-                t.DestinationLocationId.Value,
-                t.CreatedByUserId.Value,
-                t.CreatedAtUtc,
-                t.DispatchedAtUtc,
-                t.ReceivedAtUtc,
-                t.TotalValue,
-                t.Lines.Count))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        List<TransferSummary> summaries = [.. transfers.Select(Summary)];
 
         return TypedResults.Ok(summaries);
     }
@@ -899,6 +901,7 @@ public static class TransferEndpoints
 
     private static async Task<IResult> GetReplenishmentRecommendationsAsync(
         PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
@@ -910,7 +913,9 @@ public static class TransferEndpoints
         // Scoping is assignments-based, matching the rest of the API: a user
         // sees recommendations for the stores they are assigned to, whatever
         // their role grants. The token only carries the primary location, so
-        // the full assignment set comes from the database.
+        // the full assignment set comes from the database. A business-wide
+        // account with no store assignments at all (the owner, an
+        // administrator) looks after every store, so it sees all of them.
         List<LocationId> assignedLocations = await context.UserLocations
             .AsNoTracking()
             .Where(a => a.UserId == userId)
@@ -918,9 +923,12 @@ public static class TransferEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        bool everyStore = assignedLocations.Count == 0
+            && (await evaluator.GetAuthorizationAsync(userId, cancellationToken).ConfigureAwait(false)).HasAllLocations;
+
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind == LocationKind.Store && assignedLocations.Contains(l.Id))
+            .Where(l => l.Kind == LocationKind.Store && (everyStore || assignedLocations.Contains(l.Id)))
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1044,7 +1052,19 @@ public static class TransferEndpoints
                 quantity));
         }
 
-        return TypedResults.Ok(recommendations);
+        // Most urgent first: Critical (below minimum), then High (at or below
+        // the reorder point), then Normal; the largest shortfall leads each band.
+        static int Rank(string urgency) => urgency switch
+        {
+            "Critical" => 0,
+            "High" => 1,
+            _ => 2,
+        };
+
+        return TypedResults.Ok(recommendations
+            .OrderBy(r => Rank(r.Urgency))
+            .ThenByDescending(r => r.Deficit)
+            .ToList());
     }
 
     private static async Task<IResult> DispatchAsync(

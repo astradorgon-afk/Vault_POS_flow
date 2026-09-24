@@ -578,6 +578,84 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         resolved.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
+    [Fact]
+    public async Task Pick_TwoProductsWithoutBatches_PicksBothLines()
+    {
+        // Products that do not track batches all share the empty batch key; the
+        // pick check once keyed stock by batch alone and threw on the duplicate.
+        Seed seed = await SeedAsync("pk2");
+        string secondBarcode = Interlocked.Increment(ref _barcodeSequence).ToString(CultureInfo.InvariantCulture);
+        ProductId second = await factory.CreateProductAsync("TR-pk2-b", "Product pk2 b", secondBarcode, defaultPurchaseCost: 40m);
+        await factory.CreateUserAsync("pk2-requester", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("pk2-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string requester = await SignInAsync(client, "pk2-requester");
+        string approver = await SignInAsync(client, "pk2-approver");
+
+        await SeedAvailableAsync(seed.Warehouse, seed.Product, batchId: null, quantity: 10m, unitCost: 95m);
+        await SeedAvailableAsync(seed.Warehouse, second, batchId: null, quantity: 8m, unitCost: 40m);
+
+        using HttpResponseMessage created = await PostAsJsonAsync(
+            client,
+            "/api/v1/transfers",
+            new
+            {
+                sourceLocationId = seed.Warehouse.Value,
+                destinationLocationId = seed.Store.Value,
+                lines = new object[]
+                {
+                    new { productId = seed.Product.Value, quantity = 6m },
+                    new { productId = second.Value, quantity = 5m },
+                },
+            },
+            requester);
+        created.StatusCode.Should().Be(HttpStatusCode.OK, await created.Content.ReadAsStringAsync());
+        using JsonDocument createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        Guid transferId = createdBody.RootElement.GetProperty("id").GetGuid();
+
+        await RequestThroughApprovalAsync(client, requester, approver, transferId);
+
+        using HttpResponseMessage picked = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/transfers/{transferId}/pick"),
+            new
+            {
+                allocations = new object[]
+                {
+                    new { lineNo = 1, batchId = (Guid?)null, quantity = 6m },
+                    new { lineNo = 2, batchId = (Guid?)null, quantity = 5m },
+                },
+            },
+            approver);
+        picked.StatusCode.Should().Be(HttpStatusCode.OK, await picked.Content.ReadAsStringAsync());
+
+        // The list values the transfer at its picked costs (6 x 95 + 5 x 40);
+        // it once reported every transfer as worth zero.
+        using HttpRequestMessage listRequest = new(HttpMethod.Get, new Uri("/api/v1/transfers", UriKind.Relative));
+        listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", approver);
+        using HttpResponseMessage listed = await client.SendAsync(listRequest);
+        listed.StatusCode.Should().Be(HttpStatusCode.OK, await listed.Content.ReadAsStringAsync());
+        using JsonDocument list = JsonDocument.Parse(await listed.Content.ReadAsStringAsync());
+        JsonElement row = list.RootElement.EnumerateArray().Single(t => t.GetProperty("id").GetGuid() == transferId);
+        row.GetProperty("totalValue").GetDecimal().Should().Be(770m);
+        row.GetProperty("lineCount").GetInt32().Should().Be(2);
+
+        // Each line is checked against its own product: asking for more of the
+        // second product than it holds is refused even though the first has plenty.
+        using HttpResponseMessage overpick = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/transfers/{transferId}/pick"),
+            new
+            {
+                allocations = new object[]
+                {
+                    new { lineNo = 2, batchId = (Guid?)null, quantity = 9m },
+                },
+            },
+            approver);
+        overpick.IsSuccessStatusCode.Should().BeFalse();
+    }
+
     private async Task<Seed> SeedAsync(string suffix)
     {
         SupplierId supplier = await factory.CreateSupplierAsync($"SUP-{suffix}", $"Supplier {suffix}");

@@ -147,7 +147,7 @@ else
                             </td>
                             <td>@LocationLabel(transfer.SourceLocationId) → @LocationLabel(transfer.DestinationLocationId)</td>
                             <td>@transfer.LineCount</td>
-                            <td>@Money(transfer.TotalValue)</td>
+                            <td>@(transfer.TotalValue > 0 ? Money(transfer.TotalValue) : "—")</td>
                             <td>@transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@(transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                             <td>@(transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
@@ -279,7 +279,7 @@ else
             return;
         }
 
-        locations.AddRange(response.Value.Where(location => location.Kind == 1));
+        locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1));
     }
 
     private async Task LoadProductsAsync()

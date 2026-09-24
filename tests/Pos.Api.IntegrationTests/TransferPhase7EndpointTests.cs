@@ -563,6 +563,29 @@ public sealed class TransferPhase7EndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task ReplenishmentRecommendations_BusinessWideOwnerWithoutAssignments_SeesEveryStore()
+    {
+        // An owner covers the whole business and has no store assignments; the
+        // recommendations once scoped to assignments only and came back empty.
+        Seed seed = await SeedAsync("rpl3");
+        await factory.CreateUserAsync("rpl3-owner", Roles.Owner, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string owner = await SignInAsync(client, "rpl3-owner");
+
+        await SeedSettingAsync(seed.StoreA, seed.Product, minimum: 10m, reorder: 15m, target: 30m, maximum: 40m, preferred: 12m);
+        await SeedAvailableAsync(seed.StoreA, seed.Product, batchId: null, quantity: 4m, unitCost: 95m);
+        await SeedAvailableAsync(seed.Warehouse, seed.Product, batchId: null, quantity: 50m, unitCost: 95m);
+
+        using HttpResponseMessage response = await GetAsync(client, "/api/v1/replenishment/recommendations", owner);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        List<RecommendationDbo> recommendations = JsonSerializer.Deserialize<List<RecommendationDbo>>(
+            await response.Content.ReadAsStringAsync(),
+            WebJsonOptions)!;
+
+        recommendations.Should().Contain(r => r.LocationId == seed.StoreA.Value && r.ProductId == seed.Product.Value);
+    }
+
+    [Fact]
     public async Task ReplenishmentRecommendations_FallsBackToSurplusStore()
     {
         Seed seed = await SeedAsync("rpl2");

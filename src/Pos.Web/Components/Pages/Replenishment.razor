@@ -101,7 +101,8 @@
             }
 
             recommendations.Clear();
-            recommendations.AddRange(response.Value.OrderByDescending(r => r.Urgency).ThenByDescending(r => r.Deficit));
+            // Urgency is text; ranking it alphabetically put High above Critical.
+            recommendations.AddRange(response.Value.OrderBy(r => UrgencyRank(r.Urgency)).ThenByDescending(r => r.Deficit));
             await LoadProductNamesAsync(recommendations.Select(r => r.ProductId).Distinct().ToArray());
         }
         catch (HttpRequestException)
@@ -179,10 +180,17 @@
 
     private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
 
+    private static int UrgencyRank(string urgency) => urgency switch
+    {
+        "Critical" => 0,
+        "High" => 1,
+        _ => 2,
+    };
+
     private static string UrgencyChipClass(string urgency) => urgency switch
     {
-        "Critical" => "status-chip sc-issue",
-        "High" => "status-chip sc-pending-approval",
+        "Critical" => "status-chip sc-rejected",
+        "High" => "status-chip sc-issue",
         "Normal" => "status-chip sc-draft",
         _ => "status-chip",
     };

@@ -148,16 +148,22 @@ public static class CatalogEndpoints
         {
             string term = q.Trim();
 
-            // Name matches run through LIKE (case-insensitive on SQLite, which is
-            // the offline store's embedded database); SKU matches are exact after
-            // normalization, because the SKU is a value-converted key and partial
-            // string functions do not translate through the converter. Retired
-            // barcodes no longer find their product.
+            // Name matches compare lower-cased text: LIKE ignores case on SQLite
+            // but not on PostgreSQL, where "rice" would miss "Premium Rice". SKU
+            // matches are exact after normalization, because the SKU is a
+            // value-converted key and partial string functions do not translate
+            // through the converter. Retired barcodes no longer find their product.
+            string lowered = term.ToLowerInvariant();
+
+            // ToLower() is translated to SQL lower() and never runs in .NET, so
+            // the culture the analyzers ask for does not apply.
+#pragma warning disable CA1304, CA1311
             query = query.Where(p =>
-                EF.Functions.Like(p.Name, $"%{term}%")
+                EF.Functions.Like(p.Name.ToLower(), $"%{lowered}%")
                 || p.Sku == Sku.FromTrustedSource(term.ToUpperInvariant())
                 || context.ProductBarcodes.Any(b =>
                     b.ProductId == p.Id && b.RetiredAtUtc == null && b.Value.Contains(term)));
+#pragma warning restore CA1304, CA1311
         }
 
         List<ProductSummary> products = await query
