@@ -77,7 +77,6 @@ h1, h2, h3 { margin: 0; color: var(--text); font-weight: 650; letter-spacing: -0
 :focus-visible { outline: 2px solid var(--signal-bright); outline-offset: 2px; }
 
 .mono { font-family: var(--mono); letter-spacing: 0.02em; }
-.num, .money { font-variant-numeric: tabular-nums; }
 
 .eyebrow, .section-kicker, .rail-kicker {
     color: var(--signal);
@@ -221,27 +220,20 @@ kbd {
 .vf-alert-caution { border-color: var(--signal-line); background: var(--signal-soft); color: #f7d9a6; }
 .vf-alert-info { border-color: var(--cyan-line); background: var(--cyan-soft); color: #d8f1ee; }
 
-.catalogue-scroll { max-height: 55vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
-.catalogue-count { margin: 0.6rem 0 0; color: var(--faint); font-size: 0.8rem; }
-
 /* ==========================================================================
    Start-up, setup and sign-in (Home) - the original register-console look,
    scoped to .login-classic so it never leaks into the till or office.
    ========================================================================== */
 .register-app.login-classic { color-scheme: dark; font-family: "OpenSansRegular", "Segoe UI", sans-serif; background: #0c1114; color: #f4f0e6; --ink: #0c1114; --panel: #172126; --line: rgba(230, 224, 209, 0.14); --muted: #98a6a7; --text: #f4f0e6; --signal: #e3a84f; --signal-bright: #f2bd68; --cyan: #86c5c1; --danger: #ee837a; }
-.login-classic input, .login-classic select { font: inherit; }
+.login-classic input, .login-classic select { font: inherit; min-height: 0; width: 100%; padding: 0.78rem 0.9rem; border: 1px solid rgba(230, 224, 209, 0.17); border-radius: 0.6rem; outline: none; background: rgba(7, 12, 14, 0.58); color: var(--text); font-size: 0.9rem; transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease; }
 .login-classic.register-app {
     background-color: var(--ink);
-    background-image:
-        linear-gradient(rgba(142, 178, 174, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(142, 178, 174, 0.035) 1px, transparent 1px),
-        radial-gradient(circle at 82% 12%, rgba(227, 168, 79, 0.12), transparent 25rem),
-        linear-gradient(138deg, #10181b 0%, #0b1012 70%);
+    background-image: linear-gradient(rgba(142, 178, 174, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(142, 178, 174, 0.035) 1px, transparent 1px), radial-gradient(circle at 82% 12%, rgba(227, 168, 79, 0.12), transparent 25rem), linear-gradient(138deg, #10181b 0%, #0b1012 70%);
     background-size: 44px 44px, 44px 44px, auto, auto;
+    min-height: 100vh;
+    padding: 1.35rem clamp(1.25rem, 4vw, 4.5rem) 2rem;
 }
 .login-classic button { min-height: 0; padding: 0.76rem 1.05rem; border: 1px solid transparent; border-radius: 0.58rem; cursor: pointer; font-size: 0.82rem; font-weight: 700; line-height: normal; transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease; }
-.login-classic input, .login-classic select { min-height: 0; }
-.login-classic.register-app { min-height: 100vh; padding: 1.35rem clamp(1.25rem, 4vw, 4.5rem) 2rem; }
 .login-classic .app-topbar { display: flex; align-items: center; justify-content: space-between; width: min(92rem, 100%); margin: 0 auto; padding: 0.25rem 0 1.2rem; border-bottom: 1px solid var(--line); }
 .login-classic .brand-lockup, .login-classic .topbar-status, .login-classic .rail-footer, .login-classic .rail-guide-item { display: flex; align-items: center; }
 .login-classic .brand-lockup { gap: 0.75rem; }
@@ -284,13 +276,11 @@ kbd {
 .login-classic .panel { margin-top: 1.15rem; padding: 1.55rem; border: 1px solid var(--line); border-radius: 1rem; background: linear-gradient(145deg, rgba(27, 40, 46, 0.94), rgba(20, 30, 35, 0.96)); box-shadow: 0 1.6rem 4rem rgba(0, 0, 0, 0.16); }
 .login-classic .panel h2 { margin: 0 0 0.4rem; color: var(--text); font-size: 1.45rem; }
 .login-classic .panel-lead { margin: 0 0 1.25rem; color: var(--muted); font-size: 0.87rem; line-height: 1.6; }
-.login-classic .panel-head { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; justify-content: space-between; }
-.login-classic .panel-tools, .login-classic .form-actions { display: flex; gap: 0.65rem; align-items: center; }
+.login-classic .form-actions { display: flex; gap: 0.65rem; align-items: center; }
 .login-classic .form-grid { display: grid; gap: 0.85rem; }
 .login-classic .form-grid label { display: grid; gap: 0.38rem; }
 .login-classic .form-grid label > span { color: #c8d0ca; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.045em; text-transform: uppercase; }
 .login-classic .form-grid small { margin-left: 0.35rem; color: #7d8b8d; font-size: 0.7rem; font-weight: 400; letter-spacing: 0; text-transform: none; }
-.login-classic input, .login-classic select { width: 100%; padding: 0.78rem 0.9rem; border: 1px solid rgba(230, 224, 209, 0.17); border-radius: 0.6rem; outline: none; background: rgba(7, 12, 14, 0.58); color: var(--text); font-size: 0.9rem; transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease; }
 .login-classic input::placeholder { color: #657476; }
 .login-classic input:hover, .login-classic select:hover { border-color: rgba(230, 224, 209, 0.3); }
 .login-classic input:focus, .login-classic select:focus { border-color: var(--signal); background: rgba(7, 12, 14, 0.82); box-shadow: 0 0 0 0.2rem rgba(227, 168, 79, 0.13); }
@@ -308,12 +298,7 @@ kbd {
 .login-classic .panel-more { margin-top: 1.25rem; padding: 0.9rem 1rem; border: 1px solid rgba(230, 224, 209, 0.11); border-radius: 0.7rem; background: rgba(6, 11, 13, 0.2); }
 .login-classic .panel-more summary { color: #ecc276; cursor: pointer; font-size: 0.82rem; font-weight: 600; }
 .login-classic .panel-more[open] summary { margin-bottom: 1rem; }
-.login-classic.register-app-auth { min-height: 100vh; padding: 1.1rem clamp(1.25rem, 4vw, 3.5rem) 2rem; }
-.login-classic .auth-topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(92rem, 100%); margin: 0 auto; padding: 0.2rem 0 0.9rem; border-bottom: 1px solid var(--line); }
-.login-classic .auth-identity { color: #b7c2c1; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
-.login-classic .auth-stage { display: grid; flex: 1; place-items: center; width: min(34rem, 100%); margin: 0 auto; padding: 1.5rem 0; }
 .login-classic .auth-card { display: grid; gap: 1rem; width: 100%; }
-.login-classic .auth-sync-note { margin: 0; color: #5f7072; font-size: 0.66rem; text-align: center; }
 .login-classic .device-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.6rem 0.8rem; border: 1px solid rgba(134, 197, 193, 0.3); border-radius: 0.65rem; background: rgba(62, 112, 108, 0.1); color: #cfe7e4; font-size: 0.74rem; }
 .login-classic .device-status-lamp { width: 0.5rem; height: 0.5rem; flex: none; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 0.2rem rgba(134, 197, 193, 0.12); }
 .login-classic .device-status-headline { color: var(--cyan); font-weight: 700; }

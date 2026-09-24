@@ -1,7 +1,6 @@
 .pos-head { display:flex; flex-direction:column; align-items:flex-start; gap:16px; margin-bottom:18px; }
 .pos-head h1 { margin:.3rem 0 .3rem; font:800 clamp(1.5rem,2.4vw,2rem)/1.1 'Manrope'; letter-spacing:-.03em; }
 .pos-head p { margin:0; color:var(--muted); font-size:.9rem; }
-.head-pickers { display:flex; gap:12px; flex-wrap:wrap; }
 .location-picker { min-width:200px; display:grid; gap:6px; color:var(--muted); font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
 .location-picker select,.location-picker input { height:46px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:white; color:var(--ink); font-weight:600; text-transform:none; letter-spacing:0; font-size:.86rem; }
 .location-picker input:disabled,.location-picker select:disabled { opacity:.55; }
@@ -22,7 +21,7 @@
 .sales-table tbody tr { cursor:pointer; }
 .sales-table tbody tr:hover { background:#f6f9f6; }
 .sales-table tbody tr:last-child td { border-bottom:0; }
-.sale-number { font:700 .86rem 'DM Sans'; color:var(--forest); }
+.sale-number { font: 700 .86rem "DM Sans"; color: var(--forest); font-weight: 600; letter-spacing: .01em; }
 .status-chip { padding:3px 9px; border-radius:999px; font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 .status-completed { background:#e7f0ea; color:#245a42; }
 .status-voided { background:#f6e7e5; color:#8b3b35; }
