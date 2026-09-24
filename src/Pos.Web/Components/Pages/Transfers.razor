@@ -12,7 +12,7 @@
     <div>
         <p class="office-kicker">Inventory command</p>
         <h1 class="office-title">Transfers</h1>
-        <p class="office-lead">Move stock between your stores and the main warehouse, and record what arrives at the door.</p>
+        <p class="office-lead">Stock moving between the main warehouse and the stores, from request to arrival, as recorded at each location.</p>
     </div>
     <div class="head-pickers">
         <label class="location-picker">
@@ -48,76 +48,6 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
-    @if (CanRequestTransfers)
-    {
-        <section class="open-count">
-            <div class="open-count-title">
-                <strong>Request a transfer</strong>
-                <span>Choose the route, then add the lines. The transfer is created as a draft for someone to review.</span>
-            </div>
-            <div class="open-count-fields">
-                <label class="location-picker">
-                    <span>Source</span>
-                    <select value="@(sourceLocationId?.ToString() ?? string.Empty)" @onchange="OnSourceLocationChangedAsync" disabled="@locationsLoading">
-                        <option value="">Select a source</option>
-                        @foreach (PosLocation location in externalLocations)
-                        {
-                            <option value="@location.Id">@location.Code · @location.Name</option>
-                        }
-                    </select>
-                </label>
-                <label class="location-picker">
-                    <span>Destination</span>
-                    <select value="@(destinationLocationId?.ToString() ?? string.Empty)" @onchange="OnDestinationLocationChangedAsync" disabled="@locationsLoading">
-                        <option value="">Select a destination</option>
-                        @foreach (PosLocation location in externalLocations)
-                        {
-                            <option value="@location.Id">@location.Code · @location.Name</option>
-                        }
-                    </select>
-                </label>
-                <label class="location-picker">
-                    <span>Pre-approval token</span>
-                    <input type="text" placeholder="Optional token id"
-                           value="@preApprovalTokenId"
-                           @onchange="OnTokenChangedAsync" />
-                </label>
-            </div>
-            <div class="transfer-lines">
-                @for (int index = 0; index < draftLines.Count; index++)
-                {
-                    <div class="transfer-line" @key="draftLines[index].Marker">
-                        <select class="line-product"
-                                value="@(draftLines[index].ProductId?.ToString() ?? string.Empty)"
-                                @onchange="(e) => OnLineProductChangedAsync(index, e)">
-                            <option value="">Select a product</option>
-                            @foreach (PosProductSummary product in products)
-                            {
-                                <option value="@product.Id">@product.Sku · @product.Name</option>
-                            }
-                        </select>
-                        <input class="line-quantity" type="number" min="0" step="1" placeholder="Qty"
-                               value="@draftLines[index].Quantity"
-                               @onchange="(e) => OnLineQuantityChanged(index, e)" />
-                        @if (draftLines.Count > 1)
-                        {
-                            <button type="button" class="line-remove" @onclick="() => RemoveLine(index)">✕</button>
-                        }
-                    </div>
-                }
-                <button type="button" class="search-action line-add" @onclick="AddLine" disabled="@(products.Count == 0)">
-                    + Add line
-                </button>
-            </div>
-            <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="CreateTransferAsync"
-                        disabled="@(!CanCreateTransfer || creating)">
-                    @(creating ? "Creating…" : "Create transfer")
-                </button>
-            </div>
-        </section>
-    }
-
     <section class="results-panel" aria-live="polite">
         @if (loading)
         {
@@ -140,7 +70,7 @@ else
                             <td class="sale-number">@transfer.Number</td>
                             <td>
                                 <span class="@StatusChipClass(transfer.Status)">@SplitWords(transfer.Status)</span>
-                                @if (AwaitingReceive(transfer.Status) && CanReceive)
+                                @if (AwaitingReceive(transfer.Status))
                                 {
                                     <span class="status-chip sc-dispatched">awaiting receipt</span>
                                 }
@@ -167,29 +97,16 @@ else
         "PendingCentralReview",
     ];
 
-    private sealed record DraftLine(long Marker, Guid? ProductId, decimal Quantity);
-
     private readonly List<PosLocation> locations = [];
-    private readonly List<PosProductSummary> products = [];
     private readonly List<PosTransferSummary> transfers = [];
-    private readonly List<DraftLine> draftLines = [];
 
-    private Guid? sourceLocationId;
-    private Guid? destinationLocationId;
-    private string preApprovalTokenId = string.Empty;
     private string selectedStatus = string.Empty;
     private string searchedLabel = string.Empty;
 
-    private bool locationsLoading = true;
     private bool loading;
-    private bool creating;
     private string? message;
-    private long nextMarker = 1;
 
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
-    private bool CanRequestTransfers => Session.HasPermission("transfer.request");
-    private bool CanReceive => Session.HasPermission("transfer.receive");
-
     private List<PosTransferSummary> visibleTransfers
     {
         get
@@ -203,76 +120,21 @@ else
         }
     }
 
-    private List<PosLocation> externalLocations =>
-        locations.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code).ToList();
-
-    private bool CanCreateTransfer =>
-        sourceLocationId is { } source &&
-        destinationLocationId is { } destination &&
-        source != destination &&
-        draftLines.Count > 0 &&
-        draftLines.All(line => line.ProductId is not null && line.Quantity > 0m);
-
-    /// <summary>A replenishment recommendation's suggested route, read from the query string.</summary>
-    [SupplyParameterFromQuery(Name = "source")]
-    public string? QuerySource { get; set; }
-
-    [SupplyParameterFromQuery(Name = "destination")]
-    public string? QueryDestination { get; set; }
-
-    [SupplyParameterFromQuery(Name = "product")]
-    public string? QueryProduct { get; set; }
-
-    [SupplyParameterFromQuery(Name = "qty")]
-    public string? QueryQuantity { get; set; }
-
     protected override async Task OnInitializedAsync()
     {
         if (!CanViewTransfers)
         {
-            locationsLoading = false;
             return;
         }
 
         await LoadLocationsAsync();
-        if (CanRequestTransfers)
-        {
-            await LoadProductsAsync();
-            AddLine();
-            ApplyQueryPrefill();
-        }
 
         await LoadTransfersAsync();
-    }
-
-    // Lets "Raise transfer" on the Replenishment page land here with the route
-    // and first line already filled in; the cashier still reviews it before
-    // creating the transfer.
-    private void ApplyQueryPrefill()
-    {
-        if (Guid.TryParse(QuerySource, out Guid source) && externalLocations.Any(l => l.Id == source))
-        {
-            sourceLocationId = source;
-        }
-
-        if (Guid.TryParse(QueryDestination, out Guid destination) && externalLocations.Any(l => l.Id == destination))
-        {
-            destinationLocationId = destination;
-        }
-
-        if (Guid.TryParse(QueryProduct, out Guid productId) && products.Any(p => p.Id == productId) && draftLines.Count > 0)
-        {
-            decimal quantity = decimal.TryParse(QueryQuantity, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value) && value > 0m
-                ? value
-                : 1m;
-            draftLines[0] = draftLines[0] with { ProductId = productId, Quantity = quantity };
-        }
     }
 
     private async Task LoadLocationsAsync()
     {
         ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
-        locationsLoading = false;
         if (!response.IsSuccess || response.Value is null)
         {
             message = response.Error;
@@ -280,31 +142,6 @@ else
         }
 
         locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1));
-    }
-
-    private async Task LoadProductsAsync()
-    {
-        const int pageSize = 200;
-        const int maxPages = 10;
-
-        for (int offset = 0; offset < maxPages * pageSize; offset += pageSize)
-        {
-            ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(
-                null, offset, pageSize, CancellationToken.None);
-            if (!response.IsSuccess || response.Value is null || response.Value.Count == 0)
-            {
-                break;
-            }
-
-            products.AddRange(response.Value);
-            if (response.Value.Count < pageSize)
-            {
-                break;
-            }
-        }
-
-        products.Sort((left, right) =>
-            string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task LoadTransfersAsync()
@@ -333,92 +170,6 @@ else
         finally
         {
             loading = false;
-        }
-    }
-
-    private void OnSourceLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        sourceLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
-    }
-
-    private void OnDestinationLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        destinationLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
-    }
-
-    private void OnTokenChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        preApprovalTokenId = e.Value?.ToString() ?? string.Empty;
-    }
-
-    private void OnLineProductChangedAsync(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        Guid? productId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
-        draftLines[index] = draftLines[index] with { ProductId = productId };
-    }
-
-    private void OnLineQuantityChanged(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
-            ? value
-            : 0m;
-        draftLines[index] = draftLines[index] with { Quantity = quantity };
-    }
-
-    private void AddLine() => draftLines.Add(new DraftLine(nextMarker++, null, 0m));
-
-    private void RemoveLine(int index) => draftLines.RemoveAt(index);
-
-    private async Task CreateTransferAsync()
-    {
-        if (sourceLocationId is not { } source || destinationLocationId is not { } destination)
-        {
-            message = "Pick the route before creating the transfer.";
-            return;
-        }
-
-        List<PosTransferLineRequest> lines =
-        [
-            .. draftLines
-                .Where(line => line.ProductId is not null && line.Quantity > 0m)
-                .Select(line => new PosTransferLineRequest(line.ProductId!.Value, line.Quantity)),
-        ];
-
-        if (lines.Count == 0)
-        {
-            message = "Add at least one line with a quantity before creating the transfer.";
-            return;
-        }
-
-        Guid? tokenId = Guid.TryParse(preApprovalTokenId, out Guid token) ? token : null;
-
-        creating = true;
-        message = null;
-        try
-        {
-            ApiResult<PosReference> response = await Api.CreateTransferAsync(
-                new PosCreateTransferRequest(source, destination, lines, tokenId),
-                CancellationToken.None);
-            if (!response.IsSuccess || response.Value is null)
-            {
-                message = response.Error;
-                return;
-            }
-
-            preApprovalTokenId = string.Empty;
-            sourceLocationId = null;
-            destinationLocationId = null;
-            draftLines.Clear();
-            AddLine();
-            Navigation.NavigateTo($"/transfers/{response.Value.Id:D}");
-        }
-        catch (HttpRequestException)
-        {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            creating = false;
         }
     }
 

@@ -12,7 +12,7 @@
     <div>
         <p class="office-kicker">Inventory control</p>
         <h1 class="office-title">Stock adjustments</h1>
-        <p class="office-lead">Raise damage, spoilage, loss, theft or correction entries. Approving an adjustment posts it to the ledger.</p>
+        <p class="office-lead">Damage, spoilage, loss, theft and correction entries recorded at each location, and whether they were approved and posted.</p>
     </div>
     <div class="head-pickers">
         <label class="location-picker">
@@ -62,59 +62,6 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
-    @if (CanAdjust)
-    {
-        <section class="open-count">
-            <div class="open-count-title">
-                <strong>Raise an adjustment</strong>
-                <span>Add one or more lines, then save as a draft. Submit it once every line is entered.</span>
-            </div>
-            <div class="open-count-fields">
-                <label class="location-picker">
-                    <span>Reason</span>
-                    <select @bind="draftReason">
-                        @foreach (ReasonOption option in ReasonOptions)
-                        {
-                            <option value="@option.Value">@option.Label</option>
-                        }
-                    </select>
-                </label>
-                <label class="location-picker">
-                    <span>Notes</span>
-                    <input type="text" @bind="draftNotes" placeholder="@(draftReason == OtherReason ? "Required for \"Other\"" : "Optional")" />
-                </label>
-            </div>
-
-            <div class="transfer-lines">
-                @foreach (DraftLine line in draftLines)
-                {
-                    <div class="transfer-line" @key="line.Marker">
-                        <select class="line-product" value="@(line.ProductId?.ToString() ?? string.Empty)" @onchange="e => OnLineProductChanged(line, e)">
-                            <option value="">Select a product</option>
-                            @foreach (PosProductSummary product in products)
-                            {
-                                <option value="@product.Id">@product.Sku · @product.Name</option>
-                            }
-                        </select>
-                        <input class="line-quantity" type="number" step="0.001" placeholder="± qty"
-                               value="@(line.QuantityDelta?.ToString(CultureInfo.InvariantCulture) ?? string.Empty)"
-                               @onchange="e => OnLineQuantityChanged(line, e)" />
-                        <button type="button" class="line-remove" @onclick="() => RemoveLine(line)">✕</button>
-                    </div>
-                }
-                <button type="button" class="search-action line-add" @onclick="AddLine" disabled="@(products.Count == 0)">
-                    + Add line
-                </button>
-            </div>
-
-            <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="CreateAdjustmentAsync" disabled="@(!CanCreate || creating)">
-                    @(creating ? "Saving…" : "Save draft")
-                </button>
-            </div>
-        </section>
-    }
-
     <section class="results-panel" aria-live="polite">
         @if (loading)
         {
@@ -149,61 +96,20 @@ else
 }
 
 @code {
-    private const int OtherReason = 99;
-
-    private sealed record ReasonOption(int Value, string Label);
-
-    // The manually-raisable causes. TransferCancelled / TransitVariance* /
-    // EmergencyTransfer* are posted by the system, never picked by a person.
-    private static readonly ReasonOption[] ReasonOptions =
-    [
-        new(1, "Damaged"),
-        new(2, "Expired"),
-        new(3, "Spoilage"),
-        new(4, "Loss"),
-        new(5, "Theft"),
-        new(6, "Count correction"),
-        new(7, "Supplier return"),
-        new(8, "Broken"),
-        new(9, "Contaminated"),
-        new(OtherReason, "Other"),
-    ];
-
     private static readonly string[] StatusNames = ["Draft", "PendingApproval", "Rejected", "Posted", "Reversed"];
 
-    private sealed class DraftLine
-    {
-        public long Marker { get; init; }
-        public Guid? ProductId { get; set; }
-        public decimal? QuantityDelta { get; set; }
-    }
-
     private readonly List<PosLocation> locations = [];
-    private readonly List<PosProductSummary> products = [];
     private readonly List<PosStockAdjustmentSummary> adjustments = [];
-    private readonly List<DraftLine> draftLines = [];
-    private long nextMarker = 1;
 
     private Guid? selectedLocationId;
     private string selectedStatus = string.Empty;
-    private int draftReason = 1;
-    private string draftNotes = string.Empty;
 
     private bool loadingLocations = true;
     private bool loading;
-    private bool creating;
     private string? message;
     private string searchedLabel = string.Empty;
 
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanAdjust => Session.HasPermission("inventory.adjust");
-
-    private bool CanCreate =>
-        selectedLocationId is not null
-        && draftLines.Count > 0
-        && draftLines.All(line => line.ProductId is not null && line.QuantityDelta is not null and not 0m)
-        && (draftReason != OtherReason || !string.IsNullOrWhiteSpace(draftNotes));
-
     protected override async Task OnInitializedAsync()
     {
         if (!CanViewInventory)
@@ -213,11 +119,6 @@ else
         }
 
         await LoadLocationsAsync();
-        if (CanAdjust)
-        {
-            await LoadProductsAsync();
-            AddLine();
-        }
     }
 
     private async Task LoadLocationsAsync()
@@ -238,15 +139,6 @@ else
         }
     }
 
-    private async Task LoadProductsAsync()
-    {
-        ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(null, 0, 500, CancellationToken.None);
-        if (response.IsSuccess && response.Value is not null)
-        {
-            products.AddRange(response.Value.Where(p => p.IsActive).OrderBy(p => p.Name));
-        }
-    }
-
     private void OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
         selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
@@ -254,18 +146,6 @@ else
         searchedLabel = string.Empty;
         message = null;
     }
-
-    private void AddLine() => draftLines.Add(new DraftLine { Marker = nextMarker++ });
-
-    private void RemoveLine(DraftLine line) => draftLines.Remove(line);
-
-    private void OnLineProductChanged(DraftLine line, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-        => line.ProductId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
-
-    private void OnLineQuantityChanged(DraftLine line, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-        => line.QuantityDelta = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
-            ? value
-            : null;
 
     private async Task LoadAdjustmentsAsync()
     {
@@ -304,42 +184,6 @@ else
         finally
         {
             loading = false;
-        }
-    }
-
-    private async Task CreateAdjustmentAsync()
-    {
-        if (!CanCreate || selectedLocationId is not { } locationId)
-        {
-            return;
-        }
-
-        creating = true;
-        message = null;
-        try
-        {
-            var request = new PosCreateStockAdjustmentRequest(
-                locationId,
-                draftReason,
-                [.. draftLines.Select(line => new PosStockAdjustmentLineRequest(line.ProductId!.Value, 0, line.QuantityDelta!.Value))],
-                string.IsNullOrWhiteSpace(draftNotes) ? null : draftNotes.Trim());
-
-            ApiResult<PosReference> response = await Api.CreateStockAdjustmentAsync(request, CancellationToken.None);
-            if (!response.IsSuccess || response.Value is null)
-            {
-                message = response.Error;
-                return;
-            }
-
-            Navigation.NavigateTo($"/inventory/adjustments/{response.Value.Id:D}");
-        }
-        catch (HttpRequestException)
-        {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            creating = false;
         }
     }
 

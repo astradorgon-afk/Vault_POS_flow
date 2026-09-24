@@ -78,7 +78,7 @@
     {
         var path when path.StartsWith("admin/", StringComparison.Ordinal) => "Administration",
         var path when path.StartsWith("catalog/", StringComparison.Ordinal) => "Catalogue",
-        var path when path.StartsWith("sales", StringComparison.Ordinal) || path.StartsWith("returns", StringComparison.Ordinal) || path is "pos" or "receipts" => "Sales & service",
+        var path when path.StartsWith("sales", StringComparison.Ordinal) || path.StartsWith("returns", StringComparison.Ordinal) || path is "receipts" or "stores" or "inventory/stock" => "Stores",
         var path when path.StartsWith("sync/", StringComparison.Ordinal) => "System operations",
         var path when path.StartsWith("inventory/", StringComparison.Ordinal) || path.StartsWith("transfers", StringComparison.Ordinal) || path.StartsWith("quarantine", StringComparison.Ordinal) => "Inventory operations",
         "reports" => "Reporting",
@@ -90,7 +90,8 @@
     {
         "" => "Overview",
         "notifications" => "Notifications",
-        "pos" => "New sale",
+        "stores" => "Store performance",
+        "inventory/stock" => "Store inventory",
         "sales" => "Sales ledger",
         var path when path.StartsWith("sales/", StringComparison.Ordinal) => "Sale detail",
         var path when path.StartsWith("returns/", StringComparison.Ordinal) => "Return detail",

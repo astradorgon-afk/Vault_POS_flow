@@ -212,7 +212,7 @@ else
         <section class="dashboard-section" aria-labelledby="store-split-title">
             <div class="section-heading">
                 <div><span class="eyebrow">Last 7 days</span><h2 id="store-split-title">Sales by location</h2></div>
-                <a class="text-link" href="sales">Open sales ledger <AppIcon Name="arrow" /></a>
+                <a class="text-link" href="stores">Compare stores <AppIcon Name="arrow" /></a>
             </div>
             <div class="location-ledger">
                 <div class="ledger-head"><span>Location</span><span>Relative sales</span><span>Net</span><span>Sales</span></div>
@@ -354,14 +354,15 @@ else
         get
         {
             List<DashboardAction> actions = [];
-            if (CanCreateSale) actions.Add(new("sale", "Start a sale", "Open a register and build the next transaction.", "/pos"));
-            if (CanViewSales) actions.Add(new("ledger", "Review sales", "Find transactions, returns and receipt history.", "/sales"));
-            if (CanUseStockCounts) actions.Add(new("count", "Open stock counts", "Count assigned stock and resolve recorded variances.", "/inventory/counts"));
-            if (CanViewTransfers) actions.Add(new("transfer", "Track transfers", "Request movement and record every handoff between locations.", "/transfers"));
+            if (CanViewSales) actions.Add(new("coins", "Store performance", "See what each store sold and took in, and its best sellers.", "/stores"));
+            if (CanViewInventory) actions.Add(new("box", "Store inventory", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
+            if (CanViewSales) actions.Add(new("ledger", "Review sales", "Browse each store's transactions, returns and receipts.", "/sales"));
+            if (CanUseStockCounts) actions.Add(new("count", "Stock counts", "See the counts each store ran and the variances they posted.", "/inventory/counts"));
+            if (CanViewTransfers) actions.Add(new("transfer", "Track transfers", "Follow stock moving between the warehouse and the stores.", "/transfers"));
             if (CanViewReports) actions.Add(new("report", "Open daily reports", "Reconcile trade, payment methods and drawer shifts.", "/reports"));
             if (CanManageUsers) actions.Add(new("people", "Manage people & roles", "Control accounts, access and location assignments.", "/admin/users"));
             if (CanManageDevices) actions.Add(new("device", "Manage devices", "Enrol, suspend and inspect the terminal fleet.", "/admin/devices"));
-            if (CanViewReceipts) actions.Add(new("receipt", "Payment receipts", "Issue and retrieve standalone payment receipts.", "/receipts"));
+            if (CanViewReceipts) actions.Add(new("receipt", "Payment receipts", "See cash each store paid out or took in outside a sale.", "/receipts"));
             if (CanViewCatalog) actions.Add(new("tag", "Review prices", "Search products and inspect effective price schedules.", "/catalog/prices"));
             if (CanManageSync) actions.Add(new("sync", "Resolve sync failures", "Retry or dismiss device synchronization conflicts.", "/sync/failures"));
             if (actions.Count == 0) actions.Add(new("bell", "Review notifications", "See activity and exceptions addressed to you.", "/notifications"));
@@ -381,7 +382,7 @@ else
         new("receipt", "Gross sales", "Sales value before discounts are applied.", Money(totalGross), Change(totalGross, previousGross), [.. days.Select(day => day.Gross)]),
     ];
 
-    private string? InventoryHref => CanViewInventoryExceptions ? "inventory/exceptions" : CanUseStockCounts ? "inventory/counts" : null;
+    private string? InventoryHref => CanViewInventory ? "inventory/stock" : null;
     private string ActivityHref => CanViewSales ? "sales" : "notifications";
 
     private List<ActivityItem> Activity

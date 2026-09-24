@@ -4,7 +4,6 @@
 @rendermode InteractiveServer
 @inject VaultFlowApiClient Api
 @inject UserSession Session
-@inject NavigationManager Navigation
 
 <PageTitle>Replenishment · VaultFlow</PageTitle>
 
@@ -12,7 +11,7 @@
     <div>
         <p class="office-kicker">Getting stock into a store</p>
         <h1 class="office-title">Replenishment</h1>
-        <p class="office-lead">Suggested restock quantities for your locations, ranked by urgency. Raise a transfer request from a recommendation.</p>
+        <p class="office-lead">What each store needs restocking and where the stock could come from, most urgent first.</p>
     </div>
 </div>
 
@@ -34,7 +33,7 @@
     {
         <table class="sales-table">
             <thead>
-                <tr><th>Location</th><th>Product</th><th>Available</th><th>Deficit</th><th>Urgency</th><th>Suggested from</th><th>Suggested qty</th><th></th></tr>
+                <tr><th>Location</th><th>Product</th><th>Available</th><th>Deficit</th><th>Urgency</th><th>Suggested from</th><th>Suggested qty</th></tr>
             </thead>
             <tbody>
                 @foreach (PosReplenishmentRecommendation row in recommendations)
@@ -53,12 +52,6 @@
                         <td><span class="@UrgencyChipClass(row.Urgency)">@row.Urgency</span></td>
                         <td>@(row.SuggestedSourceLocationId is { } source ? LocationName(source) : "—")</td>
                         <td class="sheet-number">@row.SuggestedQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                        <td>
-                            @if (row.SuggestedSourceLocationId is not null && CanRequest)
-                            {
-                                <button type="button" class="action-button subtle" @onclick="() => RaiseTransfer(row)">Raise transfer →</button>
-                            }
-                        </td>
                     </tr>
                 }
             </tbody>
@@ -73,8 +66,6 @@
 
     private bool loading = true;
     private string? message;
-
-    private bool CanRequest => Session.HasPermission("transfer.request");
 
     protected override async Task OnInitializedAsync()
     {
@@ -150,19 +141,6 @@
         catch (HttpRequestException)
         {
         }
-    }
-
-    private void RaiseTransfer(PosReplenishmentRecommendation row)
-    {
-        if (row.SuggestedSourceLocationId is not { } source)
-        {
-            return;
-        }
-
-        // Transfers.razor reads these query values to preselect the route; the
-        // cashier still reviews and adds lines there before creating it.
-        Navigation.NavigateTo(FormattableString.Invariant(
-            $"/transfers?source={source:D}&destination={row.LocationId:D}&product={row.ProductId:D}&qty={row.SuggestedQuantity.ToString(CultureInfo.InvariantCulture)}"));
     }
 
     private string LocationName(Guid locationId)

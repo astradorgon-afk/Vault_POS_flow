@@ -27,7 +27,9 @@
 .receipts-table th { padding:12px 18px; text-align:left; color:var(--muted); font-size:.64rem; font-weight:800; text-transform:uppercase; letter-spacing:.1em; }
 .receipts-table td { padding:15px 18px; border-top:1px solid var(--line); vertical-align:top; }
 .receipts-table td small { display:block; margin-top:4px; color:var(--muted); font-size:.76rem; }
+.receipts-table tbody tr { cursor:pointer; }
 .receipts-table tbody tr:hover { background:#fafbf9; }
+.receipts-table tbody tr.selected { background:var(--mint-soft); }
 .receipt-number { font-weight:800; font-family:'DM Sans'; letter-spacing:.01em; }
 .receipt-amount { text-align:right; white-space:nowrap; }
 .receipt-amount strong { font:700 1.05rem 'DM Sans'; }
@@ -40,15 +42,6 @@
 .receipt-command { border:1px solid var(--line); border-radius:18px; background:white; padding:24px; }
 .receipt-command h2 { margin:6px 0 8px; font:700 1.55rem 'Manrope'; }
 .receipt-command-lead { margin:0 0 20px; color:var(--muted); font-size:.86rem; line-height:1.55; }
-.issue-form { display:grid; gap:13px; }
-.issue-form label { display:grid; gap:7px; color:var(--muted); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
-.issue-form label small { color:var(--muted); font-weight:600; text-transform:none; letter-spacing:0; }
-.issue-form label strong { color:#8c3a33; }
-.issue-form select,.issue-form input { height:46px; padding:0 13px; border:1px solid var(--line); border-radius:9px; background:white; color:var(--ink); font-size:.95rem; font-weight:500; text-transform:none; letter-spacing:0; }
-.issue-form input:disabled,.issue-form select:disabled { background:#f3f5f2; color:var(--muted); }
-.issue-button { height:50px; border:0; border-radius:9px; background:var(--forest); color:white; font-weight:800; }
-.issue-button:disabled { opacity:.55; }
-.issue-permission-note { margin:2px 0 0; color:var(--muted); font-size:.78rem; line-height:1.5; }
 
 .print-preview { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
 .print-preview header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }

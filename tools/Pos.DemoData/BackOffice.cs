@@ -23,6 +23,15 @@ internal sealed class BackOffice(DemoWorld world)
 
     private Guid Location(string code) => world.Locations[code];
 
+    /// <summary>The manager assigned to a store.</summary>
+    private DemoSession StoreManager(string store) => store switch
+    {
+        "STORE01" => User("manager"),
+        "STORE02" => User("manager2"),
+        "STORE03" => User("manager3"),
+        _ => throw new ArgumentOutOfRangeException(nameof(store), store, "Not a store."),
+    };
+
     public int Failures { get; private set; }
 
     /// <summary>True when an earlier run posted the back-office activity. Its
@@ -57,11 +66,11 @@ internal sealed class BackOffice(DemoWorld world)
             ("BUTTER-225", 30m), ("NUGGETS-500", 20m), ("PANDESAL-10", 40m), ("ALCOHOL-500", 30m)));
 
         await StepAsync("Transfer to Store Two, in transit", () => TransferAsync(
-            "STORE02", "admin", Stage.Dispatched,
+            "STORE02", "manager2", Stage.Dispatched,
             ("NOODLE-55", 150m), ("TUNA-155", 60m), ("EGGS-DZ", 24m)));
 
         await StepAsync("Transfer to Store Three, approved", () => TransferAsync(
-            "STORE03", "admin", Stage.Approved,
+            "STORE03", "manager3", Stage.Approved,
             ("WATER-500", 200m), ("SODA-1L", 48m), ("CHIPS-60", 60m)));
 
         await StepAsync("Transfer to Store One, awaiting approval", () => TransferAsync(
@@ -69,7 +78,7 @@ internal sealed class BackOffice(DemoWorld world)
             ("RICE-01", 20m), ("OIL-1L", 24m)));
 
         await StepAsync("Transfer to Store Three, draft", () => TransferAsync(
-            "STORE03", "admin", Stage.Draft,
+            "STORE03", "manager3", Stage.Draft,
             ("COFFEE-3IN1", 40m)));
 
         await StepAsync("Cycle count at Store Two, approved", () => CountAsync(
@@ -281,7 +290,8 @@ internal sealed class BackOffice(DemoWorld world)
     /// approved count posts a small variance.</summary>
     private async Task CountAsync(string store, bool approve, params string[] skus)
     {
-        DemoSession counter = User("admin");
+        // The store's own manager runs its counts; the owner approves them.
+        DemoSession counter = StoreManager(store);
         Guid countId = await Api.CreateAsync(
             "/api/v1/inventory/counts",
             new
@@ -360,7 +370,9 @@ internal sealed class BackOffice(DemoWorld world)
     /// owner approves it, which posts it to the ledger.</summary>
     private async Task AdjustmentAsync(string location, int reason, string notes, Adjust stage, params (string Sku, decimal Delta)[] lines)
     {
-        DemoSession raiser = location == "STORE01" ? User("manager") : User("admin");
+        // A store adjustment is raised by that store's manager, a warehouse one
+        // by Inventory Staff; the owner approves both.
+        DemoSession raiser = location == "MAIN" ? User("inventory") : StoreManager(location);
         Guid adjustmentId = await Api.CreateAsync(
             "/api/v1/inventory/adjustments",
             new
@@ -391,8 +403,8 @@ internal sealed class BackOffice(DemoWorld world)
         }
     }
 
-    /// <summary>Cash moving outside a sale today: a walk-in slip, two branch
-    /// expenses and an owner withdrawal.</summary>
+    /// <summary>Cash moving outside a sale today, recorded by each store's
+    /// manager: a walk-in slip, branch expenses and an owner withdrawal.</summary>
     private async Task ReceiptsAsync()
     {
         (string Store, int Kind, decimal Amount, string Counterparty, string Note)[] receipts =
@@ -409,7 +421,7 @@ internal sealed class BackOffice(DemoWorld world)
             await Api.PostAsync(
                 "/api/v1/receipts",
                 new { locationId = Location(store), kind, amount, counterparty, note, referenceNumber = (string?)null },
-                world.Owner);
+                StoreManager(store));
         }
     }
 
@@ -426,5 +438,5 @@ internal sealed class BackOffice(DemoWorld world)
                 },
                 note = "Found in the back room with no delivery record.",
             },
-            User("admin"));
+            StoreManager("STORE02"));
 }

@@ -107,6 +107,15 @@ else
 
     private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
 
+    /// <summary>A store to open the ledger on, e.g. from the Stores page.</summary>
+    [SupplyParameterFromQuery(Name = "store")] public Guid? QueryStore { get; set; }
+
+    /// <summary>The first business date to show, as yyyy-MM-dd.</summary>
+    [SupplyParameterFromQuery(Name = "from")] public string? QueryFrom { get; set; }
+
+    /// <summary>The last business date to show, as yyyy-MM-dd.</summary>
+    [SupplyParameterFromQuery(Name = "to")] public string? QueryTo { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         if (!CanViewSales)
@@ -133,6 +142,16 @@ else
         if (locations.Count == 0)
         {
             message = "No active store is assigned to this account.";
+            return;
+        }
+
+        // Opened for one store (from the Stores page): show its sales at once.
+        if (QueryStore is { } store && locations.Any(location => location.Id == store))
+        {
+            selectedLocationId = store;
+            from = DateOnly.TryParseExact(QueryFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly f) ? f : null;
+            to = DateOnly.TryParseExact(QueryTo, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly t) ? t : null;
+            await SearchAsync();
         }
     }
 

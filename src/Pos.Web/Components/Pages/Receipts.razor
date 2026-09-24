@@ -12,7 +12,7 @@
     <div>
         <span class="eyebrow">Cash control</span>
         <h1>Receipts</h1>
-        <p>Record money moving in and out of the branches — walk-in sales, branch expenses and owner withdrawals — then reprint any of them.</p>
+        <p>Money that moved in and out of each store outside a sale: walk-in slips, branch expenses and owner withdrawals, as recorded at the store.</p>
     </div>
     <div class="receipts-head-controls">
         <label class="location-picker">
@@ -103,7 +103,7 @@ else
                     <tbody>
                         @foreach (PosReceiptSummary receipt in FilteredReceipts)
                         {
-                            <tr @key="receipt.Id">
+                            <tr @key="receipt.Id" class="@(receipt.Id == _previewId ? "selected" : null)" @onclick="() => LoadPreviewAsync(receipt.Id)">
                                 <td>
                                     <strong class="receipt-number">@receipt.Number</strong>
                                     <small>@receipt.IssuedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small>
@@ -118,69 +118,10 @@ else
             }
         </section>
 
-        <aside class="receipt-command" aria-label="Issue a receipt">
-            <span class="eyebrow">Issue a receipt</span>
-            <h2>Record cash in or out</h2>
-            <p class="receipt-command-lead">Assign an RCT number to money that moved outside a sale — giving a walk-in customer a slip or documenting a branch expense or owner withdrawal.</p>
-
-            @if (!string.IsNullOrWhiteSpace(_issueError))
-            {
-                <div class="pos-message pos-message-error" role="alert">@_issueError</div>
-            }
-
-            <div class="issue-form">
-                <label>
-                    <span>Type</span>
-                    <select @bind="_issueKind" @bind:after="() => _issueError = null">
-                        <option value="1">Walk-in sale — money in</option>
-                        <option value="2">Branch expense — money out</option>
-                        <option value="3">Owner withdrawal — money out</option>
-                    </select>
-                </label>
-
-                @if (locations.Count > 1)
-                {
-                    <label>
-                        <span>Store</span>
-                        <select value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChangedAsync">
-                            <option value="">All locations</option>
-                            @foreach (PosLocation location in locations)
-                            {
-                                <option value="@location.Id">@location.Code · @location.Name</option>
-                            }
-                        </select>
-                    </label>
-                }
-
-                <label>
-                    <span>Amount <strong>*</strong></span>
-                    <input type="text" inputmode="decimal" placeholder="0.00" @bind="_issueAmount" disabled="@issuing" />
-                </label>
-
-                <label>
-                    <span>Paid to / received from</span>
-                    <input type="text" maxlength="120" placeholder="Customer or supplier name" @bind="_issueCounterparty" disabled="@issuing" />
-                </label>
-
-                <label>
-                    <span>Reference number <small>optional</small></span>
-                    <input type="text" maxlength="40" placeholder="Related document, e.g. a sale number" @bind="_issueReference" disabled="@issuing" />
-                </label>
-
-                <label>
-                    <span>Note <small>optional</small></span>
-                    <input type="text" maxlength="240" placeholder="What the money was for" @bind="_issueNote" disabled="@issuing" />
-                </label>
-
-                <button type="button" class="issue-button" @onclick="IssueAsync" disabled="@(issuing || !CanIssueReceipts)">
-                    @(issuing ? "Issuing…" : "Issue receipt")
-                </button>
-
-                @if (!CanIssueReceipts)
-                {
-                    <p class="issue-permission-note">Your account needs the <code>receipt.create</code> permission to issue receipts.</p>
-                }
-            </div>
+        <aside class="receipt-command" aria-label="Receipt copy">
+            <span class="eyebrow">Receipt copy</span>
+            <h2>As printed at the store</h2>
+            <p class="receipt-command-lead">Receipts are issued at the store. Choose one on the left to see its printed copy.</p>
 
             @if (_preview is not null)
             {
@@ -206,16 +147,10 @@ else
     private Guid? selectedLocationId;
     private int? _activeKind;
     private string? _message;
-    private string? _issueError;
-    private string _issueAmount = string.Empty;
-    private string _issueCounterparty = string.Empty;
-    private string _issueReference = string.Empty;
-    private string _issueNote = string.Empty;
-    private int _issueKind = 1;
     private string? _preview;
+    private Guid? _previewId;
     private bool loadingLocations = true;
     private bool loadingReceipts;
-    private bool issuing;
     private bool copying;
     private bool copied;
 
@@ -230,7 +165,6 @@ else
     ];
 
     private bool CanViewReceipts => Session.Current?.User.Permissions.Contains("receipt.view", StringComparer.Ordinal) == true;
-    private bool CanIssueReceipts => Session.Current?.User.Permissions.Contains("receipt.create", StringComparer.Ordinal) == true;
 
     private IEnumerable<PosReceiptSummary> FilteredReceipts =>
         _activeKind is { } kind
@@ -339,64 +273,10 @@ else
         }
     }
 
-    private async Task IssueAsync()
-    {
-        _issueError = null;
-        if (selectedLocationId is not { } locationId)
-        {
-            _issueError = "Choose the store the cash event happened at.";
-            return;
-        }
-
-        if (!decimal.TryParse(_issueAmount, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal amount)
-            || amount <= 0m)
-        {
-            _issueError = "Enter an amount greater than zero.";
-            return;
-        }
-
-        issuing = true;
-        _preview = null;
-        copied = false;
-        try
-        {
-            ApiResult<PosNewReceipt> result = await Api.IssueReceiptAsync(new PosIssueReceiptRequest
-            {
-                LocationId = locationId,
-                Kind = _issueKind,
-                Amount = decimal.Round(amount, 4, MidpointRounding.ToEven),
-                Counterparty = string.IsNullOrWhiteSpace(_issueCounterparty) ? null : _issueCounterparty.Trim(),
-                Note = string.IsNullOrWhiteSpace(_issueNote) ? null : _issueNote.Trim(),
-                ReferenceNumber = string.IsNullOrWhiteSpace(_issueReference) ? null : _issueReference.Trim(),
-            }, CancellationToken.None);
-
-            if (!result.IsSuccess || result.Value is null)
-            {
-                _issueError = result.Error;
-                return;
-            }
-
-            _message = "Receipt issued and numbered.";
-            _issueAmount = string.Empty;
-            _issueCounterparty = string.Empty;
-            _issueReference = string.Empty;
-            _issueNote = string.Empty;
-            _activeKind = null;
-            await LoadTodayAsync();
-            await LoadPreviewAsync(result.Value.Id);
-        }
-        catch (HttpRequestException)
-        {
-            _issueError = "Head office is unreachable. Try again shortly.";
-        }
-        finally
-        {
-            issuing = false;
-        }
-    }
-
     private async Task LoadPreviewAsync(Guid receiptId)
     {
+        _previewId = receiptId;
+        copied = false;
         ApiResult<string> result = await Api.GetReceiptPrintTextAsync(receiptId, "Plain", CancellationToken.None);
         if (result.IsSuccess)
         {
@@ -425,7 +305,7 @@ else
         }
         catch (JSException)
         {
-            _issueError = "The clipboard is unavailable in this browser.";
+            _message = "The clipboard is unavailable in this browser.";
         }
         finally
         {

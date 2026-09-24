@@ -4,7 +4,6 @@
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
-@inject NavigationManager Navigation
 
 <PageTitle>Return @salesReturn?.Number · VaultFlow</PageTitle>
 
@@ -125,61 +124,11 @@ else if (salesReturn is not null)
         </section>
     }
 
-    @if (CanRefund && Remaining > 0m)
+    @if (Remaining > 0m)
     {
-        <section class="refund-panel">
-            <header>
-                <div>
-                    <span class="eyebrow">Settlement</span>
-                    <h2>Issue a refund</h2>
-                    <p>@(salesReturn.IsBlind ? "A blind return refunds in cash only." : "Refund against the return's original sale, through the open shift.")</p>
-                </div>
-                <strong class="remaining">@Money(Remaining) <span>available</span></strong>
-            </header>
-
-            <TerminalBar LocationId="salesReturn.LocationId" OnStateChanged="HandleTerminalChanged" />
-
-            <div class="refund-form" aria-live="polite">
-                <label class="dispose-field">
-                    Amount
-                    <input class="qty-input" type="number" min="0.01" step="any" value="@refundAmount"
-                           @onchange="OnRefundAmountChanged" />
-                </label>
-                <label class="dispose-field">
-                    Method
-                    <select value="@refundMethod" @onchange="OnRefundMethodChanged" disabled="@salesReturn.IsBlind">
-                        <option value="1">Cash</option>
-                        <option value="2">Card</option>
-                        <option value="3">E-Wallet</option>
-                    </select>
-                </label>
-                @if (refundMethod == 1)
-                {
-                    <label class="dispose-field">
-                        Cash tendered
-                        <input class="qty-input" type="number" min="0.01" step="any" value="@refundTendered"
-                               @onchange="OnRefundTenderedChanged" />
-                    </label>
-                }
-                else
-                {
-                    <label class="dispose-field">
-                        Provider reference
-                        <input class="note-input" placeholder="Card or wallet reference" value="@refundProviderReference"
-                               @onchange="OnRefundProviderChanged" />
-                    </label>
-                }
-                <button type="button" @onclick="RefundAsync"
-                        disabled="@(refunding || RegisterMissing || ShiftMissing || RefundAmountValue <= 0m)">
-                    @(refunding ? "Refunding…" : "Issue refund")
-                </button>
-            </div>
-
-            @if (RegisterMissing || ShiftMissing)
-            {
-                <div class="action-hint" role="status">@TerminalHint</div>
-            }
-        </section>
+        @* Refunds pay money out of a register's drawer, so they are issued at
+           the store's register, which syncs them here. *@
+        <div class="pos-message" role="note">@Money(Remaining) is still owed on this return. Refunds are issued at the store's register.</div>
     }
 
     <section class="detail-panel refund-history">
@@ -241,27 +190,14 @@ else if (salesReturn is not null)
     private readonly Dictionary<int, int> disposeKinds = [];
     private readonly Dictionary<int, int> disposeReasons = [];
     private readonly Dictionary<int, string> disposeNotes = [];
-    private string refundAmount = string.Empty;
-    private int refundMethod = 1;
-    private string refundTendered = string.Empty;
-    private string refundProviderReference = string.Empty;
     private bool disposing;
-    private bool refunding;
     private Guid loadedId;
 
     private bool CanRead => Session.Current?.User.Permissions.Any(permission =>
         permission is "sale.view" or "sale.return" or "sale.refund" or "inventory.adjust") == true;
-    private bool CanRefund => Session.Current?.User.Permissions.Contains("sale.refund", StringComparer.Ordinal) == true;
     private bool CanAdjust => Session.Current?.User.Permissions.Contains("inventory.adjust", StringComparer.Ordinal) == true;
-    private bool RegisterMissing => Session.DeviceId is null;
-    private bool ShiftMissing => Session.OpenShift is null;
-    private string TerminalHint =>
-        RegisterMissing ? "Select the register above to unlock refunds."
-        : ShiftMissing ? "Open a shift on the register above to unlock refunds."
-        : $"Ready — {Session.DeviceName}";
 
     private decimal Remaining => (salesReturn?.RefundableTotal ?? 0m) - (salesReturn?.RefundedTotal ?? 0m);
-    private decimal RefundAmountValue => decimal.TryParse(refundAmount, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal amount) ? amount : 0m;
 
     private string DisposeQty(PosReturnLineDetail line) => disposeQuantities.GetValueOrDefault(line.LineNumber, line.PendingDispositionQuantity).ToString("0.###", CultureInfo.InvariantCulture);
     private int DisposeKind(PosReturnLineDetail line) => disposeKinds.GetValueOrDefault(line.LineNumber, 1);
@@ -283,10 +219,6 @@ else if (salesReturn is not null)
         disposeKinds.Clear();
         disposeReasons.Clear();
         disposeNotes.Clear();
-        refundAmount = string.Empty;
-        refundTendered = string.Empty;
-        refundProviderReference = string.Empty;
-        refundMethod = 1;
         try
         {
             if (!CanRead)
@@ -298,12 +230,9 @@ else if (salesReturn is not null)
             ApiResult<PosReturnDetail> response = await Api.GetReturnAsync(Id, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
             salesReturn = response.Value;
-            refundAmount = Remaining.ToString("0.##", CultureInfo.InvariantCulture);
         }
         catch (HttpRequestException) { message = "The returns service is unavailable. Try again shortly."; }
     }
-
-    private void HandleTerminalChanged() { }
 
     private void SetDisposeQty(PosReturnLineDetail line, string? value)
     {
@@ -375,52 +304,6 @@ else if (salesReturn is not null)
         catch (HttpRequestException) { actionMessage = "The disposition service is unavailable. Try again shortly."; }
         finally { disposing = false; }
     }
-
-    private async Task RefundAsync()
-    {
-        if (salesReturn is null || Session.DeviceId is not { } deviceId || Session.OpenShift is not { } openShift) return;
-        if (RefundAmountValue <= 0m) { actionMessage = "Enter a refund amount."; return; }
-        if (refundMethod == 1 && RefundTenderedValue < RefundAmountValue) { actionMessage = "Cash tendered is below the refund amount."; return; }
-        if (refundMethod != 1 && string.IsNullOrWhiteSpace(refundProviderReference)) { actionMessage = "Provide the card or wallet reference."; return; }
-
-        refunding = true;
-        actionMessage = null;
-        try
-        {
-            ApiResult<PosReference> result = await Api.RefundReturnAsync(
-                Id,
-                new PosRefundReturnRequest(
-                    salesReturn.IsBlind ? null : salesReturn.SaleId,
-                    Guid.CreateVersion7(),
-                    salesReturn.LocationId,
-                    openShift.ShiftId,
-                    deviceId,
-                    refundMethod,
-                    RefundAmountValue,
-                    refundMethod == 1 ? RefundTenderedValue : null,
-                    refundMethod == 1 ? null : refundProviderReference.Trim(),
-                    DateTimeOffset.UtcNow),
-                CancellationToken.None);
-            if (!result.IsSuccess || result.Value is null) { actionMessage = result.Error; return; }
-
-            await LoadReturnAsync();
-            actionMessage = $"Refund of {Money(RefundAmountValue)} issued.";
-        }
-        catch (HttpRequestException) { actionMessage = "The refund service is unavailable. Try again shortly."; }
-        finally { refunding = false; }
-    }
-
-    private decimal RefundTenderedValue => decimal.TryParse(refundTendered, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal value) ? value : 0m;
-    private void OnRefundAmountChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => refundAmount = e.Value?.ToString() ?? string.Empty;
-    private void OnRefundMethodChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        int.TryParse(e.Value?.ToString(), out refundMethod);
-        refundTendered = string.Empty;
-        refundProviderReference = string.Empty;
-    }
-
-    private void OnRefundTenderedChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => refundTendered = e.Value?.ToString() ?? string.Empty;
-    private void OnRefundProviderChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e) => refundProviderReference = e.Value?.ToString() ?? string.Empty;
 
     private static string Money(decimal value)
         => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));

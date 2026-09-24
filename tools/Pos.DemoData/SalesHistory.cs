@@ -4,11 +4,13 @@ using System.Text.Json.Nodes;
 namespace Pos.DemoData;
 
 /// <summary>
-/// Posts a month of trading at every store through the browser-register path:
-/// one shift per store per day, completed sales with cash, card and e-wallet
-/// payments, the odd void and return, and a closed shift with its cash count.
-/// Sales carry their real business date and completion time, so reports,
-/// dashboards and the sales ledger show history rather than one busy afternoon.
+/// Posts a month of trading at every store the way a store register does:
+/// the store's cashier signs in at the enrolled till, opens one shift per day,
+/// completes sales with cash, card and e-wallet payments under numbers the
+/// register allocates itself, the store supervisor voids and refunds the odd
+/// sale, and the cashier closes the shift with a cash count. Sales carry their
+/// real business date and completion time, so the web dashboard, reports and
+/// sales ledger show a month of history rather than one busy afternoon.
 /// </summary>
 internal sealed class SalesHistory(DemoWorld world, Random random)
 {
@@ -21,14 +23,12 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
 
     private static readonly TimeZoneInfo Manila = TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila");
 
-    /// <summary>How busy each store is on an ordinary day, and who works its till.
-    /// The seed keeps one account per role, so the Store One cashier runs Store
-    /// One and the owner covers the other two stores.</summary>
-    private static readonly (string Store, int SalesPerDay, string Cashier)[] Stores =
+    /// <summary>How busy each store is on an ordinary day.</summary>
+    private static readonly (string Store, int SalesPerDay)[] Stores =
     [
-        ("STORE01", 22, "cashier"),
-        ("STORE02", 16, "owner"),
-        ("STORE03", 12, "owner"),
+        ("STORE01", 22),
+        ("STORE02", 16),
+        ("STORE03", 12),
     ];
 
     /// <summary>What shoppers reach for, with a relative weight and the most
@@ -48,6 +48,10 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
 
     /// <summary>How the last posted sale was paid; a return is refunded the same way.</summary>
     private int _lastPaymentMethod;
+
+    /// <summary>The last number each register allocated, per document type. A
+    /// register numbers its own documents (offline, it cannot ask head office).</summary>
+    private readonly Dictionary<(string ShortCode, string Type), int> _sequences = [];
 
     /// <summary>Products a store has run out of during this run; later baskets skip them.</summary>
     private readonly HashSet<(string Store, string Sku)> _soldOut = [];
@@ -70,20 +74,19 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
             DateOnly businessDate = Today.AddDays(-back);
             int daySales = 0;
 
-            foreach ((string store, int salesPerDay, string cashier) in Stores)
+            foreach ((string store, int salesPerDay) in Stores)
             {
-                daySales += await TradeDayAsync(store, salesPerDay, cashier, businessDate, isToday: back == 0);
+                daySales += await TradeDayAsync(world.Registers[store], salesPerDay, businessDate, isToday: back == 0);
             }
 
             Console.WriteLine($"  {businessDate:ddd dd MMM}: {daySales} sales");
         }
     }
 
-    private async Task<int> TradeDayAsync(string store, int salesPerDay, string cashierName, DateOnly businessDate, bool isToday)
+    private async Task<int> TradeDayAsync(DemoRegister register, int salesPerDay, DateOnly businessDate, bool isToday)
     {
-        Guid locationId = world.Locations[store];
-        Guid deviceId = world.Registers[store];
-        DemoSession cashier = world.Users[cashierName];
+        Guid locationId = register.LocationId;
+        DemoSession cashier = register.Cashier;
 
         // Weekends and paydays (the 15th and the last days of the month) are busier.
         double factor = businessDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1.35
@@ -103,26 +106,24 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
             return 0;
         }
 
-        await CloseLeftoverShiftAsync(locationId, deviceId, cashier);
+        await CloseLeftoverShiftAsync(register);
         List<DateTimeOffset> times = TradingTimes(businessDate, count, isToday);
         if (times.Count == 0)
         {
             return 0;
         }
 
-        string shiftNumber = await world.Api.NextNumberAsync(locationId, deviceId, "SHF", cashier);
-        Guid shiftId = await world.Api.CreateAsync(
+        Guid shiftId = await WithNextNumberAsync(register, "SHF", businessDate.Year, number => world.Api.CreateAsync(
             "/api/v1/shifts/open",
-            new { number = shiftNumber, locationId, businessDate, openingFloat = 2000m },
-            cashier,
-            deviceId);
+            new { number, locationId, businessDate, openingFloat = 2000m },
+            cashier));
         Shifts++;
 
         int posted = 0;
         foreach (DateTimeOffset completedAt in times)
         {
             (Guid SaleId, List<(DemoProduct Product, decimal Quantity, decimal Price)> Lines)? sale =
-                await SellAsync(store, locationId, deviceId, shiftId, cashier, businessDate, completedAt);
+                await SellAsync(register, shiftId, businessDate, completedAt);
 
             if (sale is null)
             {
@@ -134,20 +135,19 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
             // About one sale in seventy is voided at the till moments later;
             // about one cash sale in sixty comes back later that day as a
             // return, refunded in cash as it was paid. A cashier cannot void
-            // or refund, so the store's supervisor does both on the cashier's
-            // shift; the owner covering a store holds both rights.
-            DemoSession supervisor = cashierName == "cashier" ? world.Users["manager"] : cashier;
+            // or refund, so the store's supervisor does both at the register,
+            // on the cashier's shift.
             if (random.Next(70) == 0)
             {
-                await VoidAsync(sale.Value.SaleId, locationId, deviceId, shiftId, supervisor, businessDate, completedAt);
+                await VoidAsync(register, sale.Value.SaleId, shiftId, businessDate, completedAt);
             }
             else if (_lastPaymentMethod == Cash && random.Next(60) == 0)
             {
-                await ReturnAsync(sale.Value, locationId, deviceId, shiftId, cashier, supervisor, businessDate, completedAt);
+                await ReturnAsync(register, sale.Value, shiftId, businessDate, completedAt);
             }
         }
 
-        await CloseShiftAsync(shiftId, locationId, cashier);
+        await CloseShiftAsync(register, shiftId);
         return posted;
     }
 
@@ -163,18 +163,76 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
 
     /// <summary>Closes a shift an interrupted run left open on the register, so
     /// the next day can open its own.</summary>
-    private async Task CloseLeftoverShiftAsync(Guid locationId, Guid deviceId, DemoSession cashier)
+    private async Task CloseLeftoverShiftAsync(DemoRegister register)
     {
-        JsonNode? session = await world.Api.GetWithDeviceAsync(
-            string.Create(CultureInfo.InvariantCulture, $"/api/v1/terminal/session?locationId={locationId:D}"),
-            cashier,
-            deviceId);
+        JsonNode? session = await world.Api.GetAsync(
+            string.Create(CultureInfo.InvariantCulture, $"/api/v1/terminal/session?locationId={register.LocationId:D}"),
+            register.Cashier);
 
         if (session?["openShift"]?["shiftId"]?.GetValue<Guid>() is { } shiftId)
         {
-            Console.WriteLine("    closing a shift left open by an earlier run");
-            await CloseShiftAsync(shiftId, locationId, cashier);
+            Console.WriteLine($"    closing a shift left open on {register.ShortCode} by an earlier run");
+            await CloseShiftAsync(register, shiftId);
         }
+    }
+
+    /// <summary>
+    /// Allocates the register's next number for a document type and posts with
+    /// it, as an offline register does: SHF numbers have four digits, SAL and RET
+    /// six. The sale counter starts after the highest sale head office already
+    /// holds for the register; if a number turns out to be taken (a rerun after
+    /// an interruption), the register moves on to the next one.
+    /// </summary>
+    private async Task<T> WithNextNumberAsync<T>(DemoRegister register, string type, int year, Func<string, Task<T>> post)
+    {
+        (string, string) key = (register.ShortCode, type);
+        if (!_sequences.ContainsKey(key))
+        {
+            _sequences[key] = type == "SAL" ? await HighestSaleSequenceAsync(register) : 0;
+        }
+
+        for (int attempt = 0; ; attempt++)
+        {
+            int sequence = ++_sequences[key];
+            string number = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{type}-{year:D4}-{register.ShortCode}-{sequence.ToString(type == "SHF" ? "D4" : "D6", CultureInfo.InvariantCulture)}");
+
+            try
+            {
+                return await post(number);
+            }
+            catch (DemoApiException ex) when (attempt < 200 && IsNumberTaken(ex))
+            {
+                // Taken by an earlier run: try the next number.
+            }
+        }
+    }
+
+    /// <summary>A reused document number trips the unique index; the API answers
+    /// with a conflict or, for an unmapped database error, a server error.</summary>
+    private static bool IsNumberTaken(DemoApiException ex)
+        => ex.StatusCode is 409 or 500
+           && !ex.Message.Contains("stock", StringComparison.OrdinalIgnoreCase)
+           && ex.ErrorCode?.Contains("stock", StringComparison.OrdinalIgnoreCase) != true;
+
+    private async Task<int> HighestSaleSequenceAsync(DemoRegister register)
+    {
+        string prefix = string.Create(CultureInfo.InvariantCulture, $"-{register.ShortCode}-");
+        int highest = 0;
+        foreach (JsonNode? sale in DemoApi.Items(await world.Api.GetAsync(
+                     string.Create(CultureInfo.InvariantCulture, $"/api/v1/sales?locationId={register.LocationId:D}"),
+                     world.Owner)))
+        {
+            string number = sale?["number"]?.GetValue<string>() ?? string.Empty;
+            int at = number.IndexOf(prefix, StringComparison.Ordinal);
+            if (at >= 0 && int.TryParse(number[(at + prefix.Length)..], NumberStyles.None, CultureInfo.InvariantCulture, out int sequence))
+            {
+                highest = Math.Max(highest, sequence);
+            }
+        }
+
+        return highest;
     }
 
     /// <summary>Spreads a day's sales across trading hours (8:00 to 21:00 Manila).
@@ -202,31 +260,31 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
     }
 
     private async Task<(Guid SaleId, List<(DemoProduct Product, decimal Quantity, decimal Price)> Lines)?> SellAsync(
-        string store, Guid locationId, Guid deviceId, Guid shiftId, DemoSession cashier, DateOnly businessDate, DateTimeOffset completedAt)
+        DemoRegister register, Guid shiftId, DateOnly businessDate, DateTimeOffset completedAt)
     {
-        List<(DemoProduct Product, decimal Quantity, decimal Price)> lines = PickBasket(store, completedAt);
+        List<(DemoProduct Product, decimal Quantity, decimal Price)> lines = PickBasket(register.Store, completedAt);
 
         // A basket can hit a product the store has just run out of; drop that
         // product for the rest of the run and try the basket again without it.
         for (int attempt = 0; attempt < 4 && lines.Count > 0; attempt++)
         {
             decimal total = lines.Sum(l => l.Quantity * l.Price);
-            string number = await world.Api.NextNumberAsync(locationId, deviceId, "SAL", cashier);
             Guid? customerId = world.Customers.Count > 0 && random.Next(8) == 0
                 ? world.Customers[random.Next(world.Customers.Count)]
                 : null;
+            object payment = Payment(total, out int method);
 
             try
             {
-                Guid saleId = await world.Api.CreateAsync(
+                Guid saleId = await WithNextNumberAsync(register, "SAL", businessDate.Year, number => world.Api.CreateAsync(
                     "/api/v1/sales",
                     new
                     {
                         number,
                         eventId = Guid.CreateVersion7(),
-                        locationId,
+                        locationId = register.LocationId,
                         cashierShiftId = shiftId,
-                        deviceId,
+                        deviceId = register.DeviceId,
                         customerId,
                         businessDate,
                         completedAtUtc = completedAt,
@@ -243,10 +301,9 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
                             allowExpiredOverride = false,
                             expiredOverrideReason = (string?)null,
                         }),
-                        payments = new[] { Payment(total, out int method) },
+                        payments = new[] { payment },
                     },
-                    cashier,
-                    deviceId);
+                    register.Cashier));
 
                 SalesPosted++;
                 _lastPaymentMethod = method;
@@ -263,7 +320,7 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
 
                 // Without a named product, the largest line is the likeliest to be short.
                 culprit ??= lines.OrderByDescending(l => l.Quantity).First().Product.Sku;
-                _soldOut.Add((store, culprit));
+                _soldOut.Add((register.Store, culprit));
                 lines.RemoveAll(l => l.Product.Sku == culprit);
             }
         }
@@ -332,7 +389,7 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
     }
 
     private async Task VoidAsync(
-        Guid saleId, Guid locationId, Guid deviceId, Guid shiftId, DemoSession cashier, DateOnly businessDate, DateTimeOffset completedAt)
+        DemoRegister register, Guid saleId, Guid shiftId, DateOnly businessDate, DateTimeOffset completedAt)
     {
         string[] reasons = ["Customer changed their mind at the counter.", "Scanned the wrong item.", "Duplicate transaction."];
         try
@@ -342,15 +399,14 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
                 new
                 {
                     eventId = Guid.CreateVersion7(),
-                    locationId,
+                    locationId = register.LocationId,
                     shiftId,
-                    deviceId,
+                    deviceId = register.DeviceId,
                     businessDate,
                     voidedAtUtc = completedAt.AddMinutes(2),
                     reason = reasons[random.Next(reasons.Length)],
                 },
-                cashier,
-                deviceId);
+                register.Supervisor);
             Voids++;
         }
         catch (DemoApiException ex)
@@ -360,8 +416,10 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
     }
 
     private async Task ReturnAsync(
+        DemoRegister register,
         (Guid SaleId, List<(DemoProduct Product, decimal Quantity, decimal Price)> Lines) sale,
-        Guid locationId, Guid deviceId, Guid shiftId, DemoSession cashier, DemoSession refunder, DateOnly businessDate,
+        Guid shiftId,
+        DateOnly businessDate,
         DateTimeOffset completedAt)
     {
         (DemoProduct product, _, decimal price) = sale.Lines[0];
@@ -369,24 +427,22 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
 
         try
         {
-            string number = await world.Api.NextNumberAsync(locationId, deviceId, "RET", cashier);
-            Guid returnId = await world.Api.CreateAsync(
+            Guid returnId = await WithNextNumberAsync(register, "RET", businessDate.Year, number => world.Api.CreateAsync(
                 "/api/v1/returns",
                 new
                 {
                     number,
                     eventId = Guid.CreateVersion7(),
                     saleId = sale.SaleId,
-                    locationId,
+                    locationId = register.LocationId,
                     shiftId,
-                    deviceId,
+                    deviceId = register.DeviceId,
                     customerId = (Guid?)null,
                     businessDate,
                     returnedAtUtc = returnedAt,
                     lines = new[] { new { productId = product.Id, quantity = 1m } },
                 },
-                cashier,
-                deviceId);
+                register.Cashier));
 
             await world.Api.PostAsync(
                 string.Create(CultureInfo.InvariantCulture, $"/api/v1/returns/{returnId:D}/refund"),
@@ -394,17 +450,16 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
                 {
                     saleId = sale.SaleId,
                     eventId = Guid.CreateVersion7(),
-                    locationId,
+                    locationId = register.LocationId,
                     shiftId,
-                    deviceId,
+                    deviceId = register.DeviceId,
                     method = Cash,
                     amount = price,
                     tendered = (decimal?)price,
                     providerReference = (string?)null,
                     refundedAtUtc = returnedAt.AddMinutes(1),
                 },
-                refunder,
-                deviceId);
+                register.Supervisor);
             Returns++;
         }
         catch (DemoApiException ex)
@@ -415,17 +470,16 @@ internal sealed class SalesHistory(DemoWorld world, Random random)
 
     /// <summary>Closes the shift against its expected cash. Most drawers balance;
     /// about one in eight is a little short or over, as real counts are.</summary>
-    private async Task CloseShiftAsync(Guid shiftId, Guid locationId, DemoSession cashier)
+    private async Task CloseShiftAsync(DemoRegister register, Guid shiftId)
     {
         JsonNode? summary = await world.Api.GetAsync(
-            string.Create(CultureInfo.InvariantCulture, $"/api/v1/shifts/{shiftId:D}/summary"), cashier);
+            string.Create(CultureInfo.InvariantCulture, $"/api/v1/shifts/{shiftId:D}/summary"), register.Cashier);
         decimal expected = summary?["expectedCash"]?.GetValue<decimal>() ?? 0m;
         decimal counted = random.Next(8) == 0 ? expected + (random.Next(-8, 5) * 5m) : expected;
 
         await world.Api.PostAsync(
             string.Create(CultureInfo.InvariantCulture, $"/api/v1/shifts/{shiftId:D}/close"),
-            new { locationId, declaredCash = counted, countedCash = counted },
-            cashier,
-            world.Registers.First(r => world.Locations[r.Key] == locationId).Value);
+            new { locationId = register.LocationId, declaredCash = counted, countedCash = counted },
+            register.Cashier);
     }
 }

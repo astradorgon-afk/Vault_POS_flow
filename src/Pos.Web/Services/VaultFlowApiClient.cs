@@ -49,13 +49,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
                 current.AccessToken);
         }
 
-        // Commands sent through the register carry the server-minted numbers;
-        // the API binds the chosen web register from this header.
-        if (session.DeviceId is { } deviceId)
-        {
-            request.Headers.Add("X-Device-Id", deviceId.ToString("D", System.Globalization.CultureInfo.InvariantCulture));
-        }
-
         return request;
     }
 
@@ -99,48 +92,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             ? ApiResult<T>.Failure("The API returned an unreadable response.")
             : ApiResult<T>.Success(value);
     }
-
-    /// <summary>Lists the browser registers a store's checkout can use.</summary>
-    public Task<ApiResult<List<PosRegister>>> GetRegistersAsync(
-        Guid locationId, CancellationToken cancellationToken)
-        => GetAsync<List<PosRegister>>(
-            FormattableString.Invariant($"/api/v1/terminal/registers?locationId={locationId:D}"),
-            cancellationToken);
-
-    /// <summary>Gets the checkout context for the chosen register: business
-    /// date, VAT and rounding settings, and the open shift, if any.</summary>
-    public Task<ApiResult<PosTerminalSession>> GetTerminalSessionAsync(
-        Guid locationId, CancellationToken cancellationToken)
-        => GetAsync<PosTerminalSession>(
-            FormattableString.Invariant($"/api/v1/terminal/session?locationId={locationId:D}"),
-            cancellationToken);
-
-    /// <summary>Asks the server to mint the register's next device-scoped
-    /// number (SAL, RET or SHF). The physical offline counters never see
-    /// these, so Web registers may not mix with a physical device's sequence.</summary>
-    public Task<ApiResult<PosNextNumber>> PostNextNumberAsync(
-        Guid locationId, string documentType, CancellationToken cancellationToken)
-        => PostAsync<PosNextNumber>(
-            FormattableString.Invariant($"/api/v1/terminal/{locationId:D}/next-number"),
-            new { documentType },
-            cancellationToken);
-
-    /// <summary>Opens a cashier shift on the chosen register (POS.md §1).</summary>
-    public Task<ApiResult<PosShiftReference>> OpenShiftAsync(
-        Guid locationId,
-        string number,
-        DateOnly businessDate,
-        decimal openingFloat,
-        CancellationToken cancellationToken)
-        => PostAsync<PosShiftReference>(
-            "/api/v1/shifts/open",
-            new { number, locationId, businessDate, openingFloat },
-            cancellationToken);
-
-    /// <summary>Completes the sale atomically on the server (POS.md §3).</summary>
-    public Task<ApiResult<PosCompletedSale>> CompleteSaleAsync(
-        PosCompleteSaleRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosCompletedSale>("/api/v1/sales", request, cancellationToken);
 
     /// <summary>Schedules an effective-dated product price.</summary>
     public Task<ApiResult<PosReference>> SchedulePriceAsync(
@@ -255,11 +206,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return GetAsync<List<PosReceiptSummary>>(path, cancellationToken);
     }
 
-    /// <summary>Issues an RCT-numbered payment receipt for a cash event.</summary>
-    public Task<ApiResult<PosNewReceipt>> IssueReceiptAsync(
-        PosIssueReceiptRequest body, CancellationToken cancellationToken)
-        => PostAsync<PosNewReceipt>("/api/v1/receipts", body, cancellationToken);
-
     /// <summary>Renders a payment receipt as printable plain text (or HTML when requested).</summary>
     public Task<ApiResult<string>> GetReceiptPrintTextAsync(
         Guid receiptId, string? format, CancellationToken cancellationToken)
@@ -346,41 +292,11 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             FormattableString.Invariant($"/api/v1/sales/{saleId:D}/receipt?format=Html"),
             cancellationToken);
 
-    /// <summary>Logs a permissioned reprint of a sale receipt. The reprint flows
-    /// through the register selected in the session.</summary>
-    public Task<ApiResult<PosReference>> ReprintSaleAsync(
-        Guid saleId, PosReprintSaleRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/sales/{saleId:D}/reprint"),
-            request,
-            cancellationToken);
-
-    /// <summary>Voids a completed sale through the open shift, reversing its stock movement.</summary>
-    public Task<ApiResult<PosReference>> VoidSaleAsync(
-        Guid saleId, PosVoidSaleRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/sales/{saleId:D}/void"),
-            request,
-            cancellationToken);
-
     /// <summary>Gets a customer return with its lines, inspections and refunds.</summary>
     public Task<ApiResult<PosReturnDetail>> GetReturnAsync(
         Guid returnId, CancellationToken cancellationToken)
         => GetAsync<PosReturnDetail>(
             FormattableString.Invariant($"/api/v1/returns/{returnId:D}"),
-            cancellationToken);
-
-    /// <summary>Accepts a customer return against a completed sale.</summary>
-    public Task<ApiResult<PosReference>> CreateReturnAsync(
-        PosCreateReturnRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>("/api/v1/returns", request, cancellationToken);
-
-    /// <summary>Issues a refund against a return through the open shift.</summary>
-    public Task<ApiResult<PosReference>> RefundReturnAsync(
-        Guid returnId, PosRefundReturnRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/returns/{returnId:D}/refund"),
-            request,
             cancellationToken);
 
     /// <summary>Routes inspected returned goods to restock, quarantine, damaged,
@@ -419,10 +335,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}"),
             cancellationToken);
 
-    /// <summary>Lists product categories for scoping category and cycle counts.</summary>
-    public Task<ApiResult<List<PosCategory>>> GetCategoriesAsync(CancellationToken cancellationToken)
-        => GetAsync<List<PosCategory>>("/api/v1/catalog/categories", cancellationToken);
-
     /// <summary>Lists product master rows by name, SKU or barcode, paged.</summary>
     public Task<ApiResult<List<PosProductSummary>>> GetProductsAsync(
         string? query, int offset, int limit, CancellationToken cancellationToken)
@@ -435,58 +347,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
 
         return GetAsync<List<PosProductSummary>>(path, cancellationToken);
     }
-
-    /// <summary>Opens a count and takes its sheet from the ledger.</summary>
-    public Task<ApiResult<PosReference>> OpenInventoryCountAsync(
-        Guid locationId,
-        int kind,
-        IReadOnlyList<Guid>? categoryIds,
-        string? note,
-        CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            "/api/v1/inventory/counts",
-            new PosOpenInventoryCountRequest(locationId, kind, categoryIds, note),
-            cancellationToken);
-
-    /// <summary>Records counted quantities on an open count sheet.</summary>
-    public Task<ApiResult<PosReference>> RecordInventoryCountLinesAsync(
-        Guid countId, IReadOnlyList<PosCountLineRequest> lines, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}/lines"),
-            new PosRecordCountLinesRequest(lines),
-            cancellationToken);
-
-    /// <summary>Submits a fully counted sheet for approval.</summary>
-    public Task<ApiResult<PosReference>> SubmitInventoryCountAsync(
-        Guid countId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}/submit"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Approves a count and posts its variance to the ledger.</summary>
-    public Task<ApiResult<PosReference>> ApproveInventoryCountAsync(
-        Guid countId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}/approve"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Sends a count back for recounting with a reason.</summary>
-    public Task<ApiResult<PosReference>> RejectInventoryCountAsync(
-        Guid countId, string? reason, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}/reject"),
-            new PosInventoryControlReasonRequest(reason),
-            cancellationToken);
-
-    /// <summary>Abandons a count without posting, with a reason.</summary>
-    public Task<ApiResult<PosReference>> CancelInventoryCountAsync(
-        Guid countId, string? reason, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}/cancel"),
-            new PosInventoryControlReasonRequest(reason),
-            cancellationToken);
 
     // ---- Transfers ----
 
@@ -506,91 +366,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         Guid transferId, CancellationToken cancellationToken)
         => GetAsync<List<PosTransferCustodyEventSummary>>(
             FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/custody"),
-            cancellationToken);
-
-    /// <summary>Raises a draft transfer request.</summary>
-    public Task<ApiResult<PosReference>> CreateTransferAsync(
-        PosCreateTransferRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>("/api/v1/transfers", request, cancellationToken);
-
-    /// <summary>Submits a draft transfer for review.</summary>
-    public Task<ApiResult<PosReference>> SubmitTransferAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/submit"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Approves a reviewed transfer, optionally amending quantities.</summary>
-    public Task<ApiResult<PosReference>> ApproveTransferAsync(
-        Guid transferId, PosApproveTransferRequest? request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/approve"),
-            request ?? new PosApproveTransferRequest(null, null),
-            cancellationToken);
-
-    /// <summary>Rejects a transfer and sends it back to draft.</summary>
-    public Task<ApiResult<PosReference>> RejectTransferAsync(
-        Guid transferId, string? note, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/reject"),
-            new PosTransferReasonRequest(note),
-            cancellationToken);
-
-    /// <summary>Records what was picked at the source.</summary>
-    public Task<ApiResult<PosReference>> PickTransferAsync(
-        Guid transferId, PosPickTransferRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/pick"),
-            request,
-            cancellationToken);
-
-    /// <summary>Marks picking complete; the transfer may now be dispatched.</summary>
-    public Task<ApiResult<PosReference>> ReadyTransferAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/ready"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Dispatches a ready transfer and posts the ledger.</summary>
-    public Task<ApiResult<PosReference>> DispatchTransferAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/dispatch"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Cancels a dispatched transfer and reverses the ledger.</summary>
-    public Task<ApiResult<PosReference>> CancelTransferDispatchAsync(
-        Guid transferId, string reason, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/cancel-dispatch"),
-            new PosCancelTransferDispatchRequest(reason),
-            cancellationToken);
-
-    /// <summary>Records what arrived at the destination and posts the ledger.</summary>
-    public Task<ApiResult<PosReference>> ReceiveTransferAsync(
-        Guid transferId, PosReceiveTransferRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/receive"),
-            request,
-            cancellationToken);
-
-    /// <summary>Verifies and closes a fully accounted transfer.</summary>
-    public Task<ApiResult<PosReference>> VerifyTransferAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/verify"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Ratifies or rejects a pending emergency transfer.</summary>
-    public Task<ApiResult<PosReference>> ReviewCentralTransferAsync(
-        Guid transferId, bool approve, string? note, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/central-review"),
-            new { approve, note },
             cancellationToken);
 
     // ---- People & roles ----
@@ -859,43 +634,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}"),
             cancellationToken);
 
-    /// <summary>Raises a draft stock adjustment.</summary>
-    public Task<ApiResult<PosReference>> CreateStockAdjustmentAsync(
-        PosCreateStockAdjustmentRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>("/api/v1/inventory/adjustments", request, cancellationToken);
-
-    /// <summary>Submits a draft adjustment for approval.</summary>
-    public Task<ApiResult<PosReference>> SubmitStockAdjustmentAsync(
-        Guid adjustmentId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}/submit"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Approves an adjustment and posts it to the ledger.</summary>
-    public Task<ApiResult<PosReference>> ApproveStockAdjustmentAsync(
-        Guid adjustmentId, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}/approve"),
-            new { },
-            cancellationToken);
-
-    /// <summary>Refuses a submitted adjustment.</summary>
-    public Task<ApiResult<PosReference>> RejectStockAdjustmentAsync(
-        Guid adjustmentId, string? reason, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}/reject"),
-            new PosInventoryControlReasonRequest(reason),
-            cancellationToken);
-
-    /// <summary>Reverses a posted adjustment.</summary>
-    public Task<ApiResult<PosReference>> ReverseStockAdjustmentAsync(
-        Guid adjustmentId, string? reason, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}/reverse"),
-            new PosInventoryControlReasonRequest(reason),
-            cancellationToken);
-
     // ---- Quarantine ----
 
     /// <summary>Lists quarantine incidents at the caller's locations, newest first.</summary>
@@ -908,51 +646,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         Guid incidentId, CancellationToken cancellationToken)
         => GetAsync<PosQuarantineIncidentDetail>(
             FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}"),
-            cancellationToken);
-
-    /// <summary>Raises a quarantine incident for unauthorized or found stock.</summary>
-    public Task<ApiResult<PosReference>> CreateQuarantineIncidentAsync(
-        PosCreateQuarantineIncidentRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>("/api/v1/quarantine", request, cancellationToken);
-
-    /// <summary>Moves an incident into active investigation.</summary>
-    public Task<ApiResult<PosReference>> InvestigateQuarantineIncidentAsync(
-        Guid incidentId, string? note, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}/investigate"),
-            new PosQuarantineNoteRequest(note),
-            cancellationToken);
-
-    /// <summary>Identifies a line against an existing catalogue product.</summary>
-    public Task<ApiResult<PosReference>> LinkQuarantineProductAsync(
-        Guid incidentId, PosLinkQuarantineProductRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}/link-product"),
-            request,
-            cancellationToken);
-
-    /// <summary>Releases quantity from a line into sellable Available stock.</summary>
-    public Task<ApiResult<PosReference>> ReleaseQuarantineLineAsync(
-        Guid incidentId, PosQuarantineQuantityRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}/release"),
-            request,
-            cancellationToken);
-
-    /// <summary>Rejects quantity back to the supplier counterparty.</summary>
-    public Task<ApiResult<PosReference>> RejectQuarantineLineAsync(
-        Guid incidentId, PosQuarantineQuantityRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}/reject"),
-            request,
-            cancellationToken);
-
-    /// <summary>Writes off quantity as shrinkage.</summary>
-    public Task<ApiResult<PosReference>> WriteOffQuarantineLineAsync(
-        Guid incidentId, PosWriteOffQuarantineLineRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}/write-off"),
-            request,
             cancellationToken);
 
     // ---- Replenishment & inventory exceptions ----
@@ -1017,23 +710,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         => Uri.EscapeDataString(value.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
 
     private sealed record ApiProblem(string? Detail, string? ErrorCode);
-}
-
-/// <summary>An allocated device-scoped document number.</summary>
-public sealed class PosNextNumber
-{
-    /// <summary>Gets or sets the document type code (SAL, RET or SHF).</summary>
-    public string DocumentType { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the allocated number, e.g. <c>SAL-2026-TW1-000001</c>.</summary>
-    public string Number { get; set; } = string.Empty;
-}
-
-/// <summary>A reference to a cashier shift.</summary>
-public sealed class PosShiftReference
-{
-    /// <summary>Gets or sets the shift identifier.</summary>
-    public Guid Id { get; set; }
 }
 
 /// <summary>A client API result with a user-safe failure message.</summary>

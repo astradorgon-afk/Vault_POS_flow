@@ -743,6 +743,10 @@ public sealed class DevelopmentDataSeeder(
                 ("admin", "System Administrator", Roles.Administrator, ApprovalTier.Tier3, null),
                 ("manager", "Store One Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE01"),
                 ("cashier", "Store One Cashier", Roles.Cashier, ApprovalTier.None, "STORE01"),
+                ("manager2", "Store Two Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE02"),
+                ("cashier2", "Store Two Cashier", Roles.Cashier, ApprovalTier.None, "STORE02"),
+                ("manager3", "Store Three Manager", Roles.StoreManager, ApprovalTier.Tier1, "STORE03"),
+                ("cashier3", "Store Three Cashier", Roles.Cashier, ApprovalTier.None, "STORE03"),
                 ("inventory", "Inventory Staff", Roles.InventoryStaff, ApprovalTier.None, "MAIN"),
                 ("auditor", "Auditor", Roles.Auditor, ApprovalTier.None, null),
             ];
@@ -785,6 +789,16 @@ public sealed class DevelopmentDataSeeder(
                     }
 
                     logger.LogWarning("Rotated the password for development account {UserName}.", userName);
+                }
+
+                // An account an older seed created under the same name (for
+                // example cashier2, once a second Store One cashier) is brought
+                // to its current name and store, so each store's staff actually
+                // work at that store. Accounts a person created are left alone.
+                if (existing.CreatedByUserId == Guid.Empty && locationCode is not null)
+                {
+                    await ConvergeDevelopmentAccountAsync(existing, displayName, locationCode, now, cancellationToken)
+                        .ConfigureAwait(false);
                 }
 
                 continue;
@@ -888,6 +902,47 @@ public sealed class DevelopmentDataSeeder(
                 _accountsCreated,
                 DevelopmentPassword);
         }
+    }
+
+    /// <summary>Gives a seeder-created account its configured display name and
+    /// makes the configured store its only location.</summary>
+    private async Task ConvergeDevelopmentAccountAsync(
+        AppUser account, string displayName, string locationCode, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (account.DisplayName != displayName)
+        {
+            account.DisplayName = displayName;
+            IdentityResult renamed = await users.UpdateAsync(account).ConfigureAwait(false);
+            if (!renamed.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    FormattableString.Invariant(
+                        $"Could not rename development account {account.UserName}: {string.Join("; ", renamed.Errors.Select(e => e.Description))}"));
+            }
+        }
+
+        LocationId locationId = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Code == locationCode)
+            .Select(l => l.Id)
+            .SingleAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        UserId userId = new(account.Id);
+        List<UserLocationAssignment> assignments = await context.UserLocations
+            .Where(a => a.UserId == userId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (assignments.Count == 1 && assignments[0].LocationId == locationId)
+        {
+            return;
+        }
+
+        context.UserLocations.RemoveRange(assignments);
+        context.UserLocations.Add(UserLocationAssignment.Create(userId, locationId, isPrimary: true, now, assignedByUserId: UserId.Empty));
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        logger.LogWarning("Moved development account {UserName} to {Location}.", account.UserName, locationCode);
     }
 
     private Task<bool> LocationExistsAsync(string code, CancellationToken cancellationToken)

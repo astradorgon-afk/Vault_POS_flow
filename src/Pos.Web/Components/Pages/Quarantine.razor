@@ -11,7 +11,7 @@
 <header class="qr-head">
     <span class="eyebrow">Operations</span>
     <h1>Quarantine</h1>
-    <p>Record and isolate unauthorized or unidentified stock held out of sale.</p>
+    <p>Unauthorized or unidentified stock each location found and is holding out of sale.</p>
 </header>
 
 @if (!CanView)
@@ -27,57 +27,6 @@ else
     @if (!string.IsNullOrWhiteSpace(message))
     {
         <div class="dashboard-notices" role="status"><p>@message</p></div>
-    }
-
-    @if (CanCreate)
-    {
-        <section class="qr-card" aria-labelledby="flag-title">
-            <h2 id="flag-title">Flag found stock</h2>
-            <p class="qr-sub">Record what was found by barcode. It is held out of sale until someone investigates it.</p>
-
-            <div class="qr-grid">
-                <label class="qr-label" for="qr-location">Location</label>
-                <label class="qr-label" for="qr-note">Note</label>
-                <span class="qr-label">Barcode</span>
-                <span class="qr-label">Qty</span>
-                <span class="qr-label" aria-hidden="true"></span>
-
-                @for (int index = 0; index < draftLines.Count; index++)
-                {
-                    DraftLine line = draftLines[index];
-                    int lineNumber = index + 1;
-                    @if (index == 0)
-                    {
-                        <select id="qr-location" class="qr-field qr-location" value="@(draftLocationId?.ToString() ?? string.Empty)" @onchange="OnDraftLocationChanged">
-                            <option value="">Select a location</option>
-                            @foreach (PosLocation location in locations)
-                            {
-                                <option value="@location.Id">@location.Code · @location.Name</option>
-                            }
-                        </select>
-                        <input id="qr-note" class="qr-field qr-note" type="text" @bind="draftNote" placeholder="Note (optional)" />
-                    }
-                    else
-                    {
-                        <span class="qr-spacer"></span>
-                        <span class="qr-spacer"></span>
-                    }
-                    <input class="qr-field qr-barcode" type="text" placeholder="Scan or type a barcode" aria-label="Barcode, line @lineNumber" @bind="line.Barcode" />
-                    <input class="qr-field qr-qty" type="number" min="0" step="0.001" placeholder="Qty" aria-label="Quantity, line @lineNumber"
-                           value="@(line.Quantity?.ToString(CultureInfo.InvariantCulture) ?? string.Empty)"
-                           @onchange="e => OnLineQuantityChanged(line, e)" />
-                    <button type="button" class="qr-remove" aria-label="Remove line @lineNumber" disabled="@(draftLines.Count == 1)" @onclick="() => draftLines.Remove(line)"><AppIcon Name="close" /></button>
-                }
-            </div>
-
-            <button type="button" class="qr-add" @onclick="AddLine">+ Add line</button>
-
-            <div class="qr-actions">
-                <button type="button" class="qr-primary" @onclick="CreateIncidentAsync" disabled="@(!CanRaise || creating)">
-                    @(creating ? "Raising…" : "Raise incident")
-                </button>
-            </div>
-        </section>
     }
 
     <section class="qr-card qr-results" aria-live="polite" aria-label="Quarantine incidents">
@@ -97,7 +46,7 @@ else
                     <path d="M76 24a6 6 0 1 1 9 5c-2 1-2.5 2-2.5 4.5 M82.5 38v.5" fill="none" stroke="#1f5a3e" stroke-width="3" stroke-linecap="round" />
                 </svg>
                 <h2>Nothing in quarantine.</h2>
-                <p>@(CanCreate ? "Choose a location and add items to investigate." : "Flagged stock will appear here.")</p>
+                <p>Stock a location flags will appear here.</p>
             </div>
         }
         else
@@ -109,13 +58,14 @@ else
             <div class="qr-table-wrap">
                 <table class="qr-table">
                     <thead>
-                        <tr><th>Incident</th><th>Status</th><th class="num">Lines</th><th class="num">Open lines</th><th class="num">Value</th><th>Created</th><th aria-hidden="true"></th></tr>
+                        <tr><th>Incident</th><th>Location</th><th>Status</th><th class="num">Lines</th><th class="num">Open lines</th><th class="num">Value</th><th>Created</th><th aria-hidden="true"></th></tr>
                     </thead>
                     <tbody>
                         @foreach (PosQuarantineIncidentSummary incident in incidents)
                         {
                             <tr @key="incident.Id" @onclick="() => Open(incident.Id)">
                                 <td><a href="quarantine/@incident.Id.ToString("D")" @onclick:stopPropagation="true">@incident.Number</a></td>
+                                <td>@LocationName(incident.LocationId)</td>
                                 <td><span class="ov-pill tone-@StatusTone(incident.Status)">@SplitWords(incident.Status)</span></td>
                                 <td class="num">@incident.LineCount</td>
                                 <td class="num">@incident.OpenLineCount</td>
@@ -132,33 +82,15 @@ else
 }
 
 @code {
-    private sealed class DraftLine
-    {
-        public long Marker { get; init; }
-        public string Barcode { get; set; } = string.Empty;
-        public decimal? Quantity { get; set; }
-    }
-
     private readonly List<PosLocation> locations = [];
     private readonly List<PosQuarantineIncidentSummary> incidents = [];
-    private readonly List<DraftLine> draftLines = [];
-    private long nextMarker = 1;
 
-    private Guid? draftLocationId;
-    private string draftNote = string.Empty;
 
     private bool loading = true;
-    private bool creating;
     private string? message;
 
     private bool CanView => Session.HasPermission("quarantine.view");
-    private bool CanCreate => Session.HasPermission("quarantine.create");
     private int OpenCount => incidents.Count(incident => incident.Status != "Resolved");
-
-    private bool CanRaise =>
-        draftLocationId is not null
-        && draftLines.Count > 0
-        && draftLines.All(line => !string.IsNullOrWhiteSpace(line.Barcode) && line.Quantity is > 0m);
 
     protected override async Task OnInitializedAsync()
     {
@@ -168,29 +100,19 @@ else
             return;
         }
 
-        if (CanCreate)
+        ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        if (locationResponse.IsSuccess && locationResponse.Value is not null)
         {
-            ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
-            if (locationResponse.IsSuccess && locationResponse.Value is not null)
-            {
-                locations.AddRange(locationResponse.Value);
-            }
-
-            AddLine();
+            locations.AddRange(locationResponse.Value);
         }
 
         await LoadIncidentsAsync();
     }
 
-    private void OnDraftLocationChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
-        => draftLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
-
-    private void AddLine() => draftLines.Add(new DraftLine { Marker = nextMarker++ });
-
-    private void OnLineQuantityChanged(DraftLine line, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-        => line.Quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
-            ? Math.Max(0m, value)
-            : null;
+    private string LocationName(Guid locationId)
+        => locations.FirstOrDefault(location => location.Id == locationId) is { } location
+            ? $"{location.Code} · {location.Name}"
+            : "—";
 
     private async Task LoadIncidentsAsync()
     {
@@ -215,41 +137,6 @@ else
         finally
         {
             loading = false;
-        }
-    }
-
-    private async Task CreateIncidentAsync()
-    {
-        if (!CanRaise || draftLocationId is not { } locationId)
-        {
-            return;
-        }
-
-        creating = true;
-        message = null;
-        try
-        {
-            var request = new PosCreateQuarantineIncidentRequest(
-                locationId,
-                [.. draftLines.Select(line => new PosQuarantineLineRequest(line.Barcode.Trim(), line.Quantity!.Value))],
-                string.IsNullOrWhiteSpace(draftNote) ? null : draftNote.Trim());
-
-            ApiResult<PosReference> response = await Api.CreateQuarantineIncidentAsync(request, CancellationToken.None);
-            if (!response.IsSuccess || response.Value is null)
-            {
-                message = response.Error;
-                return;
-            }
-
-            Navigation.NavigateTo($"/quarantine/{response.Value.Id:D}");
-        }
-        catch (HttpRequestException)
-        {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            creating = false;
         }
     }
 

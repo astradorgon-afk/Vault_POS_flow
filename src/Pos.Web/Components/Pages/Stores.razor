@@ -1,0 +1,228 @@
+@page "/stores"
+@using System.Globalization
+@attribute [Authorize(Policy = "sale.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Stores · VaultFlow</PageTitle>
+
+<header class="qr-head st-head">
+    <div>
+        <span class="eyebrow">Monitoring</span>
+        <h1>Stores</h1>
+        <p>What each store sold and took in, as synced from its registers.</p>
+    </div>
+    <div class="st-periods" role="group" aria-label="Period">
+        @foreach ((string key, string label) in Periods)
+        {
+            <button type="button" class="@(period == key ? "active" : null)" @onclick="() => SelectPeriodAsync(key)" disabled="@loading">@label</button>
+        }
+    </div>
+</header>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="dashboard-notices" role="status"><p>@message</p></div>
+}
+
+@if (loading && report is null)
+{
+    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading store results…</p></div></section>
+}
+else if (report is not null)
+{
+    <section class="st-totals" aria-label="All stores">
+        <article><span>Takings</span><strong>@Money(report.Stores.Sum(s => s.Takings))</strong><small>after @Money(report.Stores.Sum(s => s.Refunds)) refunded</small></article>
+        <article><span>Net sales</span><strong>@Money(report.Stores.Sum(s => s.NetSales))</strong><small>@RangeLabel</small></article>
+        <article><span>Transactions</span><strong>@report.Stores.Sum(s => s.Transactions).ToString("N0", CultureInfo.InvariantCulture)</strong><small>@report.Stores.Sum(s => s.VoidedTransactions) voided</small></article>
+        <article><span>Average ticket</span><strong>@Money(AverageTicket)</strong><small>across @report.Stores.Count stores</small></article>
+    </section>
+
+    @if (report.Stores.Count == 0)
+    {
+        <section class="qr-card"><div class="qr-empty"><h2>No stores in your scope.</h2><p>Ask an administrator to assign a store to this account.</p></div></section>
+    }
+
+    <div class="st-grid">
+        @foreach (PosStorePerformance store in report.Stores.OrderByDescending(s => s.Takings))
+        {
+            decimal peak = Math.Max(store.Daily.Count == 0 ? 0m : store.Daily.Max(d => d.NetSales), 1m);
+            decimal paid = Math.Max(store.CashSales + store.CardSales + store.EWalletSales, 1m);
+            <article class="st-card" @key="store.LocationId">
+                <header>
+                    <div>
+                        <span class="st-code">@store.Code</span>
+                        <h2>@store.Name</h2>
+                    </div>
+                    <span class="st-last">@LastSaleLabel(store.LastSaleAtUtc)</span>
+                </header>
+
+                <div class="st-takings">
+                    <span>Takings</span>
+                    <strong>@Money(store.Takings)</strong>
+                    <small>@Share(store.Takings) of all stores</small>
+                </div>
+
+                <dl class="st-stats">
+                    <div><dt>Net sales</dt><dd>@Money(store.NetSales)</dd></div>
+                    <div><dt>Transactions</dt><dd>@store.Transactions.ToString("N0", CultureInfo.InvariantCulture)</dd></div>
+                    <div><dt>Average ticket</dt><dd>@Money(store.AverageTicket)</dd></div>
+                    <div><dt>Discounts</dt><dd>@Money(store.Discounts)</dd></div>
+                    <div><dt>Voided</dt><dd>@store.VoidedTransactions · @Money(store.VoidedValue)</dd></div>
+                    <div><dt>Refunded</dt><dd>@Money(store.Refunds)</dd></div>
+                </dl>
+
+                <div class="st-mix" aria-label="Payment mix">
+                    <div class="st-mix-bar">
+                        <i class="cash" style="width:@Percent(store.CashSales, paid)"></i>
+                        <i class="card" style="width:@Percent(store.CardSales, paid)"></i>
+                        <i class="wallet" style="width:@Percent(store.EWalletSales, paid)"></i>
+                    </div>
+                    <ul>
+                        <li><b class="cash"></b>Cash @Money(store.CashSales)</li>
+                        <li><b class="card"></b>Card @Money(store.CardSales)</li>
+                        <li><b class="wallet"></b>E-wallet @Money(store.EWalletSales)</li>
+                    </ul>
+                </div>
+
+                @if (store.Daily.Count > 1)
+                {
+                    <div class="st-trend" aria-label="Net sales per day">
+                        @foreach (PosStoreDailySales day in store.Daily)
+                        {
+                            <span title="@day.Date.ToString("ddd MMM d", CultureInfo.InvariantCulture): @Money(day.NetSales) · @day.Transactions sales"
+                                  style="height:@Percent(day.NetSales, peak)"></span>
+                        }
+                    </div>
+                }
+
+                @if (store.TopProducts.Count > 0)
+                {
+                    <div class="st-top">
+                        <h3>Best sellers</h3>
+                        <ol>
+                            @foreach (PosStoreTopProduct product in store.TopProducts)
+                            {
+                                <li><span>@product.Name</span><small>@product.Quantity.ToString("0.##", CultureInfo.InvariantCulture) sold</small><strong>@Money(product.NetSales)</strong></li>
+                            }
+                        </ol>
+                    </div>
+                }
+
+                <footer>
+                    <a href="@SalesLink(store.LocationId)">Transactions <AppIcon Name="arrow" /></a>
+                    <a href="@($"inventory/stock?store={store.LocationId:D}")">Inventory <AppIcon Name="arrow" /></a>
+                </footer>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private static readonly (string Key, string Label)[] Periods =
+    [
+        ("today", "Today"),
+        ("7", "7 days"),
+        ("30", "30 days"),
+        ("month", "This month"),
+    ];
+
+    private PosStorePerformanceReport? report;
+    private string period = "7";
+    private bool loading = true;
+    private string? message;
+
+    private DateOnly Today => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila")).DateTime);
+
+    private (DateOnly From, DateOnly To) Range => period switch
+    {
+        "today" => (Today, Today),
+        "30" => (Today.AddDays(-29), Today),
+        "month" => (new DateOnly(Today.Year, Today.Month, 1), Today),
+        _ => (Today.AddDays(-6), Today),
+    };
+
+    private string RangeLabel => report is null
+        ? string.Empty
+        : report.From == report.To
+            ? report.From.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)
+            : $"{report.From.ToString("MMM d", CultureInfo.InvariantCulture)} – {report.To.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}";
+
+    private decimal AverageTicket
+    {
+        get
+        {
+            int transactions = report?.Stores.Sum(s => s.Transactions) ?? 0;
+            return transactions == 0 ? 0m : decimal.Round(report!.Stores.Sum(s => s.NetSales) / transactions, 2);
+        }
+    }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task SelectPeriodAsync(string key)
+    {
+        period = key;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            (DateOnly from, DateOnly to) = Range;
+            ApiResult<PosStorePerformanceReport> response = await Api.GetAsync<PosStorePerformanceReport>(
+                FormattableString.Invariant($"/api/v1/dashboard/store-performance?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
+                CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            report = response.Value;
+        }
+        catch (HttpRequestException)
+        {
+            message = "Store results are unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private string SalesLink(Guid store)
+    {
+        (DateOnly from, DateOnly to) = Range;
+        return FormattableString.Invariant($"sales?store={store:D}&from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}");
+    }
+
+    private string Share(decimal takings)
+    {
+        decimal total = report?.Stores.Sum(s => s.Takings) ?? 0m;
+        return total <= 0m ? "0%" : (takings / total).ToString("P0", CultureInfo.InvariantCulture);
+    }
+
+    private static string Percent(decimal part, decimal whole)
+        => FormattableString.Invariant($"{Math.Clamp(part / whole * 100m, 0m, 100m):0.#}%");
+
+    private static string LastSaleLabel(DateTimeOffset? at)
+    {
+        if (at is not { } last)
+        {
+            return "No sales yet";
+        }
+
+        TimeSpan ago = DateTimeOffset.UtcNow - last;
+        return ago.TotalMinutes < 60 ? $"Last sale {Math.Max(1, (int)ago.TotalMinutes)} min ago"
+            : ago.TotalHours < 24 ? $"Last sale {(int)ago.TotalHours} h ago"
+            : $"Last sale {last.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)}";
+    }
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

@@ -127,8 +127,8 @@ Visual Studio works too: set **Pos.Client** as the startup project, pick
    availability. See [Load the demo business](#load-the-demo-business) for a
    month of history on top.
 
-The development accounts are a deliberately short set (one per role), with the
-same password `cash1234`:
+The development accounts share the password `cash1234`. Store staff work the
+registers; the owner, administrator and auditor use the web UI to monitor:
 
 | Username    | Role               | Scope                                  |
 |-------------|--------------------|----------------------------------------|
@@ -136,6 +136,10 @@ same password `cash1234`:
 | `admin`     | Administrator      | Business-wide                          |
 | `manager`   | Store Manager      | Store One                              |
 | `cashier`   | Cashier            | Store One                              |
+| `manager2`  | Store Manager      | Store Two                              |
+| `cashier2`  | Cashier            | Store Two                              |
+| `manager3`  | Store Manager      | Store Three                            |
+| `cashier3`  | Cashier            | Store Three                            |
 | `inventory` | Inventory Staff    | Main Warehouse                         |
 | `auditor`   | Auditor            | Business-wide (read-only)              |
 
@@ -158,8 +162,8 @@ The development seed gives the API a full catalogue (43 products across eight
 categories, five suppliers, twelve named customers), per-store restock levels,
 and prices and opening stock dated 35 days back. `tools/Pos.DemoData` then
 fills that catalogue with a month of activity through the public API, the same
-way the web and desktop clients call it, so every record passes the normal
-validation, ledger posting and audit:
+way the store registers and the web UI call it, so every record passes the
+normal validation, ledger posting and audit:
 
 ```powershell
 .\scripts\dev-desktop.ps1                               # API and Web UI running
@@ -168,11 +172,14 @@ dotnet run --project tools/Pos.DemoData -- --days 30    # in a second terminal
 
 It posts:
 
-- **30 days of trading at all three stores:** one shift per store per day,
-  with cash, card and e-wallet sales, customer-attached sales, supervisor
-  voids, returns with refunds, and closed shifts, some with small cash
-  variances. It registers a browser till (`WB1`–`WB3`) per store for this,
-  which also makes the web **New sale** page usable.
+- **30 days of trading at all three stores,** through one enrolled register
+  per store: `W02` (a second Windows counter at Store One), `W03` (Store Two)
+  and `A01` (an Android phone till at Store Three). The store's cashier signs
+  in at the register, the register numbers its own documents as it does
+  offline, and the store manager voids and refunds. Each day has a shift with
+  cash, card and e-wallet sales, customer-attached sales, the odd void and
+  return, and a cash count, some with small variances. The real desktop
+  register `W01` is never used, so its own numbering is unaffected.
 - **Back-office work at every stage:**
   - Purchase orders: received in full, received short with damage, awaiting
     approval, and a draft.
@@ -190,10 +197,17 @@ anything you want to keep:
 docker exec vaultflow-dev-pg pg_dump -U pos_migrator -d vaultflow --format=custom > backups\before-demo.dump
 ```
 
-The desktop register and the web UI share this data through the API. The
-register keeps an offline copy that refreshes when a cashier signs in, or with
-**Re-download** on the signed-in view. Sales made at the register appear in
-the web **Sales ledger** once they sync.
+Selling happens only at the store registers: they work offline and sync to
+head office. The web UI is read-only for store records. The owner monitors each
+store there: **Store performance** (takings, sales, transactions, payment mix,
+voids, refunds and best sellers per store over a period) and **Store
+inventory** (each location's stock, with the items running lowest and the ones
+most abundant against their target), alongside the sales ledger, payment
+receipts, counts, adjustments, transfers and quarantine, which are all view
+only. Administration (locations, people, devices, prices) stays editable.
+A register keeps an offline copy of its store's data that refreshes when a
+cashier signs in, or with **Re-download** on the signed-in view, and its sales
+appear in the web **Sales ledger** once they sync.
 
 ## Exercise backup and restore locally
 

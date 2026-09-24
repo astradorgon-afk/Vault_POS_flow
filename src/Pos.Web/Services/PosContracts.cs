@@ -108,127 +108,6 @@ public sealed record PosSchedulePriceRequest(
 /// <summary>The body used to cancel a future product price.</summary>
 public sealed record PosCancelPriceRequest(string Reason);
 
-/// <summary>One editable line in the in-memory POS cart.</summary>
-public sealed class PosCartLine(PosProduct product, decimal unitPrice)
-{
-    /// <summary>Gets the product.</summary>
-    public PosProduct Product { get; } = product;
-
-    /// <summary>Gets the resolved selling price.</summary>
-    public decimal UnitPrice { get; } = unitPrice;
-
-    /// <summary>Gets or sets the quantity.</summary>
-    public decimal Quantity { get; set; } = 1m;
-
-    /// <summary>Gets the extended amount.</summary>
-    public decimal Total => decimal.Round(UnitPrice * Quantity, 4, MidpointRounding.ToEven);
-}
-
-/// <summary>A browser register available for a store (an Active web-platform device).</summary>
-public sealed class PosRegister
-{
-    /// <summary>Gets or sets the register (device) identifier.</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Gets or sets the document-number short code.</summary>
-    public string ShortCode { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the register's display name.</summary>
-    public string Name { get; set; } = string.Empty;
-}
-
-/// <summary>The checkout context the server mints for one register (POS.md §2).</summary>
-public sealed class PosTerminalSession
-{
-    /// <summary>Gets or sets the register (device) identifier.</summary>
-    public Guid DeviceId { get; set; }
-
-    /// <summary>Gets or sets the register short code.</summary>
-    public string DeviceShortCode { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the register name.</summary>
-    public string DeviceName { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the store's business date.</summary>
-    public DateOnly BusinessDate { get; set; }
-
-    /// <summary>Gets or sets the store's VAT rate for non-exempt lines.</summary>
-    public decimal VatRate { get; set; }
-
-    /// <summary>Gets or sets the store's cash-change rounding increment.</summary>
-    public decimal CashRoundingIncrement { get; set; }
-
-    /// <summary>Gets or sets the open shift on the register, or null.</summary>
-    public PosOpenShift? OpenShift { get; set; }
-}
-
-/// <summary>A shift currently open on a register.</summary>
-public sealed class PosOpenShift
-{
-    /// <summary>Gets or sets the shift identifier.</summary>
-    public Guid ShiftId { get; set; }
-
-    /// <summary>Gets or sets the SHF document number.</summary>
-    public string Number { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the cashier's user identifier.</summary>
-    public Guid CashierId { get; set; }
-
-    /// <summary>Gets or sets the cashier's display name.</summary>
-    public string CashierName { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the business date the shift opened on.</summary>
-    public DateOnly BusinessDate { get; set; }
-
-    /// <summary>Gets or sets when the shift opened.</summary>
-    public DateTimeOffset OpenedAtUtc { get; set; }
-
-    /// <summary>Gets or sets the opening float.</summary>
-    public decimal OpeningFloat { get; set; }
-}
-
-/// <summary>A reference to a completed sale.</summary>
-public sealed class PosCompletedSale
-{
-    /// <summary>Gets or sets the sale identifier.</summary>
-    public Guid Id { get; set; }
-}
-
-/// <summary>The body of a complete-sale call. Mirrors the API's
-/// <c>CompleteSaleBody</c>; the cashier comes from the signed-in session.</summary>
-public sealed record PosCompleteSaleRequest(
-    string Number,
-    Guid EventId,
-    Guid LocationId,
-    Guid CashierShiftId,
-    Guid DeviceId,
-    Guid? CustomerId,
-    DateOnly BusinessDate,
-    DateTimeOffset CompletedAtUtc,
-    IReadOnlyList<PosSaleLine> Lines,
-    IReadOnlyList<PosPayment> Payments);
-
-/// <summary>One line of a completed sale.</summary>
-public sealed record PosSaleLine(
-    Guid ProductId,
-    decimal Quantity,
-    Guid UnitOfMeasureId,
-    string? Barcode,
-    decimal? UnitPriceOverride,
-    Guid? PriceOverrideAuthorizedByUserId,
-    decimal Discount,
-    Guid? DiscountAuthorizedByUserId,
-    bool AllowExpiredOverride,
-    string? ExpiredOverrideReason);
-
-/// <summary>One payment that settles a sale. Method is the numeric
-/// <c>PaymentMethod</c> value: <c>1</c> cash, <c>2</c> card, <c>3</c> e-wallet.</summary>
-public sealed record PosPayment(
-    int Method,
-    decimal Amount,
-    decimal? Tendered,
-    string? ProviderReference);
-
 /// <summary>One completed sale as returned by the sales search.</summary>
 public sealed class PosSaleSummary
 {
@@ -537,55 +416,6 @@ public sealed class PosReturnRefundDetail
     public DateTimeOffset RefundedAtUtc { get; set; }
 }
 
-/// <summary>The body of a receipt-reprint request. The operator comes from the
-/// signed-in session; a reprint is a read-side emission and needs no shift.</summary>
-public sealed record PosReprintSaleRequest(
-    Guid LocationId,
-    Guid DeviceId,
-    string Reason,
-    DateTimeOffset ReprintedAtUtc);
-
-/// <summary>The body of a void-sale request.</summary>
-public sealed record PosVoidSaleRequest(
-    Guid EventId,
-    Guid LocationId,
-    Guid ShiftId,
-    Guid DeviceId,
-    DateOnly BusinessDate,
-    DateTimeOffset VoidedAtUtc,
-    string Reason);
-
-/// <summary>The body of a return-against-a-sale request. The operator comes from
-/// the signed-in session.</summary>
-public sealed record PosCreateReturnRequest(
-    string Number,
-    Guid EventId,
-    Guid SaleId,
-    Guid LocationId,
-    Guid ShiftId,
-    Guid DeviceId,
-    Guid? CustomerId,
-    DateOnly BusinessDate,
-    DateTimeOffset ReturnedAtUtc,
-    IReadOnlyList<PosCreateReturnLine> Lines);
-
-/// <summary>One line of an accepted return.</summary>
-public sealed record PosCreateReturnLine(Guid ProductId, decimal Quantity);
-
-/// <summary>The body of a return-refund request. The operator comes from the
-/// signed-in session; a blind return's refund is cash only.</summary>
-public sealed record PosRefundReturnRequest(
-    Guid? SaleId,
-    Guid EventId,
-    Guid LocationId,
-    Guid ShiftId,
-    Guid DeviceId,
-    int Method,
-    decimal Amount,
-    decimal? Tendered,
-    string? ProviderReference,
-    DateTimeOffset RefundedAtUtc);
-
 /// <summary>The body of a return-inspection decision. Needs no register context.</summary>
 public sealed record PosDisposeReturnRequest(
     Guid EventId,
@@ -631,35 +461,6 @@ public sealed class PosReceiptSummary
     public DateTimeOffset IssuedAtUtc { get; set; }
 }
 
-/// <summary>The body of a payment receipt issue.</summary>
-public sealed class PosIssueReceiptRequest
-{
-    /// <summary>Gets or sets the store the cash event happened at.</summary>
-    public Guid LocationId { get; set; }
-
-    /// <summary>Gets or sets the receipt kind: 1 Walk-in sale, 2 Branch expense, 3 Owner withdrawal.</summary>
-    public int Kind { get; set; }
-
-    /// <summary>Gets or sets the amount recorded, greater than zero.</summary>
-    public decimal Amount { get; set; }
-
-    /// <summary>Gets or sets the optional counterparty name, for example a customer or supplier.</summary>
-    public string? Counterparty { get; set; }
-
-    /// <summary>Gets or sets the optional purpose note.</summary>
-    public string? Note { get; set; }
-
-    /// <summary>Gets or sets the optional number of a related document, such as a sale.</summary>
-    public string? ReferenceNumber { get; set; }
-}
-
-/// <summary>The response of a payment receipt issue.</summary>
-public sealed class PosNewReceipt
-{
-    /// <summary>Gets or sets the created receipt identifier.</summary>
-    public Guid Id { get; set; }
-}
-
 /// <summary>An inventory count as listed in the dashboard.</summary>
 public sealed record PosInventoryCountSummary(
     Guid Id,
@@ -698,44 +499,12 @@ public sealed record PosInventoryCountLineView(
     bool IsRepeatVariance,
     DateTimeOffset? CountedAtUtc);
 
-/// <summary>A product category, used to scope a category or cycle count.</summary>
-public sealed class PosCategory
-{
-    /// <summary>Gets or sets the category identifier.</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Gets or sets the category code.</summary>
-    public string Code { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the category name.</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets whether the category is active.</summary>
-    public bool IsActive { get; set; }
-}
-
 /// <summary>A product master row used to name count-sheet lines.</summary>
 public sealed record PosProductSummary(
     Guid Id,
     string Sku,
     string Name,
     bool IsActive);
-
-/// <summary>The body that opens a stock count.</summary>
-public sealed record PosOpenInventoryCountRequest(
-    Guid LocationId,
-    int Kind,
-    IReadOnlyList<Guid>? CategoryIds,
-    string? Note);
-
-/// <summary>One counted quantity sent for a count line.</summary>
-public sealed record PosCountLineRequest(Guid ProductId, decimal PhysicalQuantity, Guid? BatchId = null);
-
-/// <summary>The body that records counted quantities.</summary>
-public sealed record PosRecordCountLinesRequest(IReadOnlyList<PosCountLineRequest> Lines);
-
-/// <summary>A reason attached to a count rejection or cancellation.</summary>
-public sealed record PosInventoryControlReasonRequest(string? Reason);
 
 /// <summary>A transfer as listed in the transfers dashboard.</summary>
 public sealed record PosTransferSummary(
@@ -778,46 +547,6 @@ public sealed record PosTransferAllocationView(
     decimal PickedQuantity,
     decimal ReceivedQuantity,
     decimal DamagedQuantity);
-
-/// <summary>One arrival receipt line, keyed to a dispatched allocation.</summary>
-public sealed record PosTransferReceiveLine(
-    int LineNo,
-    Guid? BatchId,
-    decimal ReceivedQuantity,
-    decimal DamagedQuantity);
-
-/// <summary>The body that records a transfer arrival.</summary>
-public sealed record PosReceiveTransferRequest(IReadOnlyList<PosTransferReceiveLine> Receives);
-
-/// <summary>One line of a transfer request.</summary>
-public sealed record PosTransferLineRequest(Guid ProductId, decimal Quantity, string? Note = null);
-
-/// <summary>The body that raises a transfer request.</summary>
-public sealed record PosCreateTransferRequest(
-    Guid SourceLocationId,
-    Guid DestinationLocationId,
-    IReadOnlyList<PosTransferLineRequest> Lines,
-    Guid? PreApprovalTokenId = null);
-
-/// <summary>An approval-time quantity change.</summary>
-public sealed record PosTransferAmendment(int LineNo, decimal RequestedQuantity);
-
-/// <summary>The body of a transfer approval, optionally amending quantities.</summary>
-public sealed record PosApproveTransferRequest(
-    IReadOnlyList<PosTransferAmendment>? Amendments = null,
-    string? Note = null);
-
-/// <summary>One picked lot of a transfer.</summary>
-public sealed record PosTransferPickLine(Guid? BatchId, int LineNo, decimal Quantity);
-
-/// <summary>The body recording what was picked.</summary>
-public sealed record PosPickTransferRequest(IReadOnlyList<PosTransferPickLine> Allocations);
-
-/// <summary>The body cancelling a dispatch.</summary>
-public sealed record PosCancelTransferDispatchRequest(string Reason);
-
-/// <summary>A note attached to a review, rejection or cancellation.</summary>
-public sealed record PosTransferReasonRequest(string? Note);
 
 /// <summary>One step in a transfer's custody timeline.</summary>
 public sealed record PosTransferCustodyEventSummary(
@@ -1078,17 +807,6 @@ public sealed record PosStockAdjustmentLineView(
     decimal AbsoluteValue,
     string MovementType);
 
-/// <summary>One line change on a new stock adjustment.</summary>
-public sealed record PosStockAdjustmentLineRequest(
-    Guid ProductId, int State, decimal QuantityDelta, Guid? BatchId = null);
-
-/// <summary>The body that raises a draft stock adjustment.</summary>
-public sealed record PosCreateStockAdjustmentRequest(
-    Guid LocationId,
-    int Reason,
-    IReadOnlyList<PosStockAdjustmentLineRequest> Lines,
-    string? Notes = null);
-
 // ---- Quarantine ----
 
 /// <summary>A quarantine incident as listed.</summary>
@@ -1154,28 +872,6 @@ public sealed record PosQuarantineIncidentDetail(
     IReadOnlyList<PosQuarantinePhotoSummary> Photos,
     IReadOnlyList<PosQuarantineEventSummary> Timeline);
 
-/// <summary>One found line on a new quarantine incident.</summary>
-public sealed record PosQuarantineLineRequest(
-    string Barcode, decimal Quantity, decimal? UnitCost = null, string? ClaimedProductName = null);
-
-/// <summary>The body that raises a quarantine incident.</summary>
-public sealed record PosCreateQuarantineIncidentRequest(
-    Guid LocationId, IReadOnlyList<PosQuarantineLineRequest> Lines, string? Note = null);
-
-/// <summary>The body that identifies a quarantine line against a catalogue product.</summary>
-public sealed record PosLinkQuarantineProductRequest(
-    int LineNo, Guid ProductId, Guid? BatchId = null, string? Note = null);
-
-/// <summary>The body of a release or reject disposition.</summary>
-public sealed record PosQuarantineQuantityRequest(int LineNo, decimal Quantity, string? Note = null);
-
-/// <summary>The body of a write-off disposition.</summary>
-public sealed record PosWriteOffQuarantineLineRequest(
-    int LineNo, decimal Quantity, int ReasonCode, string? Note = null);
-
-/// <summary>A note attached to moving an incident into investigation.</summary>
-public sealed record PosQuarantineNoteRequest(string? Note = null);
-
 // ---- Replenishment & inventory exceptions ----
 
 /// <summary>A suggested restock for one product at one location.</summary>
@@ -1222,3 +918,59 @@ public sealed record PosNegativeStockAttemptSummaryRow(
     decimal TotalShortfall,
     DateTimeOffset FirstAttemptAtUtc,
     DateTimeOffset LastAttemptAtUtc);
+
+/// <summary>Every store's sales and takings over a period of business dates.</summary>
+public sealed record PosStorePerformanceReport(DateOnly From, DateOnly To, IReadOnlyList<PosStorePerformance> Stores);
+
+/// <summary>What one store sold and took in: takings are net sales less refunds.</summary>
+public sealed record PosStorePerformance(
+    Guid LocationId,
+    string Code,
+    string Name,
+    decimal NetSales,
+    decimal GrossSales,
+    decimal Discounts,
+    int Transactions,
+    decimal AverageTicket,
+    int VoidedTransactions,
+    decimal VoidedValue,
+    decimal Refunds,
+    decimal Takings,
+    decimal CashSales,
+    decimal CardSales,
+    decimal EWalletSales,
+    DateTimeOffset? LastSaleAtUtc,
+    IReadOnlyList<PosStoreDailySales> Daily,
+    IReadOnlyList<PosStoreTopProduct> TopProducts);
+
+/// <summary>One business date's completed sales at a store.</summary>
+public sealed record PosStoreDailySales(DateOnly Date, decimal NetSales, int Transactions);
+
+/// <summary>One of a store's best sellers over the period.</summary>
+public sealed record PosStoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);
+
+/// <summary>A location's stock per product, scarcest first.</summary>
+public sealed record PosStockLevelReport(
+    Guid LocationId,
+    string Code,
+    string Name,
+    int SalesRateDays,
+    IReadOnlyList<PosStockLevel> Products);
+
+/// <summary>One product's stock at a location; Status is Out, Low, Healthy or Over.</summary>
+public sealed record PosStockLevel(
+    Guid ProductId,
+    string Sku,
+    string Name,
+    string Category,
+    decimal Available,
+    decimal InTransit,
+    decimal OnHold,
+    decimal StockValue,
+    decimal? MinimumStock,
+    decimal? ReorderPoint,
+    decimal? TargetStock,
+    decimal? MaximumStock,
+    decimal DailySales,
+    decimal? DaysOfCover,
+    string Status);

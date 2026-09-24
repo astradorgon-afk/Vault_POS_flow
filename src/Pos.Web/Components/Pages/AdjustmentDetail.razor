@@ -94,53 +94,6 @@ else
         </table>
     </section>
 
-    <section class="sheet-actions">
-        @if (IsDraft && CanAdjust)
-        {
-            <button type="button" class="action-button primary" @onclick="SubmitAsync" disabled="@busy">
-                @(busy ? "Submitting…" : "Submit for approval")
-            </button>
-        }
-        else if (IsPendingApproval && CanApprove)
-        {
-            <button type="button" class="action-button primary" @onclick="ApproveAsync" disabled="@busy">
-                @(busy ? "Posting…" : "Approve & post")
-            </button>
-            <button type="button" class="action-button danger" @onclick="ToggleRejectAsync" disabled="@busy">
-                Reject
-            </button>
-        }
-        else if (IsPosted && CanApprove)
-        {
-            <button type="button" class="action-button danger" @onclick="ToggleReverseAsync" disabled="@busy">
-                Reverse
-            </button>
-        }
-    </section>
-
-    @if (rejecting)
-    {
-        <section class="reason-editor">
-            <label class="reason-label" for="reject-reason">Reason for rejecting</label>
-            <input id="reject-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
-            <div class="reason-actions">
-                <button type="button" class="action-button" @onclick="RejectAsync" disabled="@busy">@(busy ? "Rejecting…" : "Confirm reject")</button>
-                <button type="button" class="action-button subtle" @onclick="DismissReasonAsync">Dismiss</button>
-            </div>
-        </section>
-    }
-
-    @if (reversing)
-    {
-        <section class="reason-editor">
-            <label class="reason-label" for="reverse-reason">Reason for reversing</label>
-            <input id="reverse-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
-            <div class="reason-actions">
-                <button type="button" class="action-button danger" @onclick="ReverseAsync" disabled="@busy">@(busy ? "Reversing…" : "Confirm reverse")</button>
-                <button type="button" class="action-button subtle" @onclick="DismissReasonAsync">Dismiss</button>
-            </div>
-        </section>
-    }
 }
 
 @code {
@@ -151,20 +104,9 @@ else
 
     private PosStockAdjustmentDetail? detail;
     private bool loadingDetail = true;
-    private bool busy;
-    private bool rejecting;
-    private bool reversing;
-    private string reasonText = string.Empty;
     private string? message;
 
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanAdjust => Session.HasPermission("inventory.adjust");
-    private bool CanApprove => Session.HasPermission("inventory.adjust.approve");
-
-    private bool IsDraft => detail?.Adjustment.Status == "Draft";
-    private bool IsPendingApproval => detail?.Adjustment.Status == "PendingApproval";
-    private bool IsPosted => detail?.Adjustment.Status == "Posted";
-
     protected override async Task OnInitializedAsync()
     {
         if (!CanViewInventory)
@@ -243,76 +185,6 @@ else
         catch (HttpRequestException)
         {
         }
-    }
-
-    private async Task SubmitAsync()
-        => await RunCommandAsync(() => Api.SubmitStockAdjustmentAsync(AdjustmentId, CancellationToken.None), "Adjustment submitted for approval.");
-
-    private async Task ApproveAsync()
-        => await RunCommandAsync(() => Api.ApproveStockAdjustmentAsync(AdjustmentId, CancellationToken.None), "Adjustment approved and posted to the ledger.");
-
-    private async Task RejectAsync()
-    {
-        string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
-        await RunCommandAsync(() => Api.RejectStockAdjustmentAsync(AdjustmentId, reason, CancellationToken.None), "Adjustment rejected.");
-        rejecting = false;
-    }
-
-    private async Task ReverseAsync()
-    {
-        string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
-        await RunCommandAsync(() => Api.ReverseStockAdjustmentAsync(AdjustmentId, reason, CancellationToken.None), "Adjustment reversed.");
-        reversing = false;
-    }
-
-    private async Task RunCommandAsync(Func<Task<ApiResult<PosReference>>> command, string successMessage)
-    {
-        busy = true;
-        message = null;
-        try
-        {
-            ApiResult<PosReference> response = await command();
-            if (!response.IsSuccess || response.Value is null)
-            {
-                message = response.Error;
-                return;
-            }
-
-            detail = null;
-            await LoadDetailAsync();
-            if (detail is not null)
-            {
-                message = successMessage;
-            }
-        }
-        catch (HttpRequestException)
-        {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            busy = false;
-        }
-    }
-
-    private void ToggleRejectAsync()
-    {
-        rejecting = !rejecting;
-        reversing = false;
-        reasonText = string.Empty;
-    }
-
-    private void ToggleReverseAsync()
-    {
-        reversing = !reversing;
-        rejecting = false;
-        reasonText = string.Empty;
-    }
-
-    private void DismissReasonAsync()
-    {
-        rejecting = false;
-        reversing = false;
     }
 
     private string LocationName(Guid locationId)

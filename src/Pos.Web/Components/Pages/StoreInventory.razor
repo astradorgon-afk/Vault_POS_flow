@@ -1,0 +1,229 @@
+@page "/inventory/stock"
+@using System.Globalization
+@attribute [Authorize(Policy = "inventory.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Store inventory · VaultFlow</PageTitle>
+
+<header class="qr-head">
+    <span class="eyebrow">Monitoring</span>
+    <h1>Store inventory</h1>
+    <p>What each location holds, from the items running out to the ones piling up.</p>
+</header>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="dashboard-notices" role="status"><p>@message</p></div>
+}
+
+@if (locations.Count > 0)
+{
+    <nav class="sk-tabs" aria-label="Location">
+        @foreach (PosLocation location in locations)
+        {
+            <button type="button" class="@(location.Id == selectedId ? "active" : null)" @onclick="() => SelectAsync(location.Id)" disabled="@loading">
+                <span>@location.Code</span>@location.Name
+            </button>
+        }
+    </nav>
+}
+
+@if (loading)
+{
+    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading stock…</p></div></section>
+}
+else if (report is not null)
+{
+    <section class="sk-summary" aria-label="Stock status">
+        <button type="button" class="out @(filter == "Out" ? "active" : null)" @onclick='() => ToggleFilter("Out")'><strong>@Count("Out")</strong><span>Out of stock</span></button>
+        <button type="button" class="low @(filter == "Low" ? "active" : null)" @onclick='() => ToggleFilter("Low")'><strong>@Count("Low")</strong><span>Low</span></button>
+        <button type="button" class="ok @(filter == "Healthy" ? "active" : null)" @onclick='() => ToggleFilter("Healthy")'><strong>@Count("Healthy")</strong><span>Healthy</span></button>
+        <button type="button" class="over @(filter == "Over" ? "active" : null)" @onclick='() => ToggleFilter("Over")'><strong>@Count("Over")</strong><span>Overstocked</span></button>
+        <article><strong>@Money(report.Products.Sum(p => p.StockValue))</strong><span>Stock value at cost</span></article>
+    </section>
+
+    <div class="sk-extremes">
+        <section class="qr-card sk-panel">
+            <header><h2>Running lowest</h2><span>Fewest days of stock left</span></header>
+            <ol>
+                @foreach (PosStockLevel row in Lowest)
+                {
+                    <li>
+                        <div><strong>@row.Name</strong><small>@row.Sku · @row.Category</small></div>
+                        <span class="sk-qty">@Qty(row.Available)</span>
+                        <span class="ov-pill tone-@Tone(row.Status)">@CoverLabel(row)</span>
+                    </li>
+                }
+            </ol>
+        </section>
+        <section class="qr-card sk-panel">
+            <header><h2>Most abundant</h2><span>Most stock against target</span></header>
+            <ol>
+                @foreach (PosStockLevel row in Abundant)
+                {
+                    <li>
+                        <div><strong>@row.Name</strong><small>@row.Sku · @row.Category</small></div>
+                        <span class="sk-qty">@Qty(row.Available)</span>
+                        <span class="ov-pill tone-@Tone(row.Status)">@CoverLabel(row)</span>
+                    </li>
+                }
+            </ol>
+        </section>
+    </div>
+
+    <section class="qr-card qr-results">
+        <header class="qr-results-head sk-table-head">
+            <h2>All products <small>@Visible.Count of @report.Products.Count</small></h2>
+            <input class="qr-field sk-search" type="search" placeholder="Search name, SKU or category" @bind="search" @bind:event="oninput" aria-label="Search products" />
+        </header>
+        <div class="qr-table-wrap">
+            <table class="qr-table sk-table">
+                <thead>
+                    <tr>
+                        <th>Product</th><th>Category</th><th class="num">Available</th><th class="num">Reorder at</th><th class="num">Target</th>
+                        <th class="num">Sold / day</th><th class="num">Days left</th><th class="num">Value</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (PosStockLevel row in Visible)
+                    {
+                        <tr @key="row.ProductId" class="static">
+                            <td><strong>@row.Name</strong><small>@row.Sku</small></td>
+                            <td>@row.Category</td>
+                            <td class="num"><strong>@Qty(row.Available)</strong>@if (row.InTransit > 0m) {<small>+@Qty(row.InTransit) in transit</small>}</td>
+                            <td class="num">@Qty(row.ReorderPoint)</td>
+                            <td class="num">@Qty(row.TargetStock)</td>
+                            <td class="num">@row.DailySales.ToString("0.##", CultureInfo.InvariantCulture)</td>
+                            <td class="num">@(row.DaysOfCover is { } days ? days.ToString("0.#", CultureInfo.InvariantCulture) : "—")</td>
+                            <td class="num">@Money(row.StockValue)</td>
+                            <td><span class="ov-pill tone-@Tone(row.Status)">@StatusLabel(row.Status)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="sk-note">Sold / day averages the last @report.SalesRateDays days; days left is available stock at that rate.</p>
+    </section>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "store")] public Guid? QueryStore { get; set; }
+
+    private readonly List<PosLocation> locations = [];
+    private PosStockLevelReport? report;
+    private Guid? selectedId;
+    private string? filter;
+    private string search = string.Empty;
+    private bool loading = true;
+    private string? message;
+
+    /// <summary>Scarcest first: out of stock, then the fewest days of cover
+    /// (items not selling rank by how little is left).</summary>
+    private IEnumerable<PosStockLevel> Lowest => (report?.Products ?? [])
+        .OrderBy(r => r.Available <= 0m ? 0 : 1)
+        .ThenBy(r => r.DaysOfCover ?? decimal.MaxValue)
+        .ThenBy(r => r.Available)
+        .Take(8);
+
+    /// <summary>Most plentiful: the most stock against the store's own target
+    /// level (quantity alone where no target is set), so a slow product with a
+    /// full shelf ranks above a fast one that merely has a big number.</summary>
+    private IEnumerable<PosStockLevel> Abundant => (report?.Products ?? [])
+        .Where(r => r.Available > 0m)
+        .OrderByDescending(r => r.TargetStock is > 0m and { } target ? r.Available / target : r.Available)
+        .ThenByDescending(r => r.Available)
+        .Take(8);
+
+    private List<PosStockLevel> Visible => [.. (report?.Products ?? [])
+        .Where(r => filter is null || r.Status == filter)
+        .Where(r => string.IsNullOrWhiteSpace(search)
+            || r.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)
+            || r.Sku.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)
+            || r.Category.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))];
+
+    protected override async Task OnInitializedAsync()
+    {
+        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        if (!response.IsSuccess || response.Value is null)
+        {
+            message = response.Error;
+            loading = false;
+            return;
+        }
+
+        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
+        bool everywhere = Session.Current?.User.HasAllLocations == true;
+        locations.AddRange(response.Value
+            .Where(l => l.Kind is 0 or 1 && (everywhere || assigned.Contains(l.Id)))
+            .OrderBy(l => l.Kind == 1 ? 0 : 1)
+            .ThenBy(l => l.Code));
+
+        if (locations.Count == 0)
+        {
+            message = "No location is assigned to this account.";
+            loading = false;
+            return;
+        }
+
+        await SelectAsync(QueryStore is { } store && locations.Any(l => l.Id == store) ? store : locations[0].Id);
+    }
+
+    private async Task SelectAsync(Guid locationId)
+    {
+        selectedId = locationId;
+        filter = null;
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<PosStockLevelReport> response = await Api.GetAsync<PosStockLevelReport>(
+                FormattableString.Invariant($"/api/v1/inventory/stock-levels?locationId={locationId:D}"),
+                CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                report = null;
+                return;
+            }
+
+            report = response.Value;
+            Navigation.NavigateTo(FormattableString.Invariant($"inventory/stock?store={locationId:D}"), replace: true);
+        }
+        catch (HttpRequestException)
+        {
+            message = "Stock levels are unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private void ToggleFilter(string status) => filter = filter == status ? null : status;
+
+    private int Count(string status) => report?.Products.Count(p => p.Status == status) ?? 0;
+
+    private static string Tone(string status) => status switch
+    {
+        "Out" => "bad",
+        "Low" => "warn",
+        "Over" => "info",
+        _ => "ok",
+    };
+
+    private static string StatusLabel(string status) => status == "Over" ? "Overstocked" : status == "Out" ? "Out of stock" : status;
+
+    private static string CoverLabel(PosStockLevel row)
+        => row.Available <= 0m ? "Out of stock"
+            : row.DaysOfCover is { } days ? FormattableString.Invariant($"{days:0.#} days left")
+            : "No recent sales";
+
+    private static string Qty(decimal? value)
+        => value is { } quantity ? quantity.ToString("#,0.##", CultureInfo.InvariantCulture) : "—";
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

@@ -86,18 +86,7 @@ else
                         </td>
                         <td>@(line.BatchId is { } batchId ? ShortId(batchId) : "—")</td>
                         <td class="sheet-number">@(line.SystemQuantity.ToString("0.######", CultureInfo.InvariantCulture))</td>
-                        <td>
-                            @if (IsCounting && CanCount)
-                            {
-                                <input class="sheet-input" type="number" min="0" step="0.001"
-                                       value="@(Gauge(line.LineNo)?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty)"
-                                       @onchange="e => OnGaugeChangedAsync(line.LineNo, e)" />
-                            }
-                            else
-                            {
-                                <span class="sheet-number">@(line.PhysicalQuantity?.ToString("0.######", CultureInfo.InvariantCulture) ?? "—")</span>
-                            }
-                        </td>
+                        <td><span class="sheet-number">@(line.PhysicalQuantity?.ToString("0.######", CultureInfo.InvariantCulture) ?? "—")</span></td>
                         <td class="@VarianceTone(VarianceOf(line))">@(VarianceOf(line) is { } variance ? $"{variance:+#.###;-#.###;0}" : "—")</td>
                         <td class="sheet-number">@line.UnitCost.ToString("C", CultureInfo.GetCultureInfo("en-PH"))</td>
                         <td class="sheet-number">@(ValueOf(line) is { } value ? value.ToString("C", CultureInfo.GetCultureInfo("en-PH")) : "—")</td>
@@ -107,60 +96,6 @@ else
             </tbody>
         </table>
     </section>
-
-    <section class="sheet-actions">
-        @if (IsCounting && CanCount)
-        {
-            <button type="button" class="action-button primary" @onclick="SaveCountsAsync" disabled="@(busy || !HasDrafts)">
-                @(busy ? "Saving…" : "Save counts")
-            </button>
-            <button type="button" class="action-button" @onclick="SubmitAsync" disabled="@(busy || !HasDrafts)">
-                Submit for approval
-            </button>
-            <button type="button" class="action-button danger" @onclick="ToggleCancelAsync" disabled="@busy">
-                Cancel count
-            </button>
-        }
-        else if (IsPendingApproval && CanApproveCount)
-        {
-            <button type="button" class="action-button primary" @onclick="ApproveAsync" disabled="@busy">
-                @(busy ? "Posting…" : "Approve & post")
-            </button>
-            <button type="button" class="action-button" @onclick="ToggleRejectAsync" disabled="@busy">
-                Send back
-            </button>
-        }
-        else if (IsPendingApproval && CanCount)
-        {
-            <button type="button" class="action-button danger" @onclick="ToggleCancelAsync" disabled="@busy">
-                Cancel count
-            </button>
-        }
-    </section>
-
-    @if (cancelling)
-    {
-        <section class="reason-editor">
-            <label class="reason-label" for="cancel-reason">Reason for cancelling</label>
-            <input id="cancel-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
-            <div class="reason-actions">
-                <button type="button" class="action-button danger" @onclick="CancelCountAsync" disabled="@busy">@(busy ? "Cancelling…" : "Confirm cancel")</button>
-                <button type="button" class="action-button subtle" @onclick="DismissReasonAsync">Dismiss</button>
-            </div>
-        </section>
-    }
-
-    @if (rejecting)
-    {
-        <section class="reason-editor">
-            <label class="reason-label" for="reject-reason">Reason for sending back</label>
-            <input id="reject-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
-            <div class="reason-actions">
-                <button type="button" class="action-button" @onclick="RejectAsync" disabled="@busy">@(busy ? "Returning…" : "Confirm send back")</button>
-                <button type="button" class="action-button subtle" @onclick="DismissReasonAsync">Dismiss</button>
-            </div>
-        </section>
-    }
 }
 
 @code {
@@ -168,24 +103,12 @@ else
 
     private readonly List<PosLocation> locations = [];
     private readonly Dictionary<Guid, (string Sku, string Name)> productNames = [];
-    private Dictionary<int, decimal?> gauges = [];
 
     private PosInventoryCountDetail? detail;
     private bool loadingDetail = true;
-    private bool busy;
-    private bool cancelling;
-    private bool rejecting;
-    private string reasonText = string.Empty;
     private string? message;
 
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanCount => Session.HasPermission("inventory.count");
-    private bool CanApproveCount => Session.HasPermission("inventory.count.approve");
-
-    private bool IsCounting => detail?.Count.Status == "Counting";
-    private bool IsPendingApproval => detail?.Count.Status == "PendingApproval";
-    private bool HasDrafts => detail?.Lines.Any(line => Gauge(line.LineNo) is not null) == true;
-
     protected override async Task OnInitializedAsync()
     {
         if (!CanViewInventory)
@@ -216,7 +139,6 @@ else
             }
 
             detail = response.Value;
-            gauges = detail.Lines.ToDictionary(line => line.LineNo, line => line.PhysicalQuantity);
             await LoadProductNamesAsync(detail.Lines.Select(line => line.ProductId).Distinct().ToArray());
         }
         catch (HttpRequestException)
@@ -266,15 +188,6 @@ else
         }
     }
 
-    private decimal? Gauge(int lineNo) => gauges.TryGetValue(lineNo, out decimal? value) ? value : null;
-
-    private void OnGaugeChangedAsync(int lineNo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-    {
-        gauges[lineNo] = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
-            ? Math.Max(0m, decimal.Round(value, 3, MidpointRounding.ToEven))
-            : null;
-    }
-
     private static decimal? VarianceOf(PosInventoryCountLineView line)
         => line.PhysicalQuantity is { } physical ? physical - line.SystemQuantity : null;
 
@@ -283,106 +196,6 @@ else
 
     private static string VarianceTone(decimal? variance)
         => variance is null || variance == 0m ? "sheet-number" : variance > 0m ? "sheet-gain" : "sheet-loss";
-
-    private async Task SaveCountsAsync()
-    {
-        if (detail is null)
-        {
-            return;
-        }
-
-        List<PosCountLineRequest> lines = detail.Lines
-            .Where(line => Gauge(line.LineNo) is { } gauge)
-            .Select(line => new PosCountLineRequest(line.ProductId, Gauge(line.LineNo) ?? 0m, line.BatchId))
-            .ToList();
-
-        await RunCommandAsync(() => Api.RecordInventoryCountLinesAsync(CountId, lines, CancellationToken.None), "Counts saved.");
-    }
-
-    private async Task SubmitAsync()
-    {
-        await RunCommandAsync(() => Api.SubmitInventoryCountAsync(CountId, CancellationToken.None), "Count submitted for approval.");
-    }
-
-    private async Task ApproveAsync()
-    {
-        await RunCommandAsync(() => Api.ApproveInventoryCountAsync(CountId, CancellationToken.None), "Variance posted to stock.");
-    }
-
-    private async Task RejectAsync()
-    {
-        if (detail is null)
-        {
-            return;
-        }
-
-        string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
-        await RunCommandAsync(() => Api.RejectInventoryCountAsync(CountId, reason, CancellationToken.None), "Count sent back for recounting.");
-        rejecting = false;
-    }
-
-    private async Task CancelCountAsync()
-    {
-        if (detail is null)
-        {
-            return;
-        }
-
-        string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
-        await RunCommandAsync(() => Api.CancelInventoryCountAsync(CountId, reason, CancellationToken.None), "Count cancelled.");
-        cancelling = false;
-    }
-
-    private async Task RunCommandAsync(Func<Task<ApiResult<PosReference>>> command, string successMessage)
-    {
-        busy = true;
-        message = null;
-        try
-        {
-            ApiResult<PosReference> response = await command();
-            if (!response.IsSuccess || response.Value is null)
-            {
-                message = response.Error;
-                return;
-            }
-
-            detail = null;
-            gauges = [];
-            await LoadDetailAsync();
-            if (detail is not null)
-            {
-                message = successMessage;
-            }
-        }
-        catch (HttpRequestException)
-        {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            busy = false;
-        }
-    }
-
-    private void ToggleRejectAsync()
-    {
-        rejecting = !rejecting;
-        cancelling = false;
-        reasonText = string.Empty;
-    }
-
-    private void ToggleCancelAsync()
-    {
-        cancelling = !cancelling;
-        rejecting = false;
-        reasonText = string.Empty;
-    }
-
-    private void DismissReasonAsync()
-    {
-        cancelling = false;
-        rejecting = false;
-    }
 
     private string StoreName(Guid locationId)
         => locations.FirstOrDefault(location => location.Id == locationId)?.Name ?? "store";

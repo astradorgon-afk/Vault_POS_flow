@@ -272,6 +272,7 @@ try
     app.MapAdministrationEndpoints();
     app.MapNotificationEndpoints();
     app.MapDashboardEndpoints();
+    app.MapStoreMonitoringEndpoints();
     app.MapHub<NotificationHub>(NotificationHub.Route).RequireAuthorization();
 
     await app.RunAsync();

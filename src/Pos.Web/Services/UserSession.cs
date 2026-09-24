@@ -21,21 +21,6 @@ public sealed class UserSession
     public bool HasAnyPermission(params string[] permissions)
         => permissions.Any(HasPermission);
 
-    /// <summary>Gets the register the circuit sells through, or null.</summary>
-    public Guid? DeviceId { get; private set; }
-
-    /// <summary>Gets the register short code, or null.</summary>
-    public string? DeviceShortCode { get; private set; }
-
-    /// <summary>Gets the register name, or null.</summary>
-    public string? DeviceName { get; private set; }
-
-    /// <summary>Gets the store's business date for the selected register, or null.</summary>
-    public DateOnly? TerminalBusinessDate { get; private set; }
-
-    /// <summary>Gets the open shift on the selected register, or null.</summary>
-    public PosOpenShift? OpenShift { get; private set; }
-
     /// <summary>Replaces the current session.</summary>
     public void Set(SignInResponse response)
     {
@@ -43,39 +28,8 @@ public sealed class UserSession
         Current = response;
     }
 
-    /// <summary>Selects the register the circuit sells through.</summary>
-    public void SetRegister(PosRegister register)
-    {
-        ArgumentNullException.ThrowIfNull(register);
-        DeviceId = register.Id;
-        DeviceShortCode = register.ShortCode;
-        DeviceName = register.Name;
-    }
-
-    /// <summary>Refreshes the register's checkout context (business date and open shift).</summary>
-    public void SetTerminal(PosTerminalSession session)
-    {
-        ArgumentNullException.ThrowIfNull(session);
-        TerminalBusinessDate = session.BusinessDate;
-        OpenShift = session.OpenShift;
-    }
-
-    /// <summary>Clears the register context.</summary>
-    public void ClearRegister()
-    {
-        DeviceId = null;
-        DeviceShortCode = null;
-        DeviceName = null;
-        TerminalBusinessDate = null;
-        OpenShift = null;
-    }
-
-    /// <summary>Clears the current session and register context.</summary>
-    public void Clear()
-    {
-        Current = null;
-        ClearRegister();
-    }
+    /// <summary>Clears the current session.</summary>
+    public void Clear() => Current = null;
 }
 
 /// <summary>A successful authentication response from the API.</summary>

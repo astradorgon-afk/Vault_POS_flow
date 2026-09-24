@@ -24,13 +24,17 @@
         </NavLink>
     </div>
 
-    @if (CanCreateSale || CanViewSales || CanViewReceipts)
+    @if (CanViewSales || CanViewReceipts || CanViewInventory)
     {
         <div class="nav-group">
-            <span class="nav-heading">Sales &amp; service</span>
-            @if (CanCreateSale)
+            <span class="nav-heading">Stores</span>
+            @if (CanViewSales)
             {
-                <NavLink class="nav-link" href="pos" @onclick="NotifyNavigation"><AppIcon Name="sale" /> <span>New sale</span></NavLink>
+                <NavLink class="nav-link" href="stores" @onclick="NotifyNavigation"><AppIcon Name="coins" /> <span>Store performance</span></NavLink>
+            }
+            @if (CanViewInventory)
+            {
+                <NavLink class="nav-link" href="inventory/stock" @onclick="NotifyNavigation"><AppIcon Name="box" /> <span>Store inventory</span></NavLink>
             }
             @if (CanViewSales)
             {
@@ -117,8 +121,8 @@
     [Parameter]
     public EventCallback OnNavigate { get; set; }
 
-    private bool CanCreateSale => Session.HasPermission("sale.create");
     private bool CanViewSales => Session.HasPermission("sale.view");
+    private bool CanViewInventory => Session.HasPermission("inventory.view");
     private bool CanViewCatalog => Session.HasPermission("product.view");
     private bool CanViewReceipts => Session.HasPermission("receipt.view");
     private bool CanViewReports => Session.HasPermission("report.view");

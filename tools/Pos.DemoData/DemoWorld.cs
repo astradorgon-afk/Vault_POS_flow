@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
 namespace Pos.DemoData;
@@ -18,15 +19,43 @@ internal sealed record DemoProduct(Guid Id, string Sku, string Name, Guid UnitId
 internal sealed record DemoPrice(Guid? LocationId, decimal Amount, DateTimeOffset FromUtc, DateTimeOffset? ToUtc);
 
 /// <summary>
+/// A store's till: an enrolled desktop or phone register, with its cashier and
+/// the store supervisor (who voids and refunds) signed in at that register.
+/// </summary>
+internal sealed record DemoRegister(
+    string Store,
+    Guid LocationId,
+    Guid DeviceId,
+    string ShortCode,
+    DemoSession Cashier,
+    DemoSession Supervisor);
+
+/// <summary>
 /// Everything the demo reads before it writes: signed-in accounts, locations,
-/// the catalogue with prices, customers and one browser register per store.
+/// the catalogue with prices, customers and one enrolled register per store.
 /// </summary>
 internal sealed class DemoWorld
 {
     public const string Password = "cash1234";
 
+    private const int WindowsPlatform = 1;
+    private const int AndroidPlatform = 2;
+    private const int PendingEnrolment = 0;
+    private const int Active = 1;
+
+    /// <summary>Each store's demo till and who works it. The real desktop
+    /// register (W01) is never used: its document counter lives on that machine,
+    /// so demo numbers on it would collide with the next real sale.</summary>
+    private static readonly (string Store, string ShortCode, string Name, int Platform, string Cashier, string Supervisor)[] Tills =
+    [
+        ("STORE01", "W02", "Store One counter 2", WindowsPlatform, "cashier", "manager"),
+        ("STORE02", "W03", "Store Two counter", WindowsPlatform, "cashier2", "manager2"),
+        ("STORE03", "A01", "Store Three phone till", AndroidPlatform, "cashier3", "manager3"),
+    ];
+
     public required DemoApi Api { get; init; }
 
+    /// <summary>Back-office sessions (not bound to a register), by user name.</summary>
     public required IReadOnlyDictionary<string, DemoSession> Users { get; init; }
 
     public required IReadOnlyDictionary<string, Guid> Locations { get; init; }
@@ -35,17 +64,18 @@ internal sealed class DemoWorld
 
     public required IReadOnlyList<Guid> Customers { get; init; }
 
-    public required IReadOnlyDictionary<string, Guid> Registers { get; init; }
+    /// <summary>Each store's register, by store code.</summary>
+    public required IReadOnlyDictionary<string, DemoRegister> Registers { get; init; }
 
     public DemoSession Owner => Users["owner"];
 
     public DemoProduct Product(string sku) => Products[sku];
 
-    /// <summary>Signs every account in and loads the reference data.</summary>
+    /// <summary>Signs the accounts in and loads the reference data.</summary>
     public static async Task<DemoWorld> LoadAsync(DemoApi api)
     {
         Dictionary<string, DemoSession> users = [];
-        foreach (string userName in new[] { "owner", "admin", "manager", "cashier", "inventory" })
+        foreach (string userName in new[] { "owner", "inventory", "manager", "manager2", "manager3" })
         {
             users[userName] = await api.SignInAsync(userName, Password);
         }
@@ -100,10 +130,17 @@ internal sealed class DemoWorld
             customers.Add(customer!["id"]!.GetValue<Guid>());
         }
 
-        Dictionary<string, Guid> registers = [];
-        foreach ((string store, string shortCode) in new[] { ("STORE01", "WB1"), ("STORE02", "WB2"), ("STORE03", "WB3") })
+        Dictionary<string, DemoRegister> registers = [];
+        foreach ((string store, string shortCode, string name, int platform, string cashier, string supervisor) in Tills)
         {
-            registers[store] = await EnsureWebRegisterAsync(api, owner, locations[store], shortCode, store);
+            Guid deviceId = await EnsureEnrolledRegisterAsync(api, owner, locations[store], shortCode, name, platform);
+            registers[store] = new DemoRegister(
+                store,
+                locations[store],
+                deviceId,
+                shortCode,
+                await api.SignInAsync(cashier, Password, deviceId),
+                await api.SignInAsync(supervisor, Password, deviceId));
         }
 
         return new DemoWorld
@@ -117,30 +154,60 @@ internal sealed class DemoWorld
         };
     }
 
-    /// <summary>Finds the store's active browser register, or registers one.
-    /// Web registers are active on registration: the cashier's session is the
-    /// credential, so no enrolment code is involved.</summary>
-    private static async Task<Guid> EnsureWebRegisterAsync(
-        DemoApi api, DemoSession owner, Guid locationId, string shortCode, string storeCode)
+    /// <summary>Finds the store's demo register, or registers and enrols it the
+    /// way a real one is: an administrator registers the device and issues a
+    /// one-time code, and the device redeems it with its key thumbprint.</summary>
+    private static async Task<Guid> EnsureEnrolledRegisterAsync(
+        DemoApi api, DemoSession owner, Guid locationId, string shortCode, string name, int platform)
     {
-        const int WebPlatform = 3;
-        const int ActiveStatus = 1;
-
+        Guid? deviceId = null;
+        int status = -1;
         foreach (JsonNode? device in DemoApi.Items(await api.GetAsync(
                      string.Create(CultureInfo.InvariantCulture, $"/api/v1/devices?locationId={locationId:D}"), owner)))
         {
-            if (device!["platform"]!.GetValue<int>() == WebPlatform && device["status"]!.GetValue<int>() == ActiveStatus)
+            if (device!["shortCode"]?.GetValue<string>() == shortCode)
             {
-                return device["id"]!.GetValue<Guid>();
+                deviceId = device["id"]!.GetValue<Guid>();
+                status = device["status"]!.GetValue<int>();
             }
         }
 
-        Guid id = await api.CreateAsync(
-            "/api/v1/devices",
-            new { shortCode, name = $"Web till {storeCode[^1]}", locationId, platform = WebPlatform },
-            owner);
+        if (status == Active)
+        {
+            return deviceId!.Value;
+        }
 
-        Console.WriteLine($"  registered browser register {shortCode} for {storeCode}");
-        return id;
+        string enrolmentCode;
+        if (deviceId is null)
+        {
+            JsonNode registered = await api.PostAsync(
+                "/api/v1/devices", new { shortCode, name, locationId, platform }, owner)
+                ?? throw new DemoApiException($"Registering {shortCode} returned no body.");
+            deviceId = registered["deviceId"]!.GetValue<Guid>();
+            enrolmentCode = registered["enrolmentCode"]!.GetValue<string>();
+        }
+        else if (status == PendingEnrolment)
+        {
+            JsonNode reissued = await api.PostAsync(
+                string.Create(CultureInfo.InvariantCulture, $"/api/v1/devices/{deviceId:D}/enrolment-code"), new { }, owner)
+                ?? throw new DemoApiException($"Reissuing a code for {shortCode} returned no body.");
+            enrolmentCode = (reissued["enrolmentCode"] ?? reissued["code"])!.GetValue<string>();
+        }
+        else
+        {
+            throw new DemoApiException($"Register {shortCode} is suspended or revoked; reactivate it or remove it first.");
+        }
+
+        await api.PostAnonymousAsync("/api/v1/devices/enrol", new
+        {
+            enrolmentCode,
+            publicKeyThumbprint = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
+            platform,
+            appVersion = "1.0.0-demo",
+            osVersion = platform == AndroidPlatform ? "Android 14" : "Windows 11",
+        });
+
+        Console.WriteLine($"  registered and enrolled register {shortCode} ({name})");
+        return deviceId.Value;
     }
 }

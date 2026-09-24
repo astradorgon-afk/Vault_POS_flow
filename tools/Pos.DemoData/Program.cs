@@ -55,7 +55,7 @@ catch (Exception ex) when (ex is DemoApiException or HttpRequestException)
     return 1;
 }
 
-Console.WriteLine($"  {world.Products.Count} products, {world.Customers.Count} customers, 3 browser registers");
+Console.WriteLine($"  {world.Products.Count} products, {world.Customers.Count} customers, {world.Registers.Count} store registers");
 
 // Store-days that already have sales are skipped, so an interrupted run can
 // simply be started again.
