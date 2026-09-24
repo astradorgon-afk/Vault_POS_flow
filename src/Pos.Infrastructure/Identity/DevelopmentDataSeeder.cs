@@ -109,7 +109,13 @@ public sealed class DevelopmentDataSeeder(
         await SeedExternalLocationsAsync(cancellationToken).ConfigureAwait(false);
         await SeedPhysicalLocationsAsync(cancellationToken).ConfigureAwait(false);
         await SeedReferenceMasterDataAsync(cancellationToken).ConfigureAwait(false);
+
+        // Stock seeding looks products up by SKU from the database, so products
+        // created above must be written first. The transaction still makes the
+        // whole seed all-or-nothing.
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await SeedStockAsync(cancellationToken).ConfigureAwait(false);
+        await SeedLocationSettingsAsync(cancellationToken).ConfigureAwait(false);
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -117,6 +123,10 @@ public sealed class DevelopmentDataSeeder(
         if (_seeding.Value.EnableDevelopmentAccounts)
         {
             await SeedAccountsAsync(cancellationToken).ConfigureAwait(false);
+
+            // A customer records who created it, so the demo customers wait
+            // for the development owner account to exist.
+            await SeedCustomersAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (logger.IsEnabled(LogLevel.Information))
@@ -204,24 +214,10 @@ public sealed class DevelopmentDataSeeder(
         Dictionary<string, BrandId> brandByName = await EnsureBrandsAsync(cancellationToken);
         Dictionary<string, SupplierId> supplierByCode = await EnsureSuppliersAsync(cancellationToken);
 
-        (string Sku, string Name, string Category, string Brand, string Supplier, string Unit, string Barcode, decimal Price)[]
-            catalogue =
-            [
-                ("RICE-01", "Premium Rice 5kg", "GROCERIES", "Green Valley", "SUP1", "KG", "4800000000017", 285m),
-                ("COFFEE-200", "Ground Coffee 200g", "GROCERIES", "Sunrise", "SUP1", "KG", "4800000000024", 165m),
-                ("SUGAR-1K", "Refined Sugar 1kg", "GROCERIES", "Green Valley", "SUP2", "KG", "4800000000031", 78m),
-                ("OIL-1L", "Cooking Oil 1L", "GROCERIES", "Sunrise", "SUP2", "L", "4800000000048", 125m),
-                ("MILK-370", "Evaporated Milk 370ml", "DAIRY", "Green Valley", "SUP1", "L", "4800000000055", 42m),
-                ("EGGS-DZ", "Large Eggs (Dozen)", "DAIRY", "Green Valley", "SUP2", "PC", "4800000000062", 110m),
-                ("WATER-500", "Mineral Water 500ml", "BEVERAGES", "Sunrise", "SUP1", "L", "4800000000079", 12m),
-                ("SODA-1L", "Premium Soda 1L", "BEVERAGES", "Sunrise", "SUP2", "L", "4800000000086", 58m),
-                ("DETER-400", "Laundry Powder 400g", "HOUSEHOLD", "Green Valley", "SUP1", "PC", "4800000000093", 135m),
-            ];
+        DateTimeOffset historyStart = HistoryStartUtc;
 
-        DateTimeOffset now = clock.UtcNow;
-
-        foreach ((string sku, string name, string category, string brand, string supplier, string unit, string barcode, decimal price) in
-                 catalogue)
+        foreach ((string sku, string name, string category, string brand, string supplier, string unit, string barcode, decimal price,
+                  decimal unitCost, _, _) in Catalogue)
         {
             Product? product = await context.Products
                 .Include(p => p.Prices)
@@ -237,7 +233,8 @@ public sealed class DevelopmentDataSeeder(
                     uomByCode[unit],
                     UserId.Empty,
                     brandId: brandByName[brand],
-                    primarySupplierId: supplierByCode[supplier]);
+                    primarySupplierId: supplierByCode[supplier],
+                    defaultPurchaseCost: unitCost);
 
                 if (productResult.IsFailure)
                 {
@@ -263,19 +260,33 @@ public sealed class DevelopmentDataSeeder(
                 _productsCreated++;
             }
 
-            bool hasCurrentOrFutureBusinessPrice = product.Prices.Any(p =>
-                p.LocationId is null && (p.EffectiveToUtc is null || p.EffectiveToUtc > now));
+            // The demo sales history starts at HistoryStartUtc, and a sale is
+            // priced at the moment it completed, so every product needs a
+            // business-wide price in effect from then. A product priced later
+            // (seeded by an older run) gets an earlier row that ends exactly
+            // where its first price begins, so the two never overlap.
+            bool pricedAtHistoryStart = product.Prices.Any(p =>
+                p.LocationId is null
+                && p.EffectiveFromUtc <= historyStart
+                && (p.EffectiveToUtc is null || p.EffectiveToUtc > historyStart));
 
-            if (!hasCurrentOrFutureBusinessPrice)
+            if (!pricedAtHistoryStart)
             {
+                DateTimeOffset? firstLaterPrice = product.Prices
+                    .Where(p => p.LocationId is null && p.EffectiveFromUtc > historyStart)
+                    .Select(p => (DateTimeOffset?)p.EffectiveFromUtc)
+                    .Min();
+
+                // The seeder writes history as of its start, so the backdating
+                // guard is evaluated against that instant rather than today.
                 Result<ProductPriceId> priceScheduled = product.SchedulePrice(
                     locationId: null,
                     amount: price,
-                    effectiveFromUtc: now,
-                    effectiveToUtc: null,
+                    effectiveFromUtc: historyStart,
+                    effectiveToUtc: firstLaterPrice,
                     createdByUserId: UserId.Empty,
                     reason: "Development catalogue price.",
-                    nowUtc: now);
+                    nowUtc: historyStart);
 
                 if (priceScheduled.IsFailure)
                 {
@@ -291,20 +302,70 @@ public sealed class DevelopmentDataSeeder(
         }
     }
 
-    /// <summary>Stock levels for the demo: what each store holds and what the
-    /// Main Warehouse holds, with the acquisition cost used to value the
-    /// opening balance.</summary>
-    private static readonly (string Sku, decimal StoreOnHand, decimal WarehouseOnHand, decimal UnitCost)[] Stock =
+    /// <summary>How far back the demo history reaches. Prices and opening
+    /// balances start here so the activity <c>tools/Pos.DemoData</c> posts over
+    /// the last thirty days (sales, returns, voids) always finds a price in
+    /// effect and stock on hand.</summary>
+    private const int HistoryDays = 35;
+
+    private DateTimeOffset HistoryStartUtc
+    {
+        get
+        {
+            DateTimeOffset today = clock.UtcNow;
+            return new DateTimeOffset(today.Year, today.Month, today.Day, 0, 0, 0, TimeSpan.Zero).AddDays(-HistoryDays);
+        }
+    }
+
+    /// <summary>The demo catalogue: identity, selling price, acquisition cost and
+    /// the opening stock each store and the Main Warehouse hold. A few store
+    /// quantities are deliberately low so replenishment has work to show.</summary>
+    private static readonly (string Sku, string Name, string Category, string Brand, string Supplier, string Unit,
+        string Barcode, decimal Price, decimal UnitCost, decimal StoreOnHand, decimal WarehouseOnHand)[] Catalogue =
     [
-        ("RICE-01", 25m, 300m, 240m),
-        ("COFFEE-200", 20m, 220m, 132m),
-        ("SUGAR-1K", 40m, 320m, 63m),
-        ("OIL-1L", 30m, 280m, 99m),
-        ("MILK-370", 60m, 500m, 33m),
-        ("EGGS-DZ", 15m, 120m, 86m),
-        ("WATER-500", 120m, 800m, 9m),
-        ("SODA-1L", 48m, 240m, 44m),
-        ("DETER-400", 36m, 200m, 106m),
+        ("RICE-01", "Premium Rice 5kg", "GROCERIES", "Green Valley", "SUP1", "KG", "4800000000017", 285m, 240m, 25m, 300m),
+        ("COFFEE-200", "Ground Coffee 200g", "GROCERIES", "Sunrise", "SUP1", "KG", "4800000000024", 165m, 132m, 20m, 220m),
+        ("SUGAR-1K", "Refined Sugar 1kg", "GROCERIES", "Green Valley", "SUP2", "KG", "4800000000031", 78m, 63m, 40m, 320m),
+        ("OIL-1L", "Cooking Oil 1L", "GROCERIES", "Sunrise", "SUP2", "L", "4800000000048", 125m, 99m, 30m, 280m),
+        ("MILK-370", "Evaporated Milk 370ml", "DAIRY", "Green Valley", "SUP1", "L", "4800000000055", 42m, 33m, 60m, 500m),
+        ("EGGS-DZ", "Large Eggs (Dozen)", "DAIRY", "Green Valley", "SUP2", "PC", "4800000000062", 110m, 86m, 15m, 120m),
+        ("WATER-500", "Mineral Water 500ml", "BEVERAGES", "Sunrise", "SUP1", "L", "4800000000079", 12m, 9m, 120m, 800m),
+        ("SODA-1L", "Premium Soda 1L", "BEVERAGES", "Sunrise", "SUP2", "L", "4800000000086", 58m, 44m, 48m, 240m),
+        ("DETER-400", "Laundry Powder 400g", "HOUSEHOLD", "Green Valley", "SUP1", "PC", "4800000000093", 135m, 106m, 36m, 200m),
+        ("NOODLE-55", "Instant Noodles Chicken 55g", "GROCERIES", "Kitchen Best", "SUP1", "PC", "4800000001014", 16m, 11m, 200m, 1200m),
+        ("TUNA-155", "Canned Tuna 155g", "GROCERIES", "Kitchen Best", "SUP1", "PC", "4800000001021", 42m, 33m, 120m, 600m),
+        ("CBEEF-150", "Corned Beef 150g", "GROCERIES", "Kitchen Best", "SUP1", "PC", "4800000001038", 58m, 45m, 90m, 480m),
+        ("PASTA-1K", "Spaghetti Pasta 1kg", "GROCERIES", "Golden Harvest", "SUP1", "PC", "4800000001045", 89m, 70m, 60m, 300m),
+        ("TSAUCE-250", "Tomato Sauce 250g", "GROCERIES", "Golden Harvest", "SUP1", "PC", "4800000001052", 29m, 22m, 90m, 450m),
+        ("SOY-1L", "Soy Sauce 1L", "GROCERIES", "Kitchen Best", "SUP2", "L", "4800000001069", 55m, 42m, 70m, 360m),
+        ("VINEGAR-1L", "Cane Vinegar 1L", "GROCERIES", "Kitchen Best", "SUP2", "L", "4800000001076", 45m, 34m, 70m, 360m),
+        ("SALT-500", "Iodized Salt 500g", "GROCERIES", "Green Valley", "SUP2", "PC", "4800000001083", 18m, 12m, 80m, 400m),
+        ("OATS-800", "Rolled Oats 800g", "GROCERIES", "Golden Harvest", "SUP1", "PC", "4800000001090", 145m, 115m, 30m, 180m),
+        ("OJ-1L", "Orange Juice 1L", "BEVERAGES", "Sunrise", "SUP3", "L", "4800000001106", 95m, 74m, 50m, 260m),
+        ("ICETEA-500", "Iced Tea 500ml", "BEVERAGES", "Sunrise", "SUP3", "L", "4800000001113", 35m, 25m, 110m, 600m),
+        ("ENERGY-250", "Energy Drink 250ml", "BEVERAGES", "Sunrise", "SUP3", "L", "4800000001120", 42m, 31m, 90m, 480m),
+        ("COFFEE-3IN1", "3-in-1 Coffee Mix (10s)", "BEVERAGES", "Sunrise", "SUP3", "PC", "4800000001137", 72m, 56m, 80m, 420m),
+        ("CHOCO-1L", "Chocolate Drink 1L", "BEVERAGES", "Green Valley", "SUP3", "L", "4800000001144", 88m, 68m, 40m, 220m),
+        ("MILK-1L", "Fresh Milk 1L", "DAIRY", "Green Valley", "SUP2", "L", "4800000001151", 98m, 78m, 45m, 240m),
+        ("CHEESE-165", "Cheddar Cheese 165g", "DAIRY", "Green Valley", "SUP2", "PC", "4800000001168", 76m, 58m, 40m, 200m),
+        ("BUTTER-225", "Salted Butter 225g", "DAIRY", "Green Valley", "SUP2", "PC", "4800000001175", 135m, 108m, 10m, 150m),
+        ("YOGURT-110", "Yogurt Cup 110g", "DAIRY", "Green Valley", "SUP2", "PC", "4800000001182", 32m, 23m, 60m, 300m),
+        ("CHIPS-60", "Potato Chips 60g", "SNACKS", "Golden Harvest", "SUP1", "PC", "4800000001199", 38m, 27m, 120m, 600m),
+        ("CHOCBAR-40", "Chocolate Bar 40g", "SNACKS", "Golden Harvest", "SUP1", "PC", "4800000001205", 45m, 33m, 100m, 500m),
+        ("COOKIES-200", "Butter Cookies 200g", "SNACKS", "Golden Harvest", "SUP5", "PC", "4800000001212", 85m, 64m, 50m, 260m),
+        ("PEANUT-100", "Roasted Peanuts 100g", "SNACKS", "Golden Harvest", "SUP1", "PC", "4800000001229", 28m, 19m, 90m, 450m),
+        ("BREAD-LOAF", "Sliced Loaf Bread", "BAKERY", "Golden Harvest", "SUP5", "PC", "4800000001236", 72m, 55m, 40m, 160m),
+        ("PANDESAL-10", "Pandesal (10 pcs)", "BAKERY", "Golden Harvest", "SUP5", "PC", "4800000001243", 50m, 36m, 12m, 120m),
+        ("DISH-500", "Dishwashing Liquid 500ml", "HOUSEHOLD", "Pure Living", "SUP4", "PC", "4800000001250", 68m, 50m, 60m, 300m),
+        ("BLEACH-1L", "Bleach 1L", "HOUSEHOLD", "Pure Living", "SUP4", "L", "4800000001267", 48m, 35m, 50m, 260m),
+        ("TISSUE-4", "Bathroom Tissue (4 rolls)", "HOUSEHOLD", "Pure Living", "SUP4", "PC", "4800000001274", 95m, 72m, 60m, 320m),
+        ("TRASH-10", "Garbage Bags (10s)", "HOUSEHOLD", "Pure Living", "SUP4", "PC", "4800000001281", 55m, 40m, 50m, 260m),
+        ("SOAP-135", "Bath Soap 135g", "PERSONAL", "Pure Living", "SUP4", "PC", "4800000001298", 42m, 31m, 90m, 480m),
+        ("SHAMPOO-340", "Shampoo 340ml", "PERSONAL", "Pure Living", "SUP4", "PC", "4800000001304", 165m, 128m, 30m, 180m),
+        ("TPASTE-150", "Toothpaste 150g", "PERSONAL", "Pure Living", "SUP4", "PC", "4800000001311", 98m, 75m, 45m, 240m),
+        ("ALCOHOL-500", "Isopropyl Alcohol 500ml", "PERSONAL", "Pure Living", "SUP4", "PC", "4800000001328", 85m, 62m, 8m, 200m),
+        ("HOTDOG-1K", "Jumbo Hotdog 1kg", "FROZEN", "Kitchen Best", "SUP2", "PC", "4800000001335", 210m, 168m, 25m, 140m),
+        ("NUGGETS-500", "Chicken Nuggets 500g", "FROZEN", "Kitchen Best", "SUP2", "PC", "4800000001342", 175m, 138m, 6m, 120m),
     ];
 
     private async Task SeedStockAsync(CancellationToken cancellationToken)
@@ -325,10 +386,13 @@ public sealed class DevelopmentDataSeeder(
             throw new InvalidOperationException("The external supplier location is missing for stock seeding.");
         }
 
-        DateTimeOffset now = clock.UtcNow;
-        DateOnly businessDate = clock.BusinessDateFor("Asia/Manila");
+        // Opening balances date from the start of the demo history, so the
+        // backdated sales the demo tool posts draw on stock already present.
+        DateTimeOffset openedAt = HistoryStartUtc;
+        DateOnly businessDate = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(openedAt, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila")).DateTime);
 
-        foreach ((string sku, decimal storeOnHand, decimal warehouseOnHand, decimal unitCost) in Stock)
+        foreach ((string sku, _, _, _, _, _, _, _, decimal unitCost, decimal storeOnHand, decimal warehouseOnHand) in Catalogue)
         {
             ProductId productId = await context.Products
                 .AsNoTracking()
@@ -390,7 +454,7 @@ public sealed class DevelopmentDataSeeder(
                             ProductTracksBatches: false),
                     ],
                     Actor: new LedgerActor(UserId.Empty, UserId.Empty, null, CorrelationId.Empty),
-                    OccurredAtUtc: now,
+                    OccurredAtUtc: openedAt,
                     BusinessDate: businessDate,
                     Notes: "Development opening balance for the demo catalogue.");
 
@@ -412,6 +476,106 @@ public sealed class DevelopmentDataSeeder(
                 _stockGroupsCreated++;
             }
         }
+    }
+
+    /// <summary>Gives every product stocking thresholds at each store, scaled
+    /// from its opening quantity, so the replenishment view has targets to
+    /// measure against. Existing settings are left alone.</summary>
+    private async Task SeedLocationSettingsAsync(CancellationToken cancellationToken)
+    {
+        List<LocationId> stores = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Code == StoreOneCode || l.Code == StoreTwoCode || l.Code == StoreThreeCode)
+            .Select(l => l.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach ((string sku, _, _, _, _, _, _, _, _, decimal storeOnHand, _) in Catalogue)
+        {
+            Product product = await context.Products
+                .Include(p => p.LocationSettings)
+                .SingleAsync(p => p.Sku == Sku.FromTrustedSource(sku), cancellationToken)
+                .ConfigureAwait(false);
+
+            // A store's target is a comfortable shelf for the product; the
+            // reorder point sits at forty percent of it.
+            decimal target = Math.Max(storeOnHand, 40m);
+            decimal reorder = Math.Round(target * 0.4m, MidpointRounding.AwayFromZero);
+            decimal minimum = Math.Round(target * 0.15m, MidpointRounding.AwayFromZero);
+
+            foreach (LocationId store in stores)
+            {
+                if (product.LocationSettings.Any(setting => setting.LocationId == store))
+                {
+                    continue;
+                }
+
+                Result set = product.SetLocationSetting(
+                    store, isStocked: true, minimum, reorder, target, target * 1.5m, target - reorder);
+
+                if (set.IsFailure)
+                {
+                    throw new InvalidOperationException(set.Error.Message);
+                }
+
+                // Settings are exposed as a defensive copy; track the new row
+                // explicitly, as the price rows are.
+                context.ProductLocationSettings.Add(product.LocationSettings.Single(setting => setting.LocationId == store));
+            }
+        }
+    }
+
+    /// <summary>Named customers for the demo: account holders the registers can
+    /// attach to a sale.</summary>
+    private async Task SeedCustomersAsync(CancellationToken cancellationToken)
+    {
+        (string Name, string? Phone, string? Email, string? Tin, string? Note)[] customers =
+        [
+            ("Maria Santos", "0917 555 0101", "maria.santos@example.com", null, "Regular, weekly groceries."),
+            ("Jose Reyes", "0918 555 0102", null, null, null),
+            ("Ana Cruz", "0919 555 0103", "ana.cruz@example.com", null, null),
+            ("Carlo Mendoza", "0920 555 0104", null, null, "Prefers e-wallet."),
+            ("Liza Garcia", "0921 555 0105", "liza.garcia@example.com", null, null),
+            ("Ramon Villanueva", "0922 555 0106", null, null, null),
+            ("Grace Tan", "0923 555 0107", "grace.tan@example.com", null, null),
+            ("Paolo Bautista", "0924 555 0108", null, null, null),
+            ("Sunshine Carinderia", "0925 555 0109", "orders@sunshinecarinderia.example.com", "123-456-789-000", "Buys in bulk for the eatery."),
+            ("Barangay Hall San Roque", "02 8555 0110", null, "987-654-321-000", "Official receipts required."),
+            ("Kristine Ramos", "0926 555 0111", null, null, null),
+            ("Miguel Aquino", "0927 555 0112", "miguel.aquino@example.com", null, null),
+        ];
+
+        AppUser? owner = await users.FindByNameAsync("owner").ConfigureAwait(false);
+        if (owner is null)
+        {
+            return;
+        }
+
+        DateTimeOffset now = clock.UtcNow;
+
+        foreach ((string name, string? phone, string? email, string? tin, string? note) in customers)
+        {
+            bool exists = await context.Customers
+                .AnyAsync(c => c.DisplayName == name, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (exists)
+            {
+                continue;
+            }
+
+            Result<Pos.Domain.Sales.Customer> created = Pos.Domain.Sales.Customer.Create(
+                CustomerId.New(), name, phone, email, tin, note, new UserId(owner.Id), now);
+
+            if (created.IsFailure)
+            {
+                throw new InvalidOperationException(created.Error.Message);
+            }
+
+            context.Customers.Add(created.Value);
+        }
+
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private const string MainLocationCode = "MAIN";
@@ -465,6 +629,10 @@ public sealed class DevelopmentDataSeeder(
             ("BEVERAGES", "Beverages", 20),
             ("DAIRY", "Dairy", 30),
             ("HOUSEHOLD", "Household", 40),
+            ("SNACKS", "Snacks", 50),
+            ("BAKERY", "Bakery", 60),
+            ("PERSONAL", "Personal Care", 70),
+            ("FROZEN", "Frozen", 80),
         ];
 
         Dictionary<string, CategoryId> byCode = [];
@@ -497,7 +665,7 @@ public sealed class DevelopmentDataSeeder(
 
     private async Task<Dictionary<string, BrandId>> EnsureBrandsAsync(CancellationToken ct)
     {
-        string[] brands = ["Green Valley", "Sunrise"];
+        string[] brands = ["Green Valley", "Sunrise", "Golden Harvest", "Kitchen Best", "Pure Living"];
 
         Dictionary<string, BrandId> byName = [];
 
@@ -529,7 +697,14 @@ public sealed class DevelopmentDataSeeder(
 
     private async Task<Dictionary<string, SupplierId>> EnsureSuppliersAsync(CancellationToken ct)
     {
-        (string Code, string Name)[] suppliers = [("SUP1", "Metro Distribution"), ("SUP2", "Fresh Produce Co")];
+        (string Code, string Name)[] suppliers =
+        [
+            ("SUP1", "Metro Distribution"),
+            ("SUP2", "Fresh Produce Co"),
+            ("SUP3", "Island Beverages Inc."),
+            ("SUP4", "HomeCare Supply"),
+            ("SUP5", "Northern Bakers"),
+        ];
 
         Dictionary<string, SupplierId> byCode = [];
 

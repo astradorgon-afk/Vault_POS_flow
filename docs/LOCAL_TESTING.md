@@ -124,7 +124,8 @@ Visual Studio works too: set **Pos.Client** as the startup project, pick
 3. The catalogue lists the store's products. The development seed creates a
    selling price for every product and an opening stock balance at the Main
    Warehouse and each store, so a sale completes against real
-   availability.
+   availability. See [Load the demo business](#load-the-demo-business) for a
+   month of history on top.
 
 The development accounts are a deliberately short set (one per role), with the
 same password `cash1234`:
@@ -150,6 +151,49 @@ register code: codes are unique even after a register is revoked.
 > with *"Head office could not be reached at http://localhost:5177/"*. The
 > `/health*` endpoints are exempt from the redirect so liveness probes keep
 > working either way.
+
+## Load the demo business
+
+The development seed gives the API a full catalogue (43 products across eight
+categories, five suppliers, twelve named customers), per-store restock levels,
+and prices and opening stock dated 35 days back. `tools/Pos.DemoData` then
+fills that catalogue with a month of activity through the public API, the same
+way the web and desktop clients call it, so every record passes the normal
+validation, ledger posting and audit:
+
+```powershell
+.\scripts\dev-desktop.ps1                               # API and Web UI running
+dotnet run --project tools/Pos.DemoData -- --days 30    # in a second terminal
+```
+
+It posts:
+
+- **30 days of trading at all three stores:** one shift per store per day,
+  with cash, card and e-wallet sales, customer-attached sales, supervisor
+  voids, returns with refunds, and closed shifts, some with small cash
+  variances. It registers a browser till (`WB1`–`WB3`) per store for this,
+  which also makes the web **New sale** page usable.
+- **Back-office work at every stage:**
+  - Purchase orders: received in full, received short with damage, awaiting
+    approval, and a draft.
+  - Transfers: received, in transit, approved, awaiting approval, and a draft.
+  - Stock counts: one approved, one in progress.
+  - Stock adjustments: approved, awaiting approval, and a draft.
+  - Payment receipts and a quarantine incident.
+
+Running it again is safe. Store-days that already have sales are skipped, so
+an interrupted run can simply be restarted, and the back-office activity is
+posted once unless `--force` is given. Back up first if the database holds
+anything you want to keep:
+
+```powershell
+docker exec vaultflow-dev-pg pg_dump -U pos_migrator -d vaultflow --format=custom > backups\before-demo.dump
+```
+
+The desktop register and the web UI share this data through the API. The
+register keeps an offline copy that refreshes when a cashier signs in, or with
+**Re-download** on the signed-in view. Sales made at the register appear in
+the web **Sales ledger** once they sync.
 
 ## Exercise backup and restore locally
 
