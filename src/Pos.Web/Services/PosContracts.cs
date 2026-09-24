@@ -659,3 +659,566 @@ public sealed class PosNewReceipt
     /// <summary>Gets or sets the created receipt identifier.</summary>
     public Guid Id { get; set; }
 }
+
+/// <summary>An inventory count as listed in the dashboard.</summary>
+public sealed record PosInventoryCountSummary(
+    Guid Id,
+    string Number,
+    Guid LocationId,
+    string Kind,
+    string Status,
+    int Lines,
+    int CountedLines,
+    decimal TotalAbsoluteVarianceValue,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? PostedAtUtc);
+
+/// <summary>An inventory count with its recorded lines.</summary>
+public sealed record PosInventoryCountDetail(
+    PosInventoryCountSummary Count,
+    string? Note,
+    DateTimeOffset SnapshotTakenAtUtc,
+    Guid CreatedByUserId,
+    Guid? SubmittedByUserId,
+    Guid? ApprovedByUserId,
+    string? LastRejectionReason,
+    string? CancellationReason,
+    IReadOnlyList<PosInventoryCountLineView> Lines);
+
+/// <summary>One counted bucket on an inventory count sheet.</summary>
+public sealed record PosInventoryCountLineView(
+    int LineNo,
+    Guid ProductId,
+    Guid? BatchId,
+    decimal SystemQuantity,
+    decimal? PhysicalQuantity,
+    decimal? Variance,
+    decimal UnitCost,
+    decimal? VarianceValue,
+    bool IsRepeatVariance,
+    DateTimeOffset? CountedAtUtc);
+
+/// <summary>A product category, used to scope a category or cycle count.</summary>
+public sealed class PosCategory
+{
+    /// <summary>Gets or sets the category identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the category code.</summary>
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the category name.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets whether the category is active.</summary>
+    public bool IsActive { get; set; }
+}
+
+/// <summary>A product master row used to name count-sheet lines.</summary>
+public sealed record PosProductSummary(
+    Guid Id,
+    string Sku,
+    string Name,
+    bool IsActive);
+
+/// <summary>The body that opens a stock count.</summary>
+public sealed record PosOpenInventoryCountRequest(
+    Guid LocationId,
+    int Kind,
+    IReadOnlyList<Guid>? CategoryIds,
+    string? Note);
+
+/// <summary>One counted quantity sent for a count line.</summary>
+public sealed record PosCountLineRequest(Guid ProductId, decimal PhysicalQuantity, Guid? BatchId = null);
+
+/// <summary>The body that records counted quantities.</summary>
+public sealed record PosRecordCountLinesRequest(IReadOnlyList<PosCountLineRequest> Lines);
+
+/// <summary>A reason attached to a count rejection or cancellation.</summary>
+public sealed record PosInventoryControlReasonRequest(string? Reason);
+
+/// <summary>A transfer as listed in the transfers dashboard.</summary>
+public sealed record PosTransferSummary(
+    Guid Id,
+    string Number,
+    string Status,
+    Guid SourceLocationId,
+    Guid DestinationLocationId,
+    Guid CreatedByUserId,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? DispatchedAtUtc,
+    DateTimeOffset? ReceivedAtUtc,
+    decimal TotalValue,
+    int LineCount);
+
+/// <summary>A transfer with its lines, allocations and arrival state.</summary>
+public sealed record PosTransferDetail(
+    PosTransferSummary Transfer,
+    string Kind,
+    string Mode,
+    string? ReviewNote,
+    IReadOnlyList<PosTransferLineView> Lines);
+
+/// <summary>One line of a transfer detail.</summary>
+public sealed record PosTransferLineView(
+    int LineNo,
+    Guid ProductId,
+    string? ProductName,
+    decimal RequestedQuantity,
+    decimal PickedQuantity,
+    decimal ReceivedQuantity,
+    decimal DamagedQuantity,
+    string? Note,
+    string? DiscrepancyState,
+    IReadOnlyList<PosTransferAllocationView> Allocations);
+
+/// <summary>One picked lot within a transfer line.</summary>
+public sealed record PosTransferAllocationView(
+    Guid? BatchId,
+    decimal PickedQuantity,
+    decimal ReceivedQuantity,
+    decimal DamagedQuantity);
+
+/// <summary>One arrival receipt line, keyed to a dispatched allocation.</summary>
+public sealed record PosTransferReceiveLine(
+    int LineNo,
+    Guid? BatchId,
+    decimal ReceivedQuantity,
+    decimal DamagedQuantity);
+
+/// <summary>The body that records a transfer arrival.</summary>
+public sealed record PosReceiveTransferRequest(IReadOnlyList<PosTransferReceiveLine> Receives);
+
+/// <summary>One line of a transfer request.</summary>
+public sealed record PosTransferLineRequest(Guid ProductId, decimal Quantity, string? Note = null);
+
+/// <summary>The body that raises a transfer request.</summary>
+public sealed record PosCreateTransferRequest(
+    Guid SourceLocationId,
+    Guid DestinationLocationId,
+    IReadOnlyList<PosTransferLineRequest> Lines,
+    Guid? PreApprovalTokenId = null);
+
+/// <summary>An approval-time quantity change.</summary>
+public sealed record PosTransferAmendment(int LineNo, decimal RequestedQuantity);
+
+/// <summary>The body of a transfer approval, optionally amending quantities.</summary>
+public sealed record PosApproveTransferRequest(
+    IReadOnlyList<PosTransferAmendment>? Amendments = null,
+    string? Note = null);
+
+/// <summary>One picked lot of a transfer.</summary>
+public sealed record PosTransferPickLine(Guid? BatchId, int LineNo, decimal Quantity);
+
+/// <summary>The body recording what was picked.</summary>
+public sealed record PosPickTransferRequest(IReadOnlyList<PosTransferPickLine> Allocations);
+
+/// <summary>The body cancelling a dispatch.</summary>
+public sealed record PosCancelTransferDispatchRequest(string Reason);
+
+/// <summary>A note attached to a review, rejection or cancellation.</summary>
+public sealed record PosTransferReasonRequest(string? Note);
+
+/// <summary>One step in a transfer's custody timeline.</summary>
+public sealed record PosTransferCustodyEventSummary(
+    int Sequence,
+    string Kind,
+    Guid ActorUserId,
+    DateTimeOffset OccurredAtUtc,
+    string? Note);
+
+// ---- People & roles ----
+
+/// <summary>An account as listed for administration.</summary>
+public sealed record PosUserSummary(
+    Guid Id,
+    string UserName,
+    string DisplayName,
+    string? Email,
+    string? EmployeeCode,
+    bool IsActive,
+    bool TwoFactorEnabled,
+    int ApprovalTier,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<Guid> LocationIds,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? LastLoginAtUtc);
+
+/// <summary>One location a user is assigned to.</summary>
+public sealed record PosUserLocationSpec(Guid LocationId, bool IsPrimary);
+
+/// <summary>A per-user permission override shown to an administrator.</summary>
+public sealed record PosUserOverride(
+    Guid Id,
+    string PermissionCode,
+    string Effect,
+    Guid? LocationId,
+    string Reason,
+    DateTimeOffset GrantedAtUtc,
+    Guid GrantedByUserId,
+    DateTimeOffset? ExpiresAtUtc,
+    bool IsActive);
+
+/// <summary>An account with everything that shapes its authority.</summary>
+public sealed record PosUserDetail(
+    PosUserSummary User,
+    IReadOnlyList<PosUserLocationSpec> Locations,
+    IReadOnlyList<PosUserOverride> Overrides,
+    IReadOnlyList<string> EffectivePermissions,
+    bool HasPin,
+    bool IsLockedOut,
+    DateTimeOffset? DisabledAtUtc,
+    string? DisabledReason);
+
+/// <summary>The body creating an account.</summary>
+public sealed record PosCreateUserRequest(
+    string UserName,
+    string DisplayName,
+    string Password,
+    string? Email,
+    string? EmployeeCode,
+    int ApprovalTier,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<PosUserLocationSpec> Locations);
+
+/// <summary>The body updating an account's details.</summary>
+public sealed record PosUpdateUserRequest(
+    string DisplayName,
+    string? Email,
+    string? EmployeeCode,
+    int ApprovalTier);
+
+/// <summary>The roles an account should hold.</summary>
+public sealed record PosUserRolesRequest(IReadOnlyList<string> Roles);
+
+/// <summary>The locations an account should be assigned to.</summary>
+public sealed record PosUserLocationsRequest(IReadOnlyList<PosUserLocationSpec> Locations);
+
+/// <summary>An override granted to or withheld from one account.</summary>
+public sealed record PosOverrideRequest(
+    string PermissionCode,
+    int Effect,
+    string Reason,
+    DateTimeOffset? ExpiresAtUtc = null,
+    Guid? LocationId = null);
+
+/// <summary>A new password set by an administrator.</summary>
+public sealed record PosResetPasswordRequest(string NewPassword);
+
+/// <summary>A cashier PIN set by an administrator.</summary>
+public sealed record PosSetPinRequest(string Pin);
+
+/// <summary>The permissions a role should bundle.</summary>
+public sealed record PosRolePermissionsRequest(IReadOnlyList<string> Permissions, string Reason);
+
+/// <summary>A reason recorded for an administration change.</summary>
+public sealed record PosReasonRequest(string Reason);
+
+/// <summary>A role as shown to an administrator.</summary>
+public sealed record PosRoleView(
+    Guid Id,
+    string Name,
+    string Description,
+    bool IsSystemRole,
+    IReadOnlyList<string> Permissions,
+    int MemberCount);
+
+/// <summary>A catalogue permission as shown to an administrator.</summary>
+public sealed record PosPermissionView(
+    string Code,
+    string Module,
+    string Description,
+    bool IsOfflineCapable,
+    bool IsReadOnly,
+    bool IsPrivileged);
+
+// ---- Devices ----
+
+/// <summary>A registered terminal as shown in the fleet console.</summary>
+public sealed record PosDeviceSummary(
+    Guid Id,
+    string ShortCode,
+    string Name,
+    Guid LocationId,
+    int Platform,
+    int Status,
+    string? AppVersion,
+    DateTimeOffset? LastSeenAtUtc,
+    DateTimeOffset? LastSyncAtUtc,
+    decimal? ClockSkewSeconds,
+    string? StatusReason);
+
+/// <summary>The body used to register a terminal.</summary>
+public sealed record PosRegisterDeviceRequest(
+    string ShortCode,
+    string Name,
+    Guid LocationId,
+    int Platform);
+
+/// <summary>The one-time result of registering or reissuing a terminal enrolment.</summary>
+public sealed record PosDeviceRegistration(
+    Guid DeviceId,
+    string ShortCode,
+    string? EnrolmentCode,
+    DateTimeOffset? ExpiresAtUtc);
+
+// ---- Locations ----
+
+/// <summary>Operational policy values attached to one physical location.</summary>
+public sealed record PosLocationSettings(
+    int NegativeStockPolicy,
+    bool AllowsDirectSupplierDelivery,
+    TimeSpan OfflineGracePeriod,
+    string ReceiptHeader,
+    string ReceiptFooter,
+    decimal VatRate,
+    decimal CashRoundingIncrement,
+    int ExpiryWarningDays,
+    decimal CashVarianceThreshold,
+    TimeSpan MaxShiftHours);
+
+/// <summary>A location with its operating policy.</summary>
+public sealed record PosLocationAdmin(
+    Guid Id,
+    string Code,
+    string Name,
+    int Kind,
+    string TimeZoneId,
+    bool IsActive,
+    bool IsSystemCreated,
+    DateOnly OpenedOn,
+    DateOnly? ClosedOn,
+    PosLocationSettings Settings);
+
+/// <summary>The body used to add a physical location.</summary>
+public sealed record PosCreateLocationRequest(
+    string Code,
+    string Name,
+    int Kind,
+    string TimeZoneId,
+    PosLocationSettings? Settings = null);
+
+// ---- Reports ----
+
+/// <summary>The daily close-of-trade report for a store.</summary>
+public sealed record PosDailySalesReport(
+    Guid LocationId,
+    string LocationName,
+    DateOnly BusinessDate,
+    PosDailySalesSummary SalesSummary,
+    IReadOnlyList<PosDailyPaymentSummary> PaymentsByMethod,
+    IReadOnlyList<PosDailyShiftSummary> Shifts);
+
+/// <summary>Sales and refund totals for a business date.</summary>
+public sealed record PosDailySalesSummary(
+    int SalesCount,
+    decimal GrossTotal,
+    decimal DiscountTotal,
+    decimal NetTotal,
+    decimal VatTotal,
+    decimal VatExemptTotal,
+    decimal ZeroRatedTotal,
+    decimal TaxableBaseTotal,
+    decimal RefundTotal);
+
+/// <summary>Collected value through one payment rail.</summary>
+public sealed record PosDailyPaymentSummary(
+    string Method,
+    decimal Amount,
+    decimal ChangeGiven);
+
+/// <summary>One cashier shift's contribution to a daily report.</summary>
+public sealed record PosDailyShiftSummary(
+    Guid ShiftId,
+    string ShiftNumber,
+    Guid CashierUserId,
+    string Status,
+    DateTimeOffset OpenedAtUtc,
+    DateTimeOffset? ClosedAtUtc,
+    decimal OpeningFloat,
+    int SalesCount,
+    decimal NetTotal,
+    decimal CashSalesTotal,
+    decimal CashRefundsTotal);
+
+// ---- Stock adjustments ----
+
+/// <summary>A stock adjustment as listed.</summary>
+public sealed record PosStockAdjustmentSummary(
+    Guid Id,
+    string Number,
+    Guid LocationId,
+    string Reason,
+    string Status,
+    decimal TotalAbsoluteValue,
+    Guid CreatedByUserId,
+    DateTimeOffset CreatedAtUtc);
+
+/// <summary>A stock adjustment with its lines.</summary>
+public sealed record PosStockAdjustmentDetail(
+    PosStockAdjustmentSummary Adjustment,
+    string? Notes,
+    DateTimeOffset? SubmittedAtUtc,
+    Guid? DecidedByUserId,
+    DateTimeOffset? DecidedAtUtc,
+    string? RejectionReason,
+    Guid? ReversedByUserId,
+    DateTimeOffset? ReversedAtUtc,
+    string? ReversalReason,
+    IReadOnlyList<PosStockAdjustmentLineView> Lines);
+
+/// <summary>One line of a stock adjustment.</summary>
+public sealed record PosStockAdjustmentLineView(
+    int LineNo,
+    Guid ProductId,
+    Guid? BatchId,
+    string State,
+    decimal QuantityDelta,
+    decimal UnitCost,
+    decimal AbsoluteValue,
+    string MovementType);
+
+/// <summary>One line change on a new stock adjustment.</summary>
+public sealed record PosStockAdjustmentLineRequest(
+    Guid ProductId, int State, decimal QuantityDelta, Guid? BatchId = null);
+
+/// <summary>The body that raises a draft stock adjustment.</summary>
+public sealed record PosCreateStockAdjustmentRequest(
+    Guid LocationId,
+    int Reason,
+    IReadOnlyList<PosStockAdjustmentLineRequest> Lines,
+    string? Notes = null);
+
+// ---- Quarantine ----
+
+/// <summary>A quarantine incident as listed.</summary>
+public sealed record PosQuarantineIncidentSummary(
+    Guid Id,
+    string Number,
+    string Status,
+    Guid LocationId,
+    Guid CreatedByUserId,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? InvestigatedAtUtc,
+    DateTimeOffset? ResolvedAtUtc,
+    decimal TotalValue,
+    int LineCount,
+    int OpenLineCount);
+
+/// <summary>One line of a quarantine incident.</summary>
+public sealed record PosQuarantineLineSummary(
+    int LineNo,
+    string Barcode,
+    decimal Quantity,
+    decimal UnitCost,
+    decimal RemainingQuantity,
+    string? ClaimedProductName,
+    Guid? ProductId,
+    Guid? BatchId,
+    string Disposition,
+    Guid? DispositionedByUserId,
+    DateTimeOffset? DispositionedAtUtc,
+    string? DispositionNote);
+
+/// <summary>One photograph of an incident, without the image bytes.</summary>
+public sealed record PosQuarantinePhotoSummary(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    string? Note,
+    Guid UploadedByUserId,
+    DateTimeOffset UploadedAtUtc);
+
+/// <summary>One step in an incident's audit timeline.</summary>
+public sealed record PosQuarantineEventSummary(
+    int Sequence,
+    string Kind,
+    Guid ActorUserId,
+    DateTimeOffset OccurredAtUtc,
+    decimal? Quantity,
+    string? Note);
+
+/// <summary>A quarantine incident with its lines, photos and timeline.</summary>
+public sealed record PosQuarantineIncidentDetail(
+    Guid Id,
+    string Number,
+    string Status,
+    Guid LocationId,
+    Guid CreatedByUserId,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? InvestigatedAtUtc,
+    DateTimeOffset? ResolvedAtUtc,
+    string? Note,
+    decimal TotalValue,
+    IReadOnlyList<PosQuarantineLineSummary> Lines,
+    IReadOnlyList<PosQuarantinePhotoSummary> Photos,
+    IReadOnlyList<PosQuarantineEventSummary> Timeline);
+
+/// <summary>One found line on a new quarantine incident.</summary>
+public sealed record PosQuarantineLineRequest(
+    string Barcode, decimal Quantity, decimal? UnitCost = null, string? ClaimedProductName = null);
+
+/// <summary>The body that raises a quarantine incident.</summary>
+public sealed record PosCreateQuarantineIncidentRequest(
+    Guid LocationId, IReadOnlyList<PosQuarantineLineRequest> Lines, string? Note = null);
+
+/// <summary>The body that identifies a quarantine line against a catalogue product.</summary>
+public sealed record PosLinkQuarantineProductRequest(
+    int LineNo, Guid ProductId, Guid? BatchId = null, string? Note = null);
+
+/// <summary>The body of a release or reject disposition.</summary>
+public sealed record PosQuarantineQuantityRequest(int LineNo, decimal Quantity, string? Note = null);
+
+/// <summary>The body of a write-off disposition.</summary>
+public sealed record PosWriteOffQuarantineLineRequest(
+    int LineNo, decimal Quantity, int ReasonCode, string? Note = null);
+
+/// <summary>A note attached to moving an incident into investigation.</summary>
+public sealed record PosQuarantineNoteRequest(string? Note = null);
+
+// ---- Replenishment & inventory exceptions ----
+
+/// <summary>A suggested restock for one product at one location.</summary>
+public sealed record PosReplenishmentRecommendation(
+    Guid LocationId,
+    Guid ProductId,
+    decimal Available,
+    decimal Deficit,
+    string Urgency,
+    Guid? SuggestedSourceLocationId,
+    decimal SuggestedQuantity);
+
+/// <summary>One stock draw the ledger refused.</summary>
+public sealed record PosNegativeStockAttemptView(
+    Guid Id,
+    DateTimeOffset AttemptedAtUtc,
+    Guid LocationId,
+    string? LocationCode,
+    Guid ProductId,
+    string? Sku,
+    string? ProductName,
+    Guid? BatchId,
+    string State,
+    string MovementType,
+    decimal RequestedQuantity,
+    decimal AvailableQuantity,
+    decimal Shortfall,
+    string Policy,
+    string ReferenceDocumentType,
+    Guid? ReferenceDocumentId,
+    string ReferenceNumber,
+    Guid UserId,
+    Guid? DeviceId,
+    Guid CorrelationId);
+
+/// <summary>Refused draws for one product at one location, ranked by frequency.</summary>
+public sealed record PosNegativeStockAttemptSummaryRow(
+    Guid LocationId,
+    string? LocationCode,
+    Guid ProductId,
+    string? Sku,
+    string? ProductName,
+    int Attempts,
+    decimal TotalShortfall,
+    DateTimeOffset FirstAttemptAtUtc,
+    DateTimeOffset LastAttemptAtUtc);

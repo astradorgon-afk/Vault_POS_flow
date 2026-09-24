@@ -1,0 +1,424 @@
+@page "/inventory/counts/{CountId:guid}"
+@using System.Globalization
+@attribute [Authorize(Policy = "inventory.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Stock count · VaultFlow</PageTitle>
+
+@if (!CanViewInventory)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view inventory counts.</h2>
+        <p>Ask an administrator for the <code>inventory.view</code> permission.</p>
+    </section>
+}
+else if (detail is null && loadingDetail)
+{
+    <section class="loading-card">Loading the count sheet…</section>
+}
+else if (detail is null)
+{
+    <section class="pos-message" role="alert">@(message ?? "This count could not be found.")</section>
+}
+else
+{
+    PosInventoryCountSummary count = detail.Count;
+
+    <div class="office-head">
+        <div>
+            <p class="office-kicker">Stock count · @StoreName(count.LocationId)</p>
+            <h1 class="office-title">@count.Number</h1>
+            <p class="office-lead">@SplitWords(count.Kind) · @count.Lines line@(count.Lines == 1 ? "" : "s")@(count.PostedAtUtc is { } posted ? $" · posted {posted.ToLocalTime():MMM d, yyyy}" : "")</p>
+        </div>
+        <span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(detail.Note))
+    {
+        <div class="count-note"><strong>Note:</strong> @detail.Note</div>
+    }
+
+    <section class="count-meta">
+        <span><strong>Snapshot</strong>@detail.SnapshotTakenAtUtc.ToLocalTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)</span>
+        <span><strong>Created</strong>@detail.Count.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
+        @if (detail.SubmittedByUserId is { })
+        {
+            <span><strong>Submitted</strong>yes</span>
+        }
+        @if (detail.ApprovedByUserId is { })
+        {
+            <span><strong>Approved</strong>yes</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(detail.LastRejectionReason))
+        {
+            <span><strong>Returned</strong>@detail.LastRejectionReason</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(detail.CancellationReason))
+        {
+            <span><strong>Cancelled</strong>@detail.CancellationReason</span>
+        }
+    </section>
+
+    <section class="results-panel sheet-panel" aria-live="polite">
+        <table class="sheet-table">
+            <thead>
+                <tr><th>#</th><th>Product</th><th>Batch</th><th>System</th><th>Counted</th><th>Variance</th><th>Unit cost</th><th>Value</th><th>Counted at</th></tr>
+            </thead>
+            <tbody>
+                @foreach (PosInventoryCountLineView line in detail.Lines)
+                {
+                    <tr @key="line.LineNo">
+                        <td class="sheet-line-no">@line.LineNo</td>
+                        <td>
+                            <div class="product-name">@ProductDisplayName(line.ProductId)</div>
+                            @if (ProductSku(line.ProductId) is { } sku)
+                            {
+                                <div class="product-sku">@sku</div>
+                            }
+                        </td>
+                        <td>@(line.BatchId is { } batchId ? ShortId(batchId) : "—")</td>
+                        <td class="sheet-number">@(line.SystemQuantity.ToString("0.######", CultureInfo.InvariantCulture))</td>
+                        <td>
+                            @if (IsCounting && CanCount)
+                            {
+                                <input class="sheet-input" type="number" min="0" step="0.001"
+                                       value="@(Gauge(line.LineNo)?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty)"
+                                       @onchange="e => OnGaugeChangedAsync(line.LineNo, e)" />
+                            }
+                            else
+                            {
+                                <span class="sheet-number">@(line.PhysicalQuantity?.ToString("0.######", CultureInfo.InvariantCulture) ?? "—")</span>
+                            }
+                        </td>
+                        <td class="@VarianceTone(VarianceOf(line))">@(VarianceOf(line) is { } variance ? $"{variance:+#.###;-#.###;0}" : "—")</td>
+                        <td class="sheet-number">@line.UnitCost.ToString("C", CultureInfo.GetCultureInfo("en-PH"))</td>
+                        <td class="sheet-number">@(ValueOf(line) is { } value ? value.ToString("C", CultureInfo.GetCultureInfo("en-PH")) : "—")</td>
+                        <td class="sheet-muted">@(line.CountedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+
+    <section class="sheet-actions">
+        @if (IsCounting && CanCount)
+        {
+            <button type="button" class="action-button primary" @onclick="SaveCountsAsync" disabled="@(busy || !HasDrafts)">
+                @(busy ? "Saving…" : "Save counts")
+            </button>
+            <button type="button" class="action-button" @onclick="SubmitAsync" disabled="@(busy || !HasDrafts)">
+                Submit for approval
+            </button>
+            <button type="button" class="action-button danger" @onclick="ToggleCancelAsync" disabled="@busy">
+                Cancel count
+            </button>
+        }
+        else if (IsPendingApproval && CanApproveCount)
+        {
+            <button type="button" class="action-button primary" @onclick="ApproveAsync" disabled="@busy">
+                @(busy ? "Posting…" : "Approve & post")
+            </button>
+            <button type="button" class="action-button" @onclick="ToggleRejectAsync" disabled="@busy">
+                Send back
+            </button>
+        }
+        else if (IsPendingApproval && CanCount)
+        {
+            <button type="button" class="action-button danger" @onclick="ToggleCancelAsync" disabled="@busy">
+                Cancel count
+            </button>
+        }
+    </section>
+
+    @if (cancelling)
+    {
+        <section class="reason-editor">
+            <label class="reason-label" for="cancel-reason">Reason for cancelling</label>
+            <input id="cancel-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
+            <div class="reason-actions">
+                <button type="button" class="action-button danger" @onclick="CancelCountAsync" disabled="@busy">@(busy ? "Cancelling…" : "Confirm cancel")</button>
+                <button type="button" class="action-button subtle" @onclick="DismissReasonAsync">Dismiss</button>
+            </div>
+        </section>
+    }
+
+    @if (rejecting)
+    {
+        <section class="reason-editor">
+            <label class="reason-label" for="reject-reason">Reason for sending back</label>
+            <input id="reject-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
+            <div class="reason-actions">
+                <button type="button" class="action-button" @onclick="RejectAsync" disabled="@busy">@(busy ? "Returning…" : "Confirm send back")</button>
+                <button type="button" class="action-button subtle" @onclick="DismissReasonAsync">Dismiss</button>
+            </div>
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public Guid CountId { get; set; }
+
+    private readonly List<PosLocation> locations = [];
+    private readonly Dictionary<Guid, (string Sku, string Name)> productNames = [];
+    private Dictionary<int, decimal?> gauges = [];
+
+    private PosInventoryCountDetail? detail;
+    private bool loadingDetail = true;
+    private bool busy;
+    private bool cancelling;
+    private bool rejecting;
+    private string reasonText = string.Empty;
+    private string? message;
+
+    private bool CanViewInventory => Session.HasPermission("inventory.view");
+    private bool CanCount => Session.HasPermission("inventory.count");
+    private bool CanApproveCount => Session.HasPermission("inventory.count.approve");
+
+    private bool IsCounting => detail?.Count.Status == "Counting";
+    private bool IsPendingApproval => detail?.Count.Status == "PendingApproval";
+    private bool HasDrafts => detail?.Lines.Any(line => Gauge(line.LineNo) is not null) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewInventory)
+        {
+            loadingDetail = false;
+            return;
+        }
+
+        await LoadDetailAsync();
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        loadingDetail = true;
+        try
+        {
+            ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+            if (locationResponse.IsSuccess && locationResponse.Value is not null)
+            {
+                locations.AddRange(locationResponse.Value.Where(x => x.Kind == 1));
+            }
+
+            ApiResult<PosInventoryCountDetail> response = await Api.GetInventoryCountAsync(CountId, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error ?? "This count could not be found.";
+                return;
+            }
+
+            detail = response.Value;
+            gauges = detail.Lines.ToDictionary(line => line.LineNo, line => line.PhysicalQuantity);
+            await LoadProductNamesAsync(detail.Lines.Select(line => line.ProductId).Distinct().ToArray());
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loadingDetail = false;
+        }
+    }
+
+    private async Task LoadProductNamesAsync(IReadOnlyCollection<Guid> ids)
+    {
+        HashSet<Guid> wanted = [.. ids];
+        foreach (Guid id in wanted)
+        {
+            productNames[id] = (ShortId(id), "Product");
+        }
+
+        try
+        {
+            for (int offset = 0; offset < 2000 && wanted.Count > 0; offset += 200)
+            {
+                ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(null, offset, 200, CancellationToken.None);
+                if (!response.IsSuccess || response.Value is null || response.Value.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (PosProductSummary product in response.Value)
+                {
+                    if (wanted.Remove(product.Id))
+                    {
+                        productNames[product.Id] = (product.Sku, product.Name);
+                    }
+                }
+
+                if (response.Value.Count < 200)
+                {
+                    break;
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private decimal? Gauge(int lineNo) => gauges.TryGetValue(lineNo, out decimal? value) ? value : null;
+
+    private void OnGaugeChangedAsync(int lineNo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        gauges[lineNo] = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, decimal.Round(value, 3, MidpointRounding.ToEven))
+            : null;
+    }
+
+    private static decimal? VarianceOf(PosInventoryCountLineView line)
+        => line.PhysicalQuantity is { } physical ? physical - line.SystemQuantity : null;
+
+    private static decimal? ValueOf(PosInventoryCountLineView line)
+        => VarianceOf(line) is { } variance ? variance * line.UnitCost : null;
+
+    private static string VarianceTone(decimal? variance)
+        => variance is null || variance == 0m ? "sheet-number" : variance > 0m ? "sheet-gain" : "sheet-loss";
+
+    private async Task SaveCountsAsync()
+    {
+        if (detail is null)
+        {
+            return;
+        }
+
+        List<PosCountLineRequest> lines = detail.Lines
+            .Where(line => Gauge(line.LineNo) is { } gauge)
+            .Select(line => new PosCountLineRequest(line.ProductId, Gauge(line.LineNo) ?? 0m, line.BatchId))
+            .ToList();
+
+        await RunCommandAsync(() => Api.RecordInventoryCountLinesAsync(CountId, lines, CancellationToken.None), "Counts saved.");
+    }
+
+    private async Task SubmitAsync()
+    {
+        await RunCommandAsync(() => Api.SubmitInventoryCountAsync(CountId, CancellationToken.None), "Count submitted for approval.");
+    }
+
+    private async Task ApproveAsync()
+    {
+        await RunCommandAsync(() => Api.ApproveInventoryCountAsync(CountId, CancellationToken.None), "Variance posted to stock.");
+    }
+
+    private async Task RejectAsync()
+    {
+        if (detail is null)
+        {
+            return;
+        }
+
+        string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
+        await RunCommandAsync(() => Api.RejectInventoryCountAsync(CountId, reason, CancellationToken.None), "Count sent back for recounting.");
+        rejecting = false;
+    }
+
+    private async Task CancelCountAsync()
+    {
+        if (detail is null)
+        {
+            return;
+        }
+
+        string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
+        await RunCommandAsync(() => Api.CancelInventoryCountAsync(CountId, reason, CancellationToken.None), "Count cancelled.");
+        cancelling = false;
+    }
+
+    private async Task RunCommandAsync(Func<Task<ApiResult<PosReference>>> command, string successMessage)
+    {
+        busy = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> response = await command();
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            detail = null;
+            gauges = [];
+            await LoadDetailAsync();
+            if (detail is not null)
+            {
+                message = successMessage;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void ToggleRejectAsync()
+    {
+        rejecting = !rejecting;
+        cancelling = false;
+        reasonText = string.Empty;
+    }
+
+    private void ToggleCancelAsync()
+    {
+        cancelling = !cancelling;
+        rejecting = false;
+        reasonText = string.Empty;
+    }
+
+    private void DismissReasonAsync()
+    {
+        cancelling = false;
+        rejecting = false;
+    }
+
+    private string StoreName(Guid locationId)
+        => locations.FirstOrDefault(location => location.Id == locationId)?.Name ?? "store";
+
+    private string ProductDisplayName(Guid productId)
+        => productNames.TryGetValue(productId, out (string Sku, string Name) product)
+            ? product.Name
+            : $"Product {ShortId(productId)}";
+
+    private string? ProductSku(Guid productId)
+        => productNames.TryGetValue(productId, out (string Sku, string Name) product) && !string.IsNullOrWhiteSpace(product.Sku)
+            ? product.Sku
+            : null;
+
+    private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Counting" => "status-chip sc-counting",
+        "PendingApproval" => "status-chip sc-pending-approval",
+        "Posted" => "status-chip sc-posted",
+        "Cancelled" => "status-chip sc-cancelled",
+        _ => "status-chip",
+    };
+}
+

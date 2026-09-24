@@ -1,5 +1,5 @@
 @page "/pos"
-@attribute [Authorize]
+@attribute [Authorize(Policy = "sale.create")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
@@ -71,6 +71,10 @@ else
                     </button>
                 </div>
             </label>
+        }
+        else
+        {
+            <span class="shift-hint">Choose a store and register to start or resume a shift.</span>
         }
         @if (!string.IsNullOrWhiteSpace(checkoutMessage))
         {

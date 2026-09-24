@@ -1,0 +1,782 @@
+@page "/transfers/{TransferId:guid}"
+@using System.Globalization
+@attribute [Authorize(Policy = "transfer.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Transfer · VaultFlow</PageTitle>
+
+<div class="office-head">
+    <div>
+        <p class="office-kicker">Transfer</p>
+        <h1 class="office-title">@(detail?.Transfer.Number ?? "Transfer")</h1>
+        <p class="office-lead">Follow the stock from the source shelf to your receiving bay — and record every arrival honestly.</p>
+    </div>
+    <div class="head-pickers">
+        <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
+        @if (IsEmergency)
+        {
+            <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
+        }
+    </div>
+</div>
+
+@if (!CanViewTransfers)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view transfers.</h2>
+        <p>Ask an administrator for the <code>transfer.view</code> permission.</p>
+    </section>
+}
+else if (loading)
+{
+    <div class="results-empty">Loading transfer…</div>
+}
+else if (detail is null)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Not found</span>
+        <h2>This transfer could not be loaded.</h2>
+        <p>Check the number, or that the route belongs to your store.</p>
+    </section>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    <section class="transfer-summary">
+        <div><span>Route</span><strong class="route">@SourceLabel → @DestinationLabel</strong></div>
+        <div><span>Kind</span><strong>@KindLabel</strong></div>
+        <div><span>Mode</span><strong>@ModeLabel</strong></div>
+        <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
+        <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
+        <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
+        <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
+        <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(detail.ReviewNote))
+    {
+        <div class="note-box"><span>Review note</span>@detail.ReviewNote</div>
+    }
+
+    <section class="lines-panel">
+        <div class="lines-title">
+            <strong>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</strong>
+            <span>Picked quantities are what the source actually sent; the difference shows up as a discrepancy when you count the boxes.</span>
+        </div>
+        <table class="sales-table counts-table">
+            <thead>
+                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th><th>State</th></tr>
+            </thead>
+            <tbody>
+                @foreach (PosTransferLineView line in detail.Lines)
+                {
+                    <tr>
+                        <td>@line.LineNo</td>
+                        <td><strong>@(line.ProductName ?? "Unknown product")</strong></td>
+                        <td>@Quantity(line.RequestedQuantity)</td>
+                        <td>@Quantity(line.PickedQuantity)</td>
+                        <td>@Quantity(line.ReceivedQuantity)</td>
+                        <td>@Quantity(line.DamagedQuantity)</td>
+                        <td>
+                            @if (line.DiscrepancyState is { Length: > 0 })
+                            {
+                                <span class="status-chip sc-issue">@SplitWords(line.DiscrepancyState)</span>
+                            }
+                            else if (line.PickedQuantity == 0m)
+                            {
+                                <span class="status-chip sc-draft">not picked</span>
+                            }
+                            else if (line.ReceivedQuantity + line.DamagedQuantity >= line.PickedQuantity)
+                            {
+                                <span class="status-chip sc-received">accounted</span>
+                            }
+                            else
+                            {
+                                <span class="status-chip sc-dispatched">in transit</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+
+    @if (ShowSubmit)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Submit for review</strong><span>The route owner approves the request before anything moves.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="SubmitAsync" disabled="@acting">@(acting ? "Submitting…" : "Submit transfer")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowReview)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Start the review</strong><span>Mark the request as being examined; you can still reject it afterwards.</span></div>
+            <input type="text" class="reason-input" placeholder="Review note (optional)" @bind="reviewNote" />
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="ReviewAsync" disabled="@acting">@(acting ? "Reviewing…" : "Mark under review")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowApprove)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Decide the request</strong><span>Approval moves it to picking; rejection sends it back.</span></div>
+            <input type="text" class="reason-input" placeholder="Approval note (optional)" @bind="approvalNote" />
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="ApproveAsync" disabled="@acting">Approve</button>
+                <button type="button" class="search-action danger" @onclick="RejectAsync" disabled="@acting">Reject with reason</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowReject)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Reject the request</strong><span>A reason is required; the transfer returns to draft.</span></div>
+            <input type="text" class="reason-input" placeholder="Reason…" @bind="rejectionReason" />
+            <div class="open-count-actions">
+                <button type="button" class="search-action danger" @onclick="RejectAsync" disabled="@(acting || string.IsNullOrWhiteSpace(rejectionReason))">Reject</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowPick)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Pick the stock</strong><span>Confirm what the source is sending. Quantities default to the full request.</span></div>
+            <div class="pick-rows">
+                @foreach (PickRow row in pickRows)
+                {
+                    <div class="pick-row" @key="row.LineNo">
+                        <span class="pick-name">@row.ProductName</span>
+                        <span class="pick-requested">requested @Quantity(row.Requested) · already picked @Quantity(row.Picked)</span>
+                        <input type="number" min="0" step="1" value="@row.Quantity"
+                               @onchange="(e) => OnPickQuantityChanged(row, e)" />
+                    </div>
+                }
+            </div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="PickAsync" disabled="@(!CanPickNow || acting)">@(acting ? "Recording…" : "Record picking")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowReady)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Picking complete</strong><span>Once ready, the transfer can be dispatched and the ledger moves the stock.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="ReadyAsync" disabled="@acting">@(acting ? "Marking…" : "Mark ready for dispatch")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowDispatch)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Dispatch</strong><span>Posts the movement to the ledger — the source's available stock drops and the goods go in transit.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="DispatchAsync" disabled="@acting">@(acting ? "Dispatching…" : "Dispatch transfer")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowCancelDispatch)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Cancel the dispatch</strong><span>Only valid before the goods physically leave. Reverses the ledger movement.</span></div>
+            <input type="text" class="reason-input" placeholder="Reason (required)…" @bind="cancelReason" />
+            <div class="open-count-actions">
+                <button type="button" class="search-action danger" @onclick="CancelDispatchAsync" disabled="@(acting || string.IsNullOrWhiteSpace(cancelReason))">@(acting ? "Cancelling…" : "Cancel dispatch")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowReceive)
+    {
+        <section class="action-panel receive-panel">
+            <div class="action-title"><strong>Receive and count</strong><span>Enter what actually arrived. Shortfalls are kept on the books as a discrepancy for review.</span></div>
+            <div class="receive-rows">
+                @foreach (ReceiveRow row in receiveRows)
+                {
+                    <div class="receive-row" @key="(row.LineNo, row.BatchId)">
+                        <span class="receive-name">@row.ProductName</span>
+                        <span class="receive-batch">@(row.BatchId is null ? "any lot" : $"lot {row.BatchId.Value.ToString("D", CultureInfo.InvariantCulture)[..8]}")</span>
+                        <span class="receive-awaiting">awaiting @Quantity(row.Remaining)</span>
+                        <label>Good <input type="number" min="0" step="1" value="@row.Received"
+                                           @onchange="(e) => OnReceiveQuantityChanged(row, e, true)" /></label>
+                        <label>Damaged <input type="number" min="0" step="1" value="@row.Damaged"
+                                              @onchange="(e) => OnReceiveQuantityChanged(row, e, false)" /></label>
+                    </div>
+                }
+            </div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="ReceiveAsync" disabled="@(!CanReceiveNow || acting)">@(acting ? "Posting…" : "Post receipt")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowVerify)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Verify and close</strong><span>Confirms every allocation was accounted for — closes the transfer and clears the books.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="VerifyAsync" disabled="@acting">@(acting ? "Verifying…" : "Verify transfer")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowCentralReview)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Central review of an emergency</strong><span>Ratifying keeps the posted movement; rejecting reverses it and opens an incident.</span></div>
+            <input type="text" class="reason-input" placeholder="Review note (required to reject)" @bind="centralNote" />
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="() => CentralReviewAsync(true)" disabled="@acting">Ratify</button>
+                <button type="button" class="search-action danger" @onclick="() => CentralReviewAsync(false)" disabled="@(acting || string.IsNullOrWhiteSpace(centralNote))">Reject</button>
+            </div>
+        </section>
+    }
+
+    <section class="custody-panel">
+        <div class="custody-title">
+            <strong>Chain of custody</strong>
+            <button type="button" class="search-action" @onclick="ToggleCustodyAsync">
+                @(custodyShown ? "Hide timeline" : custodyLoading ? "Loading…" : "Show timeline")
+            </button>
+        </div>
+        @if (custodyShown)
+        {
+            @if (custody.Count == 0)
+            {
+                <div class="results-empty"><span>No custody events recorded for this transfer yet.</span></div>
+            }
+            else
+            {
+                <ol class="custody-list">
+                    @foreach (PosTransferCustodyEventSummary custodyEvent in custody)
+                    {
+                        <li>
+                            <span class="custody-kind">@SplitWords(custodyEvent.Kind)</span>
+                            <span class="custody-date">@custodyEvent.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
+                            <span class="custody-note">@(string.IsNullOrWhiteSpace(custodyEvent.Note) ? "—" : custodyEvent.Note)</span>
+                        </li>
+                    }
+                </ol>
+            }
+        }
+    </section>
+}
+
+@code {
+    private sealed record PickRow(int LineNo, string ProductName, decimal Requested, decimal Picked, decimal Quantity);
+    private sealed record ReceiveRow(
+        int LineNo,
+        Guid? BatchId,
+        string ProductName,
+        decimal Remaining,
+        decimal Received,
+        decimal Damaged);
+
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosTransferCustodyEventSummary> custody = [];
+    private readonly List<PickRow> pickRows = [];
+    private readonly List<ReceiveRow> receiveRows = [];
+
+    private PosTransferDetail? detail;
+    private string? message;
+    private string approvalNote = string.Empty;
+    private string reviewNote = string.Empty;
+    private string rejectionReason = string.Empty;
+    private string cancelReason = string.Empty;
+    private string centralNote = string.Empty;
+
+    private bool loading = true;
+    private bool acting;
+    private bool custodyShown;
+    private bool custodyLoading;
+
+    [Parameter] public Guid TransferId { get; set; }
+
+    private bool CanViewTransfers => Session.HasPermission("transfer.view");
+    private bool CanRequest => Session.HasPermission("transfer.request");
+    private bool CanApprove => Session.HasPermission("transfer.approve");
+    private bool CanPick => Session.HasPermission("transfer.pick");
+    private bool CanDispatch => Session.HasPermission("transfer.dispatch");
+    private bool CanReceive => Session.HasPermission("transfer.receive");
+    private bool CanVerify => Session.HasPermission("transfer.verify");
+
+    private string Status => detail?.Transfer.Status ?? string.Empty;
+    private string Mode => detail?.Mode ?? string.Empty;
+
+    private bool IsEmergency => Mode == "EmergencyOffline";
+
+    private bool ShowSubmit => Status == "Draft" && CanRequest;
+    private bool ShowReview => Status == "Submitted" && CanApprove;
+    private bool ShowApprove => Status == "InReview" && CanApprove;
+    private bool ShowReject => Status == "InReview" && CanApprove;
+    private bool ShowPick => Status is "Approved" or "Picking" && CanPick && pickRows.Any(row => row.Quantity > 0m);
+    private bool ShowReady => Status == "Picking" && CanPick;
+    private bool ShowDispatch => Status == "Ready" && CanDispatch;
+    private bool ShowCancelDispatch => Status == "Dispatched" && CanDispatch;
+    private bool ShowReceive => Status is "Dispatched" or "PartiallyReceived" && CanReceive && receiveRows.Count > 0;
+    private bool ShowVerify => Status == "Received" && CanVerify;
+    private bool ShowCentralReview => Status == "PendingCentralReview" && CanApprove;
+
+    private bool CanPickNow => pickRows.Any(row => row.Quantity > 0m);
+    private bool CanReceiveNow => receiveRows.Any(row => row.Received > 0m || row.Damaged > 0m);
+
+    private string KindLabel => detail is not { } transfer ? string.Empty : transfer.Kind switch
+    {
+        "WarehouseToStore" => "Warehouse → store",
+        "StoreToStore" => "Store → store",
+        "StoreToWarehouse" => "Store → warehouse",
+        _ => SplitWords(transfer.Kind),
+    };
+
+    private string ModeLabel => Mode switch
+    {
+        "Normal" => "Normal",
+        "PreApproved" => "Pre-approved",
+        "EmergencyOffline" => "Emergency",
+        _ => Mode,
+    };
+
+    private string SourceLabel => LocationLabel(detail?.Transfer.SourceLocationId);
+    private string DestinationLabel => LocationLabel(detail?.Transfer.DestinationLocationId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewTransfers)
+        {
+            loading = false;
+            return;
+        }
+
+        await LoadLocationsAsync();
+        await LoadDetailAsync();
+    }
+
+    private async Task LoadLocationsAsync()
+    {
+        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        if (response.IsSuccess && response.Value is not null)
+        {
+            locations.AddRange(response.Value.Where(location => location.Kind == 1));
+        }
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<PosTransferDetail> response = await Api.GetTransferAsync(TransferId, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                if (response.ErrorCode is not null)
+                {
+                    message = response.Error;
+                }
+
+                loading = false;
+                return;
+            }
+
+            detail = response.Value;
+            loading = false;
+
+            BuildPickRows();
+            BuildReceiveRows();
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+            loading = false;
+        }
+    }
+
+    private void BuildPickRows()
+    {
+        pickRows.Clear();
+        if (detail is null)
+        {
+            return;
+        }
+
+        foreach (PosTransferLineView line in detail.Lines)
+        {
+            decimal remaining = line.RequestedQuantity - line.PickedQuantity;
+            if (remaining <= 0m)
+            {
+                continue;
+            }
+
+            pickRows.Add(new PickRow(
+                line.LineNo,
+                line.ProductName ?? $"Line {line.LineNo}",
+                line.RequestedQuantity,
+                line.PickedQuantity,
+                remaining));
+        }
+    }
+
+    private void BuildReceiveRows()
+    {
+        receiveRows.Clear();
+        if (detail is null)
+        {
+            return;
+        }
+
+        foreach (PosTransferLineView line in detail.Lines)
+        {
+            foreach (PosTransferAllocationView allocation in line.Allocations)
+            {
+                decimal remaining = allocation.PickedQuantity
+                    - allocation.ReceivedQuantity
+                    - allocation.DamagedQuantity;
+                if (remaining <= 0m)
+                {
+                    continue;
+                }
+
+                receiveRows.Add(new ReceiveRow(
+                    line.LineNo,
+                    allocation.BatchId,
+                    line.ProductName ?? $"Line {line.LineNo}",
+                    remaining,
+                    remaining,
+                    0m));
+            }
+        }
+    }
+
+    private void OnPickQuantityChanged(PickRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? value
+            : 0m;
+        int index = pickRows.IndexOf(row);
+        if (index >= 0)
+        {
+            pickRows[index] = pickRows[index] with { Quantity = quantity };
+        }
+    }
+
+    private void OnReceiveQuantityChanged(ReceiveRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e, bool good)
+    {
+        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? value
+            : 0m;
+        int index = receiveRows.IndexOf(row);
+        if (index >= 0)
+        {
+            receiveRows[index] = good
+                ? receiveRows[index] with { Received = quantity }
+                : receiveRows[index] with { Damaged = quantity };
+        }
+    }
+
+    private async Task SubmitAsync() => await RunActionAsync("Submitting…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.SubmitTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ReviewAsync() => await RunActionAsync("Reviewing…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/transfers/{TransferId:D}/review"),
+            new PosTransferReasonRequest(string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim()),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        reviewNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ApproveAsync() => await RunActionAsync("Approving…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.ApproveTransferAsync(
+            TransferId,
+            new PosApproveTransferRequest(null, string.IsNullOrWhiteSpace(approvalNote) ? null : approvalNote.Trim()),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        approvalNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task RejectAsync() => await RunActionAsync("Rejecting…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.RejectTransferAsync(
+            TransferId,
+            string.IsNullOrWhiteSpace(rejectionReason) ? null : rejectionReason.Trim(),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        rejectionReason = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task PickAsync() => await RunActionAsync("Recording…", async () =>
+    {
+        List<PosTransferPickLine> allocations =
+        [
+            .. pickRows
+                .Where(row => row.Quantity > 0m)
+                .Select(row => new PosTransferPickLine(null, row.LineNo, row.Quantity)),
+        ];
+
+        ApiResult<PosReference> response = await Api.PickTransferAsync(
+            TransferId,
+            new PosPickTransferRequest(allocations),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ReadyAsync() => await RunActionAsync("Marking…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.ReadyTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task DispatchAsync() => await RunActionAsync("Dispatching…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.DispatchTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task CancelDispatchAsync() => await RunActionAsync("Cancelling…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.CancelTransferDispatchAsync(
+            TransferId,
+            cancelReason.Trim(),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        cancelReason = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ReceiveAsync() => await RunActionAsync("Posting…", async () =>
+    {
+        List<PosTransferReceiveLine> receives =
+        [
+            .. receiveRows
+                .Where(row => row.Received > 0m || row.Damaged > 0m)
+                .Select(row => new PosTransferReceiveLine(row.LineNo, row.BatchId, row.Received, row.Damaged)),
+        ];
+
+        if (receives.Count == 0)
+        {
+            return "Enter a counted quantity first.";
+        }
+
+        ApiResult<PosReference> response = await Api.ReceiveTransferAsync(
+            TransferId,
+            new PosReceiveTransferRequest(receives),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task VerifyAsync() => await RunActionAsync("Verifying…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.VerifyTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task CentralReviewAsync(bool approve) => await RunActionAsync("Reviewing…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.ReviewCentralTransferAsync(
+            TransferId,
+            approve,
+            string.IsNullOrWhiteSpace(centralNote) ? null : centralNote.Trim(),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        centralNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ToggleCustodyAsync()
+    {
+        if (custodyShown || custody.Count > 0)
+        {
+            custodyShown = !custodyShown;
+            return;
+        }
+
+        custodyLoading = true;
+        try
+        {
+            ApiResult<List<PosTransferCustodyEventSummary>> response = await Api.GetTransferCustodyAsync(
+                TransferId, CancellationToken.None);
+            if (response.IsSuccess && response.Value is not null)
+            {
+                custody.AddRange(response.Value);
+            }
+            else if (response.Error is { Length: > 0 })
+            {
+                message = response.Error;
+                return;
+            }
+
+            custodyShown = true;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            custodyLoading = false;
+        }
+    }
+
+    private async Task RunActionAsync(string working, Func<Task<string?>> action)
+    {
+        if (acting)
+        {
+            return;
+        }
+
+        acting = true;
+        message = null;
+        try
+        {
+            string? failure = await action().ConfigureAwait(false);
+            if (failure is not null)
+            {
+                message = failure;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    private string LocationLabel(Guid? locationId)
+    {
+        if (locationId is not { } id)
+        {
+            return "—";
+        }
+
+        PosLocation? location = locations.FirstOrDefault(l => l.Id == id);
+        return location?.Code ?? id.ToString("D", CultureInfo.InvariantCulture)[..8];
+    }
+
+    private static string Quantity(decimal value)
+        => value == 0m ? "—" : value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Draft" => "status-chip sc-draft",
+        "Submitted" => "status-chip sc-submitted",
+        "InReview" => "status-chip sc-in-review",
+        "Approved" => "status-chip sc-approved",
+        "Picking" => "status-chip sc-picking",
+        "Ready" => "status-chip sc-ready",
+        "Dispatched" => "status-chip sc-dispatched",
+        "PartiallyReceived" => "status-chip sc-partially-received",
+        "Received" => "status-chip sc-received",
+        "Closed" => "status-chip sc-closed",
+        "Cancelled" => "status-chip sc-cancelled",
+        "PendingCentralReview" => "status-chip sc-pending-central-review",
+        _ => "status-chip",
+    };
+}
+

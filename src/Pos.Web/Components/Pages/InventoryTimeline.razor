@@ -1,8 +1,7 @@
 @page "/inventory/timeline/{DocumentType}/{DocumentId:guid}"
-@attribute [Authorize]
-@rendermode InteractiveServer
 @using System.Globalization
-@using Pos.Web.Services
+@attribute [Authorize(Policy = "inventory.view")]
+@rendermode InteractiveServer
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 
@@ -58,7 +57,7 @@ else if (timeline is not null)
     private PosInventoryTimeline? timeline;
     private string? message;
     private bool loading = true;
-    private bool CanViewInventory => Session.Current?.User.Permissions.Contains("inventory.view", StringComparer.Ordinal) == true;
+    private bool CanViewInventory => Session.HasPermission("inventory.view");
 
     protected override async Task OnParametersSetAsync()
     {
@@ -78,3 +77,4 @@ else if (timeline is not null)
 
     private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
 }
+

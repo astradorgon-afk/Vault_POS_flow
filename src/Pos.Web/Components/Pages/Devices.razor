@@ -1,0 +1,381 @@
+@page "/admin/devices"
+@attribute [Authorize(Policy = "device.manage")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Devices · VaultFlow</PageTitle>
+
+<section class="fleet-head">
+    <div>
+        <span class="eyebrow">Administration · trusted terminals</span>
+        <h1>Device fleet</h1>
+        <p>Issue a lane identity, watch its last contact, and cut access immediately when custody changes.</p>
+    </div>
+    @if (CanManageDevices)
+    {
+        <button class="fleet-primary" type="button" @onclick="ToggleCreate">@(showCreate ? "Close form" : "Register device")</button>
+    }
+</section>
+
+@if (!CanManageDevices)
+{
+    <section class="fleet-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot manage devices.</h2>
+        <p>Ask an administrator for the <code>device.manage</code> permission.</p>
+    </section>
+}
+else
+{
+    @if (showCreate)
+    {
+        <section class="fleet-create" aria-labelledby="register-device-title">
+            <header>
+                <div><span>New trust record</span><h2 id="register-device-title">Register a terminal</h2></div>
+                <p>Physical terminals receive a one-time enrolment code. Browser lanes activate immediately.</p>
+            </header>
+            <div class="fleet-form-grid">
+                <label><span>Short code</span><input maxlength="6" autocomplete="off" @bind="newShortCode" placeholder="T03" /></label>
+                <label><span>Device name</span><input maxlength="80" @bind="newName" placeholder="Front counter 3" /></label>
+                <label><span>Location</span><select @bind="newLocationId"><option value="">Select location</option>@foreach (PosLocationAdmin location in locations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+                <label><span>Platform</span><select @bind="newPlatform"><option value="1">Windows register</option><option value="2">Android terminal</option><option value="3">Browser lane</option></select></label>
+            </div>
+            <footer><span>Short codes become part of offline document numbers and cannot be changed.</span><button class="fleet-primary" type="button" @onclick="RegisterDeviceAsync" disabled="@(!CanRegister || working)">@(working ? "Registering…" : "Issue identity")</button></footer>
+        </section>
+    }
+
+    @if (registration is not null)
+    {
+        <section class="enrolment-ticket" role="status">
+            <div>
+                <span>@(registration.EnrolmentCode is null ? "Browser lane active" : "One-time enrolment code")</span>
+                <strong>@(registration.EnrolmentCode ?? registration.ShortCode)</strong>
+                <small>@(registration.EnrolmentCode is null ? "This web terminal is ready to assign at checkout." : $"Expires {registration.ExpiresAtUtc?.ToLocalTime():MMM d, yyyy · h:mm tt}. This code cannot be recovered later.")</small>
+            </div>
+            <button type="button" @onclick="DismissRegistration">I saved it</button>
+        </section>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="fleet-message" role="status">@message</div>
+    }
+
+    <section class="fleet-summary" aria-label="Device fleet summary">
+        <article><span>Operational</span><strong>@devices.Count(device => device.Status == StatusActive)</strong><small>can authenticate and sync</small></article>
+        <article><span>Awaiting enrolment</span><strong>@devices.Count(device => device.Status == StatusPending)</strong><small>one-time setup not redeemed</small></article>
+        <article class="summary-attention"><span>Access stopped</span><strong>@devices.Count(device => device.Status is StatusSuspended or StatusRevoked)</strong><small>suspended or permanently revoked</small></article>
+    </section>
+
+    <section class="fleet-toolbar">
+        <label><span>Location</span><select value="@(filterLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationFilterChanged"><option value="">All locations</option>@foreach (PosLocationAdmin location in locations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+        <label><span>State</span><select @bind="filterStatus"><option value="">All states</option><option value="0">Awaiting enrolment</option><option value="1">Active</option><option value="2">Suspended</option><option value="3">Revoked</option></select></label>
+        <button type="button" @onclick="LoadDevicesAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh fleet")</button>
+    </section>
+
+    <section class="fleet-ledger" aria-live="polite">
+        @if (loading)
+        {
+            <div class="fleet-empty">Reading terminal trust records…</div>
+        }
+        else if (FilteredDevices.Count == 0)
+        {
+            <div class="fleet-empty"><strong>No devices match this view.</strong><span>Register a terminal or change the fleet filters.</span></div>
+        }
+        else
+        {
+            @foreach (PosDeviceSummary device in FilteredDevices)
+            {
+                <article class="device-row status-@StatusSlug(device.Status)" @key="device.Id">
+                    <div class="device-state" aria-label="@StatusName(device.Status)"><i></i><span>@StatusName(device.Status)</span></div>
+                    <div class="device-identity">
+                        <span>@PlatformName(device.Platform) · @LocationName(device.LocationId)</span>
+                        <h2>@device.Name</h2>
+                        <code>@device.ShortCode</code>
+                    </div>
+                    <dl>
+                        <div><dt>Last contact</dt><dd>@RelativeTime(device.LastSeenAtUtc)</dd></div>
+                        <div><dt>Last sync</dt><dd>@RelativeTime(device.LastSyncAtUtc)</dd></div>
+                        <div><dt>App / clock</dt><dd>@(device.AppVersion ?? "Not reported") · @ClockLabel(device.ClockSkewSeconds)</dd></div>
+                    </dl>
+                    <div class="device-actions">
+                        @if (device.Status == StatusPending)
+                        {
+                            <button type="button" @onclick="() => ReissueAsync(device)" disabled="@working">Reissue code</button>
+                        }
+                        @if (device.Status == StatusActive)
+                        {
+                            <button type="button" @onclick="() => StartAction(device, DeviceAction.Suspend)">Suspend</button>
+                        }
+                        @if (device.Status == StatusSuspended)
+                        {
+                            <button type="button" @onclick="() => ReactivateAsync(device)" disabled="@working">Reactivate</button>
+                        }
+                        @if (device.Status != StatusRevoked)
+                        {
+                            <button class="danger-link" type="button" @onclick="() => StartAction(device, DeviceAction.Revoke)">Revoke</button>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(device.StatusReason))
+                    {
+                        <p class="device-reason">@device.StatusReason</p>
+                    }
+                </article>
+            }
+        }
+    </section>
+
+    @if (actionDevice is not null)
+    {
+        <section class="action-drawer" role="dialog" aria-modal="true" aria-labelledby="device-action-title">
+            <div class="action-card">
+                <span>@(pendingAction == DeviceAction.Revoke ? "Permanent access change" : "Temporary access change")</span>
+                <h2 id="device-action-title">@ActionTitle</h2>
+                <p>@ActionCopy</p>
+                <label><span>Reason</span><textarea maxlength="240" @bind="actionReason" placeholder="Record why custody or trust changed"></textarea></label>
+                <footer><button type="button" @onclick="CancelAction">Cancel</button><button class="@(pendingAction == DeviceAction.Revoke ? "danger-button" : "fleet-primary")" type="button" @onclick="ConfirmActionAsync" disabled="@(string.IsNullOrWhiteSpace(actionReason) || working)">@(working ? "Saving…" : ActionButton)</button></footer>
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private const int StatusPending = 0;
+    private const int StatusActive = 1;
+    private const int StatusSuspended = 2;
+    private const int StatusRevoked = 3;
+
+    private readonly List<PosLocationAdmin> locations = [];
+    private readonly List<PosDeviceSummary> devices = [];
+    private bool loading = true;
+    private bool working;
+    private bool showCreate;
+    private string? message;
+    private PosDeviceRegistration? registration;
+    private Guid? filterLocationId;
+    private string filterStatus = string.Empty;
+    private string newShortCode = string.Empty;
+    private string newName = string.Empty;
+    private string newLocationId = string.Empty;
+    private int newPlatform = 1;
+    private PosDeviceSummary? actionDevice;
+    private DeviceAction pendingAction;
+    private string actionReason = string.Empty;
+
+    private bool CanManageDevices => Session.Current?.User.Permissions.Contains("device.manage", StringComparer.Ordinal) == true;
+    private bool CanRegister => newShortCode.Trim().Length is >= 2 and <= 6 && !string.IsNullOrWhiteSpace(newName) && Guid.TryParse(newLocationId, out _);
+    private List<PosDeviceSummary> FilteredDevices => devices.Where(device =>
+        (filterLocationId is null || device.LocationId == filterLocationId) &&
+        (string.IsNullOrEmpty(filterStatus) || device.Status.ToString(CultureInfo.InvariantCulture) == filterStatus)).ToList();
+    private string ActionTitle => pendingAction == DeviceAction.Revoke ? $"Revoke {actionDevice?.Name}?" : $"Suspend {actionDevice?.Name}?";
+    private string ActionCopy => pendingAction == DeviceAction.Revoke
+        ? "Revocation cannot be reversed. Historical sales remain attached to this identity, but the terminal can never connect again."
+        : "The terminal will be blocked and its active sessions will end. You can reactivate it later.";
+    private string ActionButton => pendingAction == DeviceAction.Revoke ? "Revoke permanently" : "Suspend device";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanManageDevices)
+        {
+            loading = false;
+            return;
+        }
+
+        await LoadLocationsAsync();
+        await LoadDevicesAsync();
+    }
+
+    private async Task LoadLocationsAsync()
+    {
+        ApiResult<List<PosLocationAdmin>> result = await Api.GetLocationAdministrationAsync(CancellationToken.None);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            locations.Clear();
+            locations.AddRange(result.Value.OrderBy(location => location.Code));
+        }
+    }
+
+    private async Task LoadDevicesAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosDeviceSummary>> result = await Api.GetDevicesAsync(null, CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            devices.Clear();
+            devices.AddRange(result.Value.OrderBy(device => device.ShortCode));
+        }
+        catch (HttpRequestException)
+        {
+            message = "The device service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task RegisterDeviceAsync()
+    {
+        if (!CanRegister || !Guid.TryParse(newLocationId, out Guid locationId))
+        {
+            message = "Enter a short code, name, location and platform.";
+            return;
+        }
+
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<PosDeviceRegistration> result = await Api.RegisterDeviceAsync(
+                new PosRegisterDeviceRequest(newShortCode.Trim().ToUpperInvariant(), newName.Trim(), locationId, newPlatform),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            registration = result.Value;
+            newShortCode = string.Empty;
+            newName = string.Empty;
+            newLocationId = string.Empty;
+            showCreate = false;
+            await LoadDevicesAsync();
+        }
+        catch (HttpRequestException)
+        {
+            message = "The device service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private async Task ReissueAsync(PosDeviceSummary device)
+    {
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<PosDeviceRegistration> result = await Api.ReissueDeviceCodeAsync(device.Id, CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            registration = result.Value;
+            message = $"A fresh enrolment code was issued for {device.Name}.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "The device service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private async Task ReactivateAsync(PosDeviceSummary device)
+    {
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<string> result = await Api.ReactivateDeviceAsync(device.Id, CancellationToken.None);
+            if (result.IsSuccess)
+            {
+                await LoadDevicesAsync();
+                message = $"{device.Name} is active again.";
+            }
+            else
+            {
+                message = result.Error;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The device service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private void StartAction(PosDeviceSummary device, DeviceAction action)
+    {
+        actionDevice = device;
+        pendingAction = action;
+        actionReason = string.Empty;
+    }
+
+    private async Task ConfirmActionAsync()
+    {
+        if (actionDevice is not { } device || string.IsNullOrWhiteSpace(actionReason))
+        {
+            return;
+        }
+
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<string> result = pendingAction == DeviceAction.Revoke
+                ? await Api.RevokeDeviceAsync(device.Id, actionReason.Trim(), CancellationToken.None)
+                : await Api.SuspendDeviceAsync(device.Id, actionReason.Trim(), CancellationToken.None);
+            if (result.IsSuccess)
+            {
+                CancelAction();
+                await LoadDevicesAsync();
+                message = pendingAction == DeviceAction.Revoke
+                    ? $"{device.Name} was permanently revoked."
+                    : $"{device.Name} was suspended.";
+            }
+            else
+            {
+                message = result.Error;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The device service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private void ToggleCreate() { showCreate = !showCreate; message = null; }
+    private void DismissRegistration() => registration = null;
+    private void CancelAction() { actionDevice = null; actionReason = string.Empty; }
+    private void OnLocationFilterChanged(ChangeEventArgs e) => filterLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+    private string LocationName(Guid id) => locations.FirstOrDefault(location => location.Id == id) is { } location ? location.Code : id.ToString()[..8];
+    private static string PlatformName(int platform) => platform switch { 1 => "Windows", 2 => "Android", 3 => "Web", _ => "Unknown" };
+    private static string StatusName(int status) => status switch { StatusPending => "Awaiting enrolment", StatusActive => "Active", StatusSuspended => "Suspended", StatusRevoked => "Revoked", _ => "Unknown" };
+    private static string StatusSlug(int status) => status switch { StatusPending => "pending", StatusActive => "active", StatusSuspended => "suspended", StatusRevoked => "revoked", _ => "unknown" };
+    private static string ClockLabel(decimal? seconds) => seconds is null ? "no clock reading" : $"{seconds:+0.##;-0.##;0}s skew";
+    private static string RelativeTime(DateTimeOffset? value)
+    {
+        if (value is null) return "Never";
+        TimeSpan age = DateTimeOffset.UtcNow - value.Value;
+        if (age < TimeSpan.FromMinutes(1)) return "Just now";
+        if (age < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)age.TotalMinutes)}m ago";
+        if (age < TimeSpan.FromDays(1)) return $"{Math.Max(1, (int)age.TotalHours)}h ago";
+        return value.Value.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+    }
+
+    private enum DeviceAction { Suspend, Revoke }
+}

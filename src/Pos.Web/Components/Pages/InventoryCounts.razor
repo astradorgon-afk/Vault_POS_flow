@@ -1,0 +1,374 @@
+@page "/inventory/counts"
+@using System.Globalization
+@attribute [Authorize(Policy = "inventory.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Stock counts · VaultFlow</PageTitle>
+
+<div class="office-head">
+    <div>
+        <p class="office-kicker">Inventory control</p>
+        <h1 class="office-title">Stock counts</h1>
+        <p class="office-lead">Open a count, record the sheet, then submit it for approval. Approving the count posts the variance to stock.</p>
+    </div>
+    <div class="head-pickers">
+        <label class="location-picker">
+            <span>Store</span>
+            <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
+                    @onchange="OnLocationChangedAsync" disabled="@loadingLocations">
+                <option value="">Select a store</option>
+                @foreach (PosLocation location in locations)
+                {
+                    <option value="@location.Id">@location.Code · @location.Name</option>
+                }
+            </select>
+        </label>
+        <label class="location-picker">
+            <span>Status</span>
+            <select @bind="selectedStatus" disabled="@(selectedLocationId is null)">
+                <option value="">All states</option>
+                @foreach (string statusName in StatusNames)
+                {
+                    <option value="@statusName">@SplitWords(statusName)</option>
+                }
+            </select>
+        </label>
+    </div>
+</div>
+
+@if (!CanViewInventory)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view inventory counts.</h2>
+        <p>Ask an administrator for the <code>inventory.view</code> permission.</p>
+    </section>
+}
+else
+{
+    <section class="search-strip">
+        <span>@(counts.Count) count@(counts.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")</span>
+        <button type="button" class="search-action" @onclick="LoadCountsAsync"
+                disabled="@(loading || selectedLocationId is null)">
+            @(loading ? "Loading…" : "Find counts")
+        </button>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    @if (CanCount)
+    {
+        <section class="open-count">
+            <div class="open-count-title">
+                <strong>Open a count</strong>
+                <span>Pick what the sheet covers. A manager can count and approve their own store end-to-end.</span>
+            </div>
+            <div class="open-count-fields">
+                <label class="location-picker">
+                    <span>Kind</span>
+                    <select value="@selectedKind" @onchange="OnKindChangedAsync">
+                        @foreach (CountKindOption option in KindOptions)
+                        {
+                            <option value="@option.Value">@option.Label</option>
+                        }
+                    </select>
+                </label>
+                <label class="location-picker">
+                    <span>Category</span>
+                    <select value="@(selectedCategoryId?.ToString() ?? string.Empty)"
+                            @onchange="OnCategoryChangedAsync"
+                            disabled="@(selectedKind != 2 && selectedKind != 3)">
+                        <option value="">@(CategoryOptions.Count > 0 ? "Select a category" : "Categories unavailable")</option>
+                        @foreach (PosCategory category in CategoryOptions)
+                        {
+                            <option value="@category.Id">@category.Code · @category.Name</option>
+                        }
+                    </select>
+                </label>
+                <label class="location-picker">
+                    <span>Note</span>
+                    <input type="text" @bind="openNote" placeholder="Optional" />
+                </label>
+            </div>
+            @if (selectedKind == 4)
+            {
+                <div class="open-count-hint" role="note">
+                    Product-specific sheets need a product picker, which lands in a later build. Open a category or full count instead.
+                </div>
+            }
+            else if (selectedKind is 2 or 3 && CategoryOptions.Count == 0)
+            {
+                <div class="open-count-hint" role="note">
+                    The catalogue is unavailable to this account, so category (and cycle) counts cannot be scoped here. Use a full count instead.
+                </div>
+            }
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="OpenCountAsync"
+                        disabled="@(!CanOpenCount || opening)">
+                    @(opening ? "Opening…" : "Open count")
+                </button>
+            </div>
+        </section>
+    }
+
+    <section class="results-panel" aria-live="polite">
+        @if (loading)
+        {
+            <div class="results-empty">Loading counts…</div>
+        }
+        else if (counts.Count == 0)
+        {
+            <div class="results-empty"><strong>No counts yet.</strong><span>Choose a store, then open a count or find existing sheets.</span></div>
+        }
+        else
+        {
+            <table class="sales-table counts-table">
+                <thead>
+                    <tr><th>COUNT #</th><th>Kind</th><th>Status</th><th>Counted</th><th>Variance</th><th>Created</th><th>Posted</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosInventoryCountSummary count in counts)
+                    {
+                        <tr class="office-row-click" @key="count.Id" @onclick="() => OpenCount(count.Id)">
+                            <td class="sale-number">@count.Number</td>
+                            <td>@SplitWords(count.Kind)</td>
+                            <td><span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span></td>
+                            <td>@count.CountedLines / @count.Lines</td>
+                            <td>@Money(count.TotalAbsoluteVarianceValue)</td>
+                            <td>@count.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@(count.PostedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+    private const int KindFullPhysical = 1;
+    private const int KindCycle = 2;
+    private const int KindCategory = 3;
+    private const int KindProductSpecific = 4;
+
+    private static readonly string[] StatusNames = ["Counting", "PendingApproval", "Posted", "Cancelled"];
+
+    private sealed record CountKindOption(int Value, string Label);
+
+    private static readonly CountKindOption[] KindOptions =
+    [
+        new(KindFullPhysical, "Full physical"),
+        new(KindCycle, "Cycle (by category)"),
+        new(KindCategory, "Category"),
+        new(KindProductSpecific, "Product-specific"),
+    ];
+
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosCategory> categoryOptions = [];
+    private readonly List<PosInventoryCountSummary> counts = [];
+
+    private Guid? selectedLocationId;
+    private string selectedStatus = string.Empty;
+    private int selectedKind = KindFullPhysical;
+    private Guid? selectedCategoryId;
+    private string openNote = string.Empty;
+
+    private bool loadingLocations = true;
+    private bool loading;
+    private bool opening;
+    private string? message;
+    private string searchedLabel = string.Empty;
+
+    private bool CanViewInventory => Session.HasPermission("inventory.view");
+    private bool CanCount => Session.HasPermission("inventory.count");
+
+    private List<PosCategory> CategoryOptions => categoryOptions;
+
+    private bool CanOpenCount =>
+        selectedLocationId is not null &&
+        selectedKind != KindProductSpecific &&
+        (selectedKind is KindCycle or KindCategory
+            ? selectedCategoryId is not null
+            : true);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewInventory)
+        {
+            loadingLocations = false;
+            return;
+        }
+
+        await LoadLocationsAsync();
+        if (CanCount)
+        {
+            await LoadCategoriesAsync();
+        }
+    }
+
+    private async Task LoadLocationsAsync()
+    {
+        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        loadingLocations = false;
+        if (!response.IsSuccess || response.Value is null)
+        {
+            message = response.Error;
+            return;
+        }
+
+        locations.AddRange(response.Value.Where(location => location.Kind == 1));
+        selectedLocationId = locations.Count == 1 ? locations[0].Id : null;
+        if (locations.Count == 0)
+        {
+            message = "No active store is available to this account.";
+        }
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        ApiResult<List<PosCategory>> response = await Api.GetCategoriesAsync(CancellationToken.None);
+        if (response.IsSuccess && response.Value is not null)
+        {
+            categoryOptions.AddRange(response.Value.Where(c => c.IsActive).OrderBy(c => c.Name));
+        }
+    }
+
+    private void OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+        counts.Clear();
+        searchedLabel = string.Empty;
+        message = null;
+    }
+
+    private void OnKindChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        selectedKind = int.TryParse(e.Value?.ToString(), out int value) ? value : KindFullPhysical;
+        selectedCategoryId = null;
+        message = null;
+    }
+
+    private void OnCategoryChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        selectedCategoryId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+    }
+
+    private async Task LoadCountsAsync()
+    {
+        if (selectedLocationId is not { } locationId)
+        {
+            message = "Select the store before searching.";
+            return;
+        }
+
+        loading = true;
+        message = null;
+        counts.Clear();
+        try
+        {
+            ApiResult<List<PosInventoryCountSummary>> response = await Api.GetInventoryCountsAsync(
+                locationId,
+                string.IsNullOrWhiteSpace(selectedStatus) ? null : selectedStatus,
+                CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            counts.AddRange(response.Value);
+            searchedLabel = string.IsNullOrWhiteSpace(selectedStatus)
+                ? "all states"
+                : SplitWords(selectedStatus);
+            if (counts.Count == 0)
+            {
+                message = "No counts matched that store and state.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task OpenCountAsync()
+    {
+        if (selectedLocationId is not { } locationId)
+        {
+            message = "Select the store before opening a count.";
+            return;
+        }
+
+        List<Guid>? categoryIds = selectedKind is KindCycle or KindCategory
+            && selectedCategoryId is { } categoryId
+            ? [categoryId]
+            : null;
+
+        opening = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> response = await Api.OpenInventoryCountAsync(
+                locationId,
+                selectedKind,
+                categoryIds,
+                string.IsNullOrWhiteSpace(openNote) ? null : openNote.Trim(),
+                CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            openNote = string.Empty;
+            selectedCategoryId = null;
+            Navigation.NavigateTo($"/inventory/counts/{response.Value.Id:D}");
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            opening = false;
+        }
+    }
+
+    private void OpenCount(Guid countId) => Navigation.NavigateTo($"/inventory/counts/{countId:D}");
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Counting" => "status-chip sc-counting",
+        "PendingApproval" => "status-chip sc-pending-approval",
+        "Posted" => "status-chip sc-posted",
+        "Cancelled" => "status-chip sc-cancelled",
+        _ => "status-chip",
+    };
+}
+

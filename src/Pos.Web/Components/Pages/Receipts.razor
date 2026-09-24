@@ -1,5 +1,5 @@
 @page "/receipts"
-@attribute [Authorize]
+@attribute [Authorize(Policy = "receipt.view")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api

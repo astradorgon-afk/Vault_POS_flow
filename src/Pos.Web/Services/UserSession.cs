@@ -9,6 +9,18 @@ public sealed class UserSession
     /// <summary>Gets whether the access token is still usable.</summary>
     public bool IsAuthenticated => Current is { } current && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow;
 
+    /// <summary>Determines whether the current authorization snapshot contains a permission.</summary>
+    /// <param name="permission">The stable permission code.</param>
+    /// <returns><see langword="true"/> when the permission is effective for this session.</returns>
+    public bool HasPermission(string permission)
+        => Current?.User.Permissions.Contains(permission, StringComparer.Ordinal) == true;
+
+    /// <summary>Determines whether any supplied permission is effective for this session.</summary>
+    /// <param name="permissions">The stable permission codes.</param>
+    /// <returns><see langword="true"/> when at least one permission is effective.</returns>
+    public bool HasAnyPermission(params string[] permissions)
+        => permissions.Any(HasPermission);
+
     /// <summary>Gets the register the circuit sells through, or null.</summary>
     public Guid? DeviceId { get; private set; }
 

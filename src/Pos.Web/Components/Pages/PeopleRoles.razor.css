@@ -1,0 +1,67 @@
+.tab-strip { display:flex; gap:6px; margin-bottom:18px; border-bottom:1px solid var(--line); }
+.tab { padding:10px 18px; border:0; border-bottom:3px solid transparent; background:transparent; color:var(--muted); font:700 .8rem 'DM Sans'; cursor:pointer; }
+.tab:hover { color:var(--forest); }
+.tab-active { color:var(--forest); border-bottom-color:var(--forest); }
+.strip-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.text-filter { height:36px; min-width:200px; padding:0 10px; border:1px solid var(--line); border-radius:8px; background:white; color:var(--ink); font-weight:600; }
+.switch-label { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:.78rem; cursor:pointer; }
+.switch-label input { accent-color: var(--forest); }
+.check-grid { display:flex; flex-wrap:wrap; gap:8px; }
+.check-chip { display:inline-flex; gap:6px; align-items:center; padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#fbfcfb; color:var(--ink); font-size:.78rem; font-weight:600; cursor:pointer; }
+.check-chip input { accent-color: var(--forest); margin:0; }
+.static-chip { background:#f0f3f2; color:var(--muted); cursor:default; }
+.picker-block { margin-top:14px; display:grid; gap:8px; }
+.picker-block-title { color:var(--muted); font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+.picker-block-hint { color:var(--muted); font-size:.8rem; }
+.primary-label { display:inline-flex; gap:5px; align-items:center; color:var(--muted); font-size:.72rem; font-weight:700; cursor:pointer; }
+.primary-label input { accent-color: var(--forest); margin:0; }
+.user-detail { margin-top:22px; padding:24px; border:1px solid var(--line); border-radius:18px; background:white; }
+.user-detail-head { display:flex; gap:18px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }
+.account-cell { display:grid; gap:3px; }
+.account-cell strong { font:700 1.05rem 'DM Sans'; }
+.account-cell span { color:var(--muted); font-size:.8rem; }
+.chip-row { display:flex; gap:6px; flex-wrap:wrap; }
+.role-chip { display:inline-flex; align-items:center; min-height:24px; padding:0 9px; border-radius:999px; background:var(--mint-soft); color:var(--forest); font-size:.74rem; font-weight:700; white-space:nowrap; }
+.muted-cell { color:var(--muted); font-size:.8rem; }
+.location-chip { background:#f0f3f2; color:var(--muted); font-variant-numeric:tabular-nums; }
+.user-detail-meta { margin:10px 0 0; color:var(--muted); font-size:.82rem; line-height:1.5; }
+.detail-grid { margin-top:18px; display:grid; gap:16px; grid-template-columns: repeat(auto-fit,minmax(340px,1fr)); }
+.detail-card { padding:16px; border:1px solid var(--line); border-radius:14px; background:#fbfcfb; display:flex; flex-direction:column; gap:12px; }
+.detail-card-title { display:flex; gap:10px; align-items:center; justify-content:space-between; }
+.detail-card-title strong { font:700 .92rem 'DM Sans'; }
+.card-action { padding:7px 12px; border:1px solid var(--line); border-radius:8px; background:white; color:var(--forest); font:700 .74rem 'DM Sans'; cursor:pointer; }
+.card-action:hover { background:#f0f5f2; }
+.card-action:disabled { opacity:.45; cursor:default; }
+.detail-note { margin:0; color:var(--muted); font-size:.8rem; }
+.override-list { display:grid; gap:8px; }
+.override-row { padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:white; display:grid; gap:8px; }
+.override-main { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:.8rem; }
+.override-code { padding:2px 6px; border-radius:6px; background:#eef1f6; color:#2f5487; font:700 .74rem 'DM Sans'; }
+.override-scope { color:var(--muted); font-size:.76rem; }
+.override-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.override-actions .text-filter { min-width:220px; }
+.link-action { padding:5px 9px; border:0; border-radius:7px; background:transparent; color:#9a4039; font:700 .76rem 'DM Sans'; cursor:pointer; }
+.link-action:hover { background:#fff5f4; }
+.link-action:disabled { opacity:.45; cursor:default; }
+.override-grant { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); display:grid; gap:10px; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); align-items:end; }
+.override-grant .search-action { justify-self:start; min-width:150px; }
+.control-block { display:grid; gap:12px; }
+.control-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+.control-row .location-picker { min-width:170px; flex:1 1 170px; }
+.control-row .search-action { height:auto; min-height:42px; }
+.danger-action { background:#9a4039; }
+.row-selected { background:#eef5f0; }
+.tier-label { font-weight:700; font-size:.78rem; }
+.status-disabled { background:#efe9e5; color:#6d5544; }
+.role-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); padding:16px; }
+.role-card { padding:16px; border:1px solid var(--line); border-radius:14px; background:white; text-align:left; display:grid; gap:6px; cursor:pointer; }
+.role-card:hover { border-color:#a9c4b4; }
+.role-card-active { border-color:var(--forest); box-shadow:0 0 0 2px rgba(23,61,44,.12); }
+.role-card-head { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+.role-card-head strong { font:700 .95rem 'DM Sans'; color:var(--forest); }
+.role-card-desc { margin:0; color:var(--muted); font-size:.78rem; line-height:1.45; }
+.role-card-meta { color:var(--muted); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+.role-permission-block { margin-top:16px; display:grid; gap:14px; }
+.role-module { display:grid; gap:8px; }
+.role-module-title { padding-bottom:5px; border-bottom:1px solid var(--line); color:var(--forest); font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }
+@media(max-width:620px){ .pos-head{align-items:stretch;flex-direction:column} .strip-controls{flex-direction:column;align-items:stretch} .text-filter{width:100%} .override-grant .search-action{width:100%} .detail-grid{grid-template-columns:1fr} }

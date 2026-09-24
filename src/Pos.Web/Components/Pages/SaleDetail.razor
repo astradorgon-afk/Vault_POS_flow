@@ -1,5 +1,5 @@
 @page "/sales/{Id:guid}"
-@attribute [Authorize]
+@attribute [Authorize(Policy = "sale.view")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
@@ -29,7 +29,7 @@ else if (sale is not null)
                 Completed @sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
             </p>
         </div>
-        <div class="sale-head-actions"><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span><a class="quiet-link" href="@($"/inventory/timeline/Sale/{sale.Id:D}")">Explore movement chain →</a></div>
+        <div class="sale-head-actions"><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></div>
     </section>
 
     @if (sale.Status == "Completed" && (CanReprint || CanVoid || CanReturn))

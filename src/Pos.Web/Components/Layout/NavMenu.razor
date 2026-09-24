@@ -1,73 +1,144 @@
 @inject VaultFlowAuthenticationStateProvider Authentication
 @inject NavigationManager Navigation
 @inject NotificationStore Notifications
+@inject UserSession Session
 
 <div class="brand-block">
-    <a class="brand" href=""><span class="brand-glyph" aria-hidden="true">V</span><span><strong>VaultFlow</strong><small>Inventory command</small></span></a>
+    <a class="brand" href="" @onclick="NotifyNavigation">
+        <span class="brand-glyph" aria-hidden="true">V</span>
+        <span><strong>VaultFlow</strong><small>Operations ledger</small></span>
+    </a>
+    <button class="sidebar-close" type="button" aria-label="Close navigation" @onclick="NotifyNavigation"><AppIcon Name="close" /></button>
 </div>
 
 <nav class="nav-stack" aria-label="Primary navigation">
-    <span class="nav-heading">Workspace</span>
-    <NavLink class="nav-link" href="notifications"><span aria-hidden="true">!</span> Notifications @if (Notifications.UnreadCount > 0) { <small>@Notifications.UnreadCount</small> }</NavLink>
-    <NavLink class="nav-link" href="" Match="NavLinkMatch.All"><span aria-hidden="true">⌂</span> Overview</NavLink>
-    <span class="nav-heading">Point of sale</span>
-    @if (CanCreateSale)
+    <div class="nav-group">
+        <span class="nav-heading">Workspace</span>
+        <NavLink class="nav-link" href="" Match="NavLinkMatch.All" @onclick="NotifyNavigation"><AppIcon Name="home" /> <span>Overview</span></NavLink>
+        <NavLink class="nav-link" href="notifications" @onclick="NotifyNavigation">
+            <AppIcon Name="bell" /> <span>Notifications</span>
+            @if (Notifications.UnreadCount > 0)
+            {
+                <small>@Notifications.UnreadCount</small>
+            }
+        </NavLink>
+    </div>
+
+    @if (CanCreateSale || CanViewSales || CanViewReceipts)
     {
-        <NavLink class="nav-link" href="pos"><span aria-hidden="true">▤</span> New sale</NavLink>
+        <div class="nav-group">
+            <span class="nav-heading">Sales &amp; service</span>
+            @if (CanCreateSale)
+            {
+                <NavLink class="nav-link" href="pos" @onclick="NotifyNavigation"><AppIcon Name="sale" /> <span>New sale</span></NavLink>
+            }
+            @if (CanViewSales)
+            {
+                <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
+            }
+            @if (CanViewReceipts)
+            {
+                <NavLink class="nav-link" href="receipts" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Payment receipts</span></NavLink>
+            }
+        </div>
     }
-    else
+
+    @if (CanUseStockCounts || CanAdjustStock || CanViewTransfers || CanViewQuarantine || CanViewCatalog || CanViewReports)
     {
-        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">▤</span> New sale</span>
+        <div class="nav-group">
+            <span class="nav-heading">Operations</span>
+            @if (CanUseStockCounts)
+            {
+                <NavLink class="nav-link" href="inventory/counts" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock counts</span></NavLink>
+            }
+            @if (CanAdjustStock)
+            {
+                <NavLink class="nav-link" href="inventory/adjustments" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock adjustments</span></NavLink>
+            }
+            @if (CanViewTransfers)
+            {
+                <NavLink class="nav-link" href="transfers" Match="NavLinkMatch.All" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Transfers</span></NavLink>
+                <NavLink class="nav-link" href="transfers/replenishment" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Replenishment</span></NavLink>
+            }
+            @if (CanViewQuarantine)
+            {
+                <NavLink class="nav-link" href="quarantine" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Quarantine</span></NavLink>
+            }
+            @if (CanViewCatalog)
+            {
+                <NavLink class="nav-link" href="catalog/prices" @onclick="NotifyNavigation"><AppIcon Name="tag" /> <span>Price schedule</span></NavLink>
+            }
+            @if (CanViewReports)
+            {
+                <NavLink class="nav-link" href="reports" @onclick="NotifyNavigation"><AppIcon Name="report" /> <span>Daily reports</span></NavLink>
+            }
+            @if (CanViewExceptions)
+            {
+                <NavLink class="nav-link" href="inventory/exceptions" @onclick="NotifyNavigation"><AppIcon Name="report" /> <span>Inventory exceptions</span></NavLink>
+            }
+        </div>
     }
-    @if (CanViewSales)
+
+    @if (CanViewLocations || CanViewAdministration || CanManageDevices || CanManageSync)
     {
-        <NavLink class="nav-link" href="sales"><span aria-hidden="true">◫</span> Sales</NavLink>
+        <div class="nav-group">
+            <span class="nav-heading">Administration</span>
+            @if (CanViewLocations)
+            {
+                <NavLink class="nav-link" href="admin/locations" @onclick="NotifyNavigation"><AppIcon Name="location" /> <span>Locations</span></NavLink>
+            }
+            @if (CanViewAdministration)
+            {
+                <NavLink class="nav-link" href="admin/users" @onclick="NotifyNavigation"><AppIcon Name="people" /> <span>People &amp; roles</span></NavLink>
+            }
+            @if (CanManageDevices)
+            {
+                <NavLink class="nav-link" href="admin/devices" @onclick="NotifyNavigation"><AppIcon Name="device" /> <span>Devices</span></NavLink>
+            }
+            @if (CanManageSync)
+            {
+                <NavLink class="nav-link" href="sync/failures" @onclick="NotifyNavigation"><AppIcon Name="sync" /> <span>Sync failures</span></NavLink>
+            }
+        </div>
     }
-    else
-    {
-        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◫</span> Sales</span>
-    }
-    @if (CanViewReceipts)
-    {
-        <NavLink class="nav-link" href="receipts"><span aria-hidden="true">☷</span> Receipts</NavLink>
-    }
-    else
-    {
-        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">☷</span> Receipts</span>
-    }
-    <span class="nav-heading">Catalogue</span>
-    @if (CanViewCatalog)
-    {
-        <NavLink class="nav-link" href="catalog/prices"><span aria-hidden="true">$</span> Prices</NavLink>
-    }
-    else
-    {
-        <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">$</span> Prices</span>
-    }
-    <span class="nav-heading">Operations</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◇</span> Inventory</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">↧</span> Purchasing</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⇄</span> Transfers <small>3</small></span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">⚠</span> Quarantine <small>2</small></span>
-    <span class="nav-heading">Administration</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">◎</span> Locations</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">☰</span> People &amp; roles</span>
-    <span class="nav-link disabled" aria-disabled="true"><span aria-hidden="true">▤</span> Devices</span>
 </nav>
 
-<AuthorizeView><Authorized><button class="sign-out" type="button" @onclick="SignOutAsync">Sign out</button></Authorized></AuthorizeView>
+<AuthorizeView>
+    <Authorized>
+        <div class="sidebar-footer">
+            <div><span>Signed in as</span><strong>@Session.Current?.User.DisplayName</strong></div>
+            <button class="sign-out" type="button" @onclick="SignOutAsync"><AppIcon Name="logout" /> Sign out</button>
+        </div>
+    </Authorized>
+</AuthorizeView>
 
 @code {
-    [Inject] private UserSession Session { get; set; } = null!;
-    private bool CanCreateSale => Session.Current?.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
-    private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
-    private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("catalog.view", StringComparer.Ordinal) == true;
-    private bool CanViewReceipts => Session.Current?.User.Permissions.Contains("receipt.view", StringComparer.Ordinal) == true;
+    /// <summary>Raised after a navigation choice so a mobile parent can close the drawer.</summary>
+    [Parameter]
+    public EventCallback OnNavigate { get; set; }
+
+    private bool CanCreateSale => Session.HasPermission("sale.create");
+    private bool CanViewSales => Session.HasPermission("sale.view");
+    private bool CanViewCatalog => Session.HasPermission("product.view");
+    private bool CanViewReceipts => Session.HasPermission("receipt.view");
+    private bool CanViewReports => Session.HasPermission("report.view");
+    private bool CanUseStockCounts => Session.HasAnyPermission("inventory.count", "inventory.count.approve", "inventory.view.all");
+    private bool CanAdjustStock => Session.HasAnyPermission("inventory.adjust", "inventory.adjust.approve");
+    private bool CanViewQuarantine => Session.HasPermission("quarantine.view");
+    private bool CanViewExceptions => Session.HasPermission("inventory.view.all");
+    private bool CanViewTransfers => Session.HasPermission("transfer.view");
+    private bool CanViewLocations => Session.HasPermission("product.view");
+    private bool CanManageDevices => Session.HasPermission("device.manage");
+    private bool CanManageSync => Session.HasPermission("sync.manage");
+    private bool CanViewAdministration => Session.HasAnyPermission("user.manage", "role.manage");
+
+    private Task NotifyNavigation() => OnNavigate.InvokeAsync();
 
     private async Task SignOutAsync()
     {
         await Notifications.StopAsync();
         Authentication.SignOut();
+        await OnNavigate.InvokeAsync();
         Navigation.NavigateTo("/login");
     }
 }

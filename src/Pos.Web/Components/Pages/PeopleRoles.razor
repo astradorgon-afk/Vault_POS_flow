@@ -1,0 +1,1451 @@
+@page "/admin/users"
+@attribute [Authorize(Policy = "people.manage")]
+@rendermode InteractiveServer
+@using System.Globalization
+@using Pos.Web.Services
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>People &amp; roles · VaultFlow</PageTitle>
+
+<section class="pos-head">
+    <div>
+        <span class="eyebrow">Administration</span>
+        <h1>People &amp; roles</h1>
+        <p>Accounts bundle permissions from roles; roles bundle permissions from the catalogue. Overrides bend one account without touching the role.</p>
+    </div>
+</section>
+
+@if (!CanViewAdministration)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot administer people and roles.</h2>
+        <p>Ask an administrator for the <code>user.manage</code> or <code>role.manage</code> permission.</p>
+    </section>
+}
+else
+{
+    <nav class="tab-strip" aria-label="Sections">
+        <button type="button" class="tab@(activeTab == "users" ? " tab-active" : "")" @onclick="SelectUsersTabAsync">Users</button>
+        <button type="button" class="tab@(activeTab == "roles" ? " tab-active" : "")" @onclick="SelectRolesTabAsync">Roles</button>
+    </nav>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    @if (activeTab == "users")
+    {
+        bool canManageUsersLocal = CanManageUsers;
+
+        <section class="search-strip">
+            <span>@(users.Count) account@(users.Count == 1 ? "" : "s")@(hasSearched ? " shown" : "")</span>
+            <div class="strip-controls">
+                <input type="search" class="text-filter" placeholder="Name, e-mail or code" @bind="searchText" />
+                <label class="switch-label">
+                    <input type="checkbox" @bind="includeInactive" />
+                    <span>Include disabled</span>
+                </label>
+                <button type="button" class="search-action" @onclick="FindUsersAsync"
+                        disabled="@(loadingUsers)">
+                    @(loadingUsers ? "Loading…" : "Find")
+                </button>
+                <button type="button" class="search-action" @onclick="ToggleCreateAsync"
+                        disabled="@(!canManageUsersLocal)">
+                    @(showCreate ? "Hide new account" : "New account")
+                </button>
+            </div>
+        </section>
+
+        @if (showCreate && canManageUsersLocal)
+        {
+            <section class="open-count">
+                <div class="open-count-title">
+                    <strong>Create an account</strong>
+                    <span>Passwords need at least 12 characters with 4 different characters. Roles and locations can be tuned after creation.</span>
+                </div>
+                <div class="open-count-fields">
+                    <label class="location-picker">
+                        <span>User name</span>
+                        <input type="text" @bind="createUserName" placeholder="e.g. valeria" />
+                    </label>
+                    <label class="location-picker">
+                        <span>Display name</span>
+                        <input type="text" @bind="createDisplayName" placeholder="e.g. Valeria Ndoro" />
+                    </label>
+                    <label class="location-picker">
+                        <span>Password</span>
+                        <input type="password" @bind="createPassword" placeholder="At least 12 characters" />
+                    </label>
+                    <label class="location-picker">
+                        <span>E-mail</span>
+                        <input type="email" @bind="createEmail" placeholder="Optional" />
+                    </label>
+                    <label class="location-picker">
+                        <span>Employee code</span>
+                        <input type="text" @bind="createEmployeeCode" placeholder="Optional" />
+                    </label>
+                    <label class="location-picker">
+                        <span>Approval tier</span>
+                        <select @bind="createApprovalTier">
+                            @foreach (TierOption option in TierOptions)
+                            {
+                                <option value="@option.Value">@option.Label</option>
+                            }
+                        </select>
+                    </label>
+                </div>
+                <div class="picker-block">
+                    <span class="picker-block-title">Roles</span>
+                    @if (roles.Count == 0)
+                    {
+                        <span class="picker-block-hint">None found. The role catalogue may be unavailable.</span>
+                    }
+                    <div class="check-grid">
+                        @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
+                        {
+                            <label class="check-chip">
+                                <input type="checkbox" value="@role.Name" @onchange="() => ToggleCreateRole(role.Name)" />
+                                <span>@role.Name</span>
+                            </label>
+                        }
+                    </div>
+                </div>
+                <div class="picker-block">
+                    <span class="picker-block-title">Locations</span>
+                    @if (locations.Count == 0)
+                    {
+                        <span class="picker-block-hint">None found. The location directory may be unavailable.</span>
+                    }
+                    <div class="check-grid">
+                        @foreach (PosLocation location in locations.OrderBy(l => l.Code, StringComparer.Ordinal))
+                        {
+                            <label class="check-chip">
+                                <input type="checkbox" value="@location.Id" @onchange="() => ToggleCreateLocation(location.Id)" />
+                                <span>@location.Code · @location.Name</span>
+                            </label>
+                        }
+                    </div>
+                </div>
+                <div class="open-count-actions">
+                    <button type="button" class="search-action" @onclick="CreateUserAsync"
+                            disabled="@(creatingUser || !CanSubmitCreate)">
+                        @(creatingUser ? "Creating…" : "Create account")
+                    </button>
+                </div>
+            </section>
+        }
+
+        <section class="results-panel" aria-live="polite">
+            @if (loadingUsers)
+            {
+                <div class="results-empty"><span>Loading accounts…</span></div>
+            }
+            else if (users.Count == 0)
+            {
+                <div class="results-empty">
+                    <strong>No accounts found</strong>
+                    <span>@(includeInactive ? "No accounts match that search." : "Only active accounts are shown. Tick “Include disabled” to see the rest.")</span>
+                </div>
+            }
+            else
+            {
+                <table class="sales-table">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Roles</th>
+                            <th>Locations</th>
+                            <th>Tier</th>
+                            <th>State</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (PosUserSummary user in users)
+                        {
+                            <tr @onclick="() => OpenUserAsync(user.Id)" class="@(selectedUserId == user.Id ? "row-selected" : "")">
+                                <td>
+                                    <div class="account-cell">
+                                        <strong>@user.DisplayName</strong>
+                                        <span>@@@user.UserName@(string.IsNullOrWhiteSpace(user.Email) ? "" : $" · {user.Email}")</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="chip-row">
+                                        @foreach (string role in user.Roles)
+                                        {
+                                            <span class="role-chip">@role</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="chip-row">
+                                        @if (user.LocationIds.Count == 0)
+                                        {
+                                            <span class="muted-cell">All locations</span>
+                                        }
+                                        @foreach (string label in LocationLabels(user.LocationIds))
+                                        {
+                                            <span class="role-chip location-chip">@label</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td><span class="tier-label">@TierName(user.ApprovalTier)</span></td>
+                                <td>
+                                    @if (!user.IsActive)
+                                    {
+                                        <span class="status-chip status-disabled">Disabled</span>
+                                    }
+                                    else if (user.TwoFactorEnabled)
+                                    {
+                                        <span class="status-chip status-submitted">2FA</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-chip status-approved">Active</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        @if (selectedUser is { } detail && canManageUsersLocal)
+        {
+            <section class="user-detail">
+                <div class="user-detail-head">
+                    <div class="account-cell">
+                        <strong>@detail.User.DisplayName</strong>
+                        <span>@@@detail.User.UserName@(string.IsNullOrWhiteSpace(detail.User.Email) ? "" : $" · {detail.User.Email}")</span>
+                    </div>
+                    <div class="chip-row">
+                        @if (!detail.User.IsActive)
+                        {
+                            <span class="status-chip status-disabled">Disabled</span>
+                        }
+                        else
+                        {
+                            <span class="status-chip status-approved">Active</span>
+                        }
+                        @if (detail.User.TwoFactorEnabled)
+                        {
+                            <span class="status-chip status-submitted">2FA enrolled</span>
+                        }
+                        @if (detail.HasPin)
+                        {
+                            <span class="status-chip status-picking">PIN set</span>
+                        }
+                        @if (detail.IsLockedOut)
+                        {
+                            <span class="status-chip status-disabled">Locked out</span>
+                        }
+                    </div>
+                </div>
+                <p class="user-detail-meta">
+                    Tier @TierName(detail.User.ApprovalTier) ·
+                    Created @detail.User.CreatedAtUtc.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)
+                    @if (detail.User.LastLoginAtUtc is { } lastLogin)
+                    {
+                        <text> · Last sign-in @lastLogin.ToLocalTime().ToString("g", CultureInfo.InvariantCulture)</text>
+                    }
+                    @if (detail.DisabledAtUtc is { } disabledAt && !string.IsNullOrWhiteSpace(detail.DisabledReason))
+                    {
+                        <text> · Disabled @disabledAt.ToLocalTime().ToString("g", CultureInfo.InvariantCulture) — @detail.DisabledReason</text>
+                    }
+                    @if (detail.User.Id == CurrentUserId)
+                    {
+                        <text> · This is the account you are signed in as; its own authority cannot be edited here.</text>
+                    }
+                </p>
+
+                <div class="detail-grid">
+                    <div class="detail-card">
+                        <div class="detail-card-title">
+                            <strong>Roles</strong>
+                            @if (!IsSelf)
+                            {
+                                <button type="button" class="card-action" @onclick="SaveUserRolesAsync"
+                                        disabled="@(savingRoles || !userDetailRoles.SetEquals(detail.User.Roles))">
+                                    @(savingRoles ? "Saving…" : "Save roles")
+                                </button>
+                            }
+                        </div>
+                        @if (IsSelf)
+                        {
+                            <p class="detail-note">Your own roles cannot be edited here.</p>
+                        }
+                        <div class="check-grid">
+                            @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
+                            {
+                                if (IsSelf)
+                                {
+                                    <span class="check-chip static-chip">@role.Name</span>
+                                }
+                                else
+                                {
+                                    <label class="check-chip">
+                                        <input type="checkbox" value="@role.Name"
+                                               checked="@userDetailRoles.Contains(role.Name)"
+                                               @onchange="() => ToggleUserRole(role.Name)" />
+                                        <span>@role.Name</span>
+                                    </label>
+                                }
+                            }
+                        </div>
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-title">
+                            <strong>Locations</strong>
+                            <button type="button" class="card-action" @onclick="SaveUserLocationsAsync"
+                                    disabled="@(savingLocations || (userDetailLocations.Count == 0 && detail.Locations.Count == 0))">
+                                @(savingLocations ? "Saving…" : "Save locations")
+                            </button>
+                        </div>
+                        @if (locations.Count == 0)
+                        {
+                            <p class="detail-note">The location directory is unavailable.</p>
+                        }
+                        else
+                        {
+                            <div class="check-grid">
+                                @foreach (PosLocation location in locations.OrderBy(l => l.Code, StringComparer.Ordinal).ThenBy(l => l.Name, StringComparer.Ordinal))
+                                {
+                                    bool assigned = userDetailLocations.Contains(location.Id);
+                                    <label class="check-chip">
+                                        <input type="checkbox" value="@location.Id"
+                                               checked="@assigned"
+                                               @onchange="() => ToggleUserLocation(location.Id)" />
+                                        <span>@location.Code · @location.Name</span>
+                                    </label>
+                                    @if (assigned)
+                                    {
+                                        <label class="primary-label">
+                                            <input type="radio" name="primary-location" value="@location.Id"
+                                                   checked="@(userDetailPrimaryId == location.Id)"
+                                                   @onchange="() => userDetailPrimaryId = location.Id" />
+                                            <span>Primary</span>
+                                        </label>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-title">
+                            <strong>Overrides</strong>
+                            <span class="detail-note">Grant or deny one permission for this account.</span>
+                        </div>
+                        <div class="override-list">
+                            @foreach (PosUserOverride item in detail.Overrides)
+                            {
+                                <div class="override-row">
+                                    <div class="override-main">
+                                        <span class="status-chip @(item.Effect == "Grant" ? "status-approved" : "status-disabled")">@item.Effect</span>
+                                        <code class="override-code">@item.PermissionCode</code>
+                                        <span class="override-scope">@(item.LocationId is { } oid ? $"at {LocationLabel(oid)}" : "everywhere")</span>
+                                        @if (item.ExpiresAtUtc is { } expiry)
+                                        {
+                                            <span class="override-scope">until @expiry.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                        }
+                                        <span class="override-scope">— @item.Reason</span>
+                                    </div>
+                                    <div class="override-actions">
+                                        @if (revokeTargetId != item.Id)
+                                        {
+                                            <button type="button" class="link-action"
+                                                    @onclick="() => revokeTargetId = item.Id">
+                                                Revoke
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <input type="text" class="text-filter" placeholder="Reason (5+ characters)" @bind="revokeReason" />
+                                            <button type="button" class="link-action"
+                                                    @onclick="() => RevokeOverrideAsync(item.Id)"
+                                                    disabled="@(revokingOverride || revokeReason.Trim().Length < 5)">
+                                                @(revokingOverride ? "Revoking…" : "Confirm")
+                                            </button>
+                                            <button type="button" class="link-action"
+                                                    @onclick="() => { revokeTargetId = null; revokeReason = string.Empty; }">
+                                                Cancel
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            @if (detail.Overrides.Count == 0)
+                            {
+                                <p class="detail-note">No overrides. This account follows its roles and nothing else.</p>
+                            }
+                        </div>
+                        <div class="override-grant">
+                            <label class="location-picker">
+                                <span>Permission</span>
+                                <select @bind="newOverrideCode">
+                                    <option value="">Select a permission…</option>
+                                    @foreach (IGrouping<string, PosPermissionView> module in permissions.GroupBy(p => p.Module).OrderBy(g => g.Key, StringComparer.Ordinal))
+                                    {
+                                        <optgroup label="@SplitWords(module.Key)">
+                                            @foreach (PosPermissionView permission in module.OrderBy(p => p.Code, StringComparer.Ordinal))
+                                            {
+                                                <option value="@permission.Code">@SplitWords(permission.Code)@(permission.IsPrivileged ? " (privileged)" : "")</option>
+                                            }
+                                        </optgroup>
+                                    }
+                                </select>
+                            </label>
+                            <label class="location-picker">
+                                <span>Effect</span>
+                                <select @bind="newOverrideEffect">
+                                    <option value="0">Grant</option>
+                                    <option value="1">Deny</option>
+                                </select>
+                            </label>
+                            <label class="location-picker">
+                                <span>Scope</span>
+                                <select @bind="newOverrideLocationId">
+                                    <option value="">Everywhere</option>
+                                    @foreach (PosLocation location in locations)
+                                    {
+                                        <option value="@location.Id">@location.Code · @location.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="location-picker">
+                                <span>Expires</span>
+                                <input type="date" @bind="newOverrideExpires" />
+                            </label>
+                            <label class="location-picker">
+                                <span>Reason</span>
+                                <input type="text" @bind="newOverrideReason" placeholder="Why this override?" />
+                            </label>
+                            <button type="button" class="search-action" @onclick="GrantOverrideAsync"
+                                    disabled="@(grantingOverride || newOverrideCode.Length == 0 || newOverrideReason.Trim().Length < 5)">
+                                @(grantingOverride ? "Granting…" : "Add override")
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-title">
+                            <strong>Account controls</strong>
+                        </div>
+                        <div class="control-block">
+                            <div class="control-row">
+                                <label class="location-picker">
+                                    <span>Display name</span>
+                                    <input type="text" @bind="editDisplayName" />
+                                </label>
+                                <label class="location-picker">
+                                    <span>E-mail</span>
+                                    <input type="email" @bind="editEmail" />
+                                </label>
+                                <label class="location-picker">
+                                    <span>Employee code</span>
+                                    <input type="text" @bind="editEmployeeCode" />
+                                </label>
+                                <label class="location-picker">
+                                    <span>Approval tier</span>
+                                    <select @bind="editApprovalTier">
+                                        @foreach (TierOption option in TierOptions)
+                                        {
+                                            <option value="@option.Value">@option.Label</option>
+                                        }
+                                    </select>
+                                </label>
+                                <button type="button" class="search-action" @onclick="SaveUserDetailsAsync"
+                                        disabled="@(savingDetails || IsSelf)">
+                                    @(savingDetails ? "Saving…" : "Save details")
+                                </button>
+                            </div>
+                            <div class="control-row">
+                                <label class="location-picker">
+                                    <span>New password</span>
+                                    <input type="password" @bind="resetPassword" placeholder="12+ characters" disabled="@IsSelf" />
+                                </label>
+                                <label class="location-picker">
+                                    <span>Confirm</span>
+                                    <input type="password" @bind="resetPasswordConfirm" placeholder="Repeat the new password" disabled="@IsSelf" />
+                                </label>
+                                <button type="button" class="search-action" @onclick="ResetPasswordAsync"
+                                        disabled="@(resettingPassword || IsSelf || !PasswordsMatch)">
+                                    @(resettingPassword ? "Resetting…" : "Reset password")
+                                </button>
+                            </div>
+                            <div class="control-row">
+                                <label class="location-picker">
+                                    <span>Cashier PIN</span>
+                                    <input type="text" inputmode="numeric" @bind="pinText" placeholder="6+ digits" disabled="@IsSelf" />
+                                </label>
+                                <button type="button" class="search-action" @onclick="SetPinAsync"
+                                        disabled="@(settingPin || IsSelf || pinText.Length < 6 || !pinText.All(char.IsDigit))">
+                                    @(settingPin ? "Saving…" : "Set PIN")
+                                </button>
+                                <label class="location-picker">
+                                    <span>Two-factor reset reason</span>
+                                    <input type="text" @bind="twoFactorReason" placeholder="5+ characters" disabled="@IsSelf" />
+                                </label>
+                                <button type="button" class="search-action"
+                                        @onclick="ResetTwoFactorAsync"
+                                        disabled="@(resettingTwoFactor || IsSelf || twoFactorReason.Trim().Length < 5)">
+                                    @(resettingTwoFactor ? "Resetting…" : "Reset 2FA")
+                                </button>
+                            </div>
+                            <div class="control-row">
+                                <label class="location-picker">
+                                    <span>Disable reason</span>
+                                    <input type="text" @bind="disableReason" placeholder="5+ characters" disabled="@IsSelf" />
+                                </label>
+                                @if (detail.User.IsActive)
+                                {
+                                    <button type="button" class="search-action danger-action"
+                                            @onclick="DisableUserAsync"
+                                            disabled="@(disablingUser || IsSelf || disableReason.Trim().Length < 5)">
+                                        @(disablingUser ? "Disabling…" : "Disable account")
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="search-action"
+                                            @onclick="EnableUserAsync"
+                                            disabled="@(enablingUser || IsSelf)">
+                                        @(enablingUser ? "Re-enabling…" : "Re-enable account")
+                                    </button>
+                                }
+                            </div>
+                            @if (IsSelf)
+                            {
+                                <p class="detail-note">You cannot change your own password, PIN, verification or status from here.</p>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </section>
+        }
+    }
+    else
+    {
+        bool canManageRolesLocal = CanManageRoles;
+
+        <section class="results-panel" aria-live="polite">
+            @if (loadingRoles)
+            {
+                <div class="results-empty"><span>Loading roles…</span></div>
+            }
+            else
+            {
+                <div class="role-grid">
+                    @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
+                    {
+                        <button type="button" class="role-card@(selectedRoleId == role.Id ? " role-card-active" : "")"
+                                @onclick="() => SelectRoleAsync(role.Id)">
+                            <div class="role-card-head">
+                                <strong>@role.Name</strong>
+                                @if (role.IsSystemRole)
+                                {
+                                    <span class="status-chip status-submitted">System</span>
+                                }
+                            </div>
+                            <span class="role-card-desc">@role.Description</span>
+                            <span class="role-card-meta">@role.Permissions.Count permission@(role.Permissions.Count == 1 ? "" : "s") · @role.MemberCount member@(role.MemberCount == 1 ? "" : "s")</span>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+
+        @if (selectedRole is { } selected && canManageRolesLocal)
+        {
+            <section class="user-detail">
+                <div class="user-detail-head">
+                    <div class="account-cell">
+                        <strong>@selected.Name</strong>
+                        <span>@selected.Description</span>
+                    </div>
+                    <div class="chip-row">
+                        <span class="status-chip status-submitted">@selected.MemberCount member@(selected.MemberCount == 1 ? "" : "s")</span>
+                        @if (SelectedRoleIsMine)
+                        {
+                            <span class="status-chip status-picking">Held by you</span>
+                        }
+                    </div>
+                </div>
+                <p class="user-detail-meta">
+                    Tick the permissions this role bundles, then save with a reason. Privileged permissions are shown as such but carry no extra weight here.
+                    @if (SelectedRoleIsMine)
+                    {
+                        <text>You hold this role, so its permissions cannot be edited here — ask another administrator.</text>
+                    }
+                </p>
+
+                <div class="role-permission-block">
+                    @foreach (IGrouping<string, PosPermissionView> module in permissions.GroupBy(p => p.Module).OrderBy(g => g.Key, StringComparer.Ordinal))
+                    {
+                        <div class="role-module">
+                            <span class="role-module-title">@SplitWords(module.Key)</span>
+                            <div class="check-grid">
+                                @foreach (PosPermissionView permission in module.OrderBy(p => p.Code, StringComparer.Ordinal))
+                                {
+                                    if (SelectedRoleIsMine)
+                                    {
+                                        <span class="check-chip static-chip">@SplitWords(permission.Code)</span>
+                                    }
+                                    else
+                                    {
+                                        <label class="check-chip">
+                                            <input type="checkbox" value="@permission.Code"
+                                                   checked="@rolePermissionCodes.Contains(permission.Code)"
+                                                   @onchange="() => ToggleRolePermission(permission.Code)" />
+                                            <span title="@permission.Description">@SplitWords(permission.Code)@(permission.IsPrivileged ? " ⛨" : "")</span>
+                                        </label>
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="control-row">
+                    <label class="location-picker">
+                        <span>Reason</span>
+                        <input type="text" @bind="roleChangeReason" placeholder="5+ characters" />
+                    </label>
+                    <button type="button" class="search-action" @onclick="SaveRolePermissionsAsync"
+                            disabled="@(savingRolePermissions || roleChangeReason.Trim().Length < 5)">
+                        @(savingRolePermissions ? "Saving…" : "Save permissions")
+                    </button>
+                </div>
+            </section>
+        }
+    }
+}
+
+@code {
+    private const string UserManagePermission = "user.manage";
+    private const string RoleManagePermission = "role.manage";
+
+    private static readonly TierOption[] TierOptions =
+    [
+        new(0, "None"),
+        new(1, "Tier 1"),
+        new(2, "Tier 2"),
+        new(3, "Tier 3"),
+        new(4, "Unlimited")
+    ];
+
+    private string activeTab = "users";
+    private string? message;
+
+    private List<PosUserSummary> users = [];
+    private List<PosRoleView> roles = [];
+    private List<PosPermissionView> permissions = [];
+    private List<PosLocation> locations = [];
+
+    private bool loadingUsers;
+    private bool loadingRoles;
+    private bool hasSearched;
+    private string searchText = string.Empty;
+    private bool includeInactive;
+
+    private bool showCreate;
+    private bool creatingUser;
+    private string createUserName = string.Empty;
+    private string createDisplayName = string.Empty;
+    private string createPassword = string.Empty;
+    private string createEmail = string.Empty;
+    private string createEmployeeCode = string.Empty;
+    private int createApprovalTier;
+    private readonly HashSet<string> createRoles = [];
+    private readonly HashSet<Guid> createLocations = [];
+
+    private Guid? selectedUserId;
+    private PosUserDetail? selectedUser;
+    private readonly HashSet<string> userDetailRoles = [];
+    private readonly HashSet<Guid> userDetailLocations = [];
+    private Guid? userDetailPrimaryId;
+    private bool savingRoles;
+    private bool savingLocations;
+
+    private Guid? revokeTargetId;
+    private string revokeReason = string.Empty;
+    private bool revokingOverride;
+    private string newOverrideCode = string.Empty;
+    private int newOverrideEffect;
+    private Guid? newOverrideLocationId;
+    private DateOnly? newOverrideExpires;
+    private string newOverrideReason = string.Empty;
+    private bool grantingOverride;
+
+    private string editDisplayName = string.Empty;
+    private string editEmail = string.Empty;
+    private string editEmployeeCode = string.Empty;
+    private int editApprovalTier;
+    private bool savingDetails;
+    private string resetPassword = string.Empty;
+    private string resetPasswordConfirm = string.Empty;
+    private bool resettingPassword;
+    private string pinText = string.Empty;
+    private bool settingPin;
+    private string twoFactorReason = string.Empty;
+    private bool resettingTwoFactor;
+    private string disableReason = string.Empty;
+    private bool disablingUser;
+    private bool enablingUser;
+
+    private Guid? selectedRoleId;
+    private PosRoleView? selectedRole;
+    private readonly HashSet<string> rolePermissionCodes = [];
+    private string roleChangeReason = string.Empty;
+    private bool savingRolePermissions;
+
+    private bool CanViewAdministration => CanManageUsers || CanManageRoles;
+    private bool CanManageUsers => Session.Current?.User.Permissions.Contains(UserManagePermission) ?? false;
+    private bool CanManageRoles => Session.Current?.User.Permissions.Contains(RoleManagePermission) ?? false;
+    private Guid CurrentUserId => Session.Current?.User.Id ?? Guid.Empty;
+    private bool IsSelf => selectedUser is { } detail && detail.User.Id == CurrentUserId;
+    private bool SelectedRoleIsMine => selectedRole is { } role
+        && Session.Current?.User.Roles.Contains(role.Name, StringComparer.Ordinal) == true;
+    private bool PasswordsMatch => resetPassword.Length >= 12
+        && resetPassword == resetPasswordConfirm;
+    private bool CanSubmitCreate => createUserName.Trim().Length >= 3
+        && createDisplayName.Trim().Length >= 1
+        && createPassword.Length >= 12;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            List<Task> loads =
+            [
+                LoadLocationsAsync(),
+                LoadRolesAsync(),
+                LoadPermissionsAsync()
+            ];
+            await Task.WhenAll(loads);
+
+            if (CanManageUsers)
+            {
+                await FindUsersAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+    }
+
+    private async Task LoadLocationsAsync()
+    {
+        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>(
+            "/api/v1/locations", CancellationToken.None);
+        if (response.IsSuccess && response.Value is not null)
+        {
+            locations = response.Value;
+        }
+    }
+
+    private async Task LoadRolesAsync()
+    {
+        if (!CanManageRoles)
+        {
+            return;
+        }
+
+        loadingRoles = true;
+        try
+        {
+            ApiResult<List<PosRoleView>> response = await Api.GetRolesAsync(CancellationToken.None);
+            if (response.IsSuccess && response.Value is not null)
+            {
+                roles = response.Value;
+            }
+            else
+            {
+                message = response.Error;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loadingRoles = false;
+        }
+    }
+
+    private async Task LoadPermissionsAsync()
+    {
+        if (!CanManageRoles)
+        {
+            return;
+        }
+
+        ApiResult<List<PosPermissionView>> response = await Api.GetPermissionsAsync(CancellationToken.None);
+        if (response.IsSuccess && response.Value is not null)
+        {
+            permissions = response.Value;
+        }
+    }
+
+    private async Task FindUsersAsync()
+    {
+        loadingUsers = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosUserSummary>> response = await Api.GetUsersAsync(
+                string.IsNullOrWhiteSpace(searchText) ? null : searchText.Trim(),
+                includeInactive,
+                CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            users = response.Value;
+            hasSearched = true;
+            if (users.Count == 0)
+            {
+                message = "No accounts matched that search.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loadingUsers = false;
+        }
+    }
+
+    private void ToggleCreate() => showCreate = !showCreate;
+
+    private async Task ToggleCreateAsync()
+    {
+        ToggleCreate();
+        if (showCreate)
+        {
+            await LoadRolesAsync();
+        }
+    }
+
+    private void ToggleCreateRole(string roleName)
+    {
+        if (!createRoles.Add(roleName))
+        {
+            createRoles.Remove(roleName);
+        }
+    }
+
+    private void ToggleCreateLocation(Guid locationId)
+    {
+        if (!createLocations.Add(locationId))
+        {
+            createLocations.Remove(locationId);
+        }
+    }
+
+    private async Task CreateUserAsync()
+    {
+        if (!CanSubmitCreate)
+        {
+            return;
+        }
+
+        creatingUser = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> response = await Api.CreateUserAsync(
+                new PosCreateUserRequest(
+                    createUserName.Trim(),
+                    createDisplayName.Trim(),
+                    createPassword,
+                    string.IsNullOrWhiteSpace(createEmail) ? null : createEmail.Trim(),
+                    string.IsNullOrWhiteSpace(createEmployeeCode) ? null : createEmployeeCode.Trim(),
+                    createApprovalTier,
+                    createRoles.ToArray(),
+                    createLocations
+                        .Select(locationId => new PosUserLocationSpec(locationId, false))
+                        .ToArray()),
+                CancellationToken.None);
+
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            ResetCreateForm();
+            showCreate = false;
+            await FindUsersAsync();
+            selectedUserId = null;
+            selectedUser = null;
+            message = "The account was created.";
+            await OpenUserAsync(response.Value.Id);
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            creatingUser = false;
+        }
+    }
+
+    private void ResetCreateForm()
+    {
+        createUserName = string.Empty;
+        createDisplayName = string.Empty;
+        createPassword = string.Empty;
+        createEmail = string.Empty;
+        createEmployeeCode = string.Empty;
+        createApprovalTier = 0;
+        createRoles.Clear();
+        createLocations.Clear();
+    }
+
+    private async Task OpenUserAsync(Guid userId)
+    {
+        if (!CanManageUsers)
+        {
+            return;
+        }
+
+        selectedUserId = userId;
+        selectedUser = null;
+        message = null;
+        revokeTargetId = null;
+        revokeReason = string.Empty;
+        newOverrideCode = string.Empty;
+        newOverrideReason = string.Empty;
+        newOverrideExpires = null;
+        newOverrideLocationId = null;
+        resetPassword = string.Empty;
+        resetPasswordConfirm = string.Empty;
+        pinText = string.Empty;
+        twoFactorReason = string.Empty;
+        disableReason = string.Empty;
+        newOverrideExpires = null;
+
+        try
+        {
+            ApiResult<PosUserDetail> response = await Api.GetUserAsync(userId, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                selectedUserId = null;
+                return;
+            }
+
+            selectedUser = response.Value;
+            userDetailRoles.Clear();
+            foreach (string roleName in selectedUser.User.Roles)
+            {
+                userDetailRoles.Add(roleName);
+            }
+
+            userDetailLocations.Clear();
+            userDetailPrimaryId = null;
+            foreach (PosUserLocationSpec spec in selectedUser.Locations)
+            {
+                userDetailLocations.Add(spec.LocationId);
+                if (spec.IsPrimary)
+                {
+                    userDetailPrimaryId = spec.LocationId;
+                }
+            }
+
+            editDisplayName = selectedUser.User.DisplayName;
+            editEmail = selectedUser.User.Email ?? string.Empty;
+            editEmployeeCode = selectedUser.User.EmployeeCode ?? string.Empty;
+            editApprovalTier = selectedUser.User.ApprovalTier;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+            selectedUserId = null;
+        }
+    }
+
+    private void ToggleUserRole(string roleName)
+    {
+        if (!userDetailRoles.Add(roleName))
+        {
+            userDetailRoles.Remove(roleName);
+        }
+    }
+
+    private void ToggleUserLocation(Guid locationId)
+    {
+        if (!userDetailLocations.Add(locationId))
+        {
+            userDetailLocations.Remove(locationId);
+            if (userDetailPrimaryId == locationId)
+            {
+                userDetailPrimaryId = null;
+            }
+        }
+    }
+
+    private async Task SaveUserRolesAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        savingRoles = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.SetUserRolesAsync(
+                detail.User.Id, userDetailRoles.ToArray(), CancellationToken.None);
+            message = response.IsSuccess
+                ? "Roles saved."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                await OpenUserAsync(detail.User.Id);
+                await FindUsersAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            savingRoles = false;
+        }
+    }
+
+    private async Task SaveUserLocationsAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        savingLocations = true;
+        message = null;
+        try
+        {
+            List<PosUserLocationSpec> specs = userDetailLocations
+                .Select(locationId => new PosUserLocationSpec(
+                    locationId, userDetailPrimaryId == locationId))
+                .ToList();
+            ApiResult<string> response = await Api.SetUserLocationsAsync(
+                detail.User.Id, specs, CancellationToken.None);
+            message = response.IsSuccess
+                ? "Locations saved."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                await OpenUserAsync(detail.User.Id);
+                await FindUsersAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            savingLocations = false;
+        }
+    }
+
+    private async Task GrantOverrideAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        grantingOverride = true;
+        message = null;
+        try
+        {
+            PosOverrideRequest request = new(
+                newOverrideCode,
+                newOverrideEffect,
+                newOverrideReason.Trim(),
+                newOverrideExpires?.ToDateTime(TimeOnly.MinValue),
+                newOverrideLocationId);
+            ApiResult<PosReference> response = await Api.GrantOverrideAsync(detail.User.Id, request, CancellationToken.None);
+            if (!response.IsSuccess)
+            {
+                message = response.Error;
+                return;
+            }
+
+            newOverrideCode = string.Empty;
+            newOverrideReason = string.Empty;
+            newOverrideExpires = null;
+            newOverrideLocationId = null;
+            message = "Override granted.";
+            await OpenUserAsync(detail.User.Id);
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            grantingOverride = false;
+        }
+    }
+
+    private async Task RevokeOverrideAsync(Guid overrideId)
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        revokingOverride = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.RemoveOverrideAsync(
+                detail.User.Id, overrideId, revokeReason.Trim(), CancellationToken.None);
+            message = response.IsSuccess
+                ? "Override revoked."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                revokeTargetId = null;
+                revokeReason = string.Empty;
+                await OpenUserAsync(detail.User.Id);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            revokingOverride = false;
+        }
+    }
+
+    private async Task SaveUserDetailsAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        savingDetails = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.UpdateUserAsync(
+                detail.User.Id,
+                new PosUpdateUserRequest(
+                    editDisplayName.Trim(),
+                    string.IsNullOrWhiteSpace(editEmail) ? null : editEmail.Trim(),
+                    string.IsNullOrWhiteSpace(editEmployeeCode) ? null : editEmployeeCode.Trim(),
+                    editApprovalTier),
+                CancellationToken.None);
+            message = response.IsSuccess
+                ? "Details saved."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                await OpenUserAsync(detail.User.Id);
+                await FindUsersAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            savingDetails = false;
+        }
+    }
+
+    private async Task ResetPasswordAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf || !PasswordsMatch)
+        {
+            return;
+        }
+
+        resettingPassword = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.ResetPasswordAsync(
+                detail.User.Id, resetPassword, CancellationToken.None);
+            message = response.IsSuccess
+                ? "Password reset."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                resetPassword = string.Empty;
+                resetPasswordConfirm = string.Empty;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            resettingPassword = false;
+        }
+    }
+
+    private async Task SetPinAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        settingPin = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.SetUserPinAsync(
+                detail.User.Id, pinText, CancellationToken.None);
+            message = response.IsSuccess
+                ? "PIN set."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                pinText = string.Empty;
+                await OpenUserAsync(detail.User.Id);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            settingPin = false;
+        }
+    }
+
+    private async Task ResetTwoFactorAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        resettingTwoFactor = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.ResetUserTwoFactorAsync(
+                detail.User.Id, twoFactorReason.Trim(), CancellationToken.None);
+            message = response.IsSuccess
+                ? "Two-factor authentication reset; the account must enrol again."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                twoFactorReason = string.Empty;
+                await OpenUserAsync(detail.User.Id);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            resettingTwoFactor = false;
+        }
+    }
+
+    private async Task DisableUserAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        disablingUser = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.DisableUserAsync(
+                detail.User.Id, disableReason.Trim(), CancellationToken.None);
+            message = response.IsSuccess
+                ? "The account was disabled."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                disableReason = string.Empty;
+                await OpenUserAsync(detail.User.Id);
+                await FindUsersAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            disablingUser = false;
+        }
+    }
+
+    private async Task EnableUserAsync()
+    {
+        if (selectedUser is not { } detail || IsSelf)
+        {
+            return;
+        }
+
+        enablingUser = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.EnableUserAsync(detail.User.Id, CancellationToken.None);
+            message = response.IsSuccess
+                ? "The account was re-enabled."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                await OpenUserAsync(detail.User.Id);
+                await FindUsersAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            enablingUser = false;
+        }
+    }
+
+    private async Task SelectRoleAsync(Guid roleId)
+    {
+        selectedRoleId = roleId;
+        selectedRole = roles.FirstOrDefault(role => role.Id == roleId);
+        message = null;
+        roleChangeReason = string.Empty;
+        rolePermissionCodes.Clear();
+        if (selectedRole is { } role)
+        {
+            foreach (string code in role.Permissions)
+            {
+                rolePermissionCodes.Add(code);
+            }
+        }
+    }
+
+    private void ToggleRolePermission(string code)
+    {
+        if (!rolePermissionCodes.Add(code))
+        {
+            rolePermissionCodes.Remove(code);
+        }
+    }
+
+    private async Task SaveRolePermissionsAsync()
+    {
+        if (selectedRole is not { } role || SelectedRoleIsMine)
+        {
+            return;
+        }
+
+        savingRolePermissions = true;
+        message = null;
+        try
+        {
+            ApiResult<string> response = await Api.SetRolePermissionsAsync(
+                role.Id, rolePermissionCodes.ToArray(), roleChangeReason.Trim(), CancellationToken.None);
+            message = response.IsSuccess
+                ? "Role permissions saved."
+                : response.Error;
+            if (response.IsSuccess)
+            {
+                roleChangeReason = string.Empty;
+                await LoadRolesAsync();
+                await SelectRoleAsync(role.Id);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The administration service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            savingRolePermissions = false;
+        }
+    }
+
+    private Task SelectUsersTabAsync() => SelectTabAsync("users");
+
+    private Task SelectRolesTabAsync() => SelectTabAsync("roles");
+
+    private async Task SelectTabAsync(string tab)
+    {
+        if (activeTab == tab)
+        {
+            return;
+        }
+
+        activeTab = tab;
+        message = null;
+        if (tab == "users" && !hasSearched)
+        {
+            await FindUsersAsync();
+        }
+
+        if (tab == "roles" && roles.Count == 0)
+        {
+            await LoadRolesAsync();
+        }
+    }
+
+    private static string TierName(int tier) => tier switch
+    {
+        1 => "Tier 1",
+        2 => "Tier 2",
+        3 => "Tier 3",
+        4 => "Unlimited",
+        _ => "None"
+    };
+
+    private static string SplitWords(string value)
+        => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+
+    private List<string> LocationLabels(IReadOnlyList<Guid> ids)
+    {
+        List<string> labels = [];
+        foreach (Guid id in ids)
+        {
+            string? label = locations.FirstOrDefault(location => location.Id == id)?.Code;
+            labels.Add(label ?? id.ToString()[..8]);
+        }
+        return labels;
+    }
+
+    private string LocationLabel(Guid id)
+        => locations.FirstOrDefault(location => location.Id == id) is { } location
+            ? $"{location.Code} · {location.Name}"
+            : id.ToString();
+
+    private sealed record TierOption(int Value, string Label);
+}

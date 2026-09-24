@@ -1,0 +1,280 @@
+@page "/quarantine"
+@using System.Globalization
+@attribute [Authorize(Policy = "quarantine.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Quarantine · VaultFlow</PageTitle>
+
+<header class="qr-head">
+    <span class="eyebrow">Operations</span>
+    <h1>Quarantine</h1>
+    <p>Record and isolate unauthorized or unidentified stock held out of sale.</p>
+</header>
+
+@if (!CanView)
+{
+    <section class="qr-card qr-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view quarantine incidents.</h2>
+        <p>Ask an administrator for the <code>quarantine.view</code> permission.</p>
+    </section>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="dashboard-notices" role="status"><p>@message</p></div>
+    }
+
+    @if (CanCreate)
+    {
+        <section class="qr-card" aria-labelledby="flag-title">
+            <h2 id="flag-title">Flag found stock</h2>
+            <p class="qr-sub">Record what was found by barcode. It is held out of sale until someone investigates it.</p>
+
+            <div class="qr-grid">
+                <label class="qr-label" for="qr-location">Location</label>
+                <label class="qr-label" for="qr-note">Note</label>
+                <span class="qr-label">Barcode</span>
+                <span class="qr-label">Qty</span>
+                <span class="qr-label" aria-hidden="true"></span>
+
+                @for (int index = 0; index < draftLines.Count; index++)
+                {
+                    DraftLine line = draftLines[index];
+                    int lineNumber = index + 1;
+                    @if (index == 0)
+                    {
+                        <select id="qr-location" class="qr-field qr-location" value="@(draftLocationId?.ToString() ?? string.Empty)" @onchange="OnDraftLocationChanged">
+                            <option value="">Select a location</option>
+                            @foreach (PosLocation location in locations)
+                            {
+                                <option value="@location.Id">@location.Code · @location.Name</option>
+                            }
+                        </select>
+                        <input id="qr-note" class="qr-field qr-note" type="text" @bind="draftNote" placeholder="Note (optional)" />
+                    }
+                    else
+                    {
+                        <span class="qr-spacer"></span>
+                        <span class="qr-spacer"></span>
+                    }
+                    <input class="qr-field qr-barcode" type="text" placeholder="Scan or type a barcode" aria-label="Barcode, line @lineNumber" @bind="line.Barcode" />
+                    <input class="qr-field qr-qty" type="number" min="0" step="0.001" placeholder="Qty" aria-label="Quantity, line @lineNumber"
+                           value="@(line.Quantity?.ToString(CultureInfo.InvariantCulture) ?? string.Empty)"
+                           @onchange="e => OnLineQuantityChanged(line, e)" />
+                    <button type="button" class="qr-remove" aria-label="Remove line @lineNumber" disabled="@(draftLines.Count == 1)" @onclick="() => draftLines.Remove(line)"><AppIcon Name="close" /></button>
+                }
+            </div>
+
+            <button type="button" class="qr-add" @onclick="AddLine">+ Add line</button>
+
+            <div class="qr-actions">
+                <button type="button" class="qr-primary" @onclick="CreateIncidentAsync" disabled="@(!CanRaise || creating)">
+                    @(creating ? "Raising…" : "Raise incident")
+                </button>
+            </div>
+        </section>
+    }
+
+    <section class="qr-card qr-results" aria-live="polite" aria-label="Quarantine incidents">
+        @if (loading)
+        {
+            <div class="qr-empty"><span class="qr-spinner"></span><p>Loading incidents…</p></div>
+        }
+        else if (incidents.Count == 0)
+        {
+            <div class="qr-empty">
+                <svg class="qr-empty-art" viewBox="0 0 120 100" aria-hidden="true" focusable="false">
+                    <path d="M24 48h72l-8 40a6 6 0 0 1-6 5H38a6 6 0 0 1-6-5z" fill="#cfe9d8" stroke="#1f5a3e" stroke-width="3" stroke-linejoin="round" />
+                    <rect x="18" y="40" width="84" height="10" rx="4" fill="#2f7a55" stroke="#1f5a3e" stroke-width="3" />
+                    <path d="M46 58v26 M56 58v26 M66 58v26 M76 58v26" stroke="#1f5a3e" stroke-width="3" stroke-linecap="round" />
+                    <path d="M40 26a7 7 0 1 1 10 6c-2 1-3 2-3 5 M47 41v.5" fill="none" stroke="#1f5a3e" stroke-width="3.5" stroke-linecap="round" />
+                    <path d="M54 12a10 10 0 1 1 14 9c-3 1.5-4 3-4 7 M64 37v.5" fill="none" stroke="#1f5a3e" stroke-width="4" stroke-linecap="round" />
+                    <path d="M76 24a6 6 0 1 1 9 5c-2 1-2.5 2-2.5 4.5 M82.5 38v.5" fill="none" stroke="#1f5a3e" stroke-width="3" stroke-linecap="round" />
+                </svg>
+                <h2>Nothing in quarantine.</h2>
+                <p>@(CanCreate ? "Choose a location and add items to investigate." : "Flagged stock will appear here.")</p>
+            </div>
+        }
+        else
+        {
+            <header class="qr-results-head">
+                <h2>Incidents</h2>
+                <span>@OpenCount open · @incidents.Count total</span>
+            </header>
+            <div class="qr-table-wrap">
+                <table class="qr-table">
+                    <thead>
+                        <tr><th>Incident</th><th>Status</th><th class="num">Lines</th><th class="num">Open lines</th><th class="num">Value</th><th>Created</th><th aria-hidden="true"></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (PosQuarantineIncidentSummary incident in incidents)
+                        {
+                            <tr @key="incident.Id" @onclick="() => Open(incident.Id)">
+                                <td><a href="quarantine/@incident.Id.ToString("D")" @onclick:stopPropagation="true">@incident.Number</a></td>
+                                <td><span class="ov-pill tone-@StatusTone(incident.Status)">@SplitWords(incident.Status)</span></td>
+                                <td class="num">@incident.LineCount</td>
+                                <td class="num">@incident.OpenLineCount</td>
+                                <td class="num">@Money(incident.TotalValue)</td>
+                                <td>@incident.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture)</td>
+                                <td class="qr-go"><AppIcon Name="arrow" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private sealed class DraftLine
+    {
+        public long Marker { get; init; }
+        public string Barcode { get; set; } = string.Empty;
+        public decimal? Quantity { get; set; }
+    }
+
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosQuarantineIncidentSummary> incidents = [];
+    private readonly List<DraftLine> draftLines = [];
+    private long nextMarker = 1;
+
+    private Guid? draftLocationId;
+    private string draftNote = string.Empty;
+
+    private bool loading = true;
+    private bool creating;
+    private string? message;
+
+    private bool CanView => Session.HasPermission("quarantine.view");
+    private bool CanCreate => Session.HasPermission("quarantine.create");
+    private int OpenCount => incidents.Count(incident => incident.Status != "Resolved");
+
+    private bool CanRaise =>
+        draftLocationId is not null
+        && draftLines.Count > 0
+        && draftLines.All(line => !string.IsNullOrWhiteSpace(line.Barcode) && line.Quantity is > 0m);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanView)
+        {
+            loading = false;
+            return;
+        }
+
+        if (CanCreate)
+        {
+            ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+            if (locationResponse.IsSuccess && locationResponse.Value is not null)
+            {
+                locations.AddRange(locationResponse.Value);
+            }
+
+            AddLine();
+        }
+
+        await LoadIncidentsAsync();
+    }
+
+    private void OnDraftLocationChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+        => draftLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+
+    private void AddLine() => draftLines.Add(new DraftLine { Marker = nextMarker++ });
+
+    private void OnLineQuantityChanged(DraftLine line, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+        => line.Quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, value)
+            : null;
+
+    private async Task LoadIncidentsAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosQuarantineIncidentSummary>> response = await Api.GetQuarantineIncidentsAsync(CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            incidents.Clear();
+            incidents.AddRange(response.Value);
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task CreateIncidentAsync()
+    {
+        if (!CanRaise || draftLocationId is not { } locationId)
+        {
+            return;
+        }
+
+        creating = true;
+        message = null;
+        try
+        {
+            var request = new PosCreateQuarantineIncidentRequest(
+                locationId,
+                [.. draftLines.Select(line => new PosQuarantineLineRequest(line.Barcode.Trim(), line.Quantity!.Value))],
+                string.IsNullOrWhiteSpace(draftNote) ? null : draftNote.Trim());
+
+            ApiResult<PosReference> response = await Api.CreateQuarantineIncidentAsync(request, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            Navigation.NavigateTo($"/quarantine/{response.Value.Id:D}");
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+
+    private void Open(Guid id) => Navigation.NavigateTo($"/quarantine/{id:D}");
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value) => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string StatusTone(string status) => status switch
+    {
+        "Open" => "warn",
+        "UnderReview" => "info",
+        "Resolved" => "ok",
+        _ => "muted",
+    };
+}

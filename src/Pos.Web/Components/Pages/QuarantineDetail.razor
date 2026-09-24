@@ -1,0 +1,450 @@
+@page "/quarantine/{IncidentId:guid}"
+@using System.Globalization
+@attribute [Authorize(Policy = "quarantine.view")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Quarantine incident · VaultFlow</PageTitle>
+
+@if (!CanView)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view quarantine incidents.</h2>
+        <p>Ask an administrator for the <code>quarantine.view</code> permission.</p>
+    </section>
+}
+else if (detail is null && loadingDetail)
+{
+    <section class="loading-card">Loading the incident…</section>
+}
+else if (detail is null)
+{
+    <section class="pos-message" role="alert">@(message ?? "This incident could not be found.")</section>
+}
+else
+{
+    <div class="office-head">
+        <div>
+            <p class="office-kicker">Quarantine · @LocationName(detail.LocationId)</p>
+            <h1 class="office-title">@detail.Number</h1>
+            <p class="office-lead">@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s") · @Money(detail.TotalValue) held</p>
+        </div>
+        <span class="@StatusChipClass(detail.Status)">@SplitWords(detail.Status)</span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(detail.Note))
+    {
+        <div class="count-note"><strong>Note:</strong> @detail.Note</div>
+    }
+
+    @if (IsOpen && CanInvestigate)
+    {
+        <section class="sheet-actions">
+            <button type="button" class="action-button primary" @onclick="InvestigateAsync" disabled="@busy">
+                @(busy ? "Moving…" : "Move to investigation")
+            </button>
+        </section>
+    }
+
+    <section class="results-panel sheet-panel" aria-live="polite">
+        <table class="sheet-table">
+            <thead>
+                <tr><th>#</th><th>Found as</th><th>Identified</th><th>Qty</th><th>Remaining</th><th>Unit cost</th><th>Disposition</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (PosQuarantineLineSummary line in detail.Lines)
+                {
+                    <tr @key="line.LineNo">
+                        <td class="sheet-line-no">@line.LineNo</td>
+                        <td>
+                            <div class="product-name">@(line.ClaimedProductName ?? "—")</div>
+                            <div class="product-sku">@line.Barcode</div>
+                        </td>
+                        <td>
+                            @if (line.ProductId is { } productId)
+                            {
+                                <div class="product-name">@ProductDisplayName(productId)</div>
+                            }
+                            else
+                            {
+                                <span class="sheet-muted">Not identified</span>
+                            }
+                        </td>
+                        <td class="sheet-number">@line.Quantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                        <td class="sheet-number">@line.RemainingQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                        <td class="sheet-number">@line.UnitCost.ToString("C", CultureInfo.GetCultureInfo("en-PH"))</td>
+                        <td>
+                            <span class="@DispositionChipClass(line.Disposition)">@SplitWords(line.Disposition)</span>
+                        </td>
+                        <td>
+                            @if (line.RemainingQuantity > 0m && CanAct)
+                            {
+                                <button type="button" class="action-button subtle" @onclick="() => ToggleLine(line)">
+                                    @(activeLine == line.LineNo ? "Close" : "Act")
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                    @if (activeLine == line.LineNo)
+                    {
+                        <tr>
+                            <td colspan="8">
+                                <div class="line-actions">
+                                    @if (line.ProductId is null && CanIdentify)
+                                    {
+                                        <div class="line-actions-row">
+                                            <select class="reason-input" @bind="linkProductId">
+                                                <option value="">Identify as…</option>
+                                                @foreach (PosProductSummary product in products)
+                                                {
+                                                    <option value="@product.Id">@product.Sku · @product.Name</option>
+                                                }
+                                            </select>
+                                            <button type="button" class="action-button" @onclick="() => LinkProductAsync(line)" disabled="@(busy || string.IsNullOrWhiteSpace(linkProductId))">
+                                                Identify
+                                            </button>
+                                        </div>
+                                    }
+                                    @if (line.ProductId is not null)
+                                    {
+                                        <div class="line-actions-row">
+                                            <input class="reason-input" type="number" min="0" max="@line.RemainingQuantity" step="0.001"
+                                                   value="@(actionQuantity?.ToString(CultureInfo.InvariantCulture) ?? string.Empty)"
+                                                   @onchange="OnActionQuantityChanged" placeholder="Qty" />
+                                            <input class="reason-input" type="text" @bind="actionNote" placeholder="Note (optional)" />
+                                            @if (CanRelease)
+                                            {
+                                                <button type="button" class="action-button primary" @onclick="() => ReleaseAsync(line)" disabled="@(busy || actionQuantity is not > 0m)">Release</button>
+                                            }
+                                            @if (CanReject)
+                                            {
+                                                <button type="button" class="action-button" @onclick="() => RejectLineAsync(line)" disabled="@(busy || actionQuantity is not > 0m)">Reject to supplier</button>
+                                            }
+                                            @if (CanReject)
+                                            {
+                                                <select class="reason-input" @bind="writeOffReason">
+                                                    @foreach (ReasonOption option in ReasonOptions)
+                                                    {
+                                                        <option value="@option.Value">@option.Label</option>
+                                                    }
+                                                </select>
+                                                <button type="button" class="action-button danger" @onclick="() => WriteOffAsync(line)" disabled="@(busy || actionQuantity is not > 0m)">Write off</button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </section>
+
+    @if (detail.Timeline.Count > 0)
+    {
+        <section class="results-panel timeline-panel">
+            <table class="sheet-table">
+                <thead><tr><th>#</th><th>Event</th><th>Qty</th><th>When</th><th>Note</th></tr></thead>
+                <tbody>
+                    @foreach (PosQuarantineEventSummary step in detail.Timeline.OrderBy(s => s.Sequence))
+                    {
+                        <tr @key="step.Sequence">
+                            <td class="sheet-line-no">@step.Sequence</td>
+                            <td>@SplitWords(step.Kind)</td>
+                            <td class="sheet-number">@(step.Quantity?.ToString("0.######", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td class="sheet-muted">@step.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@(step.Note ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public Guid IncidentId { get; set; }
+
+    private sealed record ReasonOption(int Value, string Label);
+
+    private static readonly ReasonOption[] ReasonOptions =
+    [
+        new(1, "Damaged"), new(2, "Expired"), new(3, "Spoilage"), new(4, "Loss"),
+        new(5, "Theft"), new(8, "Broken"), new(9, "Contaminated"), new(99, "Other"),
+    ];
+
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosProductSummary> products = [];
+    private readonly Dictionary<Guid, (string Sku, string Name)> productNames = [];
+
+    private PosQuarantineIncidentDetail? detail;
+    private bool loadingDetail = true;
+    private bool busy;
+    private string? message;
+
+    private int? activeLine;
+    private string linkProductId = string.Empty;
+    private decimal? actionQuantity;
+    private string actionNote = string.Empty;
+    private int writeOffReason = 1;
+
+    private bool CanView => Session.HasPermission("quarantine.view");
+    private bool CanInvestigate => Session.HasPermission("quarantine.investigate");
+    private bool CanIdentify => Session.HasPermission("quarantine.release");
+    private bool CanRelease => Session.HasPermission("quarantine.release");
+    private bool CanReject => Session.HasPermission("quarantine.reject");
+    private bool CanAct => CanIdentify || CanRelease || CanReject;
+
+    private bool IsOpen => detail?.Status == "Open";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanView)
+        {
+            loadingDetail = false;
+            return;
+        }
+
+        ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        if (locationResponse.IsSuccess && locationResponse.Value is not null)
+        {
+            locations.AddRange(locationResponse.Value);
+        }
+
+        if (CanIdentify)
+        {
+            ApiResult<List<PosProductSummary>> productResponse = await Api.GetProductsAsync(null, 0, 500, CancellationToken.None);
+            if (productResponse.IsSuccess && productResponse.Value is not null)
+            {
+                products.AddRange(productResponse.Value.Where(p => p.IsActive).OrderBy(p => p.Name));
+            }
+        }
+
+        await LoadDetailAsync();
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        loadingDetail = true;
+        try
+        {
+            ApiResult<PosQuarantineIncidentDetail> response = await Api.GetQuarantineIncidentAsync(IncidentId, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error ?? "This incident could not be found.";
+                return;
+            }
+
+            detail = response.Value;
+            await LoadProductNamesAsync(detail.Lines.Where(l => l.ProductId is not null).Select(l => l.ProductId!.Value).Distinct().ToArray());
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loadingDetail = false;
+        }
+    }
+
+    private async Task LoadProductNamesAsync(IReadOnlyCollection<Guid> ids)
+    {
+        foreach (Guid id in ids)
+        {
+            PosProductSummary? known = products.FirstOrDefault(p => p.Id == id);
+            productNames[id] = known is not null ? (known.Sku, known.Name) : (ShortId(id), "Product");
+        }
+
+        HashSet<Guid> wanted = [.. ids.Where(id => productNames[id].Name == "Product")];
+        if (wanted.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            for (int offset = 0; offset < 2000 && wanted.Count > 0; offset += 200)
+            {
+                ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(null, offset, 200, CancellationToken.None);
+                if (!response.IsSuccess || response.Value is null || response.Value.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (PosProductSummary product in response.Value)
+                {
+                    if (wanted.Remove(product.Id))
+                    {
+                        productNames[product.Id] = (product.Sku, product.Name);
+                    }
+                }
+
+                if (response.Value.Count < 200)
+                {
+                    break;
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private void ToggleLine(PosQuarantineLineSummary line)
+    {
+        activeLine = activeLine == line.LineNo ? null : line.LineNo;
+        linkProductId = string.Empty;
+        actionQuantity = line.RemainingQuantity;
+        actionNote = string.Empty;
+    }
+
+    private void OnActionQuantityChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+        => actionQuantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, value)
+            : null;
+
+    private async Task InvestigateAsync()
+        => await RunCommandAsync(() => Api.InvestigateQuarantineIncidentAsync(IncidentId, null, CancellationToken.None), "Incident moved to investigation.");
+
+    private async Task LinkProductAsync(PosQuarantineLineSummary line)
+    {
+        if (!Guid.TryParse(linkProductId, out Guid productId))
+        {
+            return;
+        }
+
+        await RunCommandAsync(
+            () => Api.LinkQuarantineProductAsync(
+                IncidentId,
+                new PosLinkQuarantineProductRequest(line.LineNo, productId, null, string.IsNullOrWhiteSpace(actionNote) ? null : actionNote.Trim()),
+                CancellationToken.None),
+            "Line identified.");
+    }
+
+    private async Task ReleaseAsync(PosQuarantineLineSummary line)
+    {
+        if (actionQuantity is not { } qty || qty <= 0m)
+        {
+            return;
+        }
+
+        await RunCommandAsync(
+            () => Api.ReleaseQuarantineLineAsync(
+                IncidentId,
+                new PosQuarantineQuantityRequest(line.LineNo, qty, string.IsNullOrWhiteSpace(actionNote) ? null : actionNote.Trim()),
+                CancellationToken.None),
+            "Quantity released to available stock.");
+    }
+
+    private async Task RejectLineAsync(PosQuarantineLineSummary line)
+    {
+        if (actionQuantity is not { } qty || qty <= 0m)
+        {
+            return;
+        }
+
+        await RunCommandAsync(
+            () => Api.RejectQuarantineLineAsync(
+                IncidentId,
+                new PosQuarantineQuantityRequest(line.LineNo, qty, string.IsNullOrWhiteSpace(actionNote) ? null : actionNote.Trim()),
+                CancellationToken.None),
+            "Quantity rejected to the supplier.");
+    }
+
+    private async Task WriteOffAsync(PosQuarantineLineSummary line)
+    {
+        if (actionQuantity is not { } qty || qty <= 0m)
+        {
+            return;
+        }
+
+        await RunCommandAsync(
+            () => Api.WriteOffQuarantineLineAsync(
+                IncidentId,
+                new PosWriteOffQuarantineLineRequest(line.LineNo, qty, writeOffReason, string.IsNullOrWhiteSpace(actionNote) ? null : actionNote.Trim()),
+                CancellationToken.None),
+            "Quantity written off. Approve the linked adjustment to post it.");
+    }
+
+    private async Task RunCommandAsync(Func<Task<ApiResult<PosReference>>> command, string successMessage)
+    {
+        busy = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> response = await command();
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            activeLine = null;
+            detail = null;
+            await LoadDetailAsync();
+            if (detail is not null)
+            {
+                message = successMessage;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private string LocationName(Guid locationId)
+        => locations.FirstOrDefault(location => location.Id == locationId)?.Name ?? "location";
+
+    private string ProductDisplayName(Guid productId)
+        => productNames.TryGetValue(productId, out (string Sku, string Name) product)
+            ? $"{product.Name} ({product.Sku})"
+            : $"Product {ShortId(productId)}";
+
+    private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value) => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Open" => "status-chip sc-issue",
+        "UnderReview" => "status-chip sc-pending-approval",
+        "Resolved" => "status-chip sc-resolved",
+        _ => "status-chip",
+    };
+
+    private static string DispositionChipClass(string disposition) => disposition switch
+    {
+        "None" => "status-chip",
+        "Released" => "status-chip sc-resolved",
+        "Rejected" => "status-chip sc-rejected",
+        "WrittenOff" => "status-chip sc-issue",
+        _ => "status-chip",
+    };
+}

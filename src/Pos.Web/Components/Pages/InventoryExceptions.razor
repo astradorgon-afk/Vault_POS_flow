@@ -1,0 +1,202 @@
+@page "/inventory/exceptions"
+@using System.Globalization
+@attribute [Authorize(Policy = "inventory.view.all")]
+@rendermode InteractiveServer
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Inventory exceptions · VaultFlow</PageTitle>
+
+<div class="office-head">
+    <div>
+        <p class="office-kicker">Inventory control</p>
+        <h1 class="office-title">Inventory exceptions</h1>
+        <p class="office-lead">Stock draws the ledger refused because there wasn't enough on hand. Repeated attempts on one product and location are a shrinkage signal.</p>
+    </div>
+    <div class="head-pickers">
+        <label class="location-picker">
+            <span>Location</span>
+            <select value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChangedAsync">
+                <option value="">All locations</option>
+                @foreach (PosLocation location in locations)
+                {
+                    <option value="@location.Id">@location.Code · @location.Name</option>
+                }
+            </select>
+        </label>
+        <label class="location-picker">
+            <span>View</span>
+            <select @bind="viewMode" @bind:after="LoadAsync">
+                <option value="summary">Ranked summary (last 30 days)</option>
+                <option value="list">Raw attempts</option>
+            </select>
+        </label>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="pos-message" role="status">@message</div>
+}
+
+<section class="results-panel" aria-live="polite">
+    @if (loading)
+    {
+        <div class="results-empty">Loading…</div>
+    }
+    else if (viewMode == "summary")
+    {
+        @if (summaryRows.Count == 0)
+        {
+            <div class="results-empty"><strong>No refused draws in the last 30 days.</strong><span>Nothing to chase down.</span></div>
+        }
+        else
+        {
+            <table class="sales-table">
+                <thead>
+                    <tr><th>Location</th><th>Product</th><th>Attempts</th><th>Total shortfall</th><th>First seen</th><th>Last seen</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosNegativeStockAttemptSummaryRow row in summaryRows)
+                    {
+                        <tr @key="@((row.LocationId, row.ProductId))">
+                            <td>@(row.LocationCode ?? ShortId(row.LocationId))</td>
+                            <td>
+                                <div class="product-name">@(row.ProductName ?? "—")</div>
+                                @if (row.Sku is { Length: > 0 } sku)
+                                {
+                                    <div class="product-sku">@sku</div>
+                                }
+                            </td>
+                            <td class="sheet-number sheet-loss">@row.Attempts</td>
+                            <td class="sheet-number">@row.TotalShortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@row.FirstAttemptAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@row.LastAttemptAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+    else
+    {
+        @if (attempts.Count == 0)
+        {
+            <div class="results-empty"><strong>No refused draws in the last 30 days.</strong><span>Nothing to chase down.</span></div>
+        }
+        else
+        {
+            <table class="sales-table">
+                <thead>
+                    <tr><th>When</th><th>Location</th><th>Product</th><th>State</th><th>Requested</th><th>Available</th><th>Shortfall</th><th>Policy</th><th>Reference</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosNegativeStockAttemptView attempt in attempts)
+                    {
+                        <tr @key="attempt.Id">
+                            <td class="sheet-muted">@attempt.AttemptedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@(attempt.LocationCode ?? ShortId(attempt.LocationId))</td>
+                            <td>
+                                <div class="product-name">@(attempt.ProductName ?? "—")</div>
+                                @if (attempt.Sku is { Length: > 0 } sku)
+                                {
+                                    <div class="product-sku">@sku</div>
+                                }
+                            </td>
+                            <td class="sheet-muted">@SplitWords(attempt.State)</td>
+                            <td class="sheet-number">@attempt.RequestedQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-number">@attempt.AvailableQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-number sheet-loss">@attempt.Shortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@SplitWords(attempt.Policy)</td>
+                            <td class="sheet-muted">@attempt.ReferenceNumber</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+</section>
+
+@code {
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosNegativeStockAttemptSummaryRow> summaryRows = [];
+    private readonly List<PosNegativeStockAttemptView> attempts = [];
+
+    private Guid? selectedLocationId;
+    private string viewMode = "summary";
+    private bool loading = true;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        if (locationResponse.IsSuccess && locationResponse.Value is not null)
+        {
+            locations.AddRange(locationResponse.Value);
+        }
+
+        await LoadAsync();
+    }
+
+    private void OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+        _ = LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            if (viewMode == "summary")
+            {
+                ApiResult<List<PosNegativeStockAttemptSummaryRow>> response = await Api.GetNegativeStockAttemptSummaryAsync(selectedLocationId, CancellationToken.None);
+                if (!response.IsSuccess || response.Value is null)
+                {
+                    message = response.Error;
+                    return;
+                }
+
+                summaryRows.Clear();
+                summaryRows.AddRange(response.Value);
+            }
+            else
+            {
+                ApiResult<List<PosNegativeStockAttemptView>> response = await Api.GetNegativeStockAttemptsAsync(selectedLocationId, CancellationToken.None);
+                if (!response.IsSuccess || response.Value is null)
+                {
+                    message = response.Error;
+                    return;
+                }
+
+                attempts.Clear();
+                attempts.AddRange(response.Value);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+}

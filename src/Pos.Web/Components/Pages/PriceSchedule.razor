@@ -1,5 +1,5 @@
 @page "/catalog/prices"
-@attribute [Authorize]
+@attribute [Authorize(Policy = "product.view")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
@@ -18,7 +18,7 @@
 
 @if (!CanViewCatalog)
 {
-    <section class="price-blocked" role="alert"><span>Access required</span><h2>This account cannot view catalogue prices.</h2><p>Ask an administrator for <code>catalog.view</code>.</p></section>
+    <section class="price-blocked" role="alert"><span>Access required</span><h2>This account cannot view catalogue prices.</h2><p>Ask an administrator for <code>product.view</code>.</p></section>
 }
 else
 {
@@ -109,7 +109,7 @@ else
     private DateTime? effectiveTo;
     private bool searching, saving;
     private string? message;
-    private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("catalog.view", StringComparer.Ordinal) == true;
+    private bool CanViewCatalog => Session.Current?.User.Permissions.Contains("product.view", StringComparer.Ordinal) == true;
     private bool CanManagePrices => Session.Current?.User.Permissions.Contains("product.price.manage", StringComparer.Ordinal) == true;
 
     protected override async Task OnInitializedAsync()

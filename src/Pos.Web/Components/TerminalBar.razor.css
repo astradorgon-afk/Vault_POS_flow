@@ -1,6 +1,6 @@
 .term-row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:13px 18px; border:1px solid var(--line); border-radius:13px; background:white; }
 .term-picker { min-width:220px; display:grid; gap:6px; color:var(--muted); font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
-.term-picker select { height:44px; padding:0 12px; border:1px solid #cbd5cd; border-radius:8px; background:white; color:var(--ink); font-weight:600; text-transform:none; letter-spacing:0; }
+.term-picker select { height:44px; padding:0 12px; border:1px solid #cbd5cd; border-radius:8px; background:white; color:var(--ink); font-weight:600; text-transform:none; letter-spacing:0; font-size:.86rem; }
 .term-picker select:disabled { opacity:.55; }
 .term-live { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .term-live strong { color:var(--forest); font-size:.74rem; text-transform:uppercase; letter-spacing:.08em; }

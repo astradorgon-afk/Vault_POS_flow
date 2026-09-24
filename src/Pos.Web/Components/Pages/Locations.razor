@@ -1,0 +1,310 @@
+@page "/admin/locations"
+@attribute [Authorize(Policy = "product.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Locations · VaultFlow</PageTitle>
+
+<section class="locations-head">
+    <div>
+        <span class="eyebrow">Administration · operating rules</span>
+        <h1>Locations</h1>
+        <p>Every store carries its own clock, stock guardrails, till tolerance and customer-facing receipt text.</p>
+    </div>
+    @if (CanManageLocations)
+    {
+        <button class="location-primary" type="button" @onclick="ToggleCreate">@(showCreate ? "Close form" : "Add location")</button>
+    }
+</section>
+
+@if (!CanViewLocations)
+{
+    <section class="locations-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view locations.</h2>
+        <p>Ask an administrator for catalogue or location administration access.</p>
+    </section>
+}
+else
+{
+    @if (showCreate)
+    {
+        <section class="location-create" aria-labelledby="create-location-title">
+            <header><div><span>New operating unit</span><h2 id="create-location-title">Add a physical location</h2></div><p>New locations start on VaultFlow's conservative defaults. Tune the policy after creation.</p></header>
+            <div class="location-create-grid">
+                <label><span>Code</span><input maxlength="16" @bind="newCode" placeholder="STORE3" /></label>
+                <label><span>Name</span><input maxlength="64" @bind="newName" placeholder="Quezon Avenue" /></label>
+                <label><span>Kind</span><select @bind="newKind"><option value="1">Retail store</option><option value="0">Main warehouse</option></select></label>
+                <label><span>IANA timezone</span><input @bind="newTimeZone" placeholder="Asia/Manila" /></label>
+            </div>
+            <footer><span>Currency is settled organization-wide in Philippine pesos.</span><button class="location-primary" type="button" @onclick="CreateLocationAsync" disabled="@(!CanCreate || working)">@(working ? "Creating…" : "Create location")</button></footer>
+        </section>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="locations-message" role="status">@message</div>
+    }
+
+    <section class="location-summary" aria-label="Location summary">
+        <article><span>Physical locations</span><strong>@locations.Count</strong><small>@locations.Count(location => location.Kind == 1) stores · @locations.Count(location => location.Kind == 0) warehouse</small></article>
+        <article><span>Strict stock policy</span><strong>@locations.Count(location => location.Settings.NegativeStockPolicy == 0)</strong><small>locations prohibit negative stock</small></article>
+        <article><span>Direct delivery</span><strong>@locations.Count(location => location.Settings.AllowsDirectSupplierDelivery)</strong><small>locations permit supplier-to-store receipts</small></article>
+    </section>
+
+    @if (loading)
+    {
+        <section class="locations-empty">Loading operating policy…</section>
+    }
+    else if (locations.Count == 0)
+    {
+        <section class="locations-empty"><strong>No physical locations found.</strong></section>
+    }
+    else
+    {
+        <div class="location-workspace">
+            <section class="location-list" aria-label="Locations">
+                @foreach (PosLocationAdmin location in locations)
+                {
+                    <button type="button" class="location-card @(selected?.Id == location.Id ? "selected" : "")" @onclick="() => SelectLocation(location)" @key="location.Id">
+                        <span class="location-code">@location.Code</span>
+                        <strong>@location.Name</strong>
+                        <small>@KindName(location.Kind) · @location.TimeZoneId</small>
+                        <i>@PolicyName(location.Settings.NegativeStockPolicy)</i>
+                    </button>
+                }
+            </section>
+
+            @if (selected is not null)
+            {
+                <section class="policy-editor" aria-labelledby="policy-editor-title">
+                    <header>
+                        <div><span>@selected.Code · @KindName(selected.Kind)</span><h2 id="policy-editor-title">@selected.Name</h2><p>Open since @selected.OpenedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture) · @selected.TimeZoneId</p></div>
+                        <div class="settlement-stamp"><span>Settlement</span><strong>PHP</strong><small>Philippine peso</small></div>
+                    </header>
+
+                    <div class="policy-section">
+                        <div class="policy-section-title"><span>01</span><div><strong>Inventory guardrails</strong><small>What happens when a movement would take stock below zero.</small></div></div>
+                        <div class="policy-fields two-columns">
+                            <label><span>Negative-stock policy</span><select @bind="editNegativePolicy" disabled="@(!CanManageSettings)"><option value="0">Prohibit</option><option value="1">Allow with permission</option><option value="2">Offline only, central review</option></select></label>
+                            <label><span>Expiry warning</span><div class="unit-input"><input type="number" min="0" max="3650" @bind="editExpiryDays" disabled="@(!CanManageSettings)" /><i>days</i></div></label>
+                            <label class="policy-check"><input type="checkbox" @bind="editDirectDelivery" disabled="@(!CanManageSettings)" /><span><strong>Allow direct supplier delivery</strong><small>Stock may arrive at this location without first passing through MAIN.</small></span></label>
+                        </div>
+                    </div>
+
+                    <div class="policy-section">
+                        <div class="policy-section-title"><span>02</span><div><strong>Till and offline operation</strong><small>Boundaries the register uses when head office is unavailable or the drawer closes.</small></div></div>
+                        <div class="policy-fields three-columns">
+                            <label><span>Offline grace</span><div class="unit-input"><input type="number" min="0" step="1" @bind="editOfflineHours" disabled="@(!CanManageSettings)" /><i>hours</i></div></label>
+                            <label><span>Maximum shift</span><div class="unit-input"><input type="number" min="1" step="1" @bind="editShiftHours" disabled="@(!CanManageSettings)" /><i>hours</i></div></label>
+                            <label><span>Cash variance threshold</span><div class="unit-input"><i>₱</i><input type="number" min="0" step="0.01" @bind="editVariance" disabled="@(!CanManageSettings)" /></div></label>
+                            <label><span>VAT rate</span><div class="unit-input"><input type="number" min="0" max="100" step="0.01" @bind="editVatPercent" disabled="@(!CanManageSettings)" /><i>%</i></div></label>
+                            <label><span>Cash rounding</span><div class="unit-input"><i>₱</i><input type="number" min="0.01" step="0.01" @bind="editRounding" disabled="@(!CanManageSettings)" /></div></label>
+                        </div>
+                    </div>
+
+                    <div class="policy-section">
+                        <div class="policy-section-title"><span>03</span><div><strong>Receipt voice</strong><small>The message printed around the fiscal sale detail.</small></div></div>
+                        <div class="policy-fields two-columns receipt-fields">
+                            <label><span>Receipt header</span><textarea maxlength="120" @bind="editReceiptHeader" disabled="@(!CanManageSettings)" placeholder="Store or customer-service message"></textarea><small>@editReceiptHeader.Length / 120</small></label>
+                            <label><span>Receipt footer</span><textarea maxlength="120" @bind="editReceiptFooter" disabled="@(!CanManageSettings)" placeholder="Return policy or thank-you message"></textarea><small>@editReceiptFooter.Length / 120</small></label>
+                        </div>
+                    </div>
+
+                    <footer>
+                        <span>@(CanManageSettings ? "Saving replaces the complete policy snapshot for this location." : "You can review this policy, but settings.manage is required to change it.")</span>
+                        @if (CanManageSettings)
+                        {
+                            <button class="location-primary" type="button" @onclick="SaveSettingsAsync" disabled="@working">@(working ? "Saving…" : "Save operating policy")</button>
+                        }
+                    </footer>
+                </section>
+            }
+        </div>
+    }
+}
+
+@code {
+    private readonly List<PosLocationAdmin> locations = [];
+    private PosLocationAdmin? selected;
+    private bool loading = true;
+    private bool working;
+    private bool showCreate;
+    private string? message;
+    private string newCode = string.Empty;
+    private string newName = string.Empty;
+    private int newKind = 1;
+    private string newTimeZone = "Asia/Manila";
+    private int editNegativePolicy;
+    private bool editDirectDelivery;
+    private decimal editOfflineHours;
+    private string editReceiptHeader = string.Empty;
+    private string editReceiptFooter = string.Empty;
+    private decimal editVatPercent;
+    private decimal editRounding;
+    private int editExpiryDays;
+    private decimal editVariance;
+    private decimal editShiftHours;
+
+    private bool CanViewLocations => Session.Current?.User.Permissions.Contains("product.view", StringComparer.Ordinal) == true;
+    private bool CanManageLocations => Session.Current?.User.Permissions.Contains("location.manage", StringComparer.Ordinal) == true;
+    private bool CanManageSettings => Session.Current?.User.Permissions.Contains("settings.manage", StringComparer.Ordinal) == true;
+    private bool CanCreate => !string.IsNullOrWhiteSpace(newCode) && !string.IsNullOrWhiteSpace(newName) && !string.IsNullOrWhiteSpace(newTimeZone);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewLocations)
+        {
+            loading = false;
+            return;
+        }
+
+        await LoadLocationsAsync();
+    }
+
+    private async Task LoadLocationsAsync(Guid? keepSelected = null)
+    {
+        loading = true;
+        try
+        {
+            ApiResult<List<PosLocationAdmin>> result = await Api.GetLocationAdministrationAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            locations.Clear();
+            locations.AddRange(result.Value.OrderBy(location => location.Kind).ThenBy(location => location.Code));
+            Guid? targetId = keepSelected ?? selected?.Id;
+            PosLocationAdmin? target = targetId is { } id ? locations.FirstOrDefault(location => location.Id == id) : locations.FirstOrDefault();
+            if (target is not null)
+            {
+                SelectLocation(target);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The location service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task CreateLocationAsync()
+    {
+        if (!CanCreate)
+        {
+            message = "Enter a code, name and IANA timezone.";
+            return;
+        }
+
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.CreateLocationAsync(
+                new PosCreateLocationRequest(newCode.Trim().ToUpperInvariant(), newName.Trim(), newKind, newTimeZone.Trim()),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            newCode = string.Empty;
+            newName = string.Empty;
+            newKind = 1;
+            newTimeZone = "Asia/Manila";
+            showCreate = false;
+            // LoadLocationsAsync re-runs SelectLocation, which clears message,
+            // so set the success text AFTER the reload.
+            await LoadLocationsAsync(result.Value.Id);
+            message ??= "The location was created with conservative operating defaults.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "The location service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        if (selected is not { } location)
+        {
+            return;
+        }
+
+        if (editRounding <= 0 || editOfflineHours < 0 || editShiftHours <= 0 || editVatPercent is < 0 or > 100 || editExpiryDays < 0 || editVariance < 0)
+        {
+            message = "Check the policy values. Durations and rounding must be positive, and VAT must be between 0 and 100%.";
+            return;
+        }
+
+        PosLocationSettings settings = new(
+            editNegativePolicy,
+            editDirectDelivery,
+            TimeSpan.FromHours((double)editOfflineHours),
+            editReceiptHeader.Trim(),
+            editReceiptFooter.Trim(),
+            editVatPercent / 100m,
+            editRounding,
+            editExpiryDays,
+            editVariance,
+            TimeSpan.FromHours((double)editShiftHours));
+
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<string> result = await Api.UpdateLocationSettingsAsync(location.Id, settings, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                message = result.Error;
+            }
+            else
+            {
+                // LoadLocationsAsync re-runs SelectLocation, which clears
+                // message, so set the success text AFTER the reload.
+                await LoadLocationsAsync(location.Id);
+                message ??= $"Operating policy saved for {location.Name}.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The location service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private void SelectLocation(PosLocationAdmin location)
+    {
+        selected = location;
+        editNegativePolicy = location.Settings.NegativeStockPolicy;
+        editDirectDelivery = location.Settings.AllowsDirectSupplierDelivery;
+        editOfflineHours = (decimal)location.Settings.OfflineGracePeriod.TotalHours;
+        editReceiptHeader = location.Settings.ReceiptHeader;
+        editReceiptFooter = location.Settings.ReceiptFooter;
+        editVatPercent = location.Settings.VatRate * 100m;
+        editRounding = location.Settings.CashRoundingIncrement;
+        editExpiryDays = location.Settings.ExpiryWarningDays;
+        editVariance = location.Settings.CashVarianceThreshold;
+        editShiftHours = (decimal)location.Settings.MaxShiftHours.TotalHours;
+        message = null;
+    }
+
+    private void ToggleCreate() { showCreate = !showCreate; message = null; }
+    private static string KindName(int kind) => kind == 0 ? "Main warehouse" : "Retail store";
+    private static string PolicyName(int policy) => policy switch { 0 => "Negative stock prohibited", 1 => "Permission override", 2 => "Offline review", _ => "Custom policy" };
+}

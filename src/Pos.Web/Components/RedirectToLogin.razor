@@ -1,14 +1,31 @@
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
-<section class="route-message" aria-live="polite">
-    <span>Session required</span>
-    <h1>Sign in to continue</h1>
-</section>
+@if (isAuthenticated)
+{
+    <section class="route-message access-denied" role="alert">
+        <span>Access restricted</span>
+        <h1>This workspace is not assigned to you.</h1>
+        <p>Your navigation only shows tools included in your current permission set.</p>
+        <a href="/">Return to your overview</a>
+    </section>
+}
+else
+{
+    <section class="route-message" aria-live="polite">
+        <span>Session required</span>
+        <h1>Sign in to continue</h1>
+    </section>
+}
 
 @code {
-    protected override void OnAfterRender(bool firstRender)
+    private bool isAuthenticated;
+
+    protected override async Task OnInitializedAsync()
     {
-        if (firstRender)
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        isAuthenticated = state.User.Identity?.IsAuthenticated == true;
+        if (!isAuthenticated)
         {
             string relative = Navigation.ToBaseRelativePath(Navigation.Uri);
             string returnUrl = Uri.EscapeDataString('/' + relative);

@@ -1,5 +1,5 @@
 @page "/sales"
-@attribute [Authorize]
+@attribute [Authorize(Policy = "sale.view")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api

@@ -2,30 +2,48 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @implements IDisposable
+@using System.Globalization
 @inject NotificationStore Store
+@inject VaultFlowApiClient Api
+@inject NavigationManager Navigation
 
 <PageTitle>Notifications · VaultFlow</PageTitle>
 
-<section class="signal-head">
-    <div>
-        <span class="eyebrow">Operations signal ledger</span>
-        <h1>What needs attention now.</h1>
+<section class="ov-hero nt-hero" aria-labelledby="notifications-title">
+    <div class="ov-hero-copy">
+        <span class="eyebrow">Stay informed</span>
+        <h1 id="notifications-title">What needs attention now.</h1>
         <p>Alerts stay here until you read them. Live delivery adds new events without replacing the durable record.</p>
     </div>
-    <div class="signal-state @(Store.IsLive ? "live" : string.Empty)">
-        <i aria-hidden="true"></i>
-        <span><strong>@(Store.IsLive ? "Live feed" : "Durable feed")</strong><small>@Store.UnreadCount unread</small></span>
+    <div class="nt-hero-art" aria-hidden="true">
+        <svg viewBox="0 0 260 150" focusable="false">
+            <ellipse cx="190" cy="92" rx="70" ry="44" fill="#d6ebdd" transform="rotate(-30 190 92)" />
+            <path d="M78 40l14 12 M66 70h18 M78 100l14-12" stroke="#4f9a70" stroke-width="5" stroke-linecap="round" />
+            <rect x="112" y="30" width="96" height="100" rx="18" fill="#f3faf5" stroke="#cfe4d6" stroke-width="2" transform="rotate(6 160 80)" />
+            <path d="M160 48c-15 0-24 11-24 25v17l-8 10h64l-8-10V73c0-14-9-25-24-25z" fill="#2f7a55" />
+            <path d="M151 106a9 9 0 0 0 18 0z" fill="#2f7a55" />
+            <circle cx="160" cy="46" r="5" fill="#2f7a55" />
+        </svg>
+        @if (Store.UnreadCount > 0)
+        {
+            <b>@Badge(Store.UnreadCount)</b>
+        }
     </div>
 </section>
 
-<section class="signal-toolbar" aria-label="Notification filters">
-    <div class="signal-filters">
-        <button class="@(unreadOnly ? string.Empty : "active")" type="button" @onclick="() => unreadOnly = false">All</button>
-        <button class="@(unreadOnly ? "active" : string.Empty)" type="button" @onclick="() => unreadOnly = true">Unread <span>@Store.UnreadCount</span></button>
+<section class="nt-toolbar" aria-label="Notification filters">
+    <div class="nt-tabs" role="tablist">
+        @foreach (ReadFilter tab in Enum.GetValues<ReadFilter>())
+        {
+            <button class="@(readFilter == tab ? "active" : string.Empty)" type="button" role="tab" aria-selected="@(readFilter == tab)" @onclick="() => readFilter = tab">
+                @tab <span>@Count(tab)</span>
+            </button>
+        }
     </div>
-    <div class="signal-actions">
-        <button type="button" @onclick="RefreshAsync" disabled="@working">Refresh</button>
-        <button class="mark-all" type="button" @onclick="MarkAllReadAsync" disabled="@(working || Store.UnreadCount == 0)">Mark all read</button>
+    <div class="nt-actions">
+        <span class="nt-live @(Store.IsLive ? "is-live" : string.Empty)" title="@(Store.IsLive ? "New alerts arrive instantly." : "Refresh to check for new alerts.")"><i></i>@(Store.IsLive ? "Live" : "Offline")</span>
+        <button type="button" @onclick="RefreshAsync" disabled="@working"><AppIcon Name="sync" /> Refresh</button>
+        <button class="nt-mark-all" type="button" @onclick="MarkAllReadAsync" disabled="@(working || Store.UnreadCount == 0)"><AppIcon Name="check" /> Mark all read</button>
     </div>
 </section>
 
@@ -34,49 +52,154 @@
     <div class="signal-error" role="alert">@Store.Error</div>
 }
 
-@if (Visible.Count == 0)
-{
-    <section class="signal-empty">
-        <span aria-hidden="true">✓</span>
-        <div><h2>@(unreadOnly ? "Nothing waiting for you." : "No operational alerts yet.")</h2><p>@(unreadOnly ? "New alerts will appear here as work changes." : "The expiry worker and future operational monitors will write here.")</p></div>
-    </section>
-}
-else
-{
-    <section class="signal-ledger" aria-live="polite">
-        @foreach (PosNotification item in Visible)
+<div class="nt-layout">
+    <section class="nt-list" aria-live="polite" aria-label="Notifications">
+        @if (Visible.Count == 0)
         {
-            <article class="signal-entry severity-@SeverityName(item.Severity) @(item.ReadAtUtc is null ? "unread" : "read")">
-                <div class="signal-rail"><i></i><time datetime="@item.CreatedAtUtc.ToString("O")">@Age(item.CreatedAtUtc)</time></div>
-                <div class="signal-copy">
-                    <header><span>@SeverityLabel(item.Severity)</span>@if (item.ReadAtUtc is null) { <b>New</b> }</header>
-                    <h2>@item.Title</h2>
-                    <p>@item.Body</p>
-                    <footer>
-                        <span>@item.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · h:mm tt")</span>
-                        @if (item.ReadAtUtc is null)
+            <div class="nt-empty">
+                <span><AppIcon Name="check" /></span>
+                <h2>@(readFilter == ReadFilter.Unread ? "Nothing waiting for you." : "No notifications here.")</h2>
+                <p>@(HasNarrowing ? "Try a wider date range or clear the category filter." : "New alerts will appear here as work changes.")</p>
+                @if (HasNarrowing)
+                {
+                    <button type="button" @onclick="ClearFilters">Clear filters</button>
+                }
+            </div>
+        }
+        else
+        {
+            @foreach (PosNotification item in Visible)
+            {
+                bool unread = item.ReadAtUtc is null;
+                string? href = TargetHref(item);
+                <article class="nt-item @(unread ? "is-unread" : string.Empty)">
+                    <button type="button" class="nt-item-hit" @onclick="() => OpenAsync(item)" disabled="@(working || (!unread && href is null))"
+                            aria-label="@(href is null ? $"Mark {item.Title} as read" : $"Open {item.Title}")"></button>
+                    <span class="nt-icon tone-@Tone(item)"><AppIcon Name="@Icon(item)" /></span>
+                    <div class="nt-copy">
+                        <h2>@item.Title</h2>
+                        <p>@item.Body</p>
+                        <small><AppIcon Name="location" /> @LocationName(item.LocationId) <i>·</i> @Category(item)</small>
+                    </div>
+                    <div class="nt-meta">
+                        <time datetime="@item.CreatedAtUtc.ToString("O")">@When(item.CreatedAtUtc)</time>
+                        <span class="ov-pill @(unread ? "tone-ok" : "tone-muted")">@(unread ? "Unread" : "Read")</span>
+                    </div>
+                    <span class="nt-go">
+                        @if (href is not null)
                         {
-                            <button type="button" @onclick="() => MarkReadAsync(item.Id)" disabled="@working">Mark read</button>
+                            <AppIcon Name="arrow" />
                         }
-                        else
+                        else if (unread)
                         {
-                            <span class="read-stamp">Read</span>
+                            <AppIcon Name="check" />
                         }
-                    </footer>
-                </div>
-            </article>
+                    </span>
+                </article>
+            }
         }
     </section>
-}
+
+    <aside class="nt-side" aria-label="Filters">
+        <h3>Quick filters</h3>
+        <div class="nt-side-list">
+            @foreach (ReadFilter filter in Enum.GetValues<ReadFilter>())
+            {
+                <button class="@(readFilter == filter ? "active" : string.Empty)" type="button" @onclick="() => readFilter = filter">
+                    <AppIcon Name="@(filter switch { ReadFilter.Unread => "circle", ReadFilter.Read => "check", _ => "list" })" />
+                    <span>@(filter == ReadFilter.All ? "All notifications" : filter.ToString())</span>
+                    <b>@Count(filter)</b>
+                </button>
+            }
+        </div>
+
+        <h3><label for="nt-range">Date range</label></h3>
+        <div class="nt-select">
+            <AppIcon Name="calendar" />
+            <select id="nt-range" @bind="range">
+                <option value="@DateRange.Day">Last 24 hours</option>
+                <option value="@DateRange.Week">Last 7 days</option>
+                <option value="@DateRange.Month">Last 30 days</option>
+                <option value="@DateRange.All">All time</option>
+            </select>
+        </div>
+
+        <h3>Categories</h3>
+        <div class="nt-side-list">
+            @foreach (string category in Categories)
+            {
+                <button class="@(categoryFilter == category ? "active" : string.Empty)" type="button" aria-pressed="@(categoryFilter == category)"
+                        @onclick="() => categoryFilter = categoryFilter == category ? null : category">
+                    <AppIcon Name="@CategoryIcon(category)" />
+                    <span>@category</span>
+                    <b>@InRange.Count(item => Category(item) == category)</b>
+                </button>
+            }
+        </div>
+    </aside>
+</div>
 
 @code {
-    private bool unreadOnly;
+    private static readonly string[] Categories = ["System", "Sales", "Inventory", "Purchasing", "Operations"];
+
+    private readonly Dictionary<Guid, string> locationNames = [];
+    private ReadFilter readFilter;
+    private DateRange range = DateRange.All;
+    private string? categoryFilter;
     private bool working;
-    private List<PosNotification> Visible => [.. Store.Items
-        .Where(item => !unreadOnly || item.ReadAtUtc is null)
+
+    private enum ReadFilter { All, Unread, Read }
+    private enum DateRange { Day, Week, Month, All }
+
+    private IEnumerable<PosNotification> InRange
+    {
+        get
+        {
+            DateTimeOffset? since = range switch
+            {
+                DateRange.Day => DateTimeOffset.UtcNow.AddDays(-1),
+                DateRange.Week => DateTimeOffset.UtcNow.AddDays(-7),
+                DateRange.Month => DateTimeOffset.UtcNow.AddDays(-30),
+                _ => null,
+            };
+            return Store.Items.Where(item => since is null || item.CreatedAtUtc >= since);
+        }
+    }
+
+    private IEnumerable<PosNotification> InCategory => InRange.Where(item => categoryFilter is null || Category(item) == categoryFilter);
+
+    private List<PosNotification> Visible => [.. InCategory
+        .Where(item => Matches(item, readFilter))
         .OrderByDescending(item => item.CreatedAtUtc)];
 
-    protected override void OnInitialized() => Store.Changed += OnChanged;
+    private bool HasNarrowing => range != DateRange.All || categoryFilter is not null;
+
+    private int Count(ReadFilter filter) => InCategory.Count(item => Matches(item, filter));
+
+    private static bool Matches(PosNotification item, ReadFilter filter) => filter switch
+    {
+        ReadFilter.Unread => item.ReadAtUtc is null,
+        ReadFilter.Read => item.ReadAtUtc is not null,
+        _ => true,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnChanged;
+
+        // Location names are a nicety; the list still renders if they cannot be loaded.
+        try
+        {
+            ApiResult<List<PosLocation>> result = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+            if (result is { IsSuccess: true, Value: not null })
+            {
+                foreach (PosLocation location in result.Value) locationNames[location.Id] = location.Name;
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -84,6 +207,13 @@ else
         {
             await Store.InitializeAsync();
         }
+    }
+
+    private async Task OpenAsync(PosNotification item)
+    {
+        string? href = TargetHref(item);
+        if (item.ReadAtUtc is null) await MarkReadAsync(item.Id);
+        if (href is not null) Navigation.NavigateTo(href);
     }
 
     private async Task RefreshAsync()
@@ -107,18 +237,65 @@ else
         finally { working = false; }
     }
 
+    private void ClearFilters()
+    {
+        range = DateRange.All;
+        categoryFilter = null;
+    }
+
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private static string SeverityName(int severity) => severity switch { 3 => "critical", 2 => "warning", _ => "info" };
-    private static string SeverityLabel(int severity) => severity switch { 3 => "Critical", 2 => "Attention", _ => "Information" };
-    private static string Age(DateTimeOffset createdAtUtc)
+    private string LocationName(Guid? locationId) => locationId switch
     {
-        TimeSpan age = DateTimeOffset.UtcNow - createdAtUtc;
-        if (age < TimeSpan.FromMinutes(1)) return "now";
-        if (age < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)age.TotalMinutes)}m";
-        if (age < TimeSpan.FromDays(1)) return $"{(int)age.TotalHours}h";
-        return $"{(int)age.TotalDays}d";
-    }
+        null => "All locations",
+        Guid id when locationNames.TryGetValue(id, out string? name) => name,
+        _ => "Assigned location",
+    };
+
+    // NotificationKind: 1 expiring, 2 expired, 3 low stock, 4 receiving discrepancy, 5 transfer shortage, 6 emergency transfer.
+    // ReferenceDocumentType: 3 transfer order, 6 sale, 7 sales return, 8 adjustment, 9 count, 10 quarantine.
+    private static string Category(PosNotification item) => (item.Kind, item.ReferenceDocumentType) switch
+    {
+        (_, 6 or 7) => "Sales",
+        (1 or 2 or 3, _) => "Inventory",
+        (4, _) => "Purchasing",
+        (5 or 6, _) => "Operations",
+        _ => "System",
+    };
+
+    private static string CategoryIcon(string category) => category switch
+    {
+        "Sales" => "sale",
+        "Inventory" => "box",
+        "Purchasing" => "receipt",
+        "Operations" => "transfer",
+        _ => "settings",
+    };
+
+    private static string Icon(PosNotification item) => item.Kind switch
+    {
+        1 or 2 => "clock",
+        3 => "warning",
+        4 => "receipt",
+        5 or 6 => "transfer",
+        _ => item.Severity switch { 3 => "alert", 2 => "warning", _ => "info" },
+    };
+
+    private static string Tone(PosNotification item) => item.Severity switch { 3 => "bad", 2 => "warn", _ => "info" };
+
+    private static string? TargetHref(PosNotification item) => (item.ReferenceDocumentType, item.ReferenceDocumentId) switch
+    {
+        (3, Guid id) => $"transfers/{id}",
+        (6, Guid id) => $"sales/{id}",
+        (7, Guid id) => $"returns/{id}",
+        (8, Guid id) => $"inventory/adjustments/{id}",
+        (9, Guid id) => $"inventory/counts/{id}",
+        (10, Guid id) => $"quarantine/{id}",
+        _ => null,
+    };
+
+    private static string Badge(int count) => count > 99 ? "99+" : count.ToString(CultureInfo.InvariantCulture);
+    private static string When(DateTimeOffset at) => at.ToLocalTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
 
     public void Dispose() => Store.Changed -= OnChanged;
 }
