@@ -27,10 +27,11 @@
                 <span class="more-item-name">Reprint last receipt</span>
                 @if (!ReprintEnabled)
                 {
-                    <span class="more-item-badge">awaiting first sale</span>
+                    <span class="more-item-badge">no sale yet</span>
                 }
             </button>
         }
+        <span class="more-item-sep" aria-hidden="true"></span>
         <button type="button" class="more-item more-item-danger" @onclick="OnLock">
             <span class="more-item-name">Lock register</span>
         </button>

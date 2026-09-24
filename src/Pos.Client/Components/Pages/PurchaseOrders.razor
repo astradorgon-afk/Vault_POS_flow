@@ -1,0 +1,410 @@
+@page "/purchasing/orders"
+@layout Layout.OfficeLayout
+@using System.Globalization
+
+<PageTitle>Purchase orders · VaultFlow</PageTitle>
+
+<div class="office-page">
+    <div class="vf-hero">
+        <div>
+            <p class="vf-eyebrow">Purchasing</p>
+            <h1>Purchase Orders</h1>
+            <p class="vf-subtitle">Create purchase orders, monitor supplier deliveries, and receive stock against approved orders.</p>
+        </div>
+        <div class="vf-hero-actions">
+            @if (Api.HasPermission(PermissionsCreate))
+            {
+                <button type="button" class="office-button" @onclick="NewOrder">
+                    ＋ New Purchase Order
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="vf-stat-grid">
+        <div class="vf-stat-card">
+            <div class="vf-stat-row"><div class="vf-stat-icon">▤</div><div><div class="vf-stat-label">Total Orders</div><div class="vf-stat-value">@_orders.Count</div><div class="vf-stat-note">All time</div></div></div><div class="vf-stat-edge"></div>
+        </div>
+        <div class="vf-stat-card green">
+            <div class="vf-stat-row"><div class="vf-stat-icon">✓</div><div><div class="vf-stat-label">Received</div><div class="vf-stat-value">@ReceivedCount</div><div class="vf-stat-note">@ReceivedNote</div></div></div><div class="vf-stat-edge"></div>
+        </div>
+        <div class="vf-stat-card gold">
+            <div class="vf-stat-row"><div class="vf-stat-icon">◷</div><div><div class="vf-stat-label">Pending</div><div class="vf-stat-value">@PendingCount</div><div class="vf-stat-note">Awaiting delivery</div></div></div><div class="vf-stat-edge"></div>
+        </div>
+        <div class="vf-stat-card red">
+            <div class="vf-stat-row"><div class="vf-stat-icon">!</div><div><div class="vf-stat-label">Drafts</div><div class="vf-stat-value">@DraftCount</div><div class="vf-stat-note">Not yet submitted</div></div></div><div class="vf-stat-edge"></div>
+        </div>
+    </div>
+
+    @if (!Api.HasPermission(PermissionsView))
+    {
+        <div class="office-blocked" role="alert">
+            <div class="office-blocked-glyph" aria-hidden="true">▣</div>
+            <h2>Access required</h2>
+            <p>Your account cannot view purchase orders. Ask an administrator for the <code>purchase.view</code> permission.</p>
+        </div>
+    }
+    else
+    {
+        <div class="vf-layout-2">
+            <div class="vf-card">
+                <div class="vf-card-body">
+                    <div class="vf-filters">
+                        <div class="field">
+                            <label class="office-field-label" for="poSearch">Search</label>
+                            <input id="poSearch" class="sheet-input" style="width:100%;text-align:left;" placeholder="PO number, supplier, product…" value="@_search" @oninput="OnSearchInput" disabled="@_loading" />
+                        </div>
+                        <div class="field">
+                            <label class="office-field-label" for="poStatus">Status</label>
+                            <select id="poStatus" value="@_selectedStatus" @onchange="OnStatusChanged" disabled="@_loading">
+                                <option value="">All statuses</option>
+                                @foreach (string statusName in OrderStatuses)
+                                {
+                                    <option value="@statusName">@SplitWords(statusName)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="office-field-label" for="poStore">Destination</label>
+                            <select id="poStore" value="@(_selectedStoreId?.ToString() ?? string.Empty)" @onchange="OnStoreChanged" disabled="@_loading">
+                                <option value="">All stores</option>
+                                @foreach (PosLocation store in Api.Stores)
+                                {
+                                    <option value="@store.Id">@store.Code · @store.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="office-field-label" for="poFind">&nbsp;</label>
+                            <button id="poFind" type="button" class="office-button" style="width:100%" @onclick="LoadOrdersAsync" disabled="@_loading">
+                                @(_loading ? "Loading…" : "Find orders")
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_message))
+                    {
+                        <div class="office-message">@_message</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_error))
+                    {
+                        <div class="office-error">@_error</div>
+                    }
+
+                    @if (_loading)
+                    {
+                        <div class="office-loading">Loading purchase orders…</div>
+                    }
+                    else if (VisibleOrders.Count == 0)
+                    {
+                        <div class="office-empty">
+                            <strong>No purchase orders matched.</strong>
+                            <span>Adjust the search, status or destination filter, or refresh when new orders land.</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="vf-table-wrap">
+                            <table class="office-table">
+                                <thead>
+                                    <tr>
+                                        <th>PO Number</th>
+                                        <th>Supplier</th>
+                                        <th>Date</th>
+                                        <th>Status</th>
+                                        <th class="numeric">Total Amount</th>
+                                        <th>Received</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (PurchaseOrderSummary order in VisibleOrders)
+                                    {
+                                        <tr class="office-row-click" @key="order.Id" @onclick="() => OpenOrder(order.Id)">
+                                            <td><strong class="mono">@(order.Number ?? order.Id.ToString("D", CultureInfo.InvariantCulture)[..8])</strong></td>
+                                            <td><div class="vf-cell-main">@SupplierName(order.SupplierId)</div><div class="vf-cell-sub">@LocationLabel(order.DestinationLocationId)</div></td>
+                                            <td><div>@order.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</div><div class="vf-cell-sub">@(order.OrderedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "Not ordered")</div></td>
+                                            <td><span class="@StatusChipClass(order.Status)">@SplitWords(order.Status)</span></td>
+                                            <td class="numeric vf-money">@Money(order.GrandTotal)</td>
+                                            <td>@ProgressLabel(order.Status)<div class="vf-progress @ProgressClass(order.Status)"><i style="width:@ProgressPercent(order.Status)%"></i></div></td>
+                                            <td><button type="button" class="office-button ghost" @onclick="() => OpenOrder(order.Id)" @onclick:stopPropagation="true">View</button></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="office-note">@VisibleOrders.Count order@(VisibleOrders.Count == 1 ? "" : "s") matched the current filters.</div>
+                    }
+                </div>
+            </div>
+
+            <div class="vf-side-stack">
+                <div class="vf-card vf-info-card">
+                    <div class="vf-info-icon">▤</div>
+                    <h3>Keep track of purchases</h3>
+                    <p>Create new purchase orders, monitor receiving progress, and manage supplier deliveries in one place.</p>
+                </div>
+                <div class="vf-card">
+                    <div class="vf-card-head"><div class="vf-card-title">Quick Actions</div></div>
+                    <div class="vf-card-body vf-quick-list">
+                        @if (Api.HasPermission(PermissionsCreate))
+                        {
+                            <button class="vf-quick-item" @onclick="NewOrder"><div class="vf-quick-mini">＋</div><div class="vf-quick-text"><strong>New Purchase Order</strong><span>Create supplier order</span></div><div class="vf-quick-arrow">›</div></button>
+                        }
+                        <button class="vf-quick-item" @onclick="OpenFirstReceivable"><div class="vf-quick-mini">▣</div><div class="vf-quick-text"><strong>Goods Receiving</strong><span>Receive items from suppliers</span></div><div class="vf-quick-arrow">›</div></button>
+                        <button class="vf-quick-item" @onclick="GoCounts"><div class="vf-quick-mini">☷</div><div class="vf-quick-text"><strong>Stock Counts</strong><span>Perform inventory count</span></div><div class="vf-quick-arrow">›</div></button>
+                        <button class="vf-quick-item" @onclick="GoTransfers"><div class="vf-quick-mini">⇄</div><div class="vf-quick-text"><strong>Transfers</strong><span>Move stock between stores</span></div><div class="vf-quick-arrow">›</div></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string PermissionsView = "purchase.view";
+    private const string PermissionsCreate = "purchase.create";
+
+    private static readonly string[] OrderStatuses =
+    [
+        "Draft", "PendingApproval", "Approved", "Rejected", "Ordered",
+        "PartiallyReceived", "FullyReceived", "Closed", "Cancelled",
+    ];
+
+    private readonly List<PurchaseOrderSummary> _orders = [];
+    private readonly Dictionary<Guid, string> _supplierNames = [];
+    private Dictionary<Guid, PosLocation> _locations = [];
+
+    private string _selectedStatus = string.Empty;
+    private Guid? _selectedStoreId;
+    private string _search = string.Empty;
+    private bool _loading = true;
+    private string? _message;
+    private string? _error;
+
+    [Inject] private BackOfficeService Api { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private int ReceivedCount => _orders.Count(order => order.Status is "FullyReceived" or "Closed");
+
+    private int PendingCount => _orders.Count(order => order.Status is "PendingApproval" or "Approved" or "Ordered" or "PartiallyReceived");
+
+    private int DraftCount => _orders.Count(order => order.Status == "Draft");
+
+    private string ReceivedNote => _orders.Count == 0
+        ? "No orders yet"
+        : $"{(ReceivedCount * 100.0 / Math.Max(1, _orders.Count)):0}% completion";
+
+    private IReadOnlyList<PurchaseOrderSummary> VisibleOrders
+        => _orders
+            .Where(order => string.IsNullOrWhiteSpace(_selectedStatus)
+                || string.Equals(order.Status, _selectedStatus, StringComparison.Ordinal))
+            .Where(order => _selectedStoreId is not { } store || order.DestinationLocationId == store)
+            .Where(MatchesSearch)
+            .OrderByDescending(order => order.CreatedAtUtc)
+            .ToArray();
+
+    private bool MatchesSearch(PurchaseOrderSummary order)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+        {
+            return true;
+        }
+
+        string query = _search.Trim().ToLowerInvariant();
+        string number = (order.Number ?? order.Id.ToString("D", CultureInfo.InvariantCulture)).ToLowerInvariant();
+        if (number.Contains(query, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (SupplierName(order.SupplierId).ToLowerInvariant().Contains(query, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return LocationLabel(order.DestinationLocationId).ToLowerInvariant().Contains(query, StringComparison.Ordinal);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Api.HasPermission(PermissionsView))
+        {
+            _loading = false;
+            return;
+        }
+
+        ApiResult<List<PosLocation>> locationResult = await Api.GetLocationsAsync(CancellationToken.None);
+        if (locationResult.IsSuccess && locationResult.Value is { } located)
+        {
+            _locations = located.ToDictionary(location => location.Id, location => location);
+        }
+
+        if (Api.Stores.Count == 1)
+        {
+            _selectedStoreId = Api.Stores[0].Id;
+        }
+
+        await LoadSuppliersAsync();
+        await LoadOrdersAsync();
+    }
+
+    private async Task LoadSuppliersAsync()
+    {
+        ApiResult<List<SupplierSummary>> result = await Api.GetSuppliersAsync(CancellationToken.None);
+        if (result.IsSuccess && result.Value is { } suppliers)
+        {
+            foreach (SupplierSummary supplier in suppliers.Where(supplier => supplier.IsActive))
+            {
+                _supplierNames[supplier.Id] = supplier.Name;
+            }
+        }
+    }
+
+    private async Task LoadOrdersAsync()
+    {
+        _loading = true;
+        _message = null;
+        _error = null;
+        try
+        {
+            ApiResult<List<PurchaseOrderSummary>> result = await Api.GetPurchaseOrdersAsync(null, CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                _error = result.Error;
+                _orders.Clear();
+                return;
+            }
+
+            _orders.Clear();
+            _orders.AddRange(result.Value);
+            _message = null;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task OnStatusChanged(ChangeEventArgs e)
+    {
+        _selectedStatus = e.Value?.ToString() ?? string.Empty;
+        await LoadOrdersAsync();
+    }
+
+    private async Task OnStoreChanged(ChangeEventArgs e)
+    {
+        _selectedStoreId = Guid.TryParse(e.Value?.ToString(), out Guid storeId) ? storeId : null;
+        await LoadOrdersAsync();
+    }
+
+    private void OpenOrder(Guid orderId) => Navigation.NavigateTo($"/purchasing/orders/{orderId:D}");
+
+    private void NewOrder() => Navigation.NavigateTo("/purchasing/orders/new");
+
+    private void GoCounts() => Navigation.NavigateTo("/inventory/counts");
+
+    private void GoTransfers() => Navigation.NavigateTo("/transfers");
+
+    private void OpenFirstReceivable()
+    {
+        PurchaseOrderSummary? receivable = _orders
+            .Where(order => order.Status is "Ordered" or "PartiallyReceived")
+            .OrderByDescending(order => order.CreatedAtUtc)
+            .FirstOrDefault()
+            ?? VisibleOrders.FirstOrDefault();
+
+        if (receivable is not null)
+        {
+            OpenOrder(receivable.Id);
+        }
+        else
+        {
+            _message = "No receivable order right now. Create a purchase order first, then receive against it once it is ordered.";
+        }
+    }
+
+    private static int ProgressPercent(string status) => status switch
+    {
+        "Draft" => 5,
+        "PendingApproval" => 20,
+        "Approved" => 35,
+        "Ordered" => 50,
+        "PartiallyReceived" => 75,
+        "FullyReceived" or "Closed" => 100,
+        _ => 0,
+    };
+
+    private static string ProgressClass(string status) => status switch
+    {
+        "FullyReceived" or "Closed" => string.Empty,
+        "Ordered" or "PartiallyReceived" => "blue",
+        "PendingApproval" or "Approved" => "gold",
+        "Draft" => "gold",
+        "Rejected" or "Cancelled" => "red",
+        _ => "gray",
+    };
+
+    private static string ProgressLabel(string status) => status switch
+    {
+        "FullyReceived" or "Closed" => "100%",
+        "PartiallyReceived" => "75%",
+        "Ordered" => "50%",
+        "Approved" => "35%",
+        "PendingApproval" => "20%",
+        "Draft" => "0%",
+        "Rejected" or "Cancelled" => "—",
+        _ => "—",
+    };
+
+    private string SupplierName(Guid supplierId)
+        => _supplierNames.TryGetValue(supplierId, out string? name)
+            ? name
+            : ShortId(supplierId);
+
+    private string LocationLabel(Guid locationId)
+        => _locations.TryGetValue(locationId, out PosLocation? location)
+            ? $"{location.Code} · {location.Name}"
+            : ShortId(locationId);
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Draft" => "status-chip sc-draft",
+        "PendingApproval" => "status-chip sc-pending-approval",
+        "Approved" => "status-chip sc-approved",
+        "Ordered" => "status-chip sc-ordered",
+        "PartiallyReceived" => "status-chip sc-partially-received",
+        "FullyReceived" => "status-chip sc-received",
+        "Rejected" => "status-chip sc-rejected",
+        "Closed" => "status-chip sc-closed",
+        "Cancelled" => "status-chip sc-cancelled",
+        _ => "status-chip",
+    };
+
+    private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

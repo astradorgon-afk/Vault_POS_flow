@@ -1,0 +1,137 @@
+@inherits LayoutComponentBase
+@inject RegisterService Register
+@inject NavigationManager Navigation
+
+@if (_store is { } store)
+{
+    <div class="office-app">
+        <header class="office-topbar">
+            <div class="office-brand">
+                <span class="office-brand-mark" aria-hidden="true">V</span>
+                <div>
+                    <div class="office-brand-word">VaultFlow</div>
+                    <div class="office-brand-context">Office</div>
+                </div>
+            </div>
+
+            <div class="office-operator">
+                <div class="office-operator-who">
+                    <span class="office-operator-store">@store.Name</span>
+                    <span class="office-operator-name">Signed in as @Register.Current?.DisplayName</span>
+                </div>
+                @if (Api.HasPermission(PermissionsSaleCreate))
+                {
+                    <button type="button" class="button-primary office-till-button" @onclick="GoTill">Open till</button>
+                }
+                <button type="button" class="button-secondary" @onclick="SignOutAsync">Sign out</button>
+            </div>
+        </header>
+
+        <div class="office-body">
+            <nav class="office-nav" aria-label="Office">
+                <button type="button" class="office-nav-link @NavClass("/office")" aria-current="@Current("/office")" @onclick="GoOffice">
+                    <span class="office-nav-glyph" aria-hidden="true">⌂</span>
+                    Overview
+                </button>
+
+                @if (Api.HasPermission(PermissionsInventoryView) || Api.HasPermission(PermissionsTransferView) || Api.HasPermission(PermissionsPurchasingView))
+                {
+                    <span class="office-nav-label">Stock</span>
+                }
+                @if (Api.HasPermission(PermissionsInventoryView))
+                {
+                    <button type="button" class="office-nav-link @NavClass("/inventory/counts")" aria-current="@Current("/inventory/counts")" @onclick="GoCounts">
+                        <span class="office-nav-glyph" aria-hidden="true">≡</span>
+                        Stock counts
+                    </button>
+                }
+                @if (Api.HasPermission(PermissionsTransferView))
+                {
+                    <button type="button" class="office-nav-link @NavClass("/transfers")" aria-current="@Current("/transfers")" @onclick="GoTransfers">
+                        <span class="office-nav-glyph" aria-hidden="true">⇄</span>
+                        Transfers
+                    </button>
+                }
+                @if (Api.HasPermission(PermissionsPurchasingView))
+                {
+                    <button type="button" class="office-nav-link @NavClass("/purchasing/orders")" aria-current="@Current("/purchasing/orders")" @onclick="GoReceiving">
+                        <span class="office-nav-glyph" aria-hidden="true">▣</span>
+                        Goods receiving
+                    </button>
+                }
+                @if (Api.HasPermission(PermissionsReportsView))
+                {
+                    <span class="office-nav-label">Sales</span>
+                    <button type="button" class="office-nav-link @NavClass("/reports")" aria-current="@Current("/reports")" @onclick="GoReports">
+                        <span class="office-nav-glyph" aria-hidden="true">▤</span>
+                        Daily reports
+                    </button>
+                }
+            </nav>
+
+            <main class="office-main">
+                @Body
+            </main>
+        </div>
+    </div>
+}
+else if (!_booted)
+{
+    <main class="office-app">
+        <div class="office-loading">Opening the office console…</div>
+    </main>
+}
+
+@code {
+    private const string PermissionsSaleCreate = "sale.create";
+    private const string PermissionsInventoryView = "inventory.view";
+    private const string PermissionsTransferView = "transfer.view";
+    private const string PermissionsPurchasingView = "purchase.view";
+    private const string PermissionsReportsView = "report.view";
+
+    [Inject] private BackOfficeService Api { get; set; } = default!;
+
+    private (string Name, string TillCode)? _store;
+    private bool _booted;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Register.Current is null)
+        {
+            Navigation.NavigateTo("/");
+            _booted = true;
+            return;
+        }
+
+        try
+        {
+            _store = await Register.GetStoreIdentityAsync();
+        }
+        catch
+        {
+            _store = (RegisterService.DefaultServer.Host, string.Empty);
+        }
+
+        _booted = true;
+    }
+
+    private string NavClass(string path)
+        => ("/" + Navigation.ToBaseRelativePath(Navigation.Uri)).StartsWith(path, StringComparison.Ordinal) ? "active" : string.Empty;
+
+    private string? Current(string path) => NavClass(path).Length > 0 ? "page" : null;
+
+    private void Go(string path) => Navigation.NavigateTo(path);
+
+    private async Task GoOffice() => Go("/office");
+    private async Task GoTill() => Go("/register");
+    private async Task GoCounts() => Go("/inventory/counts");
+    private async Task GoTransfers() => Go("/transfers");
+    private async Task GoReceiving() => Go("/purchasing/orders");
+    private async Task GoReports() => Go("/reports");
+
+    private async Task SignOutAsync()
+    {
+        await Register.SignOutAsync();
+        Navigation.NavigateTo("/", replace: true);
+    }
+}

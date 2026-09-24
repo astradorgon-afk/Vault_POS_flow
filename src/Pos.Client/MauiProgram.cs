@@ -8,6 +8,13 @@ using Pos.Client.Services;
 using Pos.Client.Storage;
 using Pos.Infrastructure.Common;
 using Pos.Infrastructure.Offline;
+using Microsoft.Maui.LifecycleEvents;
+#if WINDOWS
+using Microsoft.UI;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using WinRT.Interop;
+#endif
 
 namespace Pos.Client;
 
@@ -59,6 +66,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<DeviceKeyStore>();
         builder.Services.AddSingleton<RegisterService>();
 
+        // The office console: the same signed-in session drives the head-office
+        // HTTP calls, but with a method surface shaped for the back-office pages.
+        builder.Services.AddSingleton<BackOfficeService>();
+
         // What a whitelisted use case executes inside: one session per register,
         // the device's own unit of work, its append-only local audit, and the
         // repositories for the records it keeps until they sync.
@@ -74,6 +85,35 @@ public static class MauiProgram
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();
 #endif
+
+        // The register runs on a dedicated till, so the window fills the
+        // screen from launch rather than opening at Windows' default size.
+        builder.ConfigureLifecycleEvents(events =>
+        {
+#if WINDOWS
+            events.AddWindows(windows => windows.OnWindowCreated(window =>
+            {
+                nint handle = WindowNative.GetWindowHandle(window);
+                WindowId id = Win32Interop.GetWindowIdFromWindow(handle);
+                AppWindow appWindow = AppWindow.GetFromWindowId(id);
+
+                // MAUI applies its own default size right after the window is
+                // created, which would undo a Maximize() called this early.
+                // Activated fires once the window is actually on screen, after
+                // that sizing has already happened.
+                void MaximizeOnFirstActivation(object sender, WindowActivatedEventArgs args)
+                {
+                    window.Activated -= MaximizeOnFirstActivation;
+                    if (appWindow.Presenter is OverlappedPresenter presenter)
+                    {
+                        presenter.Maximize();
+                    }
+                }
+
+                window.Activated += MaximizeOnFirstActivation;
+            }));
+#endif
+        });
 
         return builder.Build();
     }

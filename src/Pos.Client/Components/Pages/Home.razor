@@ -4,7 +4,7 @@
 @inject RegisterService Register
 @inject NavigationManager Navigation
 
-<div class="register-app">
+<div class="register-app login-classic">
     <header class="app-topbar">
         <div class="brand-lockup">
             <span class="brand-mark" aria-hidden="true">V</span>
@@ -156,7 +156,7 @@
         await RefreshAsync();
         if (Register.Current is not null)
         {
-            Navigation.NavigateTo("/register", replace: true);
+            Navigation.NavigateTo(BackOfficeAccessible(Register.Current) ? "/office" : "/register", replace: true);
         }
     }
 
@@ -167,6 +167,15 @@
     private async Task OpenRegisterAsync()
     {
         await RefreshAsync();
-        Navigation.NavigateTo("/register");
+        Navigation.NavigateTo(BackOfficeAccessible(Register.Current) ? "/office" : "/register");
     }
+
+    // A sign-in lands on the office when the account holds any back-office
+    // permission, and on the till otherwise. A cashier should not bounce
+    // through an empty office hub.
+    private static bool BackOfficeAccessible(RegisterUser? user)
+        => user is not null
+            && user.Session.User.Permissions.Any(perm =>
+                perm == "inventory.view" || perm == "transfer.view"
+                || perm == "purchase.view" || perm == "report.view");
 }

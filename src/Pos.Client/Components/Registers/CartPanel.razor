@@ -1,7 +1,7 @@
 <div class="cart-panel">
     <div class="cart-title">
         <div>
-            <strong>CURRENT SALE</strong>
+            <strong>Current sale</strong>
             <span class="cart-title-meta">@ItemCount @(ItemCount == 1 ? "item" : "items")</span>
         </div>
         <div class="cart-title-right">
@@ -14,7 +14,7 @@
             }
             else if (ShowCustomerButton)
             {
-                <button type="button" class="button-link cart-customer" @onclick="OnCustomer">Add customer</button>
+                <button type="button" class="button-link cart-customer" @onclick="OnCustomer">+ Customer</button>
             }
             @if (HeldCount > 0)
             {
@@ -22,7 +22,7 @@
             }
             @if (Lines.Count > 0)
             {
-                <button type="button" class="button-link cart-clear" @onclick="OnClear">Clear</button>
+                <button type="button" class="button-link cart-clear" @onclick="OnClear" title="Remove every line from this sale">Clear all</button>
             }
         </div>
     </div>
@@ -31,8 +31,8 @@
         @if (Lines.Count == 0)
         {
             <p class="cart-empty">
-                Nothing in this sale yet.
-                <span>Scan or tap a product to add it.</span>
+                No items yet
+                <span>Scan a barcode, or tap a product on the left to add it.</span>
             </p>
         }
         @foreach (var line in Lines)
@@ -46,7 +46,7 @@
                 </div>
                 <div class="cart-line-controls">
                     <button type="button" class="qty-btn" title="Decrease quantity" aria-label="Decrease quantity of @line.Item.Name" @onclick="() => OnDecrement.InvokeAsync(line.Item.ProductId)">−</button>
-                    <span class="qty-value" @onclick="() => OnEditQuantity.InvokeAsync(line.Item.ProductId)" title="Tap to set exact quantity">@line.Quantity</span>
+                    <button type="button" class="qty-value" @onclick:stopPropagation="true" @onclick="() => OnEditQuantity.InvokeAsync(line.Item.ProductId)" title="Set an exact quantity (F3)" aria-label="Set quantity of @line.Item.Name">@line.Quantity</button>
                     <button type="button" class="qty-btn" title="Increase quantity" aria-label="Increase quantity of @line.Item.Name" @onclick="() => OnIncrement.InvokeAsync(line.Item.ProductId)">+</button>
                     <span class="cart-line-total">@PriceOf(line.Total, line.Item.Currency)</span>
                 </div>
@@ -60,9 +60,9 @@
 
     <div class="cart-summary">
         <div class="cart-tools">
-            <button type="button" class="cart-tool" @onclick="OnHold" disabled="@(ItemCount == 0)"><kbd>F6</kbd> Hold</button>
+            <button type="button" class="cart-tool" @onclick="EditSelected" disabled="@(ItemCount == 0)"><kbd>F3</kbd> Quantity</button>
             <button type="button" class="cart-tool" @onclick="OnDiscount"><kbd>F4</kbd> Discount</button>
-            <button type="button" class="cart-tool" @onclick="VoidSelected" disabled="@(ItemCount == 0)"><kbd>F8</kbd> Void line</button>
+            <button type="button" class="cart-tool cart-tool-danger" @onclick="VoidSelected" disabled="@(ItemCount == 0)"><kbd>F8</kbd> Void line</button>
         </div>
         <div class="cart-summary-row">
             <span>Items</span>
@@ -75,8 +75,11 @@
     </div>
 
     <div class="cart-actions">
-        <button type="button" class="cart-pay" disabled="@PayDisabled" @onclick="OnPay">Pay <kbd>F9</kbd> @PriceOf(Total, null)</button>
-        <button type="button" class="cart-hold" disabled="@HoldDisabled" @onclick="OnHold">Hold</button>
+        <button type="button" class="cart-hold" disabled="@HoldDisabled" @onclick="OnHold" title="Park this sale and serve the next customer">Hold <kbd>F6</kbd></button>
+        <button type="button" class="cart-pay" disabled="@PayDisabled" @onclick="OnPay">
+            <span class="cart-pay-label">Pay <kbd>F9</kbd></span>
+            <span class="cart-pay-amount">@PriceOf(Total, null)</span>
+        </button>
     </div>
 </div>
 
@@ -152,6 +155,15 @@
     private bool HoldDisabled => ItemCount == 0;
 
     private void SelectLine(Guid productId) => OnSelectLine.InvokeAsync(productId);
+
+    private void EditSelected()
+    {
+        var target = SelectedProductId ?? Lines.LastOrDefault()?.Item.ProductId;
+        if (target is { } productId && Lines.Count > 0)
+        {
+            OnEditQuantity.InvokeAsync(productId);
+        }
+    }
 
     private void VoidSelected()
     {

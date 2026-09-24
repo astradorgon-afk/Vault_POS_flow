@@ -1,13 +1,18 @@
 @using Pos.Client.Services
 
-<div class="vf-statusstrip @StateClass" aria-live="polite">
-    <span class="vf-statusstrip-lamp" aria-hidden="true"></span>
-    <strong class="vf-statusstrip-headline">@Headline</strong>
-    @if (Detail is { Length: > 0 } detail)
-    {
-        <span class="vf-statusstrip-detail">@detail</span>
-    }
-</div>
+@* A healthy register says so in the header; the strip only takes a row when
+   the cashier needs to know something (offline, sign-in expiring, blocked). *@
+@if (StateClass != "vf-statusstrip-ready")
+{
+    <div class="vf-statusstrip @StateClass" role="status" aria-live="polite">
+        <span class="vf-statusstrip-lamp" aria-hidden="true"></span>
+        <strong class="vf-statusstrip-headline">@Headline</strong>
+        @if (Detail is { Length: > 0 } detail)
+        {
+            <span class="vf-statusstrip-detail" title="@detail">@detail</span>
+        }
+    </div>
+}
 
 @code {
     /// <summary>The register status to present.</summary>

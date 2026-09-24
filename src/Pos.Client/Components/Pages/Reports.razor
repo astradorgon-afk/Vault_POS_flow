@@ -1,0 +1,215 @@
+@page "/reports"
+@layout Layout.OfficeLayout
+@using System.Globalization
+@inject BackOfficeService Api
+
+<PageTitle>Daily reports · VaultFlow</PageTitle>
+
+<div class="office-head">
+    <div>
+        <p class="office-kicker">Close of trade</p>
+        <h1 class="office-title">Daily sales book</h1>
+        <p class="office-lead">One business date, fully accounted for—from gross sales and refunds to each drawer that carried the day.</p>
+    </div>
+    @if (CanViewReports)
+    {
+        <div class="report-pickers">
+            <label><span>Store</span><select @bind="selectedLocationId"><option value="">Select a store</option>@foreach (PosLocation location in ScopedStores){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+            <label><span>Business date</span><input type="date" @bind="selectedDate" /></label>
+            <button type="button" @onclick="LoadReportAsync" disabled="@(!CanLoad || loading)">@(loading ? "Reading…" : "Open report")</button>
+        </div>
+    }
+</div>
+
+@if (!CanViewReports)
+{
+    <section class="report-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view operational reports.</h2>
+        <p>Ask an administrator for the <code>report.view</code> permission.</p>
+    </section>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="report-message" role="status">@message</div>
+    }
+
+    @if (loading)
+    {
+        <section class="report-empty">Balancing sales, payments and shifts…</section>
+    }
+    else if (report is null)
+    {
+        <section class="report-empty">
+            <div class="book-mark" aria-hidden="true">VF</div>
+            <div><strong>Choose a store and business date.</strong><span>The daily book is generated from committed sales and drawer activity.</span></div>
+        </section>
+    }
+    else
+    {
+        <section class="report-title-block">
+            <div><span>Daily close · @report.BusinessDate.ToString("dddd", CultureInfo.InvariantCulture)</span><h2>@report.LocationName</h2><p>@report.BusinessDate.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)</p></div>
+            <div class="report-seal"><span>Transactions</span><strong>@report.SalesSummary.SalesCount</strong><small>@(report.Shifts.Count) drawer@(report.Shifts.Count == 1 ? "" : "s")</small></div>
+        </section>
+
+        <section class="money-line" aria-label="Daily financial totals">
+            <article class="money-primary"><span>Net sales</span><strong>@Money(report.SalesSummary.NetTotal)</strong><small>after @Money(report.SalesSummary.DiscountTotal) discounts</small></article>
+            <article><span>Gross</span><strong>@Money(report.SalesSummary.GrossTotal)</strong><small>before discounts</small></article>
+            <article class="money-refund"><span>Refunds</span><strong>@Money(report.SalesSummary.RefundTotal)</strong><small>returned to customers</small></article>
+            <article><span>VAT</span><strong>@Money(report.SalesSummary.VatTotal)</strong><small>on @Money(report.SalesSummary.TaxableBaseTotal) base</small></article>
+        </section>
+
+        <div class="report-grid">
+            <section class="report-panel payment-panel" aria-labelledby="payment-breakdown-title">
+                <header><div><span>Settlement</span><h2 id="payment-breakdown-title">Payments by method</h2></div><strong>@Money(PaymentTotal)</strong></header>
+                @if (report.PaymentsByMethod.Count == 0)
+                {
+                    <div class="panel-empty">No payment activity was posted.</div>
+                }
+                else
+                {
+                    <div class="payment-stack" aria-hidden="true">
+                        @foreach (PosDailyPaymentSummary payment in report.PaymentsByMethod)
+                        {
+                            <i class="method-@MethodSlug(payment.Method)" style="width:@PaymentWidth(payment.Amount)%"></i>
+                        }
+                    </div>
+                    <div class="payment-list">
+                        @foreach (PosDailyPaymentSummary payment in report.PaymentsByMethod)
+                        {
+                            <div><span><i class="method-@MethodSlug(payment.Method)"></i>@SplitWords(payment.Method)</span><strong>@Money(payment.Amount)</strong><small>@(payment.ChangeGiven > 0 ? $"{Money(payment.ChangeGiven)} change" : "No change recorded")</small></div>
+                        }
+                    </div>
+                }
+            </section>
+
+            <section class="report-panel tax-panel" aria-labelledby="tax-shape-title">
+                <header><div><span>Tax shape</span><h2 id="tax-shape-title">What made up the day</h2></div></header>
+                <dl>
+                    <div><dt>Taxable base</dt><dd>@Money(report.SalesSummary.TaxableBaseTotal)</dd></div>
+                    <div><dt>VAT collected</dt><dd>@Money(report.SalesSummary.VatTotal)</dd></div>
+                    <div><dt>VAT-exempt sales</dt><dd>@Money(report.SalesSummary.VatExemptTotal)</dd></div>
+                    <div><dt>Zero-rated sales</dt><dd>@Money(report.SalesSummary.ZeroRatedTotal)</dd></div>
+                </dl>
+            </section>
+        </div>
+
+        <section class="shift-book" aria-labelledby="shift-book-title">
+            <header><div><span>Drawer ledger</span><h2 id="shift-book-title">Shifts that carried this date</h2></div><small>Cash = sales less cash refunds</small></header>
+            @if (report.Shifts.Count == 0)
+            {
+                <div class="panel-empty">No shifts were opened for this business date.</div>
+            }
+            else
+            {
+                <div class="shift-table-wrap">
+                    <table>
+                        <thead><tr><th>Shift</th><th>State</th><th>Time on drawer</th><th>Opening float</th><th>Sales</th><th>Net sales</th><th>Cash movement</th></tr></thead>
+                        <tbody>
+                            @foreach (PosDailyShiftSummary shift in report.Shifts)
+                            {
+                                <tr>
+                                    <td><strong>@shift.ShiftNumber</strong><small>@shift.CashierUserId.ToString()[..8]</small></td>
+                                    <td><span class="shift-state state-@shift.Status.ToLowerInvariant()">@SplitWords(shift.Status)</span></td>
+                                    <td>@ShiftTime(shift)</td>
+                                    <td>@Money(shift.OpeningFloat)</td>
+                                    <td>@shift.SalesCount</td>
+                                    <td><strong>@Money(shift.NetTotal)</strong></td>
+                                    <td>@Money(shift.CashSalesTotal - shift.CashRefundsTotal)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+}
+
+@code {
+    private readonly List<PosLocation> locations = [];
+    private string selectedLocationId = string.Empty;
+    private DateOnly selectedDate = DateOnly.FromDateTime(DateTime.Today);
+    private PosDailySalesReport? report;
+    private bool loading;
+    private string? message;
+
+    private bool CanViewReports => Api.HasPermission("report.view");
+    private bool CanLoad => Guid.TryParse(selectedLocationId, out _);
+    private List<PosLocation> ScopedStores => locations.Where(location => location.Kind == 1 && location.IsActive).ToList();
+    private decimal PaymentTotal => report?.PaymentsByMethod.Sum(item => item.Amount) ?? 0m;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewReports)
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<List<PosLocation>> result = await Api.GetLocationsAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            locations.AddRange(result.Value.OrderBy(location => location.Code));
+            if (ScopedStores.Count == 1)
+            {
+                selectedLocationId = ScopedStores[0].Id.ToString();
+                await LoadReportAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The reporting service is unavailable. Try again shortly.";
+        }
+    }
+
+    private async Task LoadReportAsync()
+    {
+        if (!Guid.TryParse(selectedLocationId, out Guid locationId))
+        {
+            message = "Select a store before opening the report.";
+            return;
+        }
+
+        loading = true;
+        message = null;
+        report = null;
+        try
+        {
+            ApiResult<PosDailySalesReport> result = await Api.GetDailySalesReportAsync(locationId, selectedDate, CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                message = result.Error;
+                return;
+            }
+
+            report = result.Value;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The reporting service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private int PaymentWidth(decimal amount) => PaymentTotal <= 0 ? 0 : Math.Max(2, (int)Math.Round(amount / PaymentTotal * 100m));
+    private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
+    private static string MethodSlug(string method) => method.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+    private static string ShiftTime(PosDailyShiftSummary shift)
+    {
+        string opened = shift.OpenedAtUtc.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture);
+        string closed = shift.ClosedAtUtc?.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "still open";
+        return $"{opened} – {closed}";
+    }
+}

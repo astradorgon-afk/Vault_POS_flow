@@ -39,12 +39,14 @@ public sealed record ProductSaleReference(Guid Id, string Sku, Guid BaseUnitOfMe
 /// <summary>The shift currently open on this physical register.</summary>
 /// <param name="ShiftId">The shift identifier.</param>
 /// <param name="Number">The human-readable shift number.</param>
-/// <param name="CashierName">The cashier who opened it.</param>
+/// <param name="CashierUserId">Who opened the shift; sales must be made by this user.</param>
+/// <param name="CashierName">The cashier's display name.</param>
 /// <param name="BusinessDate">The store business date.</param>
 /// <param name="OpeningFloat">The cash placed in the drawer.</param>
 public sealed record RegisterOpenShift(
     Guid ShiftId,
     string Number,
+    Guid CashierUserId,
     string CashierName,
     DateOnly BusinessDate,
     decimal OpeningFloat);
@@ -369,6 +371,7 @@ public sealed class HeadOfficeClient(HttpClient http)
             : new RegisterOpenShift(
                 terminal.OpenShift.ShiftId,
                 terminal.OpenShift.Number,
+                terminal.OpenShift.CashierId,
                 terminal.OpenShift.CashierName,
                 terminal.OpenShift.BusinessDate,
                 terminal.OpenShift.OpeningFloat);
@@ -820,6 +823,7 @@ public sealed class HeadOfficeClient(HttpClient http)
     private sealed record OpenShiftRow(
         Guid ShiftId,
         string Number,
+        Guid CashierId,
         string CashierName,
         DateOnly BusinessDate,
         decimal OpeningFloat);

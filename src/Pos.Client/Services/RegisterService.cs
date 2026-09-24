@@ -551,8 +551,25 @@ public sealed class RegisterService(
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Renders a completed sale receipt as text and logs the reprint.</summary>
-    public async Task<string> GetReceiptTextAsync(
+    /// <summary>
+    /// Renders the customer copy for the sale that just completed. The receipt
+    /// endpoint records this as an original print, not as a privileged reprint.
+    /// </summary>
+    public async Task<string> GetOriginalReceiptTextAsync(
+        Guid saleId,
+        CancellationToken cancellationToken = default)
+    {
+        (RegisterUser user, DeviceId deviceId, _) = RequireActiveSession();
+        return await headOffice.GetSaleReceiptAsync(
+            Server,
+            user.Session.AccessToken,
+            deviceId.Value,
+            saleId,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Logs and renders a permissioned copy of an earlier receipt.</summary>
+    public async Task<string> ReprintReceiptTextAsync(
         Guid saleId,
         string reason,
         CancellationToken cancellationToken = default)

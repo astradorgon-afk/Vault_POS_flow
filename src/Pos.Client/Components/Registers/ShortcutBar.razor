@@ -1,27 +1,27 @@
 <footer class="till-footer" aria-label="Keyboard shortcuts">
     @if (PaymentMode)
     {
-        <span class="till-footer-right"><kbd>F10</kbd> Complete sale</span>
-        <span class="till-footer-left"><kbd>Esc</kbd> Back to cart</span>
+        <button type="button" class="till-footer-key till-footer-left" @onclick='() => Press("Escape")'><kbd>Esc</kbd> Back to cart</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F10")'><kbd>F10</kbd> Complete sale</button>
     }
     else if (HeldPanelOpen)
     {
-        <span class="till-footer-right"><kbd>Esc</kbd> Close held sales</span>
+        <button type="button" class="till-footer-key till-footer-right" @onclick='() => Press("Escape")'><kbd>Esc</kbd> Close held sales</button>
     }
     else if (MoreOpen)
     {
-        <span class="till-footer-right"><kbd>Esc</kbd> Close menu</span>
+        <button type="button" class="till-footer-key till-footer-right" @onclick='() => Press("Escape")'><kbd>Esc</kbd> Close menu</button>
     }
     else
     {
-        <span class="till-footer-left"><kbd>F2</kbd> Search</span>
-        <span><kbd>F3</kbd> Quantity</span>
-        <span><kbd>F4</kbd> Discount</span>
-        <span><kbd>F6</kbd> Hold</span>
-        <span><kbd>F7</kbd> Recall</span>
-        <span><kbd>F8</kbd> Void line</span>
-        <span><kbd>F9</kbd> Pay</span>
-        <span class="till-footer-right"><kbd>Esc</kbd> Cancel</span>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F2")'><kbd>F2</kbd> Search</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F3")' disabled="@(!HasItems)"><kbd>F3</kbd> Quantity</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F4")'><kbd>F4</kbd> Discount</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F6")' disabled="@(!HasItems)"><kbd>F6</kbd> Hold</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F7")'><kbd>F7</kbd> Recall</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F8")' disabled="@(!HasItems)"><kbd>F8</kbd> Void line</button>
+        <button type="button" class="till-footer-key" @onclick='() => Press("F9")' disabled="@(!HasItems)"><kbd>F9</kbd> Pay</button>
+        <button type="button" class="till-footer-key till-footer-right" @onclick='() => Press("Escape")'><kbd>Esc</kbd> Cancel</button>
     }
 </footer>
 
@@ -37,4 +37,17 @@
     /// <summary>When true, shows shortcuts for the More menu.</summary>
     [Parameter]
     public bool MoreOpen { get; set; }
+
+    /// <summary>Whether the sale has lines, so line and payment keys can act.</summary>
+    [Parameter]
+    public bool HasItems { get; set; }
+
+    /// <summary>
+    /// Raised with the key name when a shortcut is clicked, so a mouse or touch
+    /// press does exactly what the keyboard shortcut does.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnShortcut { get; set; }
+
+    private Task Press(string key) => OnShortcut.InvokeAsync(key);
 }

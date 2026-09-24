@@ -1,0 +1,22 @@
+.office-back {
+    padding: 0.45rem 0.7rem;
+    border: 1px solid rgba(230, 224, 209, 0.14);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.office-back:hover {
+    color: var(--paper);
+    border-color: rgba(230, 224, 209, 0.32);
+}
+.variance-bad {
+    color: #ff6b6b;
+    font-weight: 700;
+}
+.variance-good {
+    color: #38b2ac;
+    font-weight: 700;
+}

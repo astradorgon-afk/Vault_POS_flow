@@ -3,6 +3,7 @@
 @using Pos.Client.Models
 @using Pos.Domain.Sales
 @inject RegisterService Register
+@inject NavigationManager Navigation
 
 <div class="register-app cashier-app" @onkeydown="HandleKeyDownAsync">
     <RegisterHeader
@@ -14,10 +15,35 @@
         Online="_online"
         SyncTime="@SyncTime"
         Pending="Status?.UnsentEvents ?? 0"
+        ShowOffice="CanOpenOffice"
+        OnOffice="OpenOffice"
         OnMore="OpenMoreAsync"
         OnLock="SignOutAsync" />
 
     <RegisterStatusStrip Status="Status" ContextError="@_contextError" />
+
+    @if (_completionNoticeOpen && _lastSale is not null)
+    {
+        <section class="sale-complete-strip" aria-label="Completed sale">
+            <span class="sale-complete-check" aria-hidden="true">✓</span>
+            <div class="sale-complete-identity" role="status" aria-live="polite">
+                <strong>Sale complete</strong>
+                <span>@_lastSale.Number</span>
+            </div>
+            @if (_changeDue is { } changeDue)
+            {
+                <div class="sale-complete-change">
+                    <span>Change due</span>
+                    <strong>@PriceOf(changeDue)</strong>
+                </div>
+            }
+            <span class="sale-complete-ready">Ready for the next scan</span>
+            <button type="button" class="button-secondary sale-complete-receipt" @onclick="OpenOriginalReceiptAsync">
+                View receipt
+            </button>
+            <button type="button" class="sale-complete-dismiss" @onclick="DismissCompletionNotice" aria-label="Dismiss completed sale">×</button>
+        </section>
+    }
 
     @if (_screen == SaleScreen.Gate)
     {
@@ -35,7 +61,7 @@
     {
         <main class="till-workspace" aria-label="Register">
             <section class="till-pane till-pane-left @(PaymentShown ? "pane-dimmed" : string.Empty)">
-                @if (_screen is SaleScreen.Selling or SaleScreen.NeedsShift)
+                @if (_screen is SaleScreen.Selling or SaleScreen.NeedsShift or SaleScreen.OtherShift)
                 {
                     <BarcodeEntry
                         Value="@_barcode"
@@ -73,6 +99,27 @@
                         </button>
                     </section>
                 }
+                else if (_screen == SaleScreen.OtherShift)
+                {
+                    <section class="shift-open-card">
+                        <span class="eyebrow">Drawer opened by someone else</span>
+                        <h3>Sell under your own shift only.</h3>
+                        <p>
+                            This drawer was opened by @(_context?.OpenShift?.CashierName ?? "another cashier").
+                            Every sale is recorded against the cashier who opened the shift, so this register
+                            can’t complete your sale into it.
+                            @(CanCloseOtherShift
+                                ? "You have the clearance to close their shift, then open your own."
+                                : "Ask them to close it, or sign in with an account that can.")
+                        </p>
+                        @if (CanCloseOtherShift)
+                        {
+                            <button type="button" class="button-primary" @onclick="MoreCloseShiftAsync" disabled="@_closingShift">
+                                Close their shift
+                            </button>
+                        }
+                    </section>
+                }
                 else if (_screen == SaleScreen.Payment)
                 {
                     @if (_error is not null)
@@ -91,6 +138,54 @@
                         Busy="_screen == SaleScreen.Completing"
                         OnComplete="CompleteSaleAsync"
                         OnBack="BackToCartAsync" />
+                }
+                else if (_receiptOpen)
+                {
+                    <section class="receipt-view">
+                        <span class="eyebrow">Receipt — @(_lastSale?.Number ?? string.Empty)</span>
+
+                        @if (_receiptAfterSale && _changeDue is { } changeDue)
+                        {
+                            <div class="receipt-change-due" role="status">
+                                <span>Change due</span>
+                                <strong>@PriceOf(changeDue)</strong>
+                            </div>
+                        }
+
+                        @if (_receiptBusy)
+                        {
+                            <div class="receipt-fetch" aria-live="polite">
+                                <span class="receipt-fetch-line"></span>
+                                <span class="receipt-fetch-line"></span>
+                                <span class="receipt-fetch-line short"></span>
+                            </div>
+                        }
+                        else if (_receiptError is not null)
+                        {
+                            <InlineRegisterAlert
+                                Variant="error"
+                                Message="@_receiptError"
+                                Details="@(_receiptAfterSale
+                                    ? "The sale is safe. Try loading this customer copy again."
+                                    : "Close and try the reprint again from the More menu.")" />
+                        }
+                        else
+                        {
+                            <div class="receipt-paper">
+                                <textarea class="receipt-text" readonly aria-label="Receipt text">@_receiptText</textarea>
+                            </div>
+                        }
+
+                        <div class="receipt-actions">
+                            @if (_receiptError is not null)
+                            {
+                                <button type="button" class="button-secondary" @onclick="RetryReceiptAsync">Try again</button>
+                            }
+                            <button type="button" class="button-primary" @onclick="CloseReceipt">
+                                Back to sale <kbd>Esc</kbd>
+                            </button>
+                        </div>
+                    </section>
                 }
                 else
                 {
@@ -125,11 +220,6 @@
                 }
             </aside>
         </main>
-    }
-
-    @if (_screen == SaleScreen.Completed)
-    {
-        <SaleCompletedOverlay SaleNumber="@(_completed?.Number ?? string.Empty)" ChangeDue="_changeDue" OnNext="StartNextSale" />
     }
 
     @if (_shiftDialogOpen)
@@ -174,17 +264,6 @@
             OnDismiss="DismissReturns" />
     }
 
-    @if (_receiptOpen)
-    {
-        <ReceiptPrintDialog
-            Open="true"
-            SaleNumber="@(_lastSale?.Number ?? string.Empty)"
-            ReceiptText="@_receiptText"
-            Busy="_receiptBusy"
-            Error="@_receiptError"
-            OnDismiss="() => _receiptOpen = false" />
-    }
-
     @if (_customerDialogOpen)
     {
         <CustomerDialog
@@ -201,8 +280,8 @@
         <RegisterMoreMenu
             Open="true"
             HeldCount="_heldSales.Count"
-            ShowReturns="CanReturn && _context?.OpenShift is not null"
-            ShowCloseShift="CanCloseShift && _context?.OpenShift is not null"
+            ShowReturns="CanReturn && _context?.OpenShift is not null && !ShiftOpenedByOther"
+            ShowCloseShift="(CanCloseShift || (ShiftOpenedByOther && CanCloseOtherShift)) && _context?.OpenShift is not null"
             ShowReprint="CanReprint"
             ReprintEnabled="_lastSale is not null"
             OnHeldSales="MoreHeldAsync"
@@ -223,7 +302,12 @@
             OnDismiss="() => _qtyTarget = null" />
     }
 
-    <ShortcutBar PaymentMode="_screen == SaleScreen.Payment" HeldPanelOpen="_heldPanelOpen" MoreOpen="_moreOpen" />
+    <ShortcutBar
+        PaymentMode="_screen == SaleScreen.Payment"
+        HeldPanelOpen="_heldPanelOpen"
+        MoreOpen="_moreOpen"
+        HasItems="_cart.Count > 0"
+        OnShortcut="PressShortcutAsync" />
 </div>
 
 @code {
@@ -239,6 +323,9 @@
         /// <summary>No shift is open; scanning works but paying does not.</summary>
         NeedsShift,
 
+        /// <summary>A shift is open, but a different cashier opened it; selling into it is not allowed.</summary>
+        OtherShift,
+
         /// <summary>Building a sale.</summary>
         Selling,
 
@@ -247,9 +334,6 @@
 
         /// <summary>Head office is committing the sale.</summary>
         Completing,
-
-        /// <summary>The sale is recorded; the register is waiting for the next sale.</summary>
-        Completed,
     }
 
     private readonly List<CatalogueItem> _items = [];
@@ -257,7 +341,6 @@
     private readonly List<HeldSale> _heldSales = [];
     private RegisterCheckoutContext? _context;
     private string? _contextError;
-    private CompletedRegisterSale? _completed;
     private decimal? _changeDue;
     private Guid? _selectedProductId;
     private SaleCartLine? _qtyTarget;
@@ -279,7 +362,6 @@
     private int _scanTicket;
     private int _searchTicket;
     private int _cashTicket;
-    private CancellationTokenSource? _completionCts;
     private PaymentPanel? _payPanel;
     private CompletedRegisterSale? _lastSale;
     private bool _returnsOpen;
@@ -289,6 +371,8 @@
     private bool _closingShift;
     private string? _shiftCloseError;
     private bool _receiptOpen;
+    private bool _receiptAfterSale;
+    private bool _completionNoticeOpen;
     private bool _receiptBusy;
     private string _receiptText = string.Empty;
     private string? _receiptError;
@@ -322,11 +406,43 @@
     private bool CanCloseShift =>
         Register.Current?.Session.User.Permissions.Contains("shift.close", StringComparer.Ordinal) == true;
 
+    /// <summary>Whether this account may close a shift opened by someone else.</summary>
+    private bool CanCloseOtherShift =>
+        Register.Current?.Session.User.Permissions.Contains("shift.close.other", StringComparer.Ordinal) == true;
+
+    /// <summary>
+    /// A shift is open on this device, but the signed-in cashier did not open it:
+    /// sales are recorded against the shift's own cashier, so selling must be blocked.
+    /// </summary>
+    private bool ShiftOpenedByOther =>
+        _context?.OpenShift is { } shift
+        && shift.CashierUserId != Register.Current?.Session.User.UserId;
+
     private bool CanViewSales =>
         Register.Current?.Session.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
 
     private bool CanViewCustomers =>
         Register.Current?.Session.User.Permissions.Contains("customer.view", StringComparer.Ordinal) == true;
+
+    // Same rule the sign-in uses to land an account on the office console.
+    private bool CanOpenOffice =>
+        Register.Current?.Session.User.Permissions.Any(perm =>
+            perm is "inventory.view" or "transfer.view" or "purchase.view" or "report.view") == true;
+
+    private void OpenOffice()
+    {
+        // Leaving the till drops the open cart, so ask for it to be settled first.
+        if (_cart.Count > 0)
+        {
+            _error = "Hold or finish this sale before opening the office.";
+            return;
+        }
+
+        Navigation.NavigateTo("/office");
+    }
+
+    // A click on the shortcut bar behaves exactly like the key it shows.
+    private Task PressShortcutAsync(string key) => HandleKeyDownAsync(new KeyboardEventArgs { Key = key });
 
     private bool CanCreateCustomer =>
         Register.Current?.Session.User.Permissions.Contains("customer.manage", StringComparer.Ordinal) == true;
@@ -394,8 +510,28 @@
             return SaleScreen.NeedsShift;
         }
 
+        if (ShiftOpenedByOther)
+        {
+            return SaleScreen.OtherShift;
+        }
+
         _scanTicket++;
         return SaleScreen.Selling;
+    }
+
+    /// <summary>
+    /// Maps the current checkout context to a till screen: a missing shift means
+    /// <see cref="SaleScreen.NeedsShift"/>, someone else's shift means
+    /// <see cref="SaleScreen.OtherShift"/>, otherwise the till is selling.
+    /// </summary>
+    private SaleScreen ShiftScreenForContext()
+    {
+        if (_context?.OpenShift is null)
+        {
+            return SaleScreen.NeedsShift;
+        }
+
+        return ShiftOpenedByOther ? SaleScreen.OtherShift : SaleScreen.Selling;
     }
 
     private async Task LoadTillAsync()
@@ -442,7 +578,7 @@
             await LoadTillAsync();
             if (_screen == SaleScreen.NeedsShift && _context?.OpenShift is not null)
             {
-                _screen = SaleScreen.Selling;
+                _screen = ShiftScreenForContext();
                 _scanTicket++;
             }
 
@@ -528,6 +664,7 @@
             existing.Quantity++;
         }
 
+        DismissCompletionForNewBasket();
         _error = null;
         _heldPanelOpen = false;
         return true;
@@ -769,21 +906,24 @@
                 new RegisterSalePayment(payment.Method, payment.Amount, payment.Tendered, payment.ProviderReference),
             ];
 
-            _completed = await Register.CompleteSaleAsync(
+            _lastSale = await Register.CompleteSaleAsync(
                 shift.ShiftId,
                 shift.BusinessDate,
                 _customer?.Id,
                 lines,
                 payments);
 
-            _lastSale = _completed;
-
             _changeDue = payment.Method == PaymentMethod.Cash && payment.Tendered is { } tendered && tendered > NetTotal
                 ? RoundToIncrement(tendered - NetTotal)
                 : null;
 
-            _screen = SaleScreen.Completed;
-            _ = ScheduleNextSaleAsync();
+            decimal? completedSaleChange = _changeDue;
+
+            // Return directly to a fresh basket. The slim completion strip keeps
+            // the sale number and change visible without replacing the cart.
+            StartNextSale();
+            _changeDue = completedSaleChange;
+            _completionNoticeOpen = true;
         }
         catch (HeadOfficeException ex)
         {
@@ -792,37 +932,8 @@
         }
     }
 
-    // Enter is deterministic and immediate; this is a forgiving nudge for the
-    // register that gets left alone after a sale.
-    private async Task ScheduleNextSaleAsync()
-    {
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-            _completionCts = cts;
-            await Task.Delay(TimeSpan.FromSeconds(6), cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-        finally
-        {
-            _completionCts = null;
-        }
-
-        if (_screen == SaleScreen.Completed)
-        {
-            StartNextSale();
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
     private void StartNextSale()
     {
-        _completionCts?.Cancel();
-        _completed = null;
-        _changeDue = null;
         _cart.Clear();
         _selectedProductId = null;
         _qtyTarget = null;
@@ -833,13 +944,16 @@
         _barcode = string.Empty;
         BarcodeError = null;
         _error = null;
-        _screen = _context?.OpenShift is null ? SaleScreen.NeedsShift : SaleScreen.Selling;
+        _changeDue = null;
+        _receiptOpen = false;
+        _receiptAfterSale = false;
+        _completionNoticeOpen = false;
+        _screen = ShiftScreenForContext();
         _scanTicket++;
     }
 
     private async Task SignOutAsync()
     {
-        _completionCts?.Cancel();
         await Register.SignOutAsync();
         await OnSignedOut.InvokeAsync();
     }
@@ -876,7 +990,7 @@
     private async Task MoreCloseShiftAsync()
     {
         _moreOpen = false;
-        if (_context?.OpenShift is not { } shift || !CanCloseShift || _closingShift)
+        if (_context?.OpenShift is not { } shift || (!CanCloseShift && !CanCloseOtherShift) || _closingShift)
         {
             return;
         }
@@ -929,7 +1043,7 @@
             _error = null;
             _context = await Register.GetCheckoutContextAsync();
             _contextError = null;
-            _screen = _context?.OpenShift is null ? SaleScreen.NeedsShift : SaleScreen.Selling;
+            _screen = ShiftScreenForContext();
         }
         catch (HeadOfficeException ex)
         {
@@ -944,18 +1058,32 @@
     private async Task MoreReprintAsync()
     {
         _moreOpen = false;
-        if (_lastSale is null || !CanReprint)
+        await ShowReceiptAsync(afterSale: false);
+    }
+
+    private Task OpenOriginalReceiptAsync() => ShowReceiptAsync(afterSale: true);
+
+    /// <summary>Fetches the last completed sale's receipt and shows it in the right pane.</summary>
+    private async Task ShowReceiptAsync(bool afterSale)
+    {
+        if (_lastSale is null || (!afterSale && !CanReprint))
         {
+            // The receipt of the sale just completed is the cashier's own and is
+            // always shown; reprinting an older sale from the menu needs the permission.
             return;
         }
 
+        _receiptAfterSale = afterSale;
         _receiptOpen = true;
         _receiptBusy = true;
         _receiptError = null;
         _receiptText = string.Empty;
+        await InvokeAsync(StateHasChanged);
         try
         {
-            _receiptText = await Register.GetReceiptTextAsync(_lastSale.Id, "Reprinted from the register menu");
+            _receiptText = afterSale
+                ? await Register.GetOriginalReceiptTextAsync(_lastSale.Id)
+                : await Register.ReprintReceiptTextAsync(_lastSale.Id, "Reprinted from the register menu");
         }
         catch (HeadOfficeException ex)
         {
@@ -964,6 +1092,40 @@
         finally
         {
             _receiptBusy = false;
+        }
+    }
+
+    private Task RetryReceiptAsync() => ShowReceiptAsync(_receiptAfterSale);
+
+    private void CloseReceipt()
+    {
+        _receiptOpen = false;
+        _receiptAfterSale = false;
+    }
+
+    private void DismissCompletionNotice()
+    {
+        _completionNoticeOpen = false;
+        _changeDue = null;
+
+        if (_receiptAfterSale)
+        {
+            CloseReceipt();
+        }
+    }
+
+    /// <summary>
+    /// The first item is the cashier's intent to move on. Retire the previous
+    /// sale's confirmation and any receipt preview so the live cart is visible.
+    /// </summary>
+    private void DismissCompletionForNewBasket()
+    {
+        _completionNoticeOpen = false;
+        _changeDue = null;
+
+        if (_receiptOpen)
+        {
+            CloseReceipt();
         }
     }
 
@@ -1095,13 +1257,6 @@
                 }
 
                 break;
-            case "Enter":
-                if (_screen == SaleScreen.Completed)
-                {
-                    StartNextSale();
-                }
-
-                break;
             case "Escape":
                 HandleEscape();
                 break;
@@ -1115,12 +1270,6 @@
             _screen = SaleScreen.Selling;
             _error = null;
             _scanTicket++;
-            return;
-        }
-
-        if (_screen == SaleScreen.Completed)
-        {
-            StartNextSale();
             return;
         }
 
@@ -1156,7 +1305,13 @@
 
         if (_receiptOpen)
         {
-            _receiptOpen = false;
+            CloseReceipt();
+            return;
+        }
+
+        if (_completionNoticeOpen)
+        {
+            DismissCompletionNotice();
             return;
         }
 
@@ -1192,4 +1347,7 @@
         increment = increment > 0m ? increment : 0.01m;
         return decimal.Round(amount / increment, 0, MidpointRounding.AwayFromZero) * increment;
     }
+
+    private static string PriceOf(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
 }

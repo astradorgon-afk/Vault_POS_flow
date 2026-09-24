@@ -1,0 +1,1224 @@
+@page "/purchasing/orders/{OrderId:guid}"
+@layout Layout.OfficeLayout
+@using System.Globalization
+@using PurchaseOrderDetailDto = Pos.Client.Services.PurchaseOrderDetail
+
+<PageTitle>Purchase order · VaultFlow</PageTitle>
+
+<div class="office-page">
+    @if (!Api.HasPermission(PermissionsView))
+    {
+        <div class="office-blocked" role="alert">
+            <div class="office-blocked-glyph" aria-hidden="true">▣</div>
+            <h2>Access required</h2>
+            <p>Your account cannot view purchase orders. Ask an administrator for the <code>purchase.view</code> permission.</p>
+        </div>
+    }
+    else if (_loading)
+    {
+        <div class="office-loading">Loading the purchase order…</div>
+    }
+    else if (_order is null)
+    {
+        <div class="office-blocked" role="alert">
+            <div class="office-blocked-glyph" aria-hidden="true">✕</div>
+            <h2>Order could not be loaded</h2>
+            <p>@(_error ?? "This purchase order was not found on the head-office system.")</p>
+        </div>
+    }
+    else
+    {
+        <div class="office-head">
+            <div>
+                <p class="office-kicker">Purchasing</p>
+                <h1 class="office-title mono">@(_order.Number is { Length: > 0 } number ? number : "Purchase order")</h1>
+                <p class="office-lead">@SupplierName(_order.SupplierId) · @LocationLabel(_order.DestinationLocationId)</p>
+            </div>
+            <div class="office-actions">
+                <button type="button" class="office-back" @onclick="GoBack">← All purchase orders</button>
+                <span class="@StatusChipClass(_order.Status)">@SplitWords(_order.Status)</span>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_notice))
+        {
+            <div class="office-message">@_notice</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="office-error">@_error</div>
+        }
+
+        <div class="office-summary-strip">
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Status</div>
+                <div class="office-summary-value">@SplitWords(_order.Status)</div>
+            </div>
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Grand total</div>
+                <div class="office-summary-value accent">@Money(_order.GrandTotal)</div>
+            </div>
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Subtotal</div>
+                <div class="office-summary-value">@Money(_order.Subtotal)</div>
+            </div>
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Tax total</div>
+                <div class="office-summary-value">@Money(_order.TaxTotal)</div>
+            </div>
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Ordered at</div>
+                <div class="office-summary-value">@(_order.OrderedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</div>
+            </div>
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Expected at</div>
+                <div class="office-summary-value">@(_order.ExpectedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</div>
+            </div>
+            <div class="office-summary-cell">
+                <div class="office-summary-label">Created by</div>
+                <div class="office-summary-value">@(_order.CreatedByUserId == Api.UserId && Api.DisplayName.Length > 0 ? Api.DisplayName : ShortId(_order.CreatedByUserId))</div>
+            </div>
+        </div>
+
+        @if (ShowApprovalActions)
+        {
+            <div class="office-panel">
+                <div class="office-panel-head">
+                    <div>
+                        <h2 class="office-panel-title">Manager review</h2>
+                        <p class="office-panel-sub">@ApprovalHint</p>
+                    </div>
+                </div>
+                <div class="office-panel-body">
+                    <div class="office-form-grid">
+                        <label>
+                            <span class="office-field-label">Decision note (optional)</span>
+                            <input type="text" placeholder="Notes for the reviewer…" @bind="_decisionNote" disabled="@_actionBusy" />
+                        </label>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_actionError))
+                    {
+                        <div class="office-error">@_actionError</div>
+                    }
+                    <div class="office-actions" style="margin-top:0.9rem;">
+                        @if (_order.Status == "Draft")
+                        {
+                            <button type="button" class="office-button" @onclick="SubmitOrderAsync" disabled="@_actionBusy">
+                                @(_actionBusy ? "Working…" : "Submit for approval")
+                            </button>
+                        }
+                        @if (_order.Status == "PendingApproval")
+                        {
+                            <button type="button" class="office-button" @onclick="ApproveOrderAsync" disabled="@_actionBusy">
+                                @(_actionBusy ? "Working…" : "Approve order")
+                            </button>
+                            <button type="button" class="office-button ghost" @onclick="RejectOrderAsync" disabled="@_actionBusy">
+                                Reject
+                            </button>
+                        }
+                        @if (_order.Status == "Approved")
+                        {
+                            <button type="button" class="office-button" @onclick="SendOrderAsync" disabled="@_actionBusy">
+                                @(_actionBusy ? "Working…" : "Send to supplier")
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_order.CancelledReason))
+        {
+            <div class="office-note"><strong>Cancelled reason:</strong> @_order.CancelledReason</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_order.ClosedReason))
+        {
+            <div class="office-note"><strong>Closed reason:</strong> @_order.ClosedReason</div>
+        }
+
+        <div class="office-panel">
+            <div class="office-panel-head">
+                <div>
+                    <h2 class="office-panel-title">Order lines</h2>
+                    <p class="office-panel-sub">@_order.Lines.Count line@(_order.Lines.Count == 1 ? "" : "s") · expected delivery @(_order.ExpectedAtUtc?.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ?? "not set")</p>
+                </div>
+            </div>
+            <div class="office-panel-body">
+                <table class="office-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>SKU</th>
+                            <th>Product</th>
+                            <th>Unit</th>
+                            <th class="numeric">Ordered qty</th>
+                            <th class="numeric">Unit cost</th>
+                            <th class="numeric">Line total</th>
+                            <th>Expected</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (PurchaseOrderLineSummary line in _order.Lines)
+                        {
+                            <tr @key="line.Id">
+                                <td>@line.LineNo</td>
+                                <td class="mono">@ProductSku(line.ProductId)</td>
+                                <td>@ProductDisplayName(line.ProductId)</td>
+                                <td class="office-table-row-hint mono">@ShortId(line.UnitOfMeasureId)</td>
+                                <td class="numeric">@Quantity(line.OrderedQuantity)</td>
+                                <td class="numeric">@Money(line.UnitCost)</td>
+                                <td class="numeric">@Money(line.LineTotal)</td>
+                                <td>@(_order.ExpectedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="office-panel">
+            <div class="office-panel-head">
+                <div>
+                    <h2 class="office-panel-title">Approvals</h2>
+                    <p class="office-panel-sub">Decisions recorded against this order.</p>
+                </div>
+            </div>
+            <div class="office-panel-body">
+                @if (_order.Approvals.Count == 0)
+                {
+                    <div class="office-empty"><strong>No decisions yet.</strong><span>An approver decision appears here once the order is reviewed.</span></div>
+                }
+                else
+                {
+                    <table class="office-table">
+                        <thead>
+                            <tr>
+                                <th>Approver</th>
+                                <th>Decision</th>
+                                <th>Decided at</th>
+                                <th class="numeric">Threshold</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (PurchaseApprovalSummary approval in _order.Approvals)
+                            {
+                                <tr @key="approval.DecidedAtUtc">
+                                    <td class="mono">@ShortId(approval.ApproverUserId)</td>
+                                    <td><span class="@ApprovalChipClass(approval.Decision)">@SplitWords(approval.Decision)</span></td>
+                                    <td>@approval.DecidedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                                    <td class="numeric">@Money(approval.ThresholdApplied)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(approval.Notes) ? "—" : approval.Notes)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+
+        @if (CanReceive && _order.Status is "Ordered" or "PartiallyReceived")
+        {
+            <div class="office-panel">
+                <div class="office-panel-head">
+                    <div>
+                        <h2 class="office-panel-title">Receive stock</h2>
+                        <p class="office-panel-sub">Count what actually arrived and dispose of damaged, wrong or expired units honestly.</p>
+                    </div>
+                </div>
+                <div class="office-panel-body">
+                    <form class="receiving-scan" @onsubmit="ScanAsync" @onsubmit:preventDefault="true">
+                        <span class="receiving-scan-icon" aria-hidden="true">▤</span>
+                        <label class="scan-field">
+                            <span>Scan barcode</span>
+                            <input @ref="_scanInput"
+                                   class="sheet-input scan-field-input"
+                                   type="text"
+                                   autocomplete="off"
+                                   autocapitalize="off"
+                                   spellcheck="false"
+                                   placeholder="Scan or type a product barcode…"
+                                   disabled="@_scanning"
+                                   @bind:event="oninput"
+                                   @bind="_scanValue" />
+                        </label>
+                        <button type="submit" class="office-button" disabled="@_scanning">
+                            @(_scanning ? "Looking up…" : "Scan")
+                        </button>
+                    </form>
+
+                    @if (!string.IsNullOrWhiteSpace(_scanMessage))
+                    {
+                        <div class="receiving-scan-message" role="status">@_scanMessage</div>
+                    }
+
+                    @if (_quarantineLines.Count > 0)
+                    {
+                        <div class="quarantine-panel">
+                            <div class="quarantine-head">
+                                <div>
+                                    <h3 class="office-panel-title">Not on this order</h3>
+                                    <p class="office-panel-sub">@_quarantineLines.Count item@(_quarantineLines.Count == 1 ? "" : "s") awaiting a quarantine incident.</p>
+                                </div>
+                            </div>
+                            <div class="quarantine-form">
+                                @foreach (QuarantineLine quarantine in _quarantineLines)
+                                {
+                                    <div class="quarantine-line" @key="quarantine.Barcode">
+                                        <div class="mono">@quarantine.Barcode</div>
+                                        <div>@(string.IsNullOrWhiteSpace(quarantine.ProductName) ? "Uncatalogued product" : quarantine.ProductName)</div>
+                                        <input class="sheet-input qty-cell" type="number" min="0" step="1"
+                                               value="@(quarantine.Quantity.ToString("0.##", CultureInfo.InvariantCulture))"
+                                               @onchange="(e) => OnQuarantineQuantityChanged(quarantine, e)" />
+                                        <button type="button" class="office-button ghost" @onclick="() => RemoveQuarantineLine(quarantine)">
+                                            Remove
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                            <div class="office-actions" style="margin-top:0.9rem;">
+                                <button type="button" class="office-button" @onclick="RaiseQuarantineAsync"
+                                        disabled="@(_raisingQuarantine || !CanRaiseQuarantine)">
+                                    @(_raisingQuarantine ? "Raising…" : "Record quarantine incident")
+                                </button>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(_quarantineError))
+                            {
+                                <div class="office-error">@_quarantineError</div>
+                            }
+                        </div>
+                    }
+
+                    <div class="office-form-grid">
+                        <label>
+                            <span class="office-field-label">Documents missing</span>
+                            <input type="checkbox" @bind="_documentsMissing" />
+                            Arrived without the expected paperwork
+                        </label>
+                    </div>
+
+                    <div class="receiving-form">
+                        <div class="receiving-line receiving-line-head">
+                            <span></span>
+                            <span>Received</span>
+                            <span>Damaged</span>
+                            <span>Wrong item</span>
+                            <span>Expired</span>
+                            <span>Actual cost</span>
+                            <span></span>
+                        </div>
+
+                        @foreach (ReceivingLine line in _receivingLines)
+                        {
+                            <div class="receiving-line" @key="line.Line.Id">
+                                <div>
+                                    <div class="mono">@line.Sku</div>
+                                    <div>@line.Name</div>
+                                </div>
+                                <input class="sheet-input qty-cell" type="number" min="0" step="1"
+                                       value="@(line.Received.ToString("0.##", CultureInfo.InvariantCulture))"
+                                       @onchange="(e) => OnReceivedChanged(line, e)" />
+                                <input class="sheet-input qty-cell" type="number" min="0" step="1"
+                                       value="@(line.Damaged.ToString("0.##", CultureInfo.InvariantCulture))"
+                                       @onchange="(e) => OnDamagedChanged(line, e)" />
+                                <input class="sheet-input qty-cell" type="number" min="0" step="1"
+                                       value="@(line.WrongItem.ToString("0.##", CultureInfo.InvariantCulture))"
+                                       @onchange="(e) => OnWrongItemChanged(line, e)" />
+                                <input class="sheet-input qty-cell" type="number" min="0" step="1"
+                                       value="@(line.Expired.ToString("0.##", CultureInfo.InvariantCulture))"
+                                       @onchange="(e) => OnExpiredChanged(line, e)" />
+                                <input class="sheet-input unit-cell" type="number" min="0" step="0.01"
+                                       value="@(line.UnitCost.ToString("0.##", CultureInfo.InvariantCulture))"
+                                       @onchange="(e) => OnUnitCostChanged(line, e)" />
+                                <span></span>
+                                <div class="receiving-body">
+                                    <div class="lot-row">
+                                        <input class="sheet-input" type="text" placeholder="Lot / batch №"
+                                               value="@line.Lot"
+                                               @onchange="(e) => OnLotChanged(line, e)" />
+                                        <input class="sheet-input date-row" type="date"
+                                               value="@(line.ManufacturedOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty)"
+                                               @onchange="(e) => OnManufacturedChanged(line, e)" />
+                                        <input class="sheet-input date-row" type="date"
+                                               value="@(line.ExpiresOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty)"
+                                               @onchange="(e) => OnExpiresChanged(line, e)" />
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="office-note">Quantities over the ordered amount are governed by your receiving tolerance; the server will flag overage.</div>
+
+                    @if (!string.IsNullOrWhiteSpace(_formError))
+                    {
+                        <div class="office-error">@_formError</div>
+                    }
+
+                    <div class="office-actions" style="margin-top:0.9rem;">
+                        <button type="button" class="office-button" @onclick="RecordReceiptAsync" disabled="@_submitting">
+                            @(_submitting ? "Recording…" : "Record receipt")
+                        </button>
+                        <button type="button" class="office-button" @onclick="ResetSheet" disabled="@_submitting">
+                            Reset sheet
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (CanReceive)
+        {
+            <div class="office-note">Receiving is only possible while the order is <strong>Ordered</strong> or <strong>Partially received</strong>. This order is <strong>@SplitWords(_order.Status)</strong>.</div>
+        }
+        else
+        {
+            <div class="office-note">Your account does not hold the <strong>purchase.receive</strong> permission. Ask an administrator to enable receiving, or open this screen on a register that does.</div>
+        }
+
+        <div class="office-panel">
+            <div class="office-panel-head">
+                <div>
+                    <h2 class="office-panel-title">Receipts</h2>
+                    <p class="office-panel-sub">Every goods receipt recorded against this order.</p>
+                </div>
+            </div>
+            <div class="office-panel-body">
+                @if (_receipts.Count == 0)
+                {
+                    <div class="office-empty"><strong>Nothing received yet.</strong><span>Record the first receipt once the delivery arrives.</span></div>
+                }
+                else
+                {
+                    foreach (GoodsReceiptDetail receipt in _receipts)
+                    {
+                        <div class="office-panel" style="margin-bottom:0.9rem;">
+                            <div class="office-panel-head">
+                                <div>
+                                    <h3 class="office-panel-title mono">@receipt.Number</h3>
+                                    <p class="office-panel-sub">Received by @ShortId(receipt.ReceivedByUserId) · @receipt.ReceivedAtUtc.ToLocalTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture) · business date @receipt.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</p>
+                                </div>
+                                <div class="office-actions">
+                                    @if (receipt.DocumentsMissing)
+                                    {
+                                        <span class="status-chip sc-action-required">Documents missing</span>
+                                    }
+                                    @if (receipt.CostVariancePendingApproval)
+                                    {
+                                        <span class="status-chip sc-pending-approval">Cost variance pending</span>
+                                    }
+                                    <span class="@ReceiptStatusChipClass(receipt.Status)">@SplitWords(receipt.Status)</span>
+                                </div>
+                            </div>
+                            <div class="office-panel-body">
+                                <div class="office-summary-strip" style="margin-bottom:0.9rem;">
+                                    <div class="office-summary-cell">
+                                        <div class="office-summary-label">Accepted / expected</div>
+                                        <div class="office-summary-value">@Quantity(AcceptedTotal(receipt)) / @Quantity(ExpectedTotal(receipt))</div>
+                                    </div>
+                                    @if (receipt.CostVariancePendingApproval)
+                                    {
+                                        <div class="office-summary-cell">
+                                            <div class="office-summary-label">Cost variance at stake</div>
+                                            <div class="office-summary-value accent">@Money(receipt.CostVarianceValueAtStake)</div>
+                                        </div>
+                                    }
+                                    <div class="office-summary-cell">
+                                        <div class="office-summary-label">Discrepancies</div>
+                                        <div class="office-summary-value @(receipt.Discrepancies.Count > 0 ? "bad" : "good")">@receipt.Discrepancies.Count</div>
+                                    </div>
+                                </div>
+
+                                <table class="office-table">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>SKU</th>
+                                            <th>Product</th>
+                                            <th class="numeric">Expected</th>
+                                            <th class="numeric">Received</th>
+                                            <th class="numeric">Damaged</th>
+                                            <th class="numeric">Wrong item</th>
+                                            <th class="numeric">Expired</th>
+                                            <th>Accepted</th>
+                                            <th class="numeric">Unit cost</th>
+                                            <th class="numeric">Variance %</th>
+                                            <th>Lot</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (GoodsReceiptLineSummary line in receipt.Lines)
+                                        {
+                                            <tr @key="line.PurchaseOrderLineId">
+                                                <td>@line.LineNo</td>
+                                                <td class="mono">@ProductSku(line.ProductId)</td>
+                                                <td>@ProductDisplayName(line.ProductId)</td>
+                                                <td class="numeric">@Quantity(line.QuantityExpected)</td>
+                                                <td class="numeric">@Quantity(line.QuantityReceived)</td>
+                                                <td class="numeric">@Quantity(line.QuantityDamaged)</td>
+                                                <td class="numeric">@Quantity(line.QuantityWrongItem)</td>
+                                                <td class="numeric">@Quantity(line.QuantityExpired)</td>
+                                                <td><span class="status-chip">@SplitWords(line.AcceptedState) · @Quantity(line.QuantityAccepted)</span></td>
+                                                <td class="numeric">@Money(line.UnitCost)</td>
+                                                <td class="numeric @VarianceTone(line.CostVariancePercent)">@($"{line.CostVariancePercent:0.##}%")</td>
+                                                <td>@LotLabel(line)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+
+                                @if (receipt.Discrepancies.Count == 0)
+                                {
+                                    <div class="office-empty"><strong>No discrepancies.</strong><span>This delivery matched the order.</span></div>
+                                }
+                                else
+                                {
+                                    <h4 class="office-panel-title" style="margin-top:1rem;">Discrepancies</h4>
+                                    <table class="office-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Kind</th>
+                                                <th class="numeric">Qty</th>
+                                                <th class="numeric">Value impact</th>
+                                                <th>Resolution</th>
+                                                <th>Notes</th>
+                                                <th>Resolved by</th>
+                                                <th>Resolved at</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (ReceivingDiscrepancySummary discrepancy in receipt.Discrepancies)
+                                            {
+                                                <tr @key="discrepancy.Id">
+                                                    <td><span class="status-chip">@SplitWords(discrepancy.Kind)</span></td>
+                                                    <td class="numeric">@Quantity(discrepancy.Quantity)</td>
+                                                    <td class="numeric">@Money(discrepancy.ValueImpact)</td>
+                                                    <td>@(string.IsNullOrWhiteSpace(discrepancy.ResolutionOutcome) ? "Open" : SplitWords(discrepancy.ResolutionOutcome))</td>
+                                                    <td>@(string.IsNullOrWhiteSpace(discrepancy.ResolutionNote) ? "—" : discrepancy.ResolutionNote)</td>
+                                                    <td>@(discrepancy.ResolvedByUserId is { } resolver ? ShortId(resolver) : "—")</td>
+                                                    <td>@(discrepancy.ResolvedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string PermissionsView = "purchase.view";
+    private const string PermissionsReceive = "purchase.receive";
+    private const string PermissionsQuarantineCreate = "quarantine.create";
+    private const string PermissionsCreate = "purchase.create";
+    private const string PermissionsApprove = "purchase.approve";
+
+    [Parameter] public Guid OrderId { get; set; }
+
+    private sealed record ReceivingLine(
+        PurchaseOrderLineSummary Line,
+        string Sku,
+        string Name,
+        decimal Received,
+        decimal Damaged,
+        decimal WrongItem,
+        decimal Expired,
+        decimal UnitCost,
+        string? Lot,
+        DateOnly? ManufacturedOn,
+        DateOnly? ExpiresOn);
+
+    private sealed record QuarantineLine(string Barcode, string? ProductName, decimal Quantity);
+
+    private readonly List<ReceivingLine> _receivingLines = [];
+    private readonly List<GoodsReceiptDetail> _receipts = [];
+    private readonly List<QuarantineLine> _quarantineLines = [];
+    private readonly Dictionary<Guid, (string Sku, string Name)> _productNames = [];
+    private readonly Dictionary<Guid, string> _supplierNames = [];
+    private Dictionary<Guid, PosLocation> _locations = [];
+
+    private PurchaseOrderDetailDto? _order;
+    private bool _loading = true;
+    private bool _submitting;
+    private bool _documentsMissing;
+    private string? _notice;
+    private string? _error;
+    private string? _formError;
+    private string _scanValue = string.Empty;
+    private bool _scanning;
+    private string? _scanMessage;
+    private ElementReference _scanInput;
+    private bool _raisingQuarantine;
+    private string? _quarantineError;
+
+    [Inject] private BackOfficeService Api { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private bool CanReceive => Api.HasPermission(PermissionsReceive);
+    private bool CanRaiseQuarantine => Api.HasPermission(PermissionsQuarantineCreate);
+    private bool CanCreate => Api.HasPermission(PermissionsCreate);
+    private bool CanApprove => Api.HasPermission(PermissionsApprove);
+
+    private bool ShowApprovalActions => _order is { } order
+        && ((order.Status == "Draft" && CanCreate)
+            || (order.Status is "PendingApproval" or "Approved" && CanApprove));
+
+    private string ApprovalHint => _order?.Status switch
+    {
+        "Draft" => "Submit the draft so an approver assigned to the destination store can review it. You can still withdraw it before submission.",
+        "PendingApproval" => "Your decision is recorded with the note above. Head-office policy blocks self-approval, so a manager who did not create the order must act.",
+        "Approved" => "Sending converts the order to Ordered and opens receiving at the destination store.",
+        _ => string.Empty,
+    };
+
+    private bool _actionBusy;
+    private string? _actionError;
+    private string _decisionNote = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Api.HasPermission(PermissionsView))
+        {
+            _loading = false;
+            return;
+        }
+
+        await LoadDetailAsync();
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            ApiResult<List<PosLocation>> locationResult = await Api.GetLocationsAsync(CancellationToken.None);
+            if (locationResult.IsSuccess && locationResult.Value is { } located)
+            {
+                _locations = located.ToDictionary(location => location.Id, location => location);
+            }
+
+            ApiResult<List<SupplierSummary>> supplierResult = await Api.GetSuppliersAsync(CancellationToken.None);
+            if (supplierResult.IsSuccess && supplierResult.Value is { } suppliers)
+            {
+                foreach (SupplierSummary supplier in suppliers.Where(supplier => supplier.IsActive))
+                {
+                    _supplierNames[supplier.Id] = supplier.Name;
+                }
+            }
+
+            _productNames.Clear();
+            ApiResult<PurchaseOrderDetailDto> orderResult = await Api.GetPurchaseOrderAsync(OrderId, CancellationToken.None);
+            if (!orderResult.IsSuccess || orderResult.Value is null)
+            {
+                _order = null;
+                _error = orderResult.Error ?? "This purchase order could not be found.";
+                return;
+            }
+
+            _order = orderResult.Value;
+            await LoadProductNamesAsync(_order.Lines.Select(line => line.ProductId).Distinct().ToArray());
+            await LoadReceiptsAsync();
+            BuildReceivingLines();
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SubmitOrderAsync()
+    {
+        if (_actionBusy)
+        {
+            return;
+        }
+
+        _actionError = null;
+        _actionBusy = true;
+        try
+        {
+            ApiResult<PosReference> result = await Api.SubmitPurchaseOrderAsync(OrderId, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                _actionError = result.Error;
+                return;
+            }
+
+            _notice = "Submitted for approval. An approver assigned to the destination store can now review it.";
+            await LoadDetailAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _actionError = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _actionBusy = false;
+        }
+    }
+
+    private async Task ApproveOrderAsync()
+    {
+        if (_actionBusy)
+        {
+            return;
+        }
+
+        _actionError = null;
+        _actionBusy = true;
+        try
+        {
+            string? notes = string.IsNullOrWhiteSpace(_decisionNote) ? null : _decisionNote;
+            ApiResult<PosReference> result = await Api.ApprovePurchaseOrderAsync(OrderId, notes, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                _actionError = result.Error;
+                return;
+            }
+
+            _decisionNote = string.Empty;
+            _notice = "Order approved. Send it to the supplier to open receiving at the destination store.";
+            await LoadDetailAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _actionError = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _actionBusy = false;
+        }
+    }
+
+    private async Task RejectOrderAsync()
+    {
+        if (_actionBusy)
+        {
+            return;
+        }
+
+        _actionError = null;
+        _actionBusy = true;
+        try
+        {
+            string? notes = string.IsNullOrWhiteSpace(_decisionNote) ? null : _decisionNote;
+            ApiResult<PosReference> result = await Api.RejectPurchaseOrderAsync(OrderId, notes, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                _actionError = result.Error;
+                return;
+            }
+
+            _decisionNote = string.Empty;
+            _notice = "Order rejected. The creator can revise and resubmit it.";
+            await LoadDetailAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _actionError = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _actionBusy = false;
+        }
+    }
+
+    private async Task SendOrderAsync()
+    {
+        if (_actionBusy)
+        {
+            return;
+        }
+
+        _actionError = null;
+        _actionBusy = true;
+        try
+        {
+            ApiResult<PosReference> result = await Api.SendPurchaseOrderAsync(OrderId, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                _actionError = result.Error;
+                return;
+            }
+
+            _notice = "Order sent to the supplier. Receiving is now open at the destination store.";
+            await LoadDetailAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _actionError = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _actionBusy = false;
+        }
+    }
+
+    private async Task LoadProductNamesAsync(IReadOnlyCollection<Guid> ids)
+    {
+        HashSet<Guid> wanted = [.. ids];
+        foreach (Guid id in wanted)
+        {
+            _productNames[id] = (ShortId(id), "Product");
+        }
+
+        try
+        {
+            for (int offset = 0; offset < 2000 && wanted.Count > 0; offset += 200)
+            {
+                ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(null, offset, 200, CancellationToken.None);
+                if (!response.IsSuccess || response.Value is null || response.Value.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (PosProductSummary product in response.Value)
+                {
+                    if (wanted.Remove(product.Id))
+                    {
+                        _productNames[product.Id] = (product.Sku, product.Name);
+                    }
+                }
+
+                if (response.Value.Count < 200)
+                {
+                    break;
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private async Task LoadReceiptsAsync()
+    {
+        _receipts.Clear();
+        ApiResult<List<GoodsReceiptSummary>> result = await Api.ListGoodsReceiptsAsync(OrderId, CancellationToken.None);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return;
+        }
+
+        foreach (GoodsReceiptSummary summary in result.Value)
+        {
+            ApiResult<GoodsReceiptDetail> detail = await Api.GetGoodsReceiptAsync(OrderId, summary.Id, CancellationToken.None);
+            if (detail.IsSuccess && detail.Value is not null)
+            {
+                _receipts.Add(detail.Value);
+            }
+        }
+    }
+
+    private void BuildReceivingLines()
+    {
+        _receivingLines.Clear();
+        if (_order is null)
+        {
+            return;
+        }
+
+        foreach (PurchaseOrderLineSummary line in _order.Lines)
+        {
+            _receivingLines.Add(new ReceivingLine(
+                line,
+                ProductSku(line.ProductId),
+                ProductDisplayName(line.ProductId),
+                0m,
+                0m,
+                0m,
+                0m,
+                line.UnitCost,
+                null,
+                null,
+                null));
+        }
+    }
+
+    private void OnReceivedChanged(ReceivingLine line, ChangeEventArgs e) => UpdateQuantity(line, e, (receiving, value) => receiving with { Received = value });
+    private void OnDamagedChanged(ReceivingLine line, ChangeEventArgs e) => UpdateQuantity(line, e, (receiving, value) => receiving with { Damaged = value });
+    private void OnWrongItemChanged(ReceivingLine line, ChangeEventArgs e) => UpdateQuantity(line, e, (receiving, value) => receiving with { WrongItem = value });
+    private void OnExpiredChanged(ReceivingLine line, ChangeEventArgs e) => UpdateQuantity(line, e, (receiving, value) => receiving with { Expired = value });
+
+    private void UpdateQuantity(ReceivingLine line, ChangeEventArgs e, Func<ReceivingLine, decimal, ReceivingLine> update)
+    {
+        decimal value = ParseNonNegativeDecimal(e.Value);
+        int index = _receivingLines.IndexOf(line);
+        if (index >= 0)
+        {
+            _receivingLines[index] = update(_receivingLines[index], value);
+        }
+    }
+
+    private void OnUnitCostChanged(ReceivingLine line, ChangeEventArgs e)
+    {
+        decimal value = ParseNonNegativeDecimal(e.Value);
+        int index = _receivingLines.IndexOf(line);
+        if (index >= 0)
+        {
+            _receivingLines[index] = _receivingLines[index] with { UnitCost = value };
+        }
+    }
+
+    private void OnLotChanged(ReceivingLine line, ChangeEventArgs e)
+    {
+        string? value = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString();
+        int index = _receivingLines.IndexOf(line);
+        if (index >= 0)
+        {
+            _receivingLines[index] = _receivingLines[index] with { Lot = value };
+        }
+    }
+
+    private void OnManufacturedChanged(ReceivingLine line, ChangeEventArgs e) => UpdateDate(line, e, (receiving, date) => receiving with { ManufacturedOn = date });
+
+    private void OnExpiresChanged(ReceivingLine line, ChangeEventArgs e) => UpdateDate(line, e, (receiving, date) => receiving with { ExpiresOn = date });
+
+    private void UpdateDate(ReceivingLine line, ChangeEventArgs e, Func<ReceivingLine, DateOnly?, ReceivingLine> update)
+    {
+        DateOnly? date = DateOnly.TryParse(e.Value?.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly parsed) ? parsed : null;
+        int index = _receivingLines.IndexOf(line);
+        if (index >= 0)
+        {
+            _receivingLines[index] = update(_receivingLines[index], date);
+        }
+    }
+
+    private void ResetSheet()
+    {
+        _documentsMissing = false;
+        _formError = null;
+        for (int index = 0; index < _receivingLines.Count; index++)
+        {
+            _receivingLines[index] = _receivingLines[index] with
+            {
+                Received = 0m,
+                Damaged = 0m,
+                WrongItem = 0m,
+                Expired = 0m,
+                UnitCost = _receivingLines[index].Line.UnitCost,
+                Lot = null,
+                ManufacturedOn = null,
+                ExpiresOn = null,
+            };
+        }
+    }
+
+    private async Task ScanAsync()
+    {
+        if (_scanning)
+        {
+            return;
+        }
+
+        string barcode = (_scanValue ?? string.Empty).Trim();
+        _scanValue = string.Empty;
+        _formError = null;
+        _quarantineError = null;
+        _scanMessage = null;
+        if (barcode.Length == 0)
+        {
+            return;
+        }
+
+        _scanning = true;
+        try
+        {
+            ApiResult<PosScannedProduct> lookup = await Api.GetProductByBarcodeAsync(barcode, CancellationToken.None);
+            if (lookup.IsSuccess && lookup.Value is { } product)
+            {
+                int index = _receivingLines.FindIndex(line => line.Line.ProductId == product.Id);
+                if (index >= 0)
+                {
+                    _receivingLines[index] = _receivingLines[index] with { Received = _receivingLines[index].Received + 1m };
+                    _scanMessage = $"{product.Name} received — {Quantity(_receivingLines[index].Received)} counted.";
+                    return;
+                }
+
+                AddQuarantineLine(barcode, product.Name);
+                _scanMessage = $"{product.Name} is not on this order — queued for quarantine.";
+                return;
+            }
+
+            if (lookup.ErrorCode is "catalog.barcode_unknown" or "catalog.barcode_retired")
+            {
+                AddQuarantineLine(barcode, null);
+                _scanMessage = $"Barcode {barcode} is not catalogued — queued for quarantine.";
+                return;
+            }
+
+            _scanMessage = lookup.Error ?? "The barcode could not be looked up.";
+        }
+        catch (HttpRequestException)
+        {
+            _scanMessage = "The catalogue service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _scanning = false;
+            await RefocusScanAsync();
+        }
+    }
+
+    private void AddQuarantineLine(string barcode, string? productName)
+    {
+        int index = _quarantineLines.FindIndex(line => string.Equals(line.Barcode, barcode, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            _quarantineLines[index] = _quarantineLines[index] with { Quantity = _quarantineLines[index].Quantity + 1m };
+            return;
+        }
+
+        _quarantineLines.Add(new QuarantineLine(barcode, productName, 1m));
+    }
+
+    private void OnQuarantineQuantityChanged(QuarantineLine quarantine, ChangeEventArgs e)
+    {
+        decimal value = ParseNonNegativeDecimal(e.Value);
+        int index = _quarantineLines.IndexOf(quarantine);
+        if (index >= 0)
+        {
+            _quarantineLines[index] = _quarantineLines[index] with { Quantity = value };
+        }
+    }
+
+    private void RemoveQuarantineLine(QuarantineLine quarantine)
+        => _quarantineLines.Remove(quarantine);
+
+    private async Task RaiseQuarantineAsync()
+    {
+        if (_raisingQuarantine || _order is null || _quarantineLines.Count == 0)
+        {
+            return;
+        }
+
+        if (!CanRaiseQuarantine)
+        {
+            _quarantineError = "Your account cannot raise a quarantine incident. Ask an administrator for the quarantine.create permission.";
+            return;
+        }
+
+        List<CreateQuarantineLineBody> lines = [.. _quarantineLines
+            .Where(line => line.Quantity > 0m)
+            .Select(line => new CreateQuarantineLineBody(
+                line.Barcode,
+                line.Quantity,
+                ClaimedProductName: line.ProductName))];
+
+        if (lines.Count == 0)
+        {
+            _quarantineError = "Enter a counted quantity on at least one quarantined line.";
+            return;
+        }
+
+        _raisingQuarantine = true;
+        _quarantineError = null;
+        _notice = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.CreateQuarantineIncidentAsync(
+                _order.DestinationLocationId,
+                lines,
+                $"Found while receiving {_order.Number} at {LocationLabel(_order.DestinationLocationId)}.",
+                CancellationToken.None);
+
+            if (!result.IsSuccess || result.Value is null)
+            {
+                _quarantineError = result.Error;
+                return;
+            }
+
+            _notice = $"Quarantine incident recorded for {lines.Count} product{(lines.Count == 1 ? "" : "s")}.";
+            _scanMessage = null;
+            _quarantineLines.Clear();
+        }
+        catch (HttpRequestException)
+        {
+            _quarantineError = "The quarantine service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _raisingQuarantine = false;
+        }
+    }
+
+    private async Task RefocusScanAsync()
+    {
+        if (_scanInput.Context is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("VaultFlowRegister.focusSelect", _scanInput);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task RecordReceiptAsync()
+    {
+        if (_submitting)
+        {
+            return;
+        }
+
+        List<ReceivingLine> counted = _receivingLines
+            .Where(line => line.Received > 0m || line.Damaged > 0m || line.WrongItem > 0m || line.Expired > 0m)
+            .ToList();
+
+        if (counted.Count == 0)
+        {
+            _formError = "Enter a counted quantity on at least one line before recording the receipt.";
+            return;
+        }
+
+        CreateGoodsReceiptBody body = new(
+        [
+            .. counted.Select(line => new CreateGoodsReceiptLineBody(
+                line.Line.Id,
+                line.Received,
+                line.Damaged,
+                line.WrongItem,
+                line.Expired,
+                line.UnitCost,
+                string.IsNullOrWhiteSpace(line.Lot) ? null : line.Lot.Trim(),
+                line.ManufacturedOn,
+                line.ExpiresOn)),
+        ],
+        _documentsMissing);
+
+        _submitting = true;
+        _formError = null;
+        _notice = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.CreateGoodsReceiptAsync(OrderId, body, CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                _formError = result.Error;
+                return;
+            }
+
+            _documentsMissing = false;
+            _receivingLines.Clear();
+            _notice = "Receipt recorded.";
+            await LoadDetailAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _formError = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/purchasing/orders");
+
+    private static decimal AcceptedTotal(GoodsReceiptDetail receipt) => receipt.Lines.Sum(line => line.QuantityAccepted);
+    private static decimal ExpectedTotal(GoodsReceiptDetail receipt) => receipt.Lines.Sum(line => line.QuantityExpected);
+
+    private static string LotLabel(GoodsReceiptLineSummary line)
+        => string.IsNullOrWhiteSpace(line.LotNumber)
+            ? "—"
+            : line.ExpiresOn is { } expires
+                ? $"{line.LotNumber} · exp {expires:yyyy-MM-dd}"
+                : line.LotNumber;
+
+    private string SupplierName(Guid supplierId)
+        => _supplierNames.TryGetValue(supplierId, out string? name)
+            ? name
+            : ShortId(supplierId);
+
+    private string LocationLabel(Guid locationId)
+        => _locations.TryGetValue(locationId, out PosLocation? location)
+            ? $"{location.Code} · {location.Name}"
+            : ShortId(locationId);
+
+    private string ProductDisplayName(Guid productId)
+        => _productNames.TryGetValue(productId, out (string Sku, string Name) product)
+            ? product.Name
+            : $"Product {ShortId(productId)}";
+
+    private string ProductSku(Guid productId)
+        => _productNames.TryGetValue(productId, out (string Sku, string Name) product) && !string.IsNullOrWhiteSpace(product.Sku)
+            ? product.Sku
+            : "—";
+
+    private static string VarianceTone(decimal percent)
+        => percent > 0m ? "variance-bad" : "variance-good";
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Draft" => "status-chip sc-draft",
+        "PendingApproval" => "status-chip sc-pending-approval",
+        "Approved" => "status-chip sc-approved",
+        "Ordered" => "status-chip sc-ordered",
+        "PartiallyReceived" => "status-chip sc-partially-received",
+        "FullyReceived" => "status-chip sc-received",
+        "Rejected" => "status-chip sc-rejected",
+        "Closed" => "status-chip sc-closed",
+        "Cancelled" => "status-chip sc-cancelled",
+        _ => "status-chip",
+    };
+
+    private static string ApprovalChipClass(string decision) => decision switch
+    {
+        "Approve" => "status-chip sc-approved",
+        "Reject" => "status-chip sc-rejected",
+        "Cancel" => "status-chip sc-cancelled",
+        "Close" => "status-chip sc-closed",
+        _ => "status-chip",
+    };
+
+    private static string ReceiptStatusChipClass(string status) => status switch
+    {
+        "Posted" => "status-chip sc-posted",
+        "Voided" => "status-chip",
+        "Reversed" => "status-chip",
+        _ => "status-chip",
+    };
+
+    private static decimal ParseNonNegativeDecimal(object? value)
+        => decimal.TryParse(value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal parsed)
+            ? Math.Max(0m, parsed)
+            : 0m;
+
+    private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
+
+    private static string Quantity(decimal value)
+        => value == 0m ? "—" : value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

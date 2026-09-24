@@ -19,7 +19,7 @@
         <strong>@CashierName</strong>
     </div>
     <span class="vf-header-sep" aria-hidden="true"></span>
-    <div class="vf-header-fact" title="Shift">
+    <div class="vf-header-fact @(string.IsNullOrWhiteSpace(ShiftNumber) ? "vf-header-fact-warn" : string.Empty)" title="Shift">
         <small>Shift</small>
         <strong>@ShiftLabel</strong>
     </div>
@@ -32,16 +32,23 @@
     <span class="vf-header-spacer" aria-hidden="true"></span>
 
     <div class="vf-header-status">
-        <span class="vf-connect @(Online ? "vf-connect-online" : "vf-connect-offline")">
+        <span class="vf-connect @(Online ? "vf-connect-online" : "vf-connect-offline")"
+              title="@(Online ? "Connected to head office" : "Working offline — sales are sent when the connection returns")">
             <i aria-hidden="true"></i>@(Online ? "Online" : "Offline")
         </span>
         <span class="vf-header-sync vf-header-hide-narrow" title="When store data was last received">Synced @SyncTime</span>
-        <span class="vf-header-pending">@Pending pending</span>
+        <span class="vf-header-pending @(Pending > 0 ? "vf-header-pending-some" : string.Empty)" title="Records waiting to be sent to head office">
+            @(Pending > 0 ? $"{Pending} to send" : "All sent")
+        </span>
     </div>
 
     <div class="vf-header-actions">
-        <button type="button" class="vf-icon-button vf-more-button" @onclick="OnMore" title="More actions" aria-label="More actions">⋮ More</button>
-        <button type="button" class="vf-icon-button vf-lock-button" @onclick="OnLock" title="Lock the register" aria-label="Lock the register">Lock</button>
+        @if (ShowOffice)
+        {
+            <button type="button" class="vf-icon-button vf-office-button" @onclick="OnOffice" title="Open the office console">Office</button>
+        }
+        <button type="button" class="vf-icon-button vf-more-button" @onclick="OnMore" title="Held sales, returns, shift and more" aria-label="More actions">☰ Menu</button>
+        <button type="button" class="vf-icon-button vf-lock-button" @onclick="OnLock" title="Lock the register and sign out" aria-label="Lock the register">Lock</button>
     </div>
 </header>
 
@@ -83,9 +90,17 @@
     [Parameter]
     public EventCallback OnMore { get; set; }
 
+    /// <summary>Whether the signed-in account may open the office console.</summary>
+    [Parameter]
+    public bool ShowOffice { get; set; }
+
+    /// <summary>Raised when the cashier opens the office console.</summary>
+    [Parameter]
+    public EventCallback OnOffice { get; set; }
+
     /// <summary>Raised when the register is locked.</summary>
     [Parameter]
     public EventCallback OnLock { get; set; }
 
-    private string ShiftLabel => string.IsNullOrWhiteSpace(ShiftNumber) ? "No shift" : $"#{ShiftNumber}";
+    private string ShiftLabel => string.IsNullOrWhiteSpace(ShiftNumber) ? "Not open" : $"#{ShiftNumber}";
 }

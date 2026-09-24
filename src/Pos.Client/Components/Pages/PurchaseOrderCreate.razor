@@ -1,0 +1,541 @@
+@page "/purchasing/orders/new"
+@layout Layout.OfficeLayout
+@using System.Globalization
+
+<PageTitle>New purchase order · VaultFlow</PageTitle>
+
+<div class="office-page">
+    @if (!Api.HasPermission(PermissionsCreate))
+    {
+        <div class="office-blocked" role="alert">
+            <div class="office-blocked-glyph" aria-hidden="true">▣</div>
+            <h2>Access required</h2>
+            <p>Your account cannot create purchase orders. Ask an administrator for the <code>purchase.create</code> permission.</p>
+        </div>
+    }
+    else if (_loading)
+    {
+        <div class="office-loading">Loading the composer…</div>
+    }
+    else
+    {
+        <div class="vf-hero">
+            <div>
+                <p class="vf-eyebrow">Purchasing</p>
+                <h1>New Purchase Order</h1>
+                <p class="vf-subtitle">Add products, review the total, then save as a draft.</p>
+            </div>
+            <div class="vf-hero-actions">
+                <button type="button" class="office-button ghost" @onclick="GoBack">← All purchase orders</button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="office-error">@_error</div>
+        }
+
+        <div class="vf-layout-2">
+            <div class="vf-stack">
+                <div class="vf-section">
+                    <div class="vf-step">
+                        <span class="vf-step-num">1</span>
+                        <span class="vf-step-title">Order Details</span>
+                    </div>
+                    <div class="vf-form-grid">
+                        <div class="field">
+                            <label class="office-field-label" for="poSupplier">Supplier</label>
+                            <select id="poSupplier" value="@(_supplierId?.ToString() ?? string.Empty)" @onchange="OnSupplierChanged" disabled="@_submitting">
+                                <option value="">Choose a supplier…</option>
+                                @foreach (SupplierSummary supplier in _suppliers)
+                                {
+                                    <option value="@supplier.Id">@supplier.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="office-field-label" for="poDeliver">Deliver To</label>
+                            <select id="poDeliver" value="@(_storeId?.ToString() ?? string.Empty)" @onchange="OnStoreChanged" disabled="@_submitting">
+                                @foreach (PosLocation location in DeliverToLocations)
+                                {
+                                    <option value="@location.Id">@location.Code · @location.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="office-field-label" for="poCurrency">Currency</label>
+                            <input id="poCurrency" class="mono" value="@_currency" maxlength="3"
+                                   @oninput="OnCurrencyInput"
+                                   placeholder="PHP" spellcheck="false" disabled="@_submitting" />
+                        </div>
+                        <div class="field">
+                            <label class="office-field-label" for="poExpected">Expected Date</label>
+                            <input id="poExpected" type="date" value="@_expectedDate" @onchange="OnExpectedChanged" disabled="@_submitting" />
+                        </div>
+                    </div>
+
+                    @if (!_showCustomSupplier)
+                    {
+                        <button type="button" class="vf-link-toggle" @onclick="() => _showCustomSupplier = true">
+                            + Order from a supplier not on the list
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="field" style="margin-top:0.75rem;">
+                            <label class="office-field-label" for="poCustomSupplier">New supplier name</label>
+                            <input id="poCustomSupplier" placeholder="Overrides the Supplier field above" value="@_customSupplier" maxlength="128"
+                                   @oninput="OnCustomSupplierInput" disabled="@_submitting" />
+                        </div>
+                    }
+                </div>
+
+                <div class="vf-section">
+                    <div class="vf-step">
+                        <span class="vf-step-num">2</span>
+                        <span class="vf-step-title">Products</span>
+                    </div>
+                    <div class="composer-finder">
+                        <div class="field">
+                            <label class="office-field-label" for="poProductSearch">Find a product</label>
+                            <input id="poProductSearch" type="search" placeholder="Search by name or SKU…" value="@_productQuery"
+                                   @onchange="OnProductQueryChanged" @onkeydown="OnProductQueryKeyDown" disabled="@_submitting" />
+                        </div>
+                        <button type="button" class="office-button" @onclick="SearchProductsAsync" disabled="@(_searching || _submitting)">
+                            @(_searching ? "Searching…" : "Search")
+                        </button>
+                    </div>
+
+                    @if (_lines.Count == 0)
+                    {
+                        <div class="office-empty">Search a product above, then add it to start the order.</div>
+                    }
+                    else
+                    {
+                        <div class="composer-lines">
+                            <div class="composer-line composer-line-head">
+                                <span>Product</span>
+                                <span>Unit</span>
+                                <span class="numeric">Quantity</span>
+                                <span class="numeric">Unit cost</span>
+                                <span class="numeric">Line total</span>
+                                <span></span>
+                            </div>
+                            @foreach (OrderLine line in _lines)
+                            {
+                                <div class="composer-line" @key="line.Key">
+                                    <select value="@(line.ProductId?.ToString() ?? string.Empty)"
+                                            @onchange="(e) => OnLineProductChanged(line, e)" disabled="@_submitting">
+                                        <option value="">Select…</option>
+                                        @foreach (PosOrderableProduct product in _products)
+                                        {
+                                            <option value="@product.Id">@product.Sku · @product.Name</option>
+                                        }
+                                    </select>
+                                    @if (SupportsGramEntry(line))
+                                    {
+                                        <select class="unit-toggle mono" value="@(line.EntryInGrams ? "g" : "kg")"
+                                                @onchange="(e) => OnLineEntryUnitChanged(line, e)" disabled="@_submitting">
+                                            <option value="kg">kg</option>
+                                            <option value="g">g</option>
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        <div class="mono">@(line.UnitCode ?? "—")</div>
+                                    }
+                                    <input class="sheet-input numeric" type="number" min="0" step="@(line.EntryInGrams ? "1" : "0.01")"
+                                           value="@(DisplayQuantity(line).ToString("0.###", CultureInfo.InvariantCulture))"
+                                           @onchange="(e) => OnLineQuantityChanged(line, e)" disabled="@_submitting" />
+                                    <input class="sheet-input numeric" type="number" min="0" step="0.01"
+                                           value="@(DisplayUnitCost(line).ToString("0.####", CultureInfo.InvariantCulture))"
+                                           @onchange="(e) => OnLineUnitCostChanged(line, e)" disabled="@_submitting" />
+                                    <div class="numeric mono">@Money(LineTotal(line))</div>
+                                    <button type="button" class="office-button ghost" @onclick="() => RemoveLine(line)" disabled="@_submitting">
+                                        Remove
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div class="office-actions" style="margin-top:0.9rem;">
+                        <button type="button" class="office-button" @onclick="AddLine" disabled="@(_products.Count == 0 || _submitting)">
+                            ＋ Add Line
+                        </button>
+                        <span class="status-chip sc-ready">@_products.Count product@(_products.Count == 1 ? "" : "s") available</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vf-side-stack sticky">
+                <div class="vf-card">
+                    <div class="vf-card-head">
+                        <div class="vf-card-title">Order Summary</div>
+                    </div>
+                    <div class="vf-card-body">
+                        <div class="vf-total-strip">
+                            <span>@_lines.Count line@(_lines.Count == 1 ? "" : "s") · Estimated total</span>
+                            <strong>@Money(GrandTotal)</strong>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(_validationError))
+                        {
+                            <div class="office-error" style="margin-top:0.75rem;">@_validationError</div>
+                        }
+
+                        <div class="office-note">Drafts stay hidden from receiving until submitted and approved by a second manager.</div>
+
+                        <div class="vf-foot stack">
+                            <button type="button" class="office-button" @onclick="CreateOrderAsync" disabled="@_submitting">
+                                @(_submitting ? "Creating…" : "Create Draft Order")
+                            </button>
+                            <button type="button" class="office-button ghost" @onclick="GoBack" disabled="@_submitting">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string PermissionsCreate = "purchase.create";
+    private const int MainWarehouseKind = 0;
+    private const int ExternalKind = 2;
+
+    /// <summary>The only unit code the composer offers a gram entry toggle for.</summary>
+    private const string WeightUnitCode = "KG";
+    private const decimal GramsPerKilogram = 1000m;
+
+    /// <summary>
+    /// One composable line on the form. <see cref="Quantity"/> and
+    /// <see cref="UnitCost"/> always hold the product's base-unit values — the
+    /// order always submits in the base unit, matching the server's invariant.
+    /// <see cref="EntryInGrams"/> only changes how those two numbers are typed
+    /// and displayed for a kilogram-based product; it never changes what is sent.
+    /// </summary>
+    private sealed class OrderLine
+    {
+        public Guid Key { get; } = Guid.NewGuid();
+        public Guid? ProductId { get; set; }
+        public string? UnitCode { get; set; }
+        public Guid? UnitOfMeasureId { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal UnitCost { get; set; }
+        public bool EntryInGrams { get; set; }
+    }
+
+    private readonly List<OrderLine> _lines = [];
+    private readonly Dictionary<Guid, PosUnitOfMeasure> _units = [];
+    private readonly List<SupplierSummary> _suppliers = [];
+    private readonly List<PosOrderableProduct> _products = [];
+
+    private bool _loading = true;
+    private bool _submitting;
+    private bool _searching;
+    private string? _error;
+    private string? _validationError;
+    private string _productQuery = string.Empty;
+    private Guid? _supplierId;
+    private bool _showCustomSupplier;
+    private string _customSupplier = string.Empty;
+    private Guid? _storeId;
+    private string _currency = "PHP";
+    private string _expectedDate = string.Empty;
+
+    [Inject] private BackOfficeService Api { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    /// <summary>Every place goods can be delivered to: the Main Warehouse first,
+    /// then the retail stores, in alphabetical order.</summary>
+    private IReadOnlyList<PosLocation> DeliverToLocations => Api.Locations
+        .Where(location => location.IsActive && location.Kind != ExternalKind)
+        .OrderBy(location => location.Kind == MainWarehouseKind ? 0 : 1)
+        .ThenBy(location => location.Code, StringComparer.Ordinal)
+        .ToArray();
+
+    private decimal GrandTotal => _lines.Sum(line => LineTotal(line));
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Api.HasPermission(PermissionsCreate))
+        {
+            _loading = false;
+            return;
+        }
+
+        await Api.GetLocationsAsync(CancellationToken.None);
+
+        Guid? deviceStore = DeliverToLocations.Any(location => location.Id == Api.DeviceLocationId)
+            ? Api.DeviceLocationId
+            : null;
+        _storeId = DeliverToLocations.FirstOrDefault(location => location.Kind == MainWarehouseKind)?.Id
+            ?? deviceStore
+            ?? (DeliverToLocations.Count == 1 ? (Guid?)DeliverToLocations[0].Id : null);
+
+        ApiResult<List<PosOrderableProduct>> productResult = await Api.GetOrderableProductsAsync(null, 0, 200, CancellationToken.None);
+        if (productResult.IsSuccess && productResult.Value is { } products)
+        {
+            _products.AddRange(products.Where(product => product.IsActive).OrderBy(product => product.Name));
+        }
+        else
+        {
+            _error = productResult.Error ?? "Could not load the product catalogue. Try refining a search below.";
+        }
+
+        ApiResult<List<PosUnitOfMeasure>> unitResult = await Api.GetUnitsAsync(CancellationToken.None);
+        if (unitResult.IsSuccess && unitResult.Value is { } units)
+        {
+            foreach (PosUnitOfMeasure unit in units)
+            {
+                _units[unit.Id] = unit;
+            }
+        }
+
+        ApiResult<List<SupplierSummary>> supplierResult = await Api.GetSuppliersAsync(CancellationToken.None);
+        if (supplierResult.IsSuccess && supplierResult.Value is { } suppliers)
+        {
+            _suppliers.AddRange(suppliers.Where(supplier => supplier.IsActive).OrderBy(supplier => supplier.Name));
+        }
+
+        _loading = false;
+    }
+
+    private void OnSupplierChanged(ChangeEventArgs e)
+        => _supplierId = Guid.TryParse(e.Value?.ToString(), out Guid supplier) ? supplier : null;
+
+    private void OnCustomSupplierInput(ChangeEventArgs e)
+        => _customSupplier = e.Value?.ToString()?.Trim() ?? string.Empty;
+
+    private void OnStoreChanged(ChangeEventArgs e)
+        => _storeId = Guid.TryParse(e.Value?.ToString(), out Guid store) ? store : null;
+
+    private void OnCurrencyInput(ChangeEventArgs e)
+    {
+        string raw = e.Value?.ToString()?.Trim() ?? string.Empty;
+        _currency = string.IsNullOrWhiteSpace(raw) ? "PHP" : raw.ToUpperInvariant();
+    }
+
+    private void OnExpectedChanged(ChangeEventArgs e)
+        => _expectedDate = e.Value?.ToString() ?? string.Empty;
+
+    private void OnProductQueryChanged(ChangeEventArgs e)
+        => _productQuery = e.Value?.ToString() ?? string.Empty;
+
+    private void OnProductQueryKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            _ = SearchProductsAsync();
+        }
+    }
+
+    private async Task SearchProductsAsync()
+    {
+        if (_searching)
+        {
+            return;
+        }
+
+        _searching = true;
+        _error = null;
+        try
+        {
+            ApiResult<List<PosOrderableProduct>> result =
+                await Api.GetOrderableProductsAsync(_productQuery, 0, 200, CancellationToken.None);
+            if (result.IsSuccess && result.Value is { } products)
+            {
+                _products.Clear();
+                _products.AddRange(products.Where(product => product.IsActive).OrderBy(product => product.Name));
+            }
+            else
+            {
+                _error = result.Error ?? "Could not search the product catalogue.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private void AddLine()
+    {
+        _validationError = null;
+        _lines.Add(new OrderLine());
+    }
+
+    private void RemoveLine(OrderLine line)
+    {
+        _validationError = null;
+        _lines.Remove(line);
+    }
+
+    private void OnLineProductChanged(OrderLine line, ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out Guid productId))
+        {
+            line.ProductId = null;
+            line.UnitOfMeasureId = null;
+            line.UnitCode = null;
+            line.UnitCost = 0;
+            return;
+        }
+
+        PosOrderableProduct? product = _products.FirstOrDefault(candidate => candidate.Id == productId);
+        if (product is null)
+        {
+            return;
+        }
+
+        line.ProductId = product.Id;
+        line.UnitOfMeasureId = product.BaseUnitOfMeasureId;
+        line.UnitCode = _units.TryGetValue(product.BaseUnitOfMeasureId, out PosUnitOfMeasure? unit)
+            ? unit.Code
+            : null;
+        line.UnitCost = product.DefaultPurchaseCost ?? 0m;
+        line.EntryInGrams = false;
+        _validationError = null;
+    }
+
+    /// <summary>Whether this line's product can be priced per gram instead of per kilogram.</summary>
+    private static bool SupportsGramEntry(OrderLine line)
+        => string.Equals(line.UnitCode, WeightUnitCode, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The quantity as typed in the chosen entry unit (kilograms, or grams when toggled).</summary>
+    private static decimal DisplayQuantity(OrderLine line)
+        => line.EntryInGrams ? line.Quantity * GramsPerKilogram : line.Quantity;
+
+    /// <summary>The unit cost as typed in the chosen entry unit (per kilogram, or per gram when toggled).</summary>
+    private static decimal DisplayUnitCost(OrderLine line)
+        => line.EntryInGrams ? line.UnitCost / GramsPerKilogram : line.UnitCost;
+
+    private void OnLineEntryUnitChanged(OrderLine line, ChangeEventArgs e)
+    {
+        // Quantity/UnitCost stay in kilograms underneath; only the toggle flips,
+        // so DisplayQuantity/DisplayUnitCost immediately show the same physical
+        // amount rescaled to the newly chosen unit.
+        line.EntryInGrams = string.Equals(e.Value?.ToString(), "g", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnLineQuantityChanged(OrderLine line, ChangeEventArgs e)
+    {
+        _validationError = null;
+        if (decimal.TryParse(e.Value?.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal typed))
+        {
+            decimal quantity = decimal.Max(0, typed);
+            line.Quantity = line.EntryInGrams ? quantity / GramsPerKilogram : quantity;
+        }
+    }
+
+    private void OnLineUnitCostChanged(OrderLine line, ChangeEventArgs e)
+    {
+        _validationError = null;
+        if (decimal.TryParse(e.Value?.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal typed))
+        {
+            decimal cost = decimal.Max(0, typed);
+            line.UnitCost = line.EntryInGrams ? cost * GramsPerKilogram : cost;
+        }
+    }
+
+    private decimal LineTotal(OrderLine line) => line.Quantity * line.UnitCost;
+
+    private async Task CreateOrderAsync()
+    {
+        if (_submitting)
+        {
+            return;
+        }
+
+        _validationError = null;
+        _error = null;
+
+        bool useCustomSupplier = !string.IsNullOrWhiteSpace(_customSupplier);
+        if (!useCustomSupplier && _supplierId is null)
+        {
+            _validationError = "Choose a managed supplier, or name a new supplier.";
+            return;
+        }
+        if (_storeId is not { } store)
+        {
+            _validationError = "Choose the location that will receive the goods.";
+            return;
+        }
+        if (!IsValidCurrency(_currency))
+        {
+            _validationError = "Currency must be exactly three capital letters, like PHP.";
+            return;
+        }
+
+        List<CreatePurchaseOrderLineBody> lines =
+        [
+            .. _lines
+                .Where(line => line.ProductId is not null && line.Quantity > 0)
+                .Select(line => new CreatePurchaseOrderLineBody(
+                    line.ProductId!.Value,
+                    line.UnitOfMeasureId!.Value,
+                    line.Quantity,
+                    line.UnitCost)),
+        ];
+
+        if (lines.Count == 0)
+        {
+            _validationError = "Add at least one line with a product and a quantity above zero.";
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            DateTimeOffset? expectedAt = ParseExpectedAt();
+            ApiResult<PosReference> result = await Api.CreatePurchaseOrderAsync(
+                new CreatePurchaseOrderBody(
+                    useCustomSupplier ? null : _supplierId,
+                    store,
+                    lines,
+                    _currency,
+                    expectedAt,
+                    useCustomSupplier ? _customSupplier : null),
+                CancellationToken.None);
+
+            if (!result.IsSuccess || result.Value is not { } reference)
+            {
+                _error = result.Error;
+                return;
+            }
+
+            Navigation.NavigateTo($"/purchasing/orders/{reference.Id:D}");
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The purchasing service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private DateTimeOffset? ParseExpectedAt()
+    {
+        if (!DateOnly.TryParseExact(_expectedDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date))
+        {
+            return null;
+        }
+
+        return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+    }
+
+    private static bool IsValidCurrency(string value)
+        => value.Length == 3 && value.All(char.IsAsciiLetterUpper);
+
+    private void GoBack() => Navigation.NavigateTo("/purchasing/orders");
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+}

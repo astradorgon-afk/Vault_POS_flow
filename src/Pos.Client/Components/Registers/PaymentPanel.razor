@@ -4,8 +4,8 @@
 
 <div class="pay-panel">
     <div class="pay-identity">
-        <strong>PAYMENT</strong>
-        <span class="pay-back" @onclick="OnBack">← Back to cart <kbd>Esc</kbd></span>
+        <strong>Take payment</strong>
+        <button type="button" class="pay-back" @onclick="OnBack">← Back to cart <kbd>Esc</kbd></button>
     </div>
 
     <div class="pay-total">
@@ -59,7 +59,7 @@
             }
 
             <div class="pay-change">
-                <span>CHANGE TO GIVE</span>
+                <span>Change to give</span>
                 <strong class="@(ChangeDue < 0m ? "change-short" : string.Empty)">@PriceOf(ChangeDue)</strong>
             </div>
         </div>

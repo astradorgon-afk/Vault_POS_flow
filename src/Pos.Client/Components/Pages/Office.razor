@@ -1,0 +1,183 @@
+@page "/office"
+@layout Layout.OfficeLayout
+
+<div class="office-page">
+    <div class="vf-hero">
+        <div>
+            <p class="vf-eyebrow">Store Operations</p>
+            <h1>Office</h1>
+            <p class="vf-subtitle">Stock visibility, counts, transfers, receiving and the daily report for this register's store.</p>
+        </div>
+    </div>
+
+    @if (_overview is { } overview)
+    {
+        <div class="vf-stat-grid six">
+            <div class="vf-stat-card">
+                <div class="vf-stat-row">
+                    <div class="vf-stat-icon">▤</div>
+                    <div>
+                        <div class="vf-stat-label">Available Quantity</div>
+                        <div class="vf-stat-value">@FormatQuantity(overview.AvailableQuantity)</div>
+                    </div>
+                </div>
+                <div class="vf-stat-edge"></div>
+            </div>
+            <div class="vf-stat-card gold">
+                <div class="vf-stat-row">
+                    <div class="vf-stat-icon">⇄</div>
+                    <div>
+                        <div class="vf-stat-label">In Transit</div>
+                        <div class="vf-stat-value">@FormatQuantity(overview.InTransitQuantity)</div>
+                    </div>
+                </div>
+                <div class="vf-stat-edge"></div>
+            </div>
+            <div class="vf-stat-card">
+                <div class="vf-stat-row">
+                    <div class="vf-stat-icon">▣</div>
+                    <div>
+                        <div class="vf-stat-label">In Quarantine</div>
+                        <div class="vf-stat-value">@FormatQuantity(overview.QuarantineQuantity)</div>
+                    </div>
+                </div>
+                <div class="vf-stat-edge"></div>
+            </div>
+            <div class="vf-stat-card @(overview.LowStockItems > 0 ? "gold" : "")">
+                <div class="vf-stat-row">
+                    <div class="vf-stat-icon">◷</div>
+                    <div>
+                        <div class="vf-stat-label">Low Stock</div>
+                        <div class="vf-stat-value">@overview.LowStockItems</div>
+                    </div>
+                </div>
+                <div class="vf-stat-edge"></div>
+            </div>
+            <div class="vf-stat-card @(overview.OutOfStockItems > 0 ? "red" : "")">
+                <div class="vf-stat-row">
+                    <div class="vf-stat-icon">!</div>
+                    <div>
+                        <div class="vf-stat-label">Out of Stock</div>
+                        <div class="vf-stat-value">@overview.OutOfStockItems</div>
+                    </div>
+                </div>
+                <div class="vf-stat-edge"></div>
+            </div>
+            <div class="vf-stat-card">
+                <div class="vf-stat-row">
+                    <div class="vf-stat-icon">▲</div>
+                    <div>
+                        <div class="vf-stat-label">Over Stock</div>
+                        <div class="vf-stat-value">@overview.OverStockItems</div>
+                    </div>
+                </div>
+                <div class="vf-stat-edge"></div>
+            </div>
+        </div>
+    }
+    else if (_error is not null)
+    {
+        <div class="office-error">@_error</div>
+    }
+
+    <div class="office-card-grid">
+        @if (Api.HasPermission(PermissionsSaleCreate))
+        {
+            <button class="office-card" @onclick="OpenTill">
+                <span class="office-card-glyph" aria-hidden="true">▪</span>
+                <span class="office-card-title">Open the till</span>
+                <span class="office-card-meta">Take the register to the counter and trade.</span>
+            </button>
+        }
+
+        @if (Api.HasPermission(PermissionsInventoryView))
+        {
+            <button class="office-card" @onclick="OpenCounts">
+                <span class="office-card-glyph" aria-hidden="true">≡</span>
+                <span class="office-card-title">Stock counts</span>
+                <span class="office-card-meta">Open a full, category or cycle count and record what is on the shelf.</span>
+            </button>
+        }
+
+        @if (Api.HasPermission(PermissionsTransferView))
+        {
+            <button class="office-card" @onclick="OpenTransfers">
+                <span class="office-card-glyph" aria-hidden="true">⇄</span>
+                <span class="office-card-title">Transfers</span>
+                <span class="office-card-meta">Raise a stock movement, then pick, dispatch and receive it.</span>
+            </button>
+        }
+
+        @if (Api.HasPermission(PermissionsPurchasingView))
+        {
+            <button class="office-card" @onclick="OpenReceiving">
+                <span class="office-card-glyph" aria-hidden="true">▣</span>
+                <span class="office-card-title">Goods receiving</span>
+                <span class="office-card-meta">Reconcile a purchase order against what actually arrived.</span>
+            </button>
+        }
+
+        @if (Api.HasPermission(PermissionsReportsView))
+        {
+            <button class="office-card" @onclick="OpenReports">
+                <span class="office-card-glyph" aria-hidden="true">▤</span>
+                <span class="office-card-title">Daily reports</span>
+                <span class="office-card-meta">Close-of-trade sales, payments and shift totals by business date.</span>
+            </button>
+        }
+    </div>
+
+    @if (!Api.HasPermission(PermissionsSaleCreate)
+        && !Api.HasPermission(PermissionsInventoryView)
+        && !Api.HasPermission(PermissionsTransferView)
+        && !Api.HasPermission(PermissionsPurchasingView)
+        && !Api.HasPermission(PermissionsReportsView))
+    {
+        <div class="office-blocked" style="margin-top:1.4rem;">
+            <div class="office-blocked-glyph" aria-hidden="true">✕</div>
+            <h2>Nothing to do here yet</h2>
+            <p>Your account has no back-office permissions on this register. Use the till, or ask a manager to grant stock access.</p>
+        </div>
+    }
+</div>
+
+@code {
+    private const string PermissionsSaleCreate = "sale.create";
+    private const string PermissionsInventoryView = "inventory.view";
+    private const string PermissionsTransferView = "transfer.view";
+    private const string PermissionsPurchasingView = "purchase.view";
+    private const string PermissionsReportsView = "report.view";
+
+    [Inject] private BackOfficeService Api { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private PosInventoryOverview? _overview;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Api.HasPermission(PermissionsInventoryView))
+        {
+            return;
+        }
+
+        ApiResult<PosInventoryOverview> result = await Api.GetInventoryOverviewAsync(CancellationToken.None);
+        if (result.IsSuccess)
+        {
+            _overview = result.Value;
+        }
+        else
+        {
+            _error = result.Error;
+        }
+    }
+
+    private void OpenTill() => Navigation.NavigateTo("/register");
+    private void OpenCounts() => Navigation.NavigateTo("/inventory/counts");
+    private void OpenTransfers() => Navigation.NavigateTo("/transfers");
+    private void OpenReceiving() => Navigation.NavigateTo("/purchasing/orders");
+    private void OpenReports() => Navigation.NavigateTo("/reports");
+
+    private static string FormatQuantity(decimal quantity)
+        => quantity == 0 ? "0" : quantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+}
