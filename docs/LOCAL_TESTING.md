@@ -56,6 +56,23 @@ Despite its historical filename, this starts the API and Blazor Web UI; it
 does not start the MAUI desktop register. Open `http://localhost:5215` after
 the command reports that the Web UI is running.
 
+An API and a Web UI left running by an earlier session are reused instead of
+started a second time, so a leftover Web UI is not rebuilt and can serve older
+code. Stop it before running the script when the change under test is in the Web
+project. The same snippet with `5177` stops the API, which also stops the
+`dotnet run` host that started it:
+
+```powershell
+Get-NetTCPConnection -LocalPort 5215 -State Listen -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+`Ctrl+C` in the terminal running the script stops the Web UI and the API the
+script started itself. Neither route stops the `vaultflow-dev-pg` container; use
+`docker stop vaultflow-dev-pg` for that. The container keeps its data in the
+`vaultflow-dev-pgdata` volume, so the next run starts where the last one left
+off.
+
 The helper creates `vaultflow-dev-pg` automatically from the API's configured
 `ConnectionStrings:Postgres` user secret and stores its data in the
 `vaultflow-dev-pgdata` Docker volume. Docker Desktop must be running. On a fresh

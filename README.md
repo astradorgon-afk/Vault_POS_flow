@@ -99,7 +99,9 @@ and Blazor Web UI together with:
 ```
 
 Keep that terminal running, then open `http://localhost:5215`. The Web UI calls
-the API at `http://localhost:5177`.
+the API at `http://localhost:5177`. A leftover API or Web UI from an earlier
+session is reused rather than started twice, so stop a Web UI that is still
+listening on 5215 when you need the project rebuilt.
 
 On a fresh machine, initialize local secrets first:
 

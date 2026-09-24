@@ -16,8 +16,10 @@
        Development the API applies migrations and seeds data on startup.
     4. Runs the Web UI in the foreground on http://localhost:5215.
 
-    An API that is already healthy is reused rather than started again. Stopping
-    the Web UI stops the API this script started.
+    An API that is already healthy, and a Web UI already listening on its port,
+    are reused rather than started again. A reused Web UI is never rebuilt, so
+    stop it first when the goal is to run the current source. Stopping the Web UI
+    stops the API this script started.
 
     Runs under Windows PowerShell 5.1 and PowerShell 7 alike.
 
@@ -43,6 +45,8 @@ $webProject = Join-Path $repositoryRoot 'src/Pos.Web/Pos.Web.csproj'
 
 # The http profiles in each project's launchSettings.json own these ports.
 $apiHealthUrl = 'http://localhost:5177/health/live'
+$webUrl = 'http://localhost:5215'
+$webPort = ([uri] $webUrl).Port
 
 function Test-ApiLive {
     try {
@@ -52,6 +56,45 @@ function Test-ApiLive {
     catch {
         return $false
     }
+}
+
+function Test-PortListening {
+    param([int] $Port)
+
+    # Answers the question Kestrel asks when it starts: is anything already
+    # accepting connections here? A TCP connect behaves the same in Windows
+    # PowerShell 5.1 and PowerShell 7, unlike Invoke-WebRequest, which reports
+    # redirects and error statuses differently and offers no usable response
+    # when -MaximumRedirection stops a redirect.
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $pending = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(1000, $false)) { return $false }
+        $client.EndConnect($pending)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $client.Close()
+    }
+}
+
+function Get-ListeningProcessId {
+    param([int] $Port)
+
+    # Only used to name the process holding the port in a message, so a missing
+    # NetTCPIP module is not an error.
+    try {
+        $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop |
+            Select-Object -First 1
+        if ($null -ne $listener) { return $listener.OwningProcess }
+    }
+    catch {
+    }
+
+    return $null
 }
 
 function Start-DevelopmentDatabase {
@@ -153,6 +196,27 @@ function Invoke-Build {
 
 $api = $null
 try {
+    # A Web UI left over from an earlier run keeps serving after its terminal is
+    # closed, so bind the port once instead of failing: reuse the running
+    # instance. Rebuilding it would only produce bits that instance never loads,
+    # so skip the build as well.
+    if (Test-PortListening $webPort) {
+        $owner = Get-ListeningProcessId $webPort
+        $ownerText = if ($null -eq $owner) { '' } else { " (process $owner)" }
+        Write-Host "Reusing the Web UI already running on $webUrl$ownerText" -ForegroundColor DarkGray
+        Write-Host 'It was not rebuilt. Stop it and run this script again to build the current source.' -ForegroundColor DarkGray
+
+        if (-not (Test-ApiLive)) {
+            Write-Host 'The API on http://localhost:5177 is not answering, so the reused Web UI cannot load data until it runs.' -ForegroundColor Yellow
+        }
+
+        # Stay attached while it serves, so callers such as the Claude desktop
+        # preview see the stack as running. Ctrl+C here leaves it untouched.
+        while (Test-PortListening $webPort) { Start-Sleep -Seconds 5 }
+        Write-Host "The Web UI on $webUrl stopped." -ForegroundColor DarkGray
+        return
+    }
+
     if (Test-ApiLive) {
         Write-Host 'Reusing the API already running on http://localhost:5177' -ForegroundColor DarkGray
     }

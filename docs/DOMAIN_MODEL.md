@@ -147,9 +147,10 @@ Product  ◄── aggregate root
 
 **Invariants**
 
-- Products are created **only** at the Main Warehouse or by an administrator
-  (`product.create` is not granted to store roles). This is the Centralized
-  Product Master rule.
+- Products can be created by anyone holding `product.create`: the Main
+  Inventory Manager, administrators, and Inventory Staff. The catalog itself
+  is centralized (a product has one master record), but the authority to
+  register it is no longer confined to the Main Warehouse.
 - `Sku` is unique and immutable after first inventory movement.
 - A `Barcode` value is unique across the entire catalog; attaching a barcode that
   already belongs to another product is rejected, not silently re-pointed.

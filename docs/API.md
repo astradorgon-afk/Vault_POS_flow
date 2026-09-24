@@ -443,11 +443,12 @@ Notes:
 - **`register-product`** posts `{ lineNo, sku, name, categoryId,
   baseUnitOfMeasureId, ..., batchId?, note? }`. The endpoint dispatches the
   catalogue `CreateProductCommand` (transitively requiring `product.create`,
-  held by HQ roles) with the scanned barcode as the new product's primary
-  barcode, then identifies the line against it. A pre-check that the line is
-  still unidentified runs before the create is dispatched, so a conflict cannot
-  normally create an orphan product; a failure between the two dispatches would
-  still leave the product in the master (the barcode stays reserved).
+  held by the Main Inventory Manager, administrators and Inventory Staff) with
+  the scanned barcode as the new product's primary barcode, then identifies the
+  line against it. A pre-check that the line is still unidentified runs before
+  the create is dispatched, so a conflict cannot normally create an orphan
+  product; a failure between the two dispatches would still leave the product in
+  the master (the barcode stays reserved).
 - **`release` / `reject` / `write-off`** take `{ lineNo, quantity, note? }` plus
   `reasonCode` for write-off. Quantities are capped at what remains per line and
   an incident resolves only when every line is fully dispositioned

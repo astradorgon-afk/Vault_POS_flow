@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 2026-09-19 · **Milestone:** Phase 17 complete (C63); Phase 18 is the active deployment track. The owner Overview has scoped sales KPIs, inventory availability, ranked exception drill-down rows, a permission-gated sync-failure watch panel, and a movement-chain explorer. Synchronization transport, replay, conflict handling, remediation, gap recovery and operator workflow are complete.
+**Last updated:** 2026-09-20 · **Milestone:** Phase 17 complete (C63); Phase 18 is the active deployment track. Synchronization transport, replay, conflict handling, remediation, gap recovery and operator workflow are complete. The desktop register shipped through C67 (daily-ops: till returns, shift close, receipt reprint, customer lookup). The web UI gap-fill from `VaultFlow-UI-Gaps.txt` is underway: **P0 (stock counts, transfers) is closed** and the first **P1 page (People & roles administration)** is implemented and browser-verified; Devices, Reports and Locations (P1) and the P2 list remain. Details in `SESSION-2026-09-20-web-ui-gaps-p0-p1.md`.
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -720,6 +720,39 @@ wrong string (`sale.external_customer_missing`).
 
 ---
 
+### Web UI gap-fill (2026-09-20, P0 + first P1 page)
+
+The web gaps inventory (`VaultFlow-UI-Gaps.txt`) drove this batch. **P0 is closed:**
+
+- **Stock counts** — `InventoryCounts.razor` (`/inventory/counts`) and
+  `InventoryCountDetail.razor`: count list with location/status/date filters,
+  opening, parse/rebuild behind `inventory.control`/`inventory.rebuild`, per-count
+  detail with lines, batch-level variance, auto-count and adjust actions.
+- **Transfers** — `Transfers.razor` (`/transfers`) and `TransferDetail.razor`:
+  location-scoped list, status chips, create/approve/cancel doors, per-transfer
+  detail with lines (requested/picked/received/damaged), allocations and
+  discrepancy state. The API gained **`GET /api/v1/transfers/{id}`**
+  (`TransferDetailView`) — the detail page had no route to read — and the list's
+  location scoping moved from the hardcoded-false `HttpCurrentUser.HasAllLocations`
+  to `DatabasePermissionEvaluator`, so Administrators keep full visibility.
+  Out-of-scope detail reads 404 `transfer.unknown`, indistinguishable from unknown.
+
+**P1, first page (People & roles):** `PeopleRoles.razor` (`/admin/users`) — Users
+tab (list, create, four-card detail: identity/roles/store access/overrides,
+disable/enable, PIN, password, two-factor reset) and Roles tab (role cards,
+permission editor across 8 modules / 76 permissions, self-administration and
+own-role read-only guards). Client gained `SendCommandAsync` plus 16
+administration methods on `VaultFlowApiClient` and 46 DTO/request records in
+`PosContracts`. Nav links for Stock counts (`inventory.view`), Transfers
+(`transfer.view`) and People & roles (`user.manage` OR `role.manage`) are live;
+Purchasing, Quarantine, Locations and Devices stay disabled placeholders.
+
+A real layout bug was fixed in the process: the sticky sidebar overflowed on short
+viewports and hid the bottom admin links (`wwwroot/app.css` `.nav-stack`
+scroll container). Pos.Web builds 0 warnings, 0 errors; full solution same.
+
+---
+
 ### Phase 12 — offline device storage
 
 C28 creates the Windows and Android `Pos.Client` MAUI Blazor Hybrid application
@@ -1332,6 +1365,15 @@ Stated plainly so they are not mistaken for finished work:
 
 Phase 13 was held after C43 by direction. C54 resumes the sync dashboard work
 while the remaining conflict matrix is implemented in contained slices.
+
+**Active web UI gap-fill (see `SESSION-2026-09-20-web-ui-gaps-p0-p1.md`):** P0 is
+closed and the People & roles page (first P1 item) is done and browser-verified.
+Next in order: P1 Devices (the `/api/v1/devices` surface: list/register/enrol/
+reissue-code/suspend/reactivate/revoke), then P1 Reports (per `report.view`),
+then P1 Locations, then the P2 list (adjustments, PO + goods receipt,
+quarantine, exceptions/replenishment/expiry, supplier returns, direct delivery,
+product master). The whole P0 + People & roles batch is uncommitted and ships
+with that session log.
 
 Phase 16 is complete through C61. C44–C47 delivered the scoped sales KPIs,
 inventory availability indicators, sync-failure watch and ranked exception

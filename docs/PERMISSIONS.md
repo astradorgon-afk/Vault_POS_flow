@@ -64,7 +64,7 @@ Codes are stable strings; renaming one requires a migration that rewrites
 | Code | Grants |
 |---|---|
 | `product.view` | Read products, barcodes, prices |
-| `product.create` | Create products (Main Warehouse / admin only) |
+| `product.create` | Create products |
 | `product.edit` | Edit product master fields |
 | `product.barcode.manage` | Add/retire barcodes |
 | `product.price.manage` | Create effective-dated price changes; cancel a scheduled price before it takes effect |
@@ -181,7 +181,8 @@ is offline-capable.
 | Permission group | Owner | Administrator | Main Inventory Mgr | Store Manager | Inventory Staff | Cashier | Auditor |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | `product.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `product.create` / `edit` / `barcode.manage` | ✓ | ✓ | ✓ | — | — | — | — |
+| `product.create` | ✓ | ✓ | ✓ | — | ✓ | — | — |
+| `product.edit` / `barcode.manage` | ✓ | ✓ | ✓ | — | — | — | — |
 | `product.price.manage` | ✓ | ✓ | — | — | — | — | — |
 | `product.cost.view` | ✓ | ✓ | ✓ | S | — | — | ✓ |
 | `product.disable` | ✓ | ✓ | ✓ | — | — | — | — |

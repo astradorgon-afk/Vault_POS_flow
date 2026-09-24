@@ -274,6 +274,7 @@ first needs it (2033) brings monthly partitions (ADR-0030).
 | `StoreManager_CannotAdjustOtherLocation` | 403 on cross-location scope |
 | `StoreManager_CannotCreateProduct` | 403 |
 | `InventoryStaff_CannotApproveOwnAdjustment` | 403 self-approval |
+| `InventoryStaff_CanCreateProduct` | 201 — inventory staff can register products |
 | `Auditor_IsReadOnly` | every mutating endpoint 403 |
 | `RevokedDevice_CannotSync` | 403 + wipe directive |
 | `DisabledUser_TokenRejected` | security stamp invalidation |
