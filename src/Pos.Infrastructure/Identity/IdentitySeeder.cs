@@ -239,7 +239,10 @@ public sealed class IdentitySeeder(
         if (removed > 0)
         {
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            logger.LogInformation("Retired {Count} role grants that are no longer defaults.", removed);
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation("Retired {Count} role grants that are no longer defaults.", removed);
+            }
         }
 
         return removed;

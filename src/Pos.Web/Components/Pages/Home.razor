@@ -317,8 +317,8 @@ else
 
     private static string DayGreeting => DateTime.Now.Hour switch
     {
-        < 12 => "Good morning",
-        < 18 => "Good afternoon",
+        var hour when hour < 12 => "Good morning",
+        var hour when hour < 18 => "Good afternoon",
         _ => "Good evening",
     };
 
