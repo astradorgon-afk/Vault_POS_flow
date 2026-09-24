@@ -131,6 +131,23 @@ public sealed class AuthorizationTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task Owner_OverseesEverything_ButDoesNotWorkTheTill()
+    {
+        UserId owner = await factory.CreateUserAsync(
+            "authz-owner-till", Roles.Owner, [MainWarehouse], ApprovalTier.Unlimited);
+
+        // Oversight and administration stay with the owner everywhere.
+        (await HasPermissionAsync(owner, Permissions.Sales.View, StoreTwo)).Should().BeTrue();
+        (await HasPermissionAsync(owner, Permissions.Administration.ManageUsers, StoreTwo)).Should().BeTrue();
+
+        // Selling, shifts, the drawer and refunds belong to the register staff.
+        foreach (string till in Roles.TillPermissions)
+        {
+            (await HasPermissionAsync(owner, till, StoreTwo)).Should().BeFalse(till);
+        }
+    }
+
+    [Fact]
     public async Task DenyOverride_BeatsAGrantFromARole()
     {
         UserId manager = await factory.CreateUserAsync(

@@ -253,7 +253,8 @@
     };
 
     // NotificationKind: 1 expiring, 2 expired, 3 low stock, 4 receiving discrepancy, 5 transfer shortage, 6 emergency transfer.
-    // ReferenceDocumentType: 3 transfer order, 6 sale, 7 sales return, 8 adjustment, 9 count, 10 quarantine.
+    // ReferenceDocumentType: 6 sale, 7 sales return. Transfers, adjustments, counts and quarantine
+    // are worked on the registers' office console, so the web has no page to open for them.
     private static string Category(PosNotification item) => (item.Kind, item.ReferenceDocumentType) switch
     {
         (_, 6 or 7) => "Sales",
@@ -285,12 +286,8 @@
 
     private static string? TargetHref(PosNotification item) => (item.ReferenceDocumentType, item.ReferenceDocumentId) switch
     {
-        (3, Guid id) => $"transfers/{id}",
         (6, Guid id) => $"sales/{id}",
         (7, Guid id) => $"returns/{id}",
-        (8, Guid id) => $"inventory/adjustments/{id}",
-        (9, Guid id) => $"inventory/counts/{id}",
-        (10, Guid id) => $"quarantine/{id}",
         _ => null,
     };
 

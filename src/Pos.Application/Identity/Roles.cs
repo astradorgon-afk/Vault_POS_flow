@@ -6,7 +6,11 @@ namespace Pos.Application.Identity;
 /// </summary>
 public static class Roles
 {
-    /// <summary>The business owner. Unlimited authority.</summary>
+    /// <summary>
+    /// The business owner. Oversight and administration across every location;
+    /// till work (selling, shifts, the drawer, refunds) belongs to the people
+    /// at the register, so it is not part of the default bundle.
+    /// </summary>
     public const string Owner = "Owner";
 
     /// <summary>System administrator. Manages users, devices and settings.</summary>
@@ -28,13 +32,36 @@ public static class Roles
     public const string Auditor = "Auditor";
 
     /// <summary>
+    /// Till work: ringing up and changing sales, running shifts and the drawer,
+    /// and customer records opened at the register. Cashiers and store
+    /// managers hold these; the owner monitors the result instead.
+    /// </summary>
+    public static IReadOnlyList<string> TillPermissions { get; } =
+    [
+        Permissions.Sales.Create, Permissions.Sales.Discount, Permissions.Sales.PriceOverride,
+        Permissions.Sales.Void, Permissions.Sales.Return, Permissions.Sales.ReturnBlind,
+        Permissions.Sales.Refund, Permissions.Sales.Reprint, Permissions.Sales.ExpiredOverride,
+        Permissions.Sales.OpenShift, Permissions.Sales.CloseShift, Permissions.Sales.CloseOtherShift,
+        Permissions.Sales.OpenCashDrawer, Permissions.Sales.ManageCustomers,
+    ];
+
+    /// <summary>
+    /// Grants that used to be role defaults and no longer are. The seeder
+    /// removes each one from a role that still holds it by default (granted by
+    /// no one), so an installed system matches the new defaults; a grant an
+    /// administrator added on purpose is left alone.
+    /// </summary>
+    public static IReadOnlyList<(string Role, string Permission)> RetiredDefaultGrants { get; } =
+        [.. TillPermissions.Select(permission => (Owner, permission))];
+
+    /// <summary>
     /// The default permission grants per role. Seeded on first run and editable
     /// afterwards through role management, with every change audited.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlyList<string>> DefaultGrants { get; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
-            [Owner] = [.. Permissions.All.Select(p => p.Code)],
+            [Owner] = [.. Permissions.All.Select(p => p.Code).Where(code => !TillPermissions.Contains(code))],
 
             [Administrator] =
             [

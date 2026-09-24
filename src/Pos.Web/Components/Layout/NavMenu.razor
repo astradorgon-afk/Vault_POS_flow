@@ -24,53 +24,18 @@
         </NavLink>
     </div>
 
-    @if (CanViewSales || CanViewReceipts || CanViewInventory)
+    @if (CanViewSales || CanViewInventory || CanViewReports)
     {
         <div class="nav-group">
             <span class="nav-heading">Stores</span>
             @if (CanViewSales)
             {
                 <NavLink class="nav-link" href="stores" @onclick="NotifyNavigation"><AppIcon Name="coins" /> <span>Store performance</span></NavLink>
+                <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
             }
             @if (CanViewInventory)
             {
                 <NavLink class="nav-link" href="inventory/stock" @onclick="NotifyNavigation"><AppIcon Name="box" /> <span>Store inventory</span></NavLink>
-            }
-            @if (CanViewSales)
-            {
-                <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
-            }
-            @if (CanViewReceipts)
-            {
-                <NavLink class="nav-link" href="receipts" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Payment receipts</span></NavLink>
-            }
-        </div>
-    }
-
-    @if (CanUseStockCounts || CanAdjustStock || CanViewTransfers || CanViewQuarantine || CanViewCatalog || CanViewReports)
-    {
-        <div class="nav-group">
-            <span class="nav-heading">Operations</span>
-            @if (CanUseStockCounts)
-            {
-                <NavLink class="nav-link" href="inventory/counts" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock counts</span></NavLink>
-            }
-            @if (CanAdjustStock)
-            {
-                <NavLink class="nav-link" href="inventory/adjustments" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock adjustments</span></NavLink>
-            }
-            @if (CanViewTransfers)
-            {
-                <NavLink class="nav-link" href="transfers" Match="NavLinkMatch.All" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Transfers</span></NavLink>
-                <NavLink class="nav-link" href="transfers/replenishment" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Replenishment</span></NavLink>
-            }
-            @if (CanViewQuarantine)
-            {
-                <NavLink class="nav-link" href="quarantine" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Quarantine</span></NavLink>
-            }
-            @if (CanViewCatalog)
-            {
-                <NavLink class="nav-link" href="catalog/prices" @onclick="NotifyNavigation"><AppIcon Name="tag" /> <span>Price schedule</span></NavLink>
             }
             @if (CanViewReports)
             {
@@ -78,7 +43,7 @@
             }
             @if (CanViewExceptions)
             {
-                <NavLink class="nav-link" href="inventory/exceptions" @onclick="NotifyNavigation"><AppIcon Name="report" /> <span>Inventory exceptions</span></NavLink>
+                <NavLink class="nav-link" href="inventory/exceptions" @onclick="NotifyNavigation"><AppIcon Name="alert" /> <span>Inventory exceptions</span></NavLink>
             }
         </div>
     }
@@ -123,14 +88,8 @@
 
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanViewCatalog => Session.HasPermission("product.view");
-    private bool CanViewReceipts => Session.HasPermission("receipt.view");
     private bool CanViewReports => Session.HasPermission("report.view");
-    private bool CanUseStockCounts => Session.HasAnyPermission("inventory.count", "inventory.count.approve", "inventory.view.all");
-    private bool CanAdjustStock => Session.HasAnyPermission("inventory.adjust", "inventory.adjust.approve");
-    private bool CanViewQuarantine => Session.HasPermission("quarantine.view");
     private bool CanViewExceptions => Session.HasPermission("inventory.view.all");
-    private bool CanViewTransfers => Session.HasPermission("transfer.view");
     private bool CanViewLocations => Session.HasPermission("product.view");
     private bool CanManageDevices => Session.HasPermission("device.manage");
     private bool CanManageSync => Session.HasPermission("sync.manage");

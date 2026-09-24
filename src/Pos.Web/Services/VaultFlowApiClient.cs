@@ -93,22 +93,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             : ApiResult<T>.Success(value);
     }
 
-    /// <summary>Schedules an effective-dated product price.</summary>
-    public Task<ApiResult<PosReference>> SchedulePriceAsync(
-        Guid productId, PosSchedulePriceRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/catalog/products/{productId:D}/prices"),
-            request,
-            cancellationToken);
-
-    /// <summary>Cancels a future product price with its recorded reason.</summary>
-    public Task<ApiResult<PosReference>> CancelScheduledPriceAsync(
-        Guid productId, Guid priceId, PosCancelPriceRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/catalog/products/{productId:D}/prices/{priceId:D}/cancel"),
-            request,
-            cancellationToken);
-
     /// <summary>Loads the authenticated operator's durable notification feed.</summary>
     public Task<ApiResult<PosNotificationFeed>> GetNotificationsAsync(
         bool unreadOnly,
@@ -171,54 +155,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return GetAsync<List<PosSaleSummary>>(path, cancellationToken);
     }
 
-    /// <summary>Lists payment receipts newest first, optionally filtered by store,
-    /// kind or an issued-window. The API re-checks <c>receipt.view</c>.</summary>
-    public Task<ApiResult<List<PosReceiptSummary>>> GetReceiptsAsync(
-        Guid? locationId,
-        string? kindName,
-        DateTimeOffset? from,
-        DateTimeOffset? to,
-        int limit,
-        CancellationToken cancellationToken)
-    {
-        string path = "/api/v1/receipts?";
-        if (locationId is { } location)
-        {
-            path += FormattableString.Invariant($"locationId={location:D}&");
-        }
-
-        if (!string.IsNullOrWhiteSpace(kindName))
-        {
-            path += $"kind={Uri.EscapeDataString(kindName)}&";
-        }
-
-        if (from is { } fromDate)
-        {
-            path += $"from={QueryTimestamp(fromDate)}&";
-        }
-
-        if (to is { } toDate)
-        {
-            path += $"to={QueryTimestamp(toDate)}&";
-        }
-
-        path += FormattableString.Invariant($"limit={limit}");
-        return GetAsync<List<PosReceiptSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Renders a payment receipt as printable plain text (or HTML when requested).</summary>
-    public Task<ApiResult<string>> GetReceiptPrintTextAsync(
-        Guid receiptId, string? format, CancellationToken cancellationToken)
-    {
-        string path = FormattableString.Invariant($"/api/v1/receipts/{receiptId:D}/print");
-        if (!string.IsNullOrWhiteSpace(format))
-        {
-            path += $"?format={Uri.EscapeDataString(format)}";
-        }
-
-        return GetTextAsync(path, cancellationToken);
-    }
-
     /// <summary>Gets the highest repeated negative-stock attempts in the last window.</summary>
     public Task<ApiResult<List<PosNegativeStockSummary>>> GetNegativeStockSummaryAsync(
         DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
@@ -238,13 +174,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         CancellationToken cancellationToken)
         => GetAsync<PosInventoryOverview>(
             "/api/v1/dashboard/inventory-overview", cancellationToken);
-
-    /// <summary>Gets the authorization-scoped movement chain for a document.</summary>
-    public Task<ApiResult<PosInventoryTimeline>> GetInventoryTimelineAsync(
-        string documentType, Guid documentId, CancellationToken cancellationToken)
-        => GetAsync<PosInventoryTimeline>(
-            FormattableString.Invariant($"/api/v1/inventory/timeline/{Uri.EscapeDataString(documentType)}/{documentId:D}"),
-            cancellationToken);
 
     /// <summary>Gets open synchronization failures for authorized operators.</summary>
     public Task<ApiResult<List<PosSyncFailure>>> GetSyncFailuresAsync(
@@ -309,66 +238,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             cancellationToken);
 
     // ---- Inventory counts ----
-
-    /// <summary>Lists counts at the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosInventoryCountSummary>>> GetInventoryCountsAsync(
-        Guid? locationId, string? statusName, CancellationToken cancellationToken)
-    {
-        string path = "/api/v1/inventory/counts?offset=0&limit=200";
-        if (locationId is { } location)
-        {
-            path += FormattableString.Invariant($"&locationId={location:D}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(statusName))
-        {
-            path += $"&status={Uri.EscapeDataString(statusName)}";
-        }
-
-        return GetAsync<List<PosInventoryCountSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Gets one count with its recorded lines.</summary>
-    public Task<ApiResult<PosInventoryCountDetail>> GetInventoryCountAsync(
-        Guid countId, CancellationToken cancellationToken)
-        => GetAsync<PosInventoryCountDetail>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}"),
-            cancellationToken);
-
-    /// <summary>Lists product master rows by name, SKU or barcode, paged.</summary>
-    public Task<ApiResult<List<PosProductSummary>>> GetProductsAsync(
-        string? query, int offset, int limit, CancellationToken cancellationToken)
-    {
-        string path = $"/api/v1/catalog/products?offset={offset}&limit={limit}";
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            path += $"&q={Uri.EscapeDataString(query)}";
-        }
-
-        return GetAsync<List<PosProductSummary>>(path, cancellationToken);
-    }
-
-    // ---- Transfers ----
-
-    /// <summary>Lists transfers touching the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosTransferSummary>>> GetTransfersAsync(CancellationToken cancellationToken)
-        => GetAsync<List<PosTransferSummary>>("/api/v1/transfers", cancellationToken);
-
-    /// <summary>Gets one transfer with its lines, allocations and arrival state.</summary>
-    public Task<ApiResult<PosTransferDetail>> GetTransferAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => GetAsync<PosTransferDetail>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}"),
-            cancellationToken);
-
-    /// <summary>Gets a transfer's custody timeline.</summary>
-    public Task<ApiResult<List<PosTransferCustodyEventSummary>>> GetTransferCustodyAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => GetAsync<List<PosTransferCustodyEventSummary>>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/custody"),
-            cancellationToken);
-
-    // ---- People & roles ----
 
     /// <summary>Sends a command whose response is empty on success (204).</summary>
     public async Task<ApiResult<string>> SendCommandAsync(
@@ -608,52 +477,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             cancellationToken);
 
     // ---- Stock adjustments ----
-
-    /// <summary>Lists adjustments at the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosStockAdjustmentSummary>>> GetStockAdjustmentsAsync(
-        Guid? locationId, string? statusName, CancellationToken cancellationToken)
-    {
-        string path = "/api/v1/inventory/adjustments?offset=0&limit=200";
-        if (locationId is { } location)
-        {
-            path += FormattableString.Invariant($"&locationId={location:D}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(statusName))
-        {
-            path += $"&status={Uri.EscapeDataString(statusName)}";
-        }
-
-        return GetAsync<List<PosStockAdjustmentSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Gets one adjustment with its lines.</summary>
-    public Task<ApiResult<PosStockAdjustmentDetail>> GetStockAdjustmentAsync(
-        Guid adjustmentId, CancellationToken cancellationToken)
-        => GetAsync<PosStockAdjustmentDetail>(
-            FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}"),
-            cancellationToken);
-
-    // ---- Quarantine ----
-
-    /// <summary>Lists quarantine incidents at the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosQuarantineIncidentSummary>>> GetQuarantineIncidentsAsync(
-        CancellationToken cancellationToken)
-        => GetAsync<List<PosQuarantineIncidentSummary>>("/api/v1/quarantine", cancellationToken);
-
-    /// <summary>Gets one incident with its lines, photos and timeline.</summary>
-    public Task<ApiResult<PosQuarantineIncidentDetail>> GetQuarantineIncidentAsync(
-        Guid incidentId, CancellationToken cancellationToken)
-        => GetAsync<PosQuarantineIncidentDetail>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}"),
-            cancellationToken);
-
-    // ---- Replenishment & inventory exceptions ----
-
-    /// <summary>Recommends replenishment quantities for the caller's stocked locations.</summary>
-    public Task<ApiResult<List<PosReplenishmentRecommendation>>> GetReplenishmentRecommendationsAsync(
-        CancellationToken cancellationToken)
-        => GetAsync<List<PosReplenishmentRecommendation>>("/api/v1/replenishment/recommendations", cancellationToken);
 
     /// <summary>Lists stock draws the ledger refused, newest first.</summary>
     public Task<ApiResult<List<PosNegativeStockAttemptView>>> GetNegativeStockAttemptsAsync(

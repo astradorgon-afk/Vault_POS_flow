@@ -306,12 +306,8 @@ else
 
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanCreateSale => Session.HasPermission("sale.create");
-    private bool CanViewCatalog => Session.HasPermission("product.view");
-    private bool CanViewReceipts => Session.HasPermission("receipt.view");
     private bool CanViewReports => Session.HasPermission("report.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanUseStockCounts => Session.HasAnyPermission("inventory.count", "inventory.count.approve", "inventory.view.all");
-    private bool CanViewTransfers => Session.HasPermission("transfer.view");
     private bool CanViewInventoryExceptions => Session.HasPermission("inventory.view.all");
     private bool CanManageUsers => Session.HasAnyPermission("user.manage", "role.manage");
     private bool CanManageDevices => Session.HasPermission("device.manage");
@@ -357,13 +353,9 @@ else
             if (CanViewSales) actions.Add(new("coins", "Store performance", "See what each store sold and took in, and its best sellers.", "/stores"));
             if (CanViewInventory) actions.Add(new("box", "Store inventory", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
             if (CanViewSales) actions.Add(new("ledger", "Review sales", "Browse each store's transactions, returns and receipts.", "/sales"));
-            if (CanUseStockCounts) actions.Add(new("count", "Stock counts", "See the counts each store ran and the variances they posted.", "/inventory/counts"));
-            if (CanViewTransfers) actions.Add(new("transfer", "Track transfers", "Follow stock moving between the warehouse and the stores.", "/transfers"));
             if (CanViewReports) actions.Add(new("report", "Open daily reports", "Reconcile trade, payment methods and drawer shifts.", "/reports"));
             if (CanManageUsers) actions.Add(new("people", "Manage people & roles", "Control accounts, access and location assignments.", "/admin/users"));
             if (CanManageDevices) actions.Add(new("device", "Manage devices", "Enrol, suspend and inspect the terminal fleet.", "/admin/devices"));
-            if (CanViewReceipts) actions.Add(new("receipt", "Payment receipts", "See cash each store paid out or took in outside a sale.", "/receipts"));
-            if (CanViewCatalog) actions.Add(new("tag", "Review prices", "Search products and inspect effective price schedules.", "/catalog/prices"));
             if (CanManageSync) actions.Add(new("sync", "Resolve sync failures", "Retry or dismiss device synchronization conflicts.", "/sync/failures"));
             if (actions.Count == 0) actions.Add(new("bell", "Review notifications", "See activity and exceptions addressed to you.", "/notifications"));
             return actions;

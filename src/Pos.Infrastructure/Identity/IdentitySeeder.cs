@@ -46,6 +46,7 @@ public sealed class IdentitySeeder(
         int permissionsAdded = await SeedPermissionsAsync(cancellationToken).ConfigureAwait(false);
         int rolesAdded = await SeedRolesAsync(now).ConfigureAwait(false);
         int grantsAdded = await SeedRoleGrantsAsync(now, cancellationToken).ConfigureAwait(false);
+        int grantsRetired = await RetireDefaultGrantsAsync(cancellationToken).ConfigureAwait(false);
         await EnsurePolicyVersionRowAsync(now, cancellationToken).ConfigureAwait(false);
 
         IReadOnlyList<string> orphaned = await FindOrphanedGrantsAsync(cancellationToken).ConfigureAwait(false);
@@ -59,7 +60,7 @@ public sealed class IdentitySeeder(
                 string.Join(", ", orphaned));
         }
 
-        if (permissionsAdded + rolesAdded + grantsAdded > 0)
+        if (permissionsAdded + rolesAdded + grantsAdded + grantsRetired > 0)
         {
             await policyVersion.BumpAsync("identity seed", cancellationToken).ConfigureAwait(false);
         }
@@ -209,6 +210,41 @@ public sealed class IdentitySeeder(
         return added;
     }
 
+    // Takes back grants that stopped being role defaults. Only a grant nobody
+    // made by hand (GrantedByUserId is null, which is how defaults are seeded)
+    // is removed, so an administrator's deliberate grant survives.
+    private async Task<int> RetireDefaultGrantsAsync(CancellationToken cancellationToken)
+    {
+        int removed = 0;
+
+        foreach (IGrouping<string, (string Role, string Permission)> retired in Roles.RetiredDefaultGrants.GroupBy(g => g.Role))
+        {
+            AppRole? role = await roles.FindByNameAsync(retired.Key).ConfigureAwait(false);
+            if (role is null)
+            {
+                continue;
+            }
+
+            string[] codes = [.. retired.Select(g => g.Permission)];
+            List<RolePermissionGrant> stale = await context.RolePermissions
+                .AsTracking()
+                .Where(rp => rp.RoleId == role.Id && rp.GrantedByUserId == null && codes.Contains(rp.PermissionCode))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            context.RolePermissions.RemoveRange(stale);
+            removed += stale.Count;
+        }
+
+        if (removed > 0)
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            logger.LogInformation("Retired {Count} role grants that are no longer defaults.", removed);
+        }
+
+        return removed;
+    }
+
     private async Task EnsurePolicyVersionRowAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         bool exists = await context.PolicyVersion
@@ -245,7 +281,7 @@ public sealed class IdentitySeeder(
 
     private static string DescribeRole(string roleName) => roleName switch
     {
-        Roles.Owner => "The business owner. Unlimited authority across every location.",
+        Roles.Owner => "The business owner. Oversight and administration across every location; till work stays with register staff.",
         Roles.Administrator => "Manages users, devices, catalog and settings.",
         Roles.MainInventoryManager => "Runs the Main Warehouse and business-wide inventory control.",
         Roles.StoreManager => "Runs one store. Authority is confined to assigned locations.",
