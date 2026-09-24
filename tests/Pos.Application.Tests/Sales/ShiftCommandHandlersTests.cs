@@ -70,6 +70,40 @@ public sealed class OpenShiftCommandHandlerTests
     }
 
     [Fact]
+    public async Task ARegisterThatOpenedOffline_KeepsItsOwnOpeningTime()
+    {
+        LocationId locationId = LocationId.New();
+        _shifts.GetLocationFactsAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new ShiftLocationFacts(LocationKind.Store, LocationSettings.Default));
+        DateTimeOffset openedOffline = Now.AddHours(-3);
+
+        var command = new OpenShiftCommand(TestShiftNumber, locationId, BusinessDate, 100m, OpenedAtUtc: openedOffline);
+
+        Result<CashierShiftId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        await _shifts.Received(1).AddAsync(
+            Arg.Is<CashierShift>(s => s.OpenedAtUtc == openedOffline),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AnOpeningTimeInTheFuture_IsRefused()
+    {
+        LocationId locationId = LocationId.New();
+        _shifts.GetLocationFactsAsync(locationId, Arg.Any<CancellationToken>())
+            .Returns(new ShiftLocationFacts(LocationKind.Store, LocationSettings.Default));
+
+        var command = new OpenShiftCommand(TestShiftNumber, locationId, BusinessDate, 100m, OpenedAtUtc: Now.AddHours(1));
+
+        Result<CashierShiftId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors[0].Code.Should().Be("shift.time_in_future");
+        await _shifts.DidNotReceive().AddAsync(Arg.Any<CashierShift>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task HappyPath_WritesShiftOpenedAudit()
     {
         LocationId locationId = LocationId.New();
@@ -256,6 +290,30 @@ public sealed class CloseShiftCommandHandlerTests
         _openShift.CashVariance.Should().Be(0m);
 
         await _shifts.Received(1).UpdateAsync(_openShift, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ARegisterReportedClosingTime_IsKept()
+    {
+        DateTimeOffset counted = _openShift.OpenedAtUtc.AddHours(8);
+        var command = new CloseShiftCommand(_openShift.Id, _location, 500m, 550m, counted);
+
+        Result<CashierShiftId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        _openShift.ClosedAtUtc.Should().Be(counted);
+    }
+
+    [Fact]
+    public async Task AClosingTimeBeforeTheShiftOpened_IsRefused()
+    {
+        var command = new CloseShiftCommand(_openShift.Id, _location, 500m, 550m, _openShift.OpenedAtUtc.AddMinutes(-1));
+
+        Result<CashierShiftId> result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Errors[0].Code.Should().Be("shift.closed_before_opened");
+        _openShift.Status.Should().Be(ShiftStatus.Open);
     }
 
     [Fact]

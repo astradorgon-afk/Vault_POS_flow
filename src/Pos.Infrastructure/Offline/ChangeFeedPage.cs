@@ -24,6 +24,10 @@ public sealed record ChangeFeedBaseline(long Cursor, IReadOnlyList<ChangeFeedCha
 public abstract record ChangeFeedChange(long Sequence);
 
 /// <summary>A product was created or changed.</summary>
+/// <remarks>
+/// <paramref name="Category"/> is the name of the product's category, which the
+/// till groups its product buttons by; null when head office did not send one.
+/// </remarks>
 public sealed record ProductChanged(
     long Sequence,
     ProductId ProductId,
@@ -33,7 +37,8 @@ public sealed record ProductChanged(
     bool TracksBatches,
     bool TracksExpiry,
     long SourceVersion,
-    DateTimeOffset UpdatedAtUtc) : ChangeFeedChange(Sequence);
+    DateTimeOffset UpdatedAtUtc,
+    string? Category = null) : ChangeFeedChange(Sequence);
 
 /// <summary>A barcode was attached, retired or made primary.</summary>
 public sealed record ProductBarcodeChanged(

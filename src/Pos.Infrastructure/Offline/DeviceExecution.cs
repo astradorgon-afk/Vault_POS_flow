@@ -21,6 +21,13 @@ public sealed class DeviceUnitOfWork(PosDeviceDbContext context) : IUnitOfWork
         => context.SaveChangesAsync(cancellationToken);
 
     /// <inheritdoc />
+    public bool IsConcurrencyConflict(Exception exception)
+        => exception is ConcurrencyConflictException or Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException;
+
+    /// <inheritdoc />
+    public void DiscardChanges() => context.ChangeTracker.Clear();
+
+    /// <inheritdoc />
     public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
         => new DeviceTransaction(
             await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false));

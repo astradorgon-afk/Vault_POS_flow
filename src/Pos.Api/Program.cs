@@ -139,11 +139,15 @@ try
                 QueueLimit = 0,
             }));
 
+        // Each signed-in account has its own budget; anonymous callers share
+        // their address's. A store's registers and every web user reach the API
+        // from one address, so an address-wide budget would throttle a whole
+        // branch at once. The limiter therefore runs after authentication.
         options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
             RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.User.Identity?.Name
-                              ?? httpContext.Connection.RemoteIpAddress?.ToString()
-                              ?? "anonymous",
+                partitionKey: httpContext.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value is { Length: > 0 } userId
+                    ? "user:" + userId
+                    : "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = rateLimits.GlobalPermitLimit,
@@ -175,8 +179,6 @@ try
     app.UseWhen(
         context => !context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase),
         builder => builder.UseHttpsRedirection());
-
-    app.UseRateLimiter();
 
     // Unhandled exceptions never reach the client as detail: the log carries the
     // exception, the response carries only a code and the correlation id.
@@ -220,6 +222,7 @@ try
     }));
 
     app.UseAuthentication();
+    app.UseRateLimiter();
     app.UseAuthorization();
 
     if (app.Environment.IsDevelopment())

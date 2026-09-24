@@ -30,6 +30,19 @@ public sealed class UnitOfWork(PosDbContext context) : IUnitOfWork
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Besides a stale balance version, two writers that both found a balance
+    /// row missing race to insert it and the loser trips the primary key; the
+    /// ledger treats both as the same competition, and so does this.
+    /// </remarks>
+    public bool IsConcurrencyConflict(Exception exception)
+        => exception is ConcurrencyConflictException or Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException
+           || (exception is Microsoft.EntityFrameworkCore.DbUpdateException update && Inventory.InventoryLedger.IsBalanceCompetition(update));
+
+    /// <inheritdoc />
+    public void DiscardChanges() => context.ChangeTracker.Clear();
+
+    /// <inheritdoc />
     public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
     {
         IDbContextTransaction transaction = await context.Database

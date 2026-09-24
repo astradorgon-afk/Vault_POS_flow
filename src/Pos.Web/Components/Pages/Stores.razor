@@ -217,7 +217,7 @@ else if (report is not null)
         TimeSpan ago = DateTimeOffset.UtcNow - last;
         return ago.TotalMinutes < 60 ? $"Last sale {Math.Max(1, (int)ago.TotalMinutes)} min ago"
             : ago.TotalHours < 24 ? $"Last sale {(int)ago.TotalHours} h ago"
-            : $"Last sale {last.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)}";
+            : $"Last sale {last.InStoreTime().ToString("MMM d", CultureInfo.InvariantCulture)}";
     }
 
     private static string Money(decimal value)

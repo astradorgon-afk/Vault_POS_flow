@@ -208,7 +208,9 @@ public sealed class DevelopmentDataSeeder(
     {
         foreach (DevelopmentLocation branch in DevelopmentCatalogue.Locations.Where(l => l.SizeFactor > 0m))
         {
+            // The context reads untracked by default; this one is written back.
             Location? location = await context.Locations
+                .AsTracking()
                 .FirstOrDefaultAsync(l => l.Code == branch.Code, cancellationToken)
                 .ConfigureAwait(false);
 

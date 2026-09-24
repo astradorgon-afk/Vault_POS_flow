@@ -132,5 +132,5 @@ else
     private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
     private static string MethodSlug(string method) => method.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
-    private static string ShiftTime(PosDailyShiftSummary shift) => $"{shift.OpenedAtUtc.ToLocalTime():h:mm tt} – {shift.ClosedAtUtc?.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "still open"}";
+    private static string ShiftTime(PosDailyShiftSummary shift) => $"{shift.OpenedAtUtc.InStoreTime():h:mm tt} – {shift.ClosedAtUtc?.InStoreTime().ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "still open"}";
 }

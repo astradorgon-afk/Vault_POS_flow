@@ -85,7 +85,7 @@ else
                             <td class="sale-number">@sale.Number</td>
                             <td><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></td>
                             <td>@sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
-                            <td>@sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@sale.CompletedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@Money(sale.GrossTotal)</td>
                             <td><strong>@Money(sale.NetTotal)</strong></td>
                         </tr>

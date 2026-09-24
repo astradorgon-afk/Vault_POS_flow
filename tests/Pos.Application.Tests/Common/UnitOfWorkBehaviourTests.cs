@@ -7,9 +7,10 @@ using Pos.Domain.Inventory;
 namespace Pos.Application.Tests.Common;
 
 /// <summary>
-/// The unit-of-work behaviour: every command is one transaction, and an
-/// optimistic-concurrency failure becomes a retryable command failure rather
-/// than an exception escaping the pipeline.
+/// The unit-of-work behaviour: every command is one transaction, a command that
+/// loses a race with a concurrent writer is run again, and contention that
+/// persists becomes a retryable command failure rather than an exception
+/// escaping the pipeline.
 /// </summary>
 public sealed class UnitOfWorkBehaviourTests
 {
@@ -53,14 +54,19 @@ public sealed class UnitOfWorkBehaviourTests
     }
 
     [Fact]
-    public async Task ContentionOnSave_BecomesTheBalanceContentionError_AndRollsBack()
+    public async Task ContentionThatPersists_BecomesTheBalanceContentionError_AndRollsBack()
     {
         (UnitOfWorkBehaviour<string, int> behaviour, FakeUnitOfWork unitOfWork) = NewBehaviour();
         unitOfWork.SaveError = new ConcurrencyConflictException();
+        int runs = 0;
 
         Result<int> result = await behaviour.HandleAsync(
             CommandName,
-            () => Task.FromResult(Result<int>.Success(42)),
+            () =>
+            {
+                runs++;
+                return Task.FromResult(Result<int>.Success(42));
+            },
             CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();
@@ -69,8 +75,66 @@ public sealed class UnitOfWorkBehaviourTests
         unitOfWork.Transaction.RolledBack.Should().BeTrue();
         unitOfWork.Transaction.Committed.Should().BeFalse();
 
-        // The behaviour ran the command: the contention happened at the save.
-        unitOfWork.SaveCount.Should().Be(1);
+        // Every attempt ran the command afresh and lost at the save.
+        runs.Should().Be(UnitOfWorkBehaviour<string, int>.MaxAttempts);
+        unitOfWork.SaveCount.Should().Be(UnitOfWorkBehaviour<string, int>.MaxAttempts);
+        unitOfWork.DiscardCount.Should().Be(UnitOfWorkBehaviour<string, int>.MaxAttempts);
+    }
+
+    [Fact]
+    public async Task ALostRace_IsRunAgainFromScratch_AndCommits()
+    {
+        (UnitOfWorkBehaviour<string, int> behaviour, FakeUnitOfWork unitOfWork) = NewBehaviour();
+        unitOfWork.SaveError = new ConcurrencyConflictException();
+        unitOfWork.FailingSaves = 1;
+        int runs = 0;
+
+        Result<int> result = await behaviour.HandleAsync(
+            CommandName,
+            () =>
+            {
+                runs++;
+                return Task.FromResult(Result<int>.Success(42));
+            },
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        runs.Should().Be(2);
+        unitOfWork.DiscardCount.Should().Be(1, because: "the second run must read what the winner committed");
+        unitOfWork.Transaction.Committed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ContentionRaisedInsideTheCommand_IsRetriedToo()
+    {
+        // A repository that saves part-way through the command meets the
+        // competing writer there, not at the behaviour's own save.
+        (UnitOfWorkBehaviour<string, int> behaviour, FakeUnitOfWork unitOfWork) = NewBehaviour();
+        int runs = 0;
+
+        Result<int> result = await behaviour.HandleAsync(
+            CommandName,
+            () => ++runs == 1
+                ? Task.FromException<Result<int>>(new ConcurrencyConflictException())
+                : Task.FromResult(Result<int>.Success(7)),
+            CancellationToken.None);
+
+        result.Value.Should().Be(7);
+        runs.Should().Be(2);
+        unitOfWork.Transaction.Committed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AFaultThatIsNotContention_StillEscapes()
+    {
+        (UnitOfWorkBehaviour<string, int> behaviour, _) = NewBehaviour();
+
+        Func<Task> act = () => behaviour.HandleAsync(
+            CommandName,
+            () => Task.FromException<Result<int>>(new InvalidOperationException("boom")),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
@@ -106,14 +170,21 @@ public sealed class UnitOfWorkBehaviourTests
 
         public Exception? SaveError { get; set; }
 
+        /// <summary>How many saves fail with <see cref="SaveError"/>; all of them when null.</summary>
+        public int? FailingSaves { get; set; }
+
+        public int DiscardCount { get; private set; }
+
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken)
         {
             SaveCount++;
 
-            return SaveError is not null
+            return SaveError is not null && (FailingSaves is null || SaveCount <= FailingSaves)
                 ? Task.FromException<int>(SaveError)
                 : Task.FromResult(1);
         }
+
+        public void DiscardChanges() => DiscardCount++;
 
         public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
             => Task.FromResult<IUnitOfWorkTransaction>(Transaction);

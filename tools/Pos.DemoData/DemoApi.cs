@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -59,8 +60,11 @@ internal sealed class DemoApi(HttpClient http) : IDisposable
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>Access tokens are short-lived; each session's current token and
-    /// password are kept so an expired token is renewed by signing in again.</summary>
-    private readonly Dictionary<string, (string Password, string Token)> _tokens = [];
+    /// password are kept so an expired token is renewed by signing in again.
+    /// The stores trade in parallel, so both are safe to share.</summary>
+    private readonly ConcurrentDictionary<string, (string Password, string Token)> _tokens = new();
+
+    private readonly SemaphoreSlim _renewal = new(1, 1);
 
     public const string DeviceHeader = "X-Device-Id";
 
@@ -127,7 +131,29 @@ internal sealed class DemoApi(HttpClient http) : IDisposable
         return [];
     }
 
-    public void Dispose() => http.Dispose();
+    public void Dispose()
+    {
+        http.Dispose();
+        _renewal.Dispose();
+    }
+
+    /// <summary>Signs a session in again once, however many calls found its
+    /// token expired at the same moment.</summary>
+    private async Task RenewAsync(DemoSession session, string? staleToken)
+    {
+        await _renewal.WaitAsync();
+        try
+        {
+            if (_tokens.TryGetValue(session.Key, out (string Password, string Token) current) && current.Token == staleToken)
+            {
+                await SignInAsync(session.UserName, current.Password, session.DeviceId);
+            }
+        }
+        finally
+        {
+            _renewal.Release();
+        }
+    }
 
     private async Task<JsonNode?> SendAsync(
         HttpMethod method, string path, object? body, DemoSession? session, Guid? deviceId)
@@ -146,9 +172,9 @@ internal sealed class DemoApi(HttpClient http) : IDisposable
                 Console.WriteLine($"  rate limited on {path}; waiting {ex.Wait.TotalSeconds:0}s");
                 await Task.Delay(ex.Wait);
             }
-            catch (TokenExpiredException) when (attempt < 6 && session is not null && _tokens.ContainsKey(session.Key))
+            catch (TokenExpiredException ex) when (attempt < 6 && session is not null && _tokens.ContainsKey(session.Key))
             {
-                await SignInAsync(session.UserName, _tokens[session.Key].Password, session.DeviceId);
+                await RenewAsync(session, ex.Token);
             }
         }
     }
@@ -158,9 +184,10 @@ internal sealed class DemoApi(HttpClient http) : IDisposable
     {
         using HttpRequestMessage request = new(method, new Uri(path, UriKind.Relative));
 
+        string? token = null;
         if (session is not null)
         {
-            string token = _tokens.TryGetValue(session.Key, out (string Password, string Token) current)
+            token = _tokens.TryGetValue(session.Key, out (string Password, string Token) current)
                 ? current.Token
                 : session.AccessToken;
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -181,7 +208,7 @@ internal sealed class DemoApi(HttpClient http) : IDisposable
 
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && session is not null)
         {
-            throw new TokenExpiredException();
+            throw new TokenExpiredException(token);
         }
 
         if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
@@ -222,4 +249,8 @@ internal sealed class RateLimitedException(TimeSpan wait) : Exception("The API r
 }
 
 /// <summary>The API answered 401 to a signed-in call: the access token expired.</summary>
-internal sealed class TokenExpiredException() : Exception("The access token expired.");
+internal sealed class TokenExpiredException(string? token) : Exception("The access token expired.")
+{
+    /// <summary>The token the API refused.</summary>
+    public string? Token { get; } = token;
+}

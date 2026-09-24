@@ -100,7 +100,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        string? category = null)
     {
         Id = id;
         Sku = sku;
@@ -110,11 +111,15 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        Category = category;
     }
 
     public ProductId Id { get; private init; }
     public string Sku { get; private set; }
     public string Name { get; private set; }
+
+    /// <summary>The product's category name, which the till groups products by.</summary>
+    public string? Category { get; private set; }
     public bool IsActive { get; private set; }
     public bool TracksBatches { get; private set; }
     public bool TracksExpiry { get; private set; }
@@ -128,7 +133,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        string? category = null)
     {
         Sku = sku;
         Name = name;
@@ -137,6 +143,7 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        Category = category;
     }
 }
 

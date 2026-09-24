@@ -586,7 +586,8 @@ public sealed class SyncPushService(
                 locationId,
                 payload.BusinessDate,
                 payload.OpeningFloat,
-                shiftId),
+                shiftId,
+                payload.OpenedAtUtc == default ? null : payload.OpenedAtUtc),
             cancellationToken).ConfigureAwait(false);
     }
 

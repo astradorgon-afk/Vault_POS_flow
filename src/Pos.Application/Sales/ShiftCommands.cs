@@ -15,12 +15,18 @@ namespace Pos.Application.Sales;
 /// <param name="BusinessDate">The business date the shift opens on.</param>
 /// <param name="OpeningFloat">The cash in the drawer when the shift opens, greater than or equal to zero.</param>
 /// <param name="ShiftId">The existing offline shift identifier, or null for a new online shift.</param>
+/// <param name="OpenedAtUtc">
+/// When the register opened the shift. A register that opened it offline
+/// reports its own time, so head office and the register agree on when the
+/// drawer opened; null means now.
+/// </param>
 public sealed record OpenShiftCommand(
     DocumentNumber Number,
     LocationId LocationId,
     DateOnly BusinessDate,
     decimal OpeningFloat,
-    CashierShiftId? ShiftId = null)
+    CashierShiftId? ShiftId = null,
+    DateTimeOffset? OpenedAtUtc = null)
     : ICommand<CashierShiftId>, IAuthorizedMessage, ILocationScoped
 {
     /// <inheritdoc />
@@ -37,11 +43,13 @@ public sealed record OpenShiftCommand(
 /// <param name="LocationId">The location the shift belongs to.</param>
 /// <param name="DeclaredCash">The cash the cashier declared before counting.</param>
 /// <param name="CountedCash">The cash actually counted in the drawer.</param>
+/// <param name="ClosedAtUtc">When the drawer was counted and the shift closed at the register; null means now.</param>
 public sealed record CloseShiftCommand(
     CashierShiftId ShiftId,
     LocationId LocationId,
     decimal DeclaredCash,
-    decimal CountedCash)
+    decimal CountedCash,
+    DateTimeOffset? ClosedAtUtc = null)
     : ICommand<CashierShiftId>, IAuthorizedMessage, ILocationScoped
 {
     /// <inheritdoc />

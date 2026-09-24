@@ -16,6 +16,8 @@ public static class StoreClock
     /// <summary>Gets the stores' current business date.</summary>
     public static DateOnly Today => DateOnly.FromDateTime(Now.DateTime);
 
-    /// <summary>Converts an instant to the stores' local time for display.</summary>
-    public static DateTimeOffset ToStoreTime(DateTimeOffset instant) => TimeZoneInfo.ConvertTime(instant, StoreZone);
+    /// <summary>Converts an instant to the stores' local time for display, so a
+    /// sale rung up at 21:57 in Makati reads 21:57 whatever zone the web server
+    /// runs in.</summary>
+    public static DateTimeOffset InStoreTime(this DateTimeOffset instant) => TimeZoneInfo.ConvertTime(instant, StoreZone);
 }

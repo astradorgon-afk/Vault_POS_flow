@@ -180,10 +180,12 @@ public sealed class LoggingBehaviour<TMessage, TResult>(
 /// leave a sale behind.
 /// </summary>
 /// <remarks>
-/// An optimistic-concurrency failure does not escape as an exception: the
-/// transaction is rolled back and the command fails with the conflict error, so
-/// the caller sees a retryable outcome instead of a server fault. Contention
-/// can only come from the inventory balance projection today, so the mapping is
+/// A command that loses a race with a concurrent writer - two branches selling
+/// the same product at the same moment both move stock through the shared
+/// customer counterparty - is rolled back and run again against the state the
+/// winner left, a few times, before the conflict error is returned. The caller
+/// sees a retryable outcome instead of a server fault either way. Contention can
+/// only come from the inventory balance projection today, so the mapping is
 /// unambiguous (see <see cref="Pos.Domain.Common.ConcurrencyConflictException"/>).
 /// </remarks>
 /// <typeparam name="TCommand">The command type.</typeparam>
@@ -192,6 +194,9 @@ public sealed class LoggingBehaviour<TMessage, TResult>(
 public sealed class UnitOfWorkBehaviour<TCommand, TResult>(IUnitOfWork unitOfWork)
     : IPipelineBehaviour<TCommand, TResult>
 {
+    /// <summary>How many times a command runs before contention is reported.</summary>
+    internal const int MaxAttempts = 5;
+
     /// <inheritdoc />
     public async Task<Result<TResult>> HandleAsync(
         TCommand message,
@@ -207,34 +212,45 @@ public sealed class UnitOfWorkBehaviour<TCommand, TResult>(IUnitOfWork unitOfWor
             return await next().ConfigureAwait(false);
         }
 
-        await using IUnitOfWorkTransaction transaction =
-            await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-        Result<TResult> result = await next().ConfigureAwait(false);
-
-        if (result.IsFailure)
+        for (int attempt = 1; ; attempt++)
         {
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-            return result;
-        }
+            await using (IUnitOfWorkTransaction transaction =
+                await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    Result<TResult> result = await next().ConfigureAwait(false);
 
-        try
-        {
-            await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (ConcurrencyConflictException)
-        {
-            // A concurrent writer committed between this read and this save.
-            // Rolling back and failing the command is the only honest outcome:
-            // the retry must reload the projection, which cannot happen inside
-            // a rolled-back transaction.
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-            return Result<TResult>.Failure(InventoryErrors.BalanceContention);
-        }
+                    if (result.IsFailure)
+                    {
+                        await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                        return result;
+                    }
 
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    return result;
+                }
+                catch (Exception ex) when (unitOfWork.IsConcurrencyConflict(ex))
+                {
+                    // A concurrent writer committed between this command's read
+                    // and its save. Nothing of this attempt survives: roll back,
+                    // forget what was read, and run the command again against
+                    // the projection as the winner left it.
+                    await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                    unitOfWork.DiscardChanges();
 
-        return result;
+                    if (attempt >= MaxAttempts)
+                    {
+                        return Result<TResult>.Failure(InventoryErrors.BalanceContention);
+                    }
+                }
+            }
+
+            // Stagger the retry so writers that collided do not collide again.
+            await Task.Delay(TimeSpan.FromMilliseconds(attempt * Random.Shared.Next(5, 20)), cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 }
 

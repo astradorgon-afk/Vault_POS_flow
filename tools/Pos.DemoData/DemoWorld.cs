@@ -19,8 +19,8 @@ internal sealed record DemoProduct(Guid Id, string Sku, string Name, Guid UnitId
 internal sealed record DemoPrice(Guid? LocationId, decimal Amount, DateTimeOffset FromUtc, DateTimeOffset? ToUtc);
 
 /// <summary>
-/// A store's till: an enrolled desktop or phone register, with its cashier and
-/// the store supervisor (who voids and refunds) signed in at that register.
+/// A store's till: an enrolled desktop or phone register, with the cashier who
+/// works it and the store supervisor (who voids and refunds) signed in at it.
 /// </summary>
 internal sealed record DemoRegister(
     string Store,
@@ -43,15 +43,24 @@ internal sealed class DemoWorld
     private const int PendingEnrolment = 0;
     private const int Active = 1;
 
-    /// <summary>Each store's demo till and who works it. The real desktop
+    /// <summary>
+    /// Each store's two demo tills and who works them: the first counter takes
+    /// the morning shift, the second the afternoon one. The real desktop
     /// register (W01) is never used: its document counter lives on that machine,
-    /// so demo numbers on it would collide with the next real sale.</summary>
+    /// so demo numbers on it would collide with the next real sale.
+    /// </summary>
     private static readonly (string Store, string ShortCode, string Name, int Platform, string Cashier, string Supervisor)[] Tills =
     [
-        ("STORE01", "W02", "Store One counter 2", WindowsPlatform, "cashier", "manager"),
-        ("STORE02", "W03", "Store Two counter", WindowsPlatform, "cashier2", "manager2"),
-        ("STORE03", "A01", "Store Three phone till", AndroidPlatform, "cashier3", "manager3"),
+        ("STORE01", "W02", "Legazpi counter 2", WindowsPlatform, "cashier", "manager"),
+        ("STORE01", "W04", "Legazpi counter 3", WindowsPlatform, "cashier1b", "manager"),
+        ("STORE02", "W03", "Morato counter 1", WindowsPlatform, "cashier2", "manager2"),
+        ("STORE02", "W05", "Morato counter 2", WindowsPlatform, "cashier2b", "manager2"),
+        ("STORE03", "A01", "Kapitolyo phone till 1", AndroidPlatform, "cashier3", "manager3"),
+        ("STORE03", "A02", "Kapitolyo phone till 2", AndroidPlatform, "cashier3b", "manager3"),
     ];
+
+    /// <summary>How many price lists load at once.</summary>
+    private const int PriceLoadConcurrency = 8;
 
     public required DemoApi Api { get; init; }
 
@@ -64,8 +73,9 @@ internal sealed class DemoWorld
 
     public required IReadOnlyList<Guid> Customers { get; init; }
 
-    /// <summary>Each store's register, by store code.</summary>
-    public required IReadOnlyDictionary<string, DemoRegister> Registers { get; init; }
+    /// <summary>Each store's registers, by store code: the morning counter first,
+    /// then the afternoon one.</summary>
+    public required IReadOnlyDictionary<string, IReadOnlyList<DemoRegister>> Registers { get; init; }
 
     public DemoSession Owner => Users["owner"];
 
@@ -75,7 +85,7 @@ internal sealed class DemoWorld
     public static async Task<DemoWorld> LoadAsync(DemoApi api)
     {
         Dictionary<string, DemoSession> users = [];
-        foreach (string userName in new[] { "owner", "inventory", "manager", "manager2", "manager3" })
+        foreach (string userName in new[] { "owner", "warehouse", "inventory", "manager", "manager2", "manager3" })
         {
             users[userName] = await api.SignInAsync(userName, Password);
         }
@@ -88,19 +98,25 @@ internal sealed class DemoWorld
             locations[location!["code"]!.GetValue<string>()] = location["id"]!.GetValue<Guid>();
         }
 
-        Dictionary<string, DemoProduct> products = [];
+        List<JsonNode> listed = [];
         for (int offset = 0; ; offset += 200)
         {
             JsonArray page = DemoApi.Items(await api.GetAsync(
                 string.Create(CultureInfo.InvariantCulture, $"/api/v1/catalog/products?offset={offset}&limit=200"), owner));
-
-            foreach (JsonNode? product in page)
+            listed.AddRange(page.OfType<JsonNode>().Where(p => p["isActive"]?.GetValue<bool>() == true));
+            if (page.Count < 200)
             {
-                if (product?["isActive"]?.GetValue<bool>() != true)
-                {
-                    continue;
-                }
+                break;
+            }
+        }
 
+        // A grocery's price lists, a few at a time.
+        using SemaphoreSlim gate = new(PriceLoadConcurrency);
+        DemoProduct[] loaded = await Task.WhenAll(listed.Select(async product =>
+        {
+            await gate.WaitAsync();
+            try
+            {
                 Guid id = product["id"]!.GetValue<Guid>();
                 List<DemoPrice> prices = [];
                 foreach (JsonNode? price in DemoApi.Items(await api.GetAsync(
@@ -113,34 +129,49 @@ internal sealed class DemoWorld
                         price["effectiveToUtc"]?.GetValue<DateTimeOffset?>()));
                 }
 
-                string sku = product["sku"]!.GetValue<string>();
-                products[sku] = new DemoProduct(
-                    id, sku, product["name"]!.GetValue<string>(), product["baseUnitOfMeasureId"]!.GetValue<Guid>(), prices);
+                return new DemoProduct(
+                    id,
+                    product["sku"]!.GetValue<string>(),
+                    product["name"]!.GetValue<string>(),
+                    product["baseUnitOfMeasureId"]!.GetValue<Guid>(),
+                    prices);
             }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        Dictionary<string, DemoProduct> products = loaded.ToDictionary(p => p.Sku);
 
-            if (page.Count < 200)
+        List<Guid> customers = [];
+        for (int page = 1; ; page++)
+        {
+            JsonArray listedCustomers = DemoApi.Items(await api.GetAsync(
+                string.Create(CultureInfo.InvariantCulture, $"/api/v1/customers?page={page}&pageSize=100"), owner));
+            customers.AddRange(listedCustomers.Select(c => c!["id"]!.GetValue<Guid>()));
+            if (listedCustomers.Count < 100)
             {
                 break;
             }
         }
 
-        List<Guid> customers = [];
-        foreach (JsonNode? customer in DemoApi.Items(await api.GetAsync("/api/v1/customers?page=1&pageSize=100", owner)))
-        {
-            customers.Add(customer!["id"]!.GetValue<Guid>());
-        }
-
-        Dictionary<string, DemoRegister> registers = [];
+        Dictionary<string, List<DemoRegister>> registers = [];
         foreach ((string store, string shortCode, string name, int platform, string cashier, string supervisor) in Tills)
         {
             Guid deviceId = await EnsureEnrolledRegisterAsync(api, owner, locations[store], shortCode, name, platform);
-            registers[store] = new DemoRegister(
+            DemoRegister register = new(
                 store,
                 locations[store],
                 deviceId,
                 shortCode,
                 await api.SignInAsync(cashier, Password, deviceId),
                 await api.SignInAsync(supervisor, Password, deviceId));
+            if (!registers.TryGetValue(store, out List<DemoRegister>? tills))
+            {
+                registers[store] = tills = [];
+            }
+
+            tills.Add(register);
         }
 
         return new DemoWorld
@@ -150,7 +181,7 @@ internal sealed class DemoWorld
             Locations = locations,
             Products = products,
             Customers = customers,
-            Registers = registers,
+            Registers = registers.ToDictionary(r => r.Key, r => (IReadOnlyList<DemoRegister>)r.Value),
         };
     }
 

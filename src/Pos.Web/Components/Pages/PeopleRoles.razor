@@ -248,14 +248,14 @@ else
                 </div>
                 <p class="user-detail-meta">
                     Tier @TierName(detail.User.ApprovalTier) ·
-                    Created @detail.User.CreatedAtUtc.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)
+                    Created @detail.User.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)
                     @if (detail.User.LastLoginAtUtc is { } lastLogin)
                     {
-                        <text> · Last sign-in @lastLogin.ToLocalTime().ToString("g", CultureInfo.InvariantCulture)</text>
+                        <text> · Last sign-in @lastLogin.InStoreTime().ToString("g", CultureInfo.InvariantCulture)</text>
                     }
                     @if (detail.DisabledAtUtc is { } disabledAt && !string.IsNullOrWhiteSpace(detail.DisabledReason))
                     {
-                        <text> · Disabled @disabledAt.ToLocalTime().ToString("g", CultureInfo.InvariantCulture) — @detail.DisabledReason</text>
+                        <text> · Disabled @disabledAt.InStoreTime().ToString("g", CultureInfo.InvariantCulture) — @detail.DisabledReason</text>
                     }
                     @if (detail.User.Id == CurrentUserId)
                     {
@@ -352,7 +352,7 @@ else
                                         <span class="override-scope">@(item.LocationId is { } oid ? $"at {LocationLabel(oid)}" : "everywhere")</span>
                                         @if (item.ExpiresAtUtc is { } expiry)
                                         {
-                                            <span class="override-scope">until @expiry.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                            <span class="override-scope">until @expiry.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
                                         }
                                         <span class="override-scope">— @item.Reason</span>
                                     </div>

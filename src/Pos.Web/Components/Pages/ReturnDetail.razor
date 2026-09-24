@@ -32,7 +32,7 @@ else if (salesReturn is not null)
                     <span> · </span>
                 }
                 @salesReturn.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ·
-                Accepted @salesReturn.ReturnedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
+                Accepted @salesReturn.ReturnedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
             </p>
         </div>
         <strong class="remaining">@Money(Remaining) <span>still refundable</span></strong>
@@ -150,7 +150,7 @@ else if (salesReturn is not null)
                             <td class="num"><strong>@Money(refund.Amount)</strong></td>
                             <td class="num">@(refund.Tendered is { } tendered ? Money(tendered) : "—")</td>
                             <td>@(refund.ProviderReference ?? "—")</td>
-                            <td>@refund.RefundedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@refund.RefundedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                         </tr>
                     }
                 </tbody>

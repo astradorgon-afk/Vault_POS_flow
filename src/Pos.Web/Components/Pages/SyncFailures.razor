@@ -44,7 +44,7 @@ else
                     }
                     else
                     {
-                        <footer><small>Created @failure.CreatedAtUtc.ToLocalTime().ToString("g")</small><div><button type="button" class="sync-button secondary" @onclick="() => RetryAsync(failure.Id)" disabled="@busy">Schedule retry</button><button type="button" class="sync-button danger" @onclick="() => BeginDismiss(failure.Id)">Dismiss</button></div></footer>
+                        <footer><small>Created @failure.CreatedAtUtc.InStoreTime().ToString("g")</small><div><button type="button" class="sync-button secondary" @onclick="() => RetryAsync(failure.Id)" disabled="@busy">Schedule retry</button><button type="button" class="sync-button danger" @onclick="() => BeginDismiss(failure.Id)">Dismiss</button></div></footer>
                     }
                 </article>
             }

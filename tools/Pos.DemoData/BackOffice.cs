@@ -1,21 +1,28 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using Pos.Infrastructure.Identity;
 
 namespace Pos.DemoData;
 
 /// <summary>
 /// Posts the back-office side of the demo, each workflow left at a different
 /// stage so every list and detail page has something to show: purchase orders
-/// (draft, awaiting approval, received, received short), transfers (draft to
-/// received), stock counts, stock adjustments, payment receipts and a
-/// quarantine incident. Each workflow runs as its own step: one that the
-/// server refuses is reported and the rest carry on.
+/// to the distribution centre (draft, awaiting approval, sent, received in
+/// full, received short), transfers restocking what each store ran low on
+/// (draft to received), stock counts, stock adjustments, payment receipts and a
+/// quarantine incident. Quantities follow each product's sales rate, so a
+/// purchase order or transfer looks like the one a buyer would raise. Each
+/// workflow runs as its own step: one that the server refuses is reported and
+/// the rest carry on.
 /// </summary>
 internal sealed class BackOffice(DemoWorld world)
 {
     private const int AvailableState = 0;
     private const int CycleCount = 2;
     private const int CategoryCount = 3;
+
+    /// <summary>The supplier whose purchase order marks the demo's back office as posted.</summary>
+    private const string MarkerSupplier = "IBC";
 
     private DemoApi Api => world.Api;
 
@@ -34,72 +41,48 @@ internal sealed class BackOffice(DemoWorld world)
 
     public int Failures { get; private set; }
 
-    /// <summary>True when an earlier run posted the back-office activity. Its
-    /// marker is a purchase order to Island Beverages (SUP3), which only the demo raises.</summary>
+    /// <summary>True when an earlier run posted the back-office activity: only the
+    /// demo raises a purchase order to its marker supplier.</summary>
     public async Task<bool> AlreadyPostedAsync()
     {
-        Guid marker = await SupplierAsync("SUP3");
+        Guid marker = await SupplierAsync(MarkerSupplier);
         return DemoApi.Items(await Api.GetAsync("/api/v1/purchasing/orders", world.Owner))
             .Any(order => order?["supplierId"]?.GetValue<Guid>() == marker);
     }
 
     public async Task RunAsync()
     {
-        await StepAsync("Purchase order received in full (Metro Distribution)", () => PurchaseOrderAsync(
-            "SUP1", receive: Receive.Full,
-            ("NOODLE-55", 600m, 11m), ("TUNA-155", 240m, 33m), ("CHIPS-60", 300m, 27m), ("CHOCBAR-40", 240m, 33m)));
+        await StepAsync("Purchase order received in full (Pacific Grains)", () => PurchaseOrderAsync("PGC", 10, Receive.Full));
+        await StepAsync("Purchase order received short (Island Beverage)", () => PurchaseOrderAsync(MarkerSupplier, 12, Receive.Short));
+        await StepAsync("Purchase order sent, awaiting delivery (Snackworks)", () => PurchaseOrderAsync("SNX", 14, Receive.SentOnly));
+        await StepAsync("Purchase order awaiting approval (HomeCare Supply)", () => PurchaseOrderAsync("HCS", 9, Receive.SubmitOnly));
+        await StepAsync("Purchase order draft (DairyFresh)", () => PurchaseOrderAsync("DFP", 6, Receive.DraftOnly));
 
-        await StepAsync("Purchase order received short (Island Beverages)", () => PurchaseOrderAsync(
-            "SUP3", receive: Receive.Short,
-            ("OJ-1L", 120m, 74m), ("ICETEA-500", 300m, 25m), ("ENERGY-250", 240m, 31m)));
+        // Restocking follows what each store actually ran low on this month.
+        Dictionary<string, List<JsonNode>> shortages = [];
+        foreach (string store in new[] { "STORE01", "STORE02", "STORE03" })
+        {
+            shortages[store] = await ShortagesAsync(store);
+        }
 
-        await StepAsync("Purchase order awaiting approval (HomeCare Supply)", () => PurchaseOrderAsync(
-            "SUP4", receive: Receive.SubmitOnly,
-            ("SHAMPOO-340", 60m, 128m), ("TPASTE-150", 120m, 75m), ("SOAP-135", 200m, 31m)));
+        await StepAsync("Restock transfer to Legazpi Village, received", () => TransferAsync("STORE01", Stage.Received, shortages["STORE01"], skip: 0, take: 18));
+        await StepAsync("Restock transfer to Tomas Morato, in transit", () => TransferAsync("STORE02", Stage.Dispatched, shortages["STORE02"], skip: 0, take: 16));
+        await StepAsync("Restock transfer to Kapitolyo, approved", () => TransferAsync("STORE03", Stage.Approved, shortages["STORE03"], skip: 0, take: 14));
+        await StepAsync("Restock transfer to Legazpi Village, awaiting approval", () => TransferAsync("STORE01", Stage.Submitted, shortages["STORE01"], skip: 18, take: 10));
+        await StepAsync("Restock transfer to Kapitolyo, draft", () => TransferAsync("STORE03", Stage.Draft, shortages["STORE03"], skip: 14, take: 6));
 
-        await StepAsync("Purchase order draft (Northern Bakers)", () => PurchaseOrderAsync(
-            "SUP5", receive: Receive.DraftOnly,
-            ("BREAD-LOAF", 80m, 55m), ("PANDESAL-10", 100m, 36m), ("COOKIES-200", 60m, 64m)));
+        await StepAsync("Cycle count at Tomas Morato, approved", () => CycleCountAsync("STORE02", "BEVERAGES", 10));
+        await StepAsync("Bakery shelf count at Kapitolyo, in progress", () => CategoryCountAsync("STORE03", "BAKERY"));
 
-        await StepAsync("Transfer to Store One, received", () => TransferAsync(
-            "STORE01", "manager", Stage.Received,
-            ("BUTTER-225", 30m), ("NUGGETS-500", 20m), ("PANDESAL-10", 40m), ("ALCOHOL-500", 30m)));
-
-        await StepAsync("Transfer to Store Two, in transit", () => TransferAsync(
-            "STORE02", "manager2", Stage.Dispatched,
-            ("NOODLE-55", 150m), ("TUNA-155", 60m), ("EGGS-DZ", 24m)));
-
-        await StepAsync("Transfer to Store Three, approved", () => TransferAsync(
-            "STORE03", "manager3", Stage.Approved,
-            ("WATER-500", 200m), ("SODA-1L", 48m), ("CHIPS-60", 60m)));
-
-        await StepAsync("Transfer to Store One, awaiting approval", () => TransferAsync(
-            "STORE01", "manager", Stage.Submitted,
-            ("RICE-01", 20m), ("OIL-1L", 24m)));
-
-        await StepAsync("Transfer to Store Three, draft", () => TransferAsync(
-            "STORE03", "manager3", Stage.Draft,
-            ("COFFEE-3IN1", 40m)));
-
-        await StepAsync("Cycle count at Store Two, approved", () => CountAsync(
-            "STORE02", approve: true, "SODA-1L", "CHIPS-60", "TUNA-155", "SOAP-135", "YOGURT-110"));
-
-        await StepAsync("Stock count at Store Three, in progress", () => CountAsync(
-            "STORE03", approve: false, "BREAD-LOAF", "PANDESAL-10", "COOKIES-200"));
-
-        // Runs after the Store One transfer is received, so the nuggets are on hand.
-        await StepAsync("Adjustment at Store One: thawed nuggets, approved", () => AdjustmentAsync(
-            "STORE01", reason: 1, "Freezer fault overnight; two packs thawed.", Adjust.Approve, ("NUGGETS-500", -2m)));
-
-        await StepAsync("Adjustment at Store Three: spoiled bread, awaiting approval", () => AdjustmentAsync(
-            "STORE03", reason: 3, "Past best-before, pulled from the shelf.", Adjust.Submit, ("BREAD-LOAF", -3m), ("PANDESAL-10", -2m)));
-
-        await StepAsync("Adjustment at the warehouse: broken bottles, draft", () => AdjustmentAsync(
-            "MAIN", reason: 8, "Pallet dropped at the loading bay.", Adjust.Draft, ("SOY-1L", -4m), ("VINEGAR-1L", -3m)));
+        await StepAsync("Adjustment at Legazpi Village: thawed frozen goods, approved", () => AdjustmentAsync(
+            "STORE01", reason: 1, "Freezer tripped overnight; packs thawed and were pulled.", Adjust.Approve, "FROZEN", 2, -2m));
+        await StepAsync("Adjustment at Kapitolyo: bread past best-before, awaiting approval", () => AdjustmentAsync(
+            "STORE03", reason: 3, "Past best-before, pulled from the shelf.", Adjust.Submit, "BAKERY", 3, -3m));
+        await StepAsync("Adjustment at the distribution centre: broken bottles, draft", () => AdjustmentAsync(
+            "MAIN", reason: 8, "Pallet dropped at the loading bay.", Adjust.Draft, "CONDIMENTS", 2, -6m));
 
         await StepAsync("Payment receipts", ReceiptsAsync);
-
-        await StepAsync("Quarantine incident at Store Two", QuarantineAsync);
+        await StepAsync("Quarantine incident at Tomas Morato", QuarantineAsync);
     }
 
     private async Task StepAsync(string name, Func<Task> step)
@@ -120,18 +103,28 @@ internal sealed class BackOffice(DemoWorld world)
     {
         DraftOnly,
         SubmitOnly,
+        SentOnly,
         Full,
         Short,
     }
 
-    /// <summary>Raises a warehouse purchase order as Inventory Staff, then walks it
-    /// to the requested stage: the owner approves and sends it, and the
-    /// warehouse receives it in full or short with damage.</summary>
-    private async Task PurchaseOrderAsync(string supplierCode, Receive receive, params (string Sku, decimal Quantity, decimal Cost)[] lines)
+    /// <summary>
+    /// Raises a distribution-centre purchase order for a supplier's fastest
+    /// sellers, about two weeks of the chain's sales in whole cases, then walks
+    /// it to the requested stage: the owner approves and sends it, and the
+    /// warehouse receives it in full, or short with a damaged case.
+    /// </summary>
+    private async Task PurchaseOrderAsync(string supplierCode, int lines, Receive receive)
     {
         Guid supplierId = await SupplierAsync(supplierCode);
         DemoSession inventory = User("inventory");
         DemoSession owner = world.Owner;
+
+        List<(DemoProduct Product, decimal Quantity, decimal Cost)> order = [.. DevelopmentCatalogue.Products
+            .Where(p => p.Supplier == supplierCode && world.Products.ContainsKey(p.Sku))
+            .OrderByDescending(ChainDailyUnits)
+            .Take(lines)
+            .Select(p => (world.Product(p.Sku), Cases(ChainDailyUnits(p) * 14m), p.UnitCost))];
 
         Guid orderId = await Api.CreateAsync(
             "/api/v1/purchasing/orders",
@@ -139,14 +132,14 @@ internal sealed class BackOffice(DemoWorld world)
             {
                 supplierId,
                 destinationLocationId = Location("MAIN"),
-                lines = lines.Select(l => new
+                lines = order.Select(l => new
                 {
-                    productId = world.Product(l.Sku).Id,
-                    unitOfMeasureId = world.Product(l.Sku).UnitId,
+                    productId = l.Product.Id,
+                    unitOfMeasureId = l.Product.UnitId,
                     orderedQuantity = l.Quantity,
                     unitCost = l.Cost,
                 }),
-                expectedAtUtc = DateTimeOffset.UtcNow.AddDays(3),
+                expectedAtUtc = DateTimeOffset.UtcNow.AddDays(DevelopmentCatalogue.Suppliers.Single(s => s.Code == supplierCode).LeadTimeDays),
             },
             inventory);
 
@@ -155,30 +148,37 @@ internal sealed class BackOffice(DemoWorld world)
             return;
         }
 
-        string order = string.Create(CultureInfo.InvariantCulture, $"/api/v1/purchasing/orders/{orderId:D}");
-        await Api.PostAsync($"{order}/submit", new { notes = "Weekly restock." }, inventory);
+        string path = string.Create(CultureInfo.InvariantCulture, $"/api/v1/purchasing/orders/{orderId:D}");
+        await Api.PostAsync($"{path}/submit", new { notes = "Fortnightly replenishment for the distribution centre." }, inventory);
         if (receive == Receive.SubmitOnly)
         {
             return;
         }
 
-        await Api.PostAsync($"{order}/approve", new { notes = "Approved for this week's delivery." }, owner);
-        await Api.PostAsync($"{order}/send", new { }, owner);
+        await Api.PostAsync($"{path}/approve", new { notes = "Approved against this fortnight's sales." }, owner);
+        await Api.PostAsync($"{path}/send", new { }, owner);
+        if (receive == Receive.SentOnly)
+        {
+            return;
+        }
 
-        JsonArray orderLines = DemoApi.Items((await Api.GetAsync(order, owner))?["lines"]);
-        bool first = true;
+        JsonArray orderLines = DemoApi.Items((await Api.GetAsync(path, owner))?["lines"]);
         List<object> received = [];
+        int index = 0;
         foreach (JsonNode? line in orderLines)
         {
             decimal ordered = line!["orderedQuantity"]!.GetValue<decimal>();
-            decimal short_ = receive == Receive.Short && first ? Math.Round(ordered * 0.15m) : 0m;
-            decimal damaged = receive == Receive.Short && first ? 5m : 0m;
-            first = false;
+
+            // Received short: the supplier was out of part of two lines, and one
+            // case arrived crushed.
+            decimal shortBy = receive == Receive.Short && index < 2 ? Math.Round(ordered * 0.25m / 12m) * 12m : 0m;
+            decimal damaged = receive == Receive.Short && index == 0 ? Math.Min(12m, ordered - shortBy) : 0m;
+            index++;
 
             received.Add(new
             {
                 purchaseOrderLineId = line["id"]!.GetValue<Guid>(),
-                quantityReceived = ordered - short_ - damaged,
+                quantityReceived = ordered - shortBy - damaged,
                 quantityDamaged = damaged,
                 quantityWrongItem = 0m,
                 quantityExpired = 0m,
@@ -186,8 +186,15 @@ internal sealed class BackOffice(DemoWorld world)
             });
         }
 
-        await Api.PostAsync($"{order}/receipts", new { lines = received, documentsMissing = false }, inventory);
+        await Api.PostAsync($"{path}/receipts", new { lines = received, documentsMissing = false }, inventory);
     }
+
+    /// <summary>A product's expected daily sale across the three stores.</summary>
+    private static decimal ChainDailyUnits(DevelopmentProduct product)
+        => DevelopmentCatalogue.Locations.Where(l => l.SizeFactor > 0m).Sum(l => DevelopmentCatalogue.DailyUnitsAt(product, l));
+
+    /// <summary>Rounds a quantity up to whole cases of twelve.</summary>
+    private static decimal Cases(decimal units) => Math.Max(12m, Math.Ceiling(units / 12m) * 12m);
 
     private async Task<Guid> SupplierAsync(string code)
     {
@@ -202,6 +209,19 @@ internal sealed class BackOffice(DemoWorld world)
         throw new DemoApiException($"Supplier {code} is not in the catalogue; restart the API so the seeder adds it.");
     }
 
+    /// <summary>The store's sold-out and low lines, fastest sellers first.</summary>
+    private async Task<List<JsonNode>> ShortagesAsync(string store)
+    {
+        JsonNode? report = await Api.GetAsync(
+            string.Create(CultureInfo.InvariantCulture, $"/api/v1/inventory/stock-levels?locationId={Location(store):D}"),
+            world.Owner);
+
+        return [.. DemoApi.Items(report?["products"])
+            .OfType<JsonNode>()
+            .Where(row => row["status"]?.GetValue<string>() is "Out" or "Low" && world.Products.ContainsKey(row["sku"]!.GetValue<string>()))
+            .OrderByDescending(row => row["dailySales"]?.GetValue<decimal>() ?? 0m)];
+    }
+
     private enum Stage
     {
         Draft,
@@ -211,12 +231,30 @@ internal sealed class BackOffice(DemoWorld world)
         Received,
     }
 
-    /// <summary>Moves stock from the Main Warehouse to a store. The store side
-    /// requests it, the owner approves it, the warehouse picks and dispatches
-    /// it, and the store receives it.</summary>
-    private async Task TransferAsync(string store, string requester, Stage stage, params (string Sku, decimal Quantity)[] lines)
+    /// <summary>
+    /// Restocks a store from the distribution centre: the store manager requests
+    /// its low lines back up to their target, the owner approves, the warehouse
+    /// picks and dispatches, and the store receives.
+    /// </summary>
+    private async Task TransferAsync(string store, Stage stage, List<JsonNode> shortages, int skip, int take)
     {
-        DemoSession storeUser = User(requester);
+        List<(Guid ProductId, decimal Quantity)> lines = [.. shortages
+            .Skip(skip)
+            .Take(take)
+            .Select(row =>
+            {
+                decimal target = row["targetStock"]?.GetValue<decimal?>() ?? 12m;
+                decimal available = Math.Max(0m, row["available"]!.GetValue<decimal>());
+                return (row["productId"]!.GetValue<Guid>(), Math.Max(6m, Math.Ceiling((target - available) / 6m) * 6m));
+            })];
+
+        if (lines.Count == 0)
+        {
+            Console.WriteLine($"        ({store} has nothing running low; no transfer needed)");
+            return;
+        }
+
+        DemoSession storeUser = StoreManager(store);
         DemoSession owner = world.Owner;
         DemoSession warehouse = User("inventory");
 
@@ -226,7 +264,7 @@ internal sealed class BackOffice(DemoWorld world)
             {
                 sourceLocationId = Location("MAIN"),
                 destinationLocationId = Location(store),
-                lines = lines.Select(l => new { productId = world.Product(l.Sku).Id, quantity = l.Quantity, note = (string?)null }),
+                lines = lines.Select(l => new { productId = l.ProductId, quantity = l.Quantity, note = (string?)null }),
             },
             storeUser);
 
@@ -243,8 +281,8 @@ internal sealed class BackOffice(DemoWorld world)
         }
 
         // A submitted request is taken into review before it can be approved.
-        await Api.PostAsync($"{transfer}/review", new { note = "Checking warehouse availability." }, owner);
-        await Api.PostAsync($"{transfer}/approve", new { note = "Approved from the warehouse plan." }, owner);
+        await Api.PostAsync($"{transfer}/review", new { note = "Checking distribution centre availability." }, owner);
+        await Api.PostAsync($"{transfer}/approve", new { note = "Approved from this week's restock plan." }, owner);
         if (stage == Stage.Approved)
         {
             return;
@@ -285,56 +323,66 @@ internal sealed class BackOffice(DemoWorld world)
             storeUser);
     }
 
-    /// <summary>Opens a count over a few products, records the shelf, and when
-    /// asked submits and approves it. One line is recorded two short, so the
-    /// approved count posts a small variance.</summary>
-    private async Task CountAsync(string store, bool approve, params string[] skus)
+    /// <summary>Counts a shelf section at a store: the manager records it, one
+    /// line two short, and the owner approves the small variance.</summary>
+    private async Task CycleCountAsync(string store, string category, int products)
     {
-        // The store's own manager runs its counts; the owner approves them.
         DemoSession counter = StoreManager(store);
+        Guid[] productIds = [.. DevelopmentCatalogue.Products
+            .Where(p => p.Category == category && world.Products.ContainsKey(p.Sku))
+            .OrderByDescending(p => p.DailyUnits)
+            .Take(products)
+            .Select(p => world.Product(p.Sku).Id)];
+
         Guid countId = await Api.CreateAsync(
             "/api/v1/inventory/counts",
-            new
-            {
-                locationId = Location(store),
-                kind = approve ? CycleCount : CategoryCount,
-                productIds = approve ? skus.Select(s => world.Product(s).Id).ToArray() : null,
-                categoryIds = approve ? null : new[] { await CategoryOfAsync(skus[0]) },
-                note = approve ? "Monthly cycle count." : "Bakery shelf count.",
-            },
+            new { locationId = Location(store), kind = CycleCount, productIds, categoryIds = (Guid[]?)null, note = "Monthly cycle count, drinks aisle." },
             counter);
 
         string count = string.Create(CultureInfo.InvariantCulture, $"/api/v1/inventory/counts/{countId:D}");
+        await RecordCountAsync(count, counter, all: true);
+        await Api.PostAsync($"{count}/submit", new { }, counter);
+        await Api.PostAsync($"{count}/approve", new { reason = "Variance checked against the shelf." }, world.Owner);
+    }
+
+    /// <summary>Starts a whole-category count and records only part of the shelf,
+    /// as a count still in progress would.</summary>
+    private async Task CategoryCountAsync(string store, string category)
+    {
+        DemoSession counter = StoreManager(store);
+        DevelopmentProduct sample = DevelopmentCatalogue.Products.First(p => p.Category == category && world.Products.ContainsKey(p.Sku));
+        Guid categoryId = await CategoryOfAsync(sample.Sku);
+
+        Guid countId = await Api.CreateAsync(
+            "/api/v1/inventory/counts",
+            new { locationId = Location(store), kind = CategoryCount, productIds = (Guid[]?)null, categoryIds = new[] { categoryId }, note = "Bakery shelf count." },
+            counter);
+
+        await RecordCountAsync(string.Create(CultureInfo.InvariantCulture, $"/api/v1/inventory/counts/{countId:D}"), counter, all: false);
+    }
+
+    private async Task RecordCountAsync(string count, DemoSession counter, bool all)
+    {
         JsonArray lines = DemoApi.Items((await Api.GetAsync(count, counter))?["lines"]);
 
         List<object> recorded = [];
-        bool first = true;
         foreach (JsonNode line in lines.OfType<JsonNode>())
         {
             decimal system = SystemQuantity(line);
             recorded.Add(new
             {
                 productId = line["productId"]!.GetValue<Guid>(),
-                physicalQuantity = first ? Math.Max(0m, system - 2m) : system,
+                physicalQuantity = recorded.Count == 0 ? Math.Max(0m, system - 2m) : system,
                 batchId = (Guid?)null,
             });
-            first = false;
 
-            // An in-progress count has only part of the shelf recorded.
-            if (!approve && recorded.Count == 2)
+            if (!all && recorded.Count == Math.Max(2, lines.Count / 3))
             {
                 break;
             }
         }
 
         await Api.PostAsync($"{count}/lines", new { lines = recorded }, counter);
-        if (!approve)
-        {
-            return;
-        }
-
-        await Api.PostAsync($"{count}/submit", new { }, counter);
-        await Api.PostAsync($"{count}/approve", new { reason = "Variance checked against the shelf." }, world.Owner);
     }
 
     /// <summary>The system quantity a count line was snapshotted at, whatever the
@@ -366,12 +414,24 @@ internal sealed class BackOffice(DemoWorld world)
         Approve,
     }
 
-    /// <summary>Raises a stock adjustment; the store raises and submits it, the
-    /// owner approves it, which posts it to the ledger.</summary>
-    private async Task AdjustmentAsync(string location, int reason, string notes, Adjust stage, params (string Sku, decimal Delta)[] lines)
+    /// <summary>
+    /// Writes off stock that can no longer be sold: the store manager (or the
+    /// warehouse, at the distribution centre) raises it for the section's best
+    /// sellers the location still holds, and the owner approves it.
+    /// </summary>
+    private async Task AdjustmentAsync(string location, int reason, string notes, Adjust stage, string category, int products, decimal delta)
     {
-        // A store adjustment is raised by that store's manager, a warehouse one
-        // by Inventory Staff; the owner approves both.
+        JsonNode? report = await Api.GetAsync(
+            string.Create(CultureInfo.InvariantCulture, $"/api/v1/inventory/stock-levels?locationId={Location(location):D}"),
+            world.Owner);
+        HashSet<string> inCategory = [.. DevelopmentCatalogue.Products.Where(p => p.Category == category).Select(p => p.Sku)];
+        List<Guid> affected = [.. DemoApi.Items(report?["products"])
+            .OfType<JsonNode>()
+            .Where(row => inCategory.Contains(row["sku"]!.GetValue<string>()) && row["available"]!.GetValue<decimal>() >= -delta)
+            .OrderByDescending(row => row["dailySales"]?.GetValue<decimal>() ?? 0m)
+            .Take(products)
+            .Select(row => row["productId"]!.GetValue<Guid>())];
+
         DemoSession raiser = location == "MAIN" ? User("inventory") : StoreManager(location);
         Guid adjustmentId = await Api.CreateAsync(
             "/api/v1/inventory/adjustments",
@@ -379,11 +439,11 @@ internal sealed class BackOffice(DemoWorld world)
             {
                 locationId = Location(location),
                 reason,
-                lines = lines.Select(l => new
+                lines = affected.Select(productId => new
                 {
-                    productId = world.Product(l.Sku).Id,
+                    productId,
                     state = AvailableState,
-                    quantityDelta = l.Delta,
+                    quantityDelta = delta,
                     batchId = (Guid?)null,
                 }),
                 notes,
@@ -409,11 +469,12 @@ internal sealed class BackOffice(DemoWorld world)
     {
         (string Store, int Kind, decimal Amount, string Counterparty, string Note)[] receipts =
         [
-            ("STORE01", 2, 1850m, "Meralco", "Electricity bill for the month."),
-            ("STORE02", 2, 420m, "Ace Hardware", "Cleaning supplies and a mop."),
-            ("STORE01", 1, 350m, "Walk-in customer", "Special order of ice, paid in cash."),
-            ("STORE03", 3, 5000m, "Owner", "Weekly owner draw."),
-            ("STORE03", 2, 260m, "Water Station", "Two containers of drinking water for staff."),
+            ("STORE01", 2, 18450m, "Meralco", "Electricity bill for the month."),
+            ("STORE02", 2, 1260m, "Wilcon Depot", "Cleaning supplies, mops and a replacement fan."),
+            ("STORE01", 1, 2350m, "Walk-in customer", "Special order of party ice, paid in cash."),
+            ("STORE03", 3, 25000m, "Owner", "Weekly owner draw."),
+            ("STORE03", 2, 540m, "Water refilling station", "Drinking water containers for staff."),
+            ("STORE02", 2, 3800m, "Manila Water", "Water bill for the month."),
         ];
 
         foreach ((string store, int kind, decimal amount, string counterparty, string note) in receipts)

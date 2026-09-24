@@ -22,6 +22,10 @@ public sealed class OpenShiftCommandHandler(
     ICurrentUser currentUser,
     ISystemClock clock) : ICommandHandler<OpenShiftCommand, CashierShiftId>
 {
+    /// <summary>How far ahead of head office a register's clock may run before
+    /// a shift time it reports is refused.</summary>
+    internal static readonly TimeSpan RegisterClockTolerance = TimeSpan.FromMinutes(5);
+
     private static readonly JsonSerializerOptions JsonDefaults = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -90,8 +94,16 @@ public sealed class OpenShiftCommandHandler(
         }
 
         // ------------------------------------------------------------------
-        // 4. Create and persist the shift.
+        // 4. Create and persist the shift, opened when the register says it
+        //    was (an offline register uploads later), never in the future.
         // ------------------------------------------------------------------
+        DateTimeOffset now = clock.UtcNow;
+        DateTimeOffset openedAt = command.OpenedAtUtc ?? now;
+        if (openedAt > now + RegisterClockTolerance)
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.TimeInFuture);
+        }
+
         Result<CashierShift> opened = CashierShift.Open(
             command.Number,
             command.LocationId,
@@ -99,7 +111,7 @@ public sealed class OpenShiftCommandHandler(
             cashierId,
             command.OpeningFloat,
             command.BusinessDate,
-            clock.UtcNow,
+            openedAt,
             command.ShiftId);
 
         if (opened.IsFailure)
@@ -189,6 +201,18 @@ public sealed class CloseShiftCommandHandler(
             }
         }
 
+        DateTimeOffset now = clock.UtcNow;
+        DateTimeOffset closedAt = command.ClosedAtUtc ?? now;
+        if (closedAt > now + OpenShiftCommandHandler.RegisterClockTolerance)
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.TimeInFuture);
+        }
+
+        if (closedAt < shift.OpenedAtUtc)
+        {
+            return Result<CashierShiftId>.Failure(ShiftCommandErrors.ClosedBeforeOpened);
+        }
+
         Result declared = shift.DeclareCash(command.DeclaredCash);
 
         if (declared.IsFailure)
@@ -205,7 +229,7 @@ public sealed class CloseShiftCommandHandler(
             totals.CashSales,
             totals.CashRefunds,
             totals.Payouts,
-            clock.UtcNow);
+            closedAt);
 
         if (closed.IsFailure)
         {

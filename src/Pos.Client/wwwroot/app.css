@@ -588,6 +588,14 @@ kbd {
     padding: 0.1rem 0.2rem 0.2rem 0;
     scrollbar-width: thin;
 }
+.catalogue-more {
+    grid-column: 1 / -1;
+    margin: 0.2rem 0 0;
+    padding: 0.6rem 0.8rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: center;
+}
 .catalogue-empty {
     grid-column: 1 / -1;
     margin: 0;

@@ -52,7 +52,7 @@ else
             <div>
                 <span>@(registration.EnrolmentCode is null ? "Browser lane active" : "One-time enrolment code")</span>
                 <strong>@(registration.EnrolmentCode ?? registration.ShortCode)</strong>
-                <small>@(registration.EnrolmentCode is null ? "This web terminal is ready to assign at checkout." : $"Expires {registration.ExpiresAtUtc?.ToLocalTime():MMM d, yyyy · h:mm tt}. This code cannot be recovered later.")</small>
+                <small>@(registration.EnrolmentCode is null ? "This web terminal is ready to assign at checkout." : $"Expires {registration.ExpiresAtUtc?.InStoreTime():MMM d, yyyy · h:mm tt}. This code cannot be recovered later.")</small>
             </div>
             <button type="button" @onclick="DismissRegistration">I saved it</button>
         </section>
@@ -374,7 +374,7 @@ else
         if (age < TimeSpan.FromMinutes(1)) return "Just now";
         if (age < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)age.TotalMinutes)}m ago";
         if (age < TimeSpan.FromDays(1)) return $"{Math.Max(1, (int)age.TotalHours)}h ago";
-        return value.Value.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+        return value.Value.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
     }
 
     private enum DeviceAction { Suspend, Revoke }

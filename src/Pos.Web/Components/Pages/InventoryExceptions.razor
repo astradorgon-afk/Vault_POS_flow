@@ -70,8 +70,8 @@
                             </td>
                             <td class="sheet-number sheet-loss">@row.Attempts</td>
                             <td class="sheet-number">@row.TotalShortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@row.FirstAttemptAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@row.LastAttemptAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@row.FirstAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@row.LastAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                         </tr>
                     }
                 </tbody>
@@ -94,7 +94,7 @@
                     @foreach (PosNegativeStockAttemptView attempt in attempts)
                     {
                         <tr @key="attempt.Id">
-                            <td class="sheet-muted">@attempt.AttemptedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@attempt.AttemptedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@(attempt.LocationCode ?? ShortId(attempt.LocationId))</td>
                             <td>
                                 <div class="product-name">@(attempt.ProductName ?? "—")</div>

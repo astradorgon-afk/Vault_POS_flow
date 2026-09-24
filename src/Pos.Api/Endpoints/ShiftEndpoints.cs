@@ -15,20 +15,24 @@ namespace Pos.Api.Endpoints;
 /// <param name="LocationId">The location the shift is opened at.</param>
 /// <param name="BusinessDate">The business date the shift opens on.</param>
 /// <param name="OpeningFloat">The cash in the drawer when the shift opens, greater than or equal to zero.</param>
+/// <param name="OpenedAtUtc">When the register opened the shift, if earlier than this request; null means now.</param>
 public sealed record OpenShiftBody(
     string Number,
     Guid LocationId,
     DateOnly BusinessDate,
-    decimal OpeningFloat);
+    decimal OpeningFloat,
+    DateTimeOffset? OpenedAtUtc = null);
 
 /// <summary>The body of a shift close.</summary>
 /// <param name="LocationId">The location the shift belongs to.</param>
 /// <param name="DeclaredCash">The cash the cashier declared before counting.</param>
 /// <param name="CountedCash">The cash actually counted in the drawer.</param>
+/// <param name="ClosedAtUtc">When the drawer was counted at the register, if earlier than this request; null means now.</param>
 public sealed record CloseShiftBody(
     Guid LocationId,
     decimal DeclaredCash,
-    decimal CountedCash);
+    decimal CountedCash,
+    DateTimeOffset? ClosedAtUtc = null);
 
 /// <summary>A cashier shift as returned by the summary route.</summary>
 public sealed record ShiftSummary(
@@ -110,7 +114,8 @@ public static class ShiftEndpoints
                     number.Value,
                     new LocationId(body.LocationId),
                     body.BusinessDate,
-                    body.OpeningFloat),
+                    body.OpeningFloat,
+                    OpenedAtUtc: body.OpenedAtUtc),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -134,7 +139,8 @@ public static class ShiftEndpoints
                     new CashierShiftId(id),
                     new LocationId(body.LocationId),
                     body.DeclaredCash,
-                    body.CountedCash),
+                    body.CountedCash,
+                    body.ClosedAtUtc),
                 cancellationToken)
             .ConfigureAwait(false);
 

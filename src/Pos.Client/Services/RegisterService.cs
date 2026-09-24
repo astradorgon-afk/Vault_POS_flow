@@ -37,6 +37,7 @@ public sealed record ManagerSetupSession(Uri Server, HeadOfficeSession Session, 
 /// <param name="Barcode">The primary barcode, if any.</param>
 /// <param name="Price">The price in force at this store now, if any.</param>
 /// <param name="Currency">The price's currency.</param>
+/// <param name="Category">The category the till files the product under, when head office sent one.</param>
 public sealed record CatalogueItem(
     Guid ProductId,
     Guid? BaseUnitOfMeasureId,
@@ -44,7 +45,8 @@ public sealed record CatalogueItem(
     string Name,
     string? Barcode,
     decimal? Price,
-    string? Currency);
+    string? Currency,
+    string? Category = null);
 
 /// <summary>
 /// Sets the register up and signs people in at it: enrolment writes the local
@@ -394,6 +396,8 @@ public sealed class RegisterService(
 
         DateTimeOffset now = clock.UtcNow;
         LocationId? store = profile?.LocationId;
+        ILookup<ProductId, DeviceCachedProductPrice> pricesByProduct = prices.ToLookup(x => x.ProductId);
+        ILookup<ProductId, DeviceCachedProductBarcode> barcodesByProduct = barcodes.ToLookup(b => b.ProductId);
 
         return [.. products
             .OrderBy(p => p.Name, StringComparer.CurrentCulture)
@@ -401,16 +405,14 @@ public sealed class RegisterService(
             {
                 // A store's own price beats the business-wide one; within each,
                 // the most recently effective price is the one in force.
-                DeviceCachedProductPrice? price = prices
-                    .Where(x => x.ProductId == p.Id
-                                && (x.LocationId is null || x.LocationId == store)
+                DeviceCachedProductPrice? price = pricesByProduct[p.Id]
+                    .Where(x => (x.LocationId is null || x.LocationId == store)
                                 && x.EffectiveFromUtc <= now
                                 && (x.EffectiveToUtc is null || x.EffectiveToUtc > now))
                     .OrderBy(x => x.LocationId is null ? 1 : 0)
                     .ThenByDescending(x => x.EffectiveFromUtc)
                     .FirstOrDefault();
-                string? barcode = barcodes
-                    .Where(b => b.ProductId == p.Id)
+                string? barcode = barcodesByProduct[p.Id]
                     .OrderBy(b => b.IsPrimary ? 0 : 1)
                     .Select(b => b.Barcode)
                     .FirstOrDefault();
@@ -423,7 +425,8 @@ public sealed class RegisterService(
                     p.Name,
                     barcode,
                     price?.Amount,
-                    price?.Currency);
+                    price?.Currency,
+                    p.Category);
             })];
     }
 

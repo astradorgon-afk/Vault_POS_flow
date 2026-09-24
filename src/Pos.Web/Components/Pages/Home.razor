@@ -571,7 +571,7 @@ else
     private static decimal? Change(decimal current, decimal previous) => previous == 0 ? null : (current - previous) / previous;
     private static string Percent(decimal change) => (change > 0 ? "+" : string.Empty) + change.ToString("0%", CultureInfo.InvariantCulture);
     private static string Css(decimal value) => Math.Round(value, 2).ToString(CultureInfo.InvariantCulture);
-    private static string When(DateTimeOffset at) => at.ToLocalTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
+    private static string When(DateTimeOffset at) => at.InStoreTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
     private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
     private static string AxisMoney(decimal amount) => amount.ToString("₱#,##0", CultureInfo.InvariantCulture);
     private static string Quantity(decimal amount) => amount.ToString("#,##0.##", CultureInfo.InvariantCulture);

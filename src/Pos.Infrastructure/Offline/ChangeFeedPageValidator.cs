@@ -87,6 +87,7 @@ internal static class ChangeFeedPageValidator
         ProductChanged p => Id(p.ProductId, "product")
             ?? Text(p.Sku, 64, "SKU")
             ?? Text(p.Name, 240, "product name")
+            ?? (p.Category is { Length: > 64 } ? "A product category name is too long." : null)
             ?? (p.SourceVersion < 0 ? "A product source version cannot be negative." : null),
         ProductBarcodeChanged b => Text(b.Barcode, 64, "barcode") ?? Id(b.ProductId, "product"),
         ProductPriceChanged p => Id(p.PriceId, "price")

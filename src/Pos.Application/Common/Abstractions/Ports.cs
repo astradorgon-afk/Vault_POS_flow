@@ -178,6 +178,21 @@ public interface IUnitOfWork
 
     /// <summary>Gets a value indicating whether a transaction is already open.</summary>
     bool HasActiveTransaction { get; }
+
+    /// <summary>
+    /// Whether a failure means the operation lost a race with a concurrent writer
+    /// over a shared record (two branches selling the same product at the same
+    /// moment, say), so running it again against the current state may succeed.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    /// <returns>True when the failure is contention rather than a fault.</returns>
+    bool IsConcurrencyConflict(Exception exception) => exception is ConcurrencyConflictException;
+
+    /// <summary>Forgets every change and read tracked so far, so a retried
+    /// operation starts from what the database holds now.</summary>
+    void DiscardChanges()
+    {
+    }
 }
 
 /// <summary>An open transaction.</summary>

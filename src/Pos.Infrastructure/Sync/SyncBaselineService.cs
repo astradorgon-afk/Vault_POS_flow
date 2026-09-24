@@ -39,12 +39,18 @@ public sealed class SyncBaselineService(
         }
 
         List<SyncBaselineItem> items = [];
-        List<ProductBaselineRow> products = await context.Products
+        Dictionary<CategoryId, string> categories = await context.Categories
             .AsNoTracking()
-            .Select(p => new ProductBaselineRow(
-                p.Id.Value, p.Sku.Value, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc))
-            .ToListAsync(cancellationToken)
+            .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken)
             .ConfigureAwait(false);
+        List<ProductBaselineRow> products = [.. (await context.Products
+            .AsNoTracking()
+            .Select(p => new { p.Id, Sku = p.Sku.Value, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc, p.CategoryId })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .Select(p => new ProductBaselineRow(
+                p.Id.Value, p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc,
+                categories.GetValueOrDefault(p.CategoryId)))];
         foreach (ProductBaselineRow product in products)
         {
             items.Add(Item("ProductChanged", product.ProductId, new
@@ -57,6 +63,7 @@ public sealed class SyncBaselineService(
                 tracksExpiry = product.TracksExpiry,
                 sourceVersion = 0L,
                 updatedAtUtc = product.UpdatedAtUtc,
+                category = product.Category,
             }));
         }
 
@@ -197,7 +204,7 @@ public sealed class SyncBaselineService(
     private static SyncBaselineItem Item<T>(string type, object key, T payload)
         => new(type, key.ToString() ?? string.Empty, JsonSerializer.SerializeToElement(payload));
 
-    private sealed record ProductBaselineRow(Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry, DateTimeOffset UpdatedAtUtc);
+    private sealed record ProductBaselineRow(Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry, DateTimeOffset UpdatedAtUtc, string? Category);
     private sealed record BarcodeBaselineRow(string Barcode, Guid ProductId, bool IsPrimary, bool IsActive);
     private sealed record PriceBaselineRow(Guid PriceId, Guid ProductId, Guid? LocationId, decimal Amount, string Currency, DateTimeOffset EffectiveFromUtc, DateTimeOffset? EffectiveToUtc);
 }

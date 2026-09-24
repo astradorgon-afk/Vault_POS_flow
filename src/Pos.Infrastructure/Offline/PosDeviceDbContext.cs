@@ -98,6 +98,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(x => x.Sku).HasColumnName("sku").HasMaxLength(64).IsRequired();
             entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(240).IsRequired();
+            entity.Property(x => x.Category).HasColumnName("category").HasMaxLength(64);
             entity.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
             entity.Property(x => x.TracksBatches).HasColumnName("tracks_batches").IsRequired();
             entity.Property(x => x.TracksExpiry).HasColumnName("tracks_expiry").IsRequired();

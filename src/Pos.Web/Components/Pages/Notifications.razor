@@ -292,7 +292,7 @@
     };
 
     private static string Badge(int count) => count > 99 ? "99+" : count.ToString(CultureInfo.InvariantCulture);
-    private static string When(DateTimeOffset at) => at.ToLocalTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
+    private static string When(DateTimeOffset at) => at.InStoreTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
 
     public void Dispose() => Store.Changed -= OnChanged;
 }

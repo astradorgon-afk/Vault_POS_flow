@@ -1,17 +1,19 @@
 using System.Diagnostics;
 using Pos.DemoData;
 
-// Fills a development VaultFlow with a month of realistic activity through the
+// Fills a development VaultFlow with a month of realistic trading through the
 // public API, so the web dashboard, the reports and the desktop register all
-// show the same demo business.
+// show the same demo business: about 800 checkouts a day across the three
+// branches, two cashier shifts per store per day, voids, returns within the
+// week, and the back office restocking what ran low.
 //
 //   dotnet run --project tools/Pos.DemoData [--api http://localhost:5177] [--days 30] [--force]
 //
 // The API must be running in Development: its seeder provides the catalogue,
-// prices dated back to the start of the history, customers and the shared
-// development accounts (password cash1234). Running it again is safe: store-days
-// that already have sales are skipped, and the back-office activity is posted
-// once unless --force is given.
+// prices dated back to the start of the history, opening stock sized for this
+// month of sales, customers and the shared development accounts (password
+// cash1234). Running it again is safe: store-days that already have sales are
+// skipped, and the back-office activity is posted once unless --force is given.
 
 string apiUrl = "http://localhost:5177";
 int days = 30;
@@ -55,14 +57,16 @@ catch (Exception ex) when (ex is DemoApiException or HttpRequestException)
     return 1;
 }
 
-Console.WriteLine($"  {world.Products.Count} products, {world.Customers.Count} customers, {world.Registers.Count} store registers");
+Console.WriteLine($"  {world.Products.Count} products, {world.Customers.Count} customers, {world.Registers.Values.Sum(r => r.Count)} store registers");
 
 // Store-days that already have sales are skipped, so an interrupted run can
 // simply be started again.
-SalesHistory sales = new(world, new Random(20260924));
-Console.WriteLine($"Posting {days} days of trading at three stores...");
+SalesHistory sales = new(world);
+Console.WriteLine($"Posting {days + 1} days of trading at {world.Registers.Count} stores (they trade in parallel)...");
 await sales.RunAsync(days);
-Console.WriteLine($"  {sales.SalesPosted} sales, {sales.Voids} voids, {sales.Returns} returns across {sales.Shifts} shifts");
+Console.WriteLine(string.Create(
+    System.Globalization.CultureInfo.InvariantCulture,
+    $"  {sales.SalesPosted:N0} sales worth {sales.NetSales:N2}, {sales.Voids} voids, {sales.Returns} returns across {sales.Shifts} shifts"));
 
 BackOffice office = new(world);
 if (!force && await office.AlreadyPostedAsync())
