@@ -13,17 +13,19 @@ using Pos.Infrastructure.Persistence;
 namespace Pos.Api.Endpoints;
 
 /// <summary>The body of a purchase order creation.</summary>
-/// <param name="SupplierId">The supplier.</param>
+/// <param name="SupplierId">The managed supplier, or null when provisioning a new supplier by name.</param>
 /// <param name="DestinationLocationId">The location receiving the goods.</param>
 /// <param name="Lines">The ordered lines, in the product's base unit.</param>
 /// <param name="CurrencyCode">Three-letter ISO-4217 currency code, defaulting to PHP.</param>
 /// <param name="ExpectedAtUtc">Expected delivery instant, or null.</param>
+/// <param name="CustomSupplierName">Name of a new supplier, used only when <paramref name="SupplierId"/> is null.</param>
 public sealed record CreatePurchaseOrderBody(
-    Guid SupplierId,
+    Guid? SupplierId,
     Guid DestinationLocationId,
     IReadOnlyList<CreatePurchaseOrderLineBody> Lines,
     string? CurrencyCode = null,
-    DateTimeOffset? ExpectedAtUtc = null);
+    DateTimeOffset? ExpectedAtUtc = null,
+    string? CustomSupplierName = null);
 
 /// <summary>One line of a purchase order creation.</summary>
 /// <param name="ProductId">The product.</param>
@@ -368,7 +370,7 @@ public static class PurchaseEndpoints
         Result<PurchaseOrderId> result = await dispatcher
             .SendAsync(
                 new CreatePurchaseOrderCommand(
-                    new SupplierId(body.SupplierId),
+                    body.SupplierId is { } supplierId ? new SupplierId(supplierId) : SupplierId.Empty,
                     new LocationId(body.DestinationLocationId),
                     [.. body.Lines.Select(l => new PurchaseOrderLineSpec(
                         new ProductId(l.ProductId),
@@ -376,7 +378,8 @@ public static class PurchaseEndpoints
                         l.OrderedQuantity,
                         l.UnitCost))],
                     body.CurrencyCode,
-                    body.ExpectedAtUtc),
+                    body.ExpectedAtUtc,
+                    body.CustomSupplierName),
                 cancellationToken)
             .ConfigureAwait(false);
 

@@ -44,6 +44,28 @@ public sealed class PurchaseOrderRepository(PosDbContext context) : IPurchaseOrd
             .AnyAsync(s => s.Id == supplierId && s.IsActive, cancellationToken);
 
     /// <inheritdoc />
+    public async Task<Result<SupplierId>> CreateSupplierAsync(
+        Supplier supplier,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(supplier);
+
+        bool codeTaken = await context.Suppliers
+            .AnyAsync(s => s.Code == supplier.Code, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (codeTaken)
+        {
+            return Result<SupplierId>.Failure(CatalogErrors.CodeTaken("supplier", supplier.Code));
+        }
+
+        context.Suppliers.Add(supplier);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<SupplierId>.Success(supplier.Id);
+    }
+
+    /// <inheritdoc />
     public Task<UnitOfMeasureId?> GetActiveProductBaseUnitAsync(
         ProductId productId,
         CancellationToken cancellationToken)

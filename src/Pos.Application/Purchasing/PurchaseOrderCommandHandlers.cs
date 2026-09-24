@@ -1,6 +1,7 @@
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
+using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Purchasing;
 
@@ -24,9 +25,41 @@ public sealed class CreatePurchaseOrderCommandHandler(
             return Result<PurchaseOrderId>.Failure(PurchasingErrors.EmptyOrder);
         }
 
-        if (!await orders.IsActiveSupplierAsync(command.SupplierId, cancellationToken).ConfigureAwait(false))
+        // The order references the managed supplier, or - when the site has no
+        // record for the seller - provisions a lightweight supplier row from the
+        // typed name so the order stays a normal order everywhere downstream.
+        SupplierId supplierId = command.SupplierId;
+        if (!supplierId.IsEmpty)
         {
-            return Result<PurchaseOrderId>.Failure(PurchasingErrors.SupplierUnknown(command.SupplierId));
+            if (!await orders.IsActiveSupplierAsync(supplierId, cancellationToken).ConfigureAwait(false))
+            {
+                return Result<PurchaseOrderId>.Failure(PurchasingErrors.SupplierUnknown(supplierId));
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(command.SupplierName))
+            {
+                return Result<PurchaseOrderId>.Failure(PurchasingErrors.CustomSupplierNameRequired);
+            }
+
+            Result<Supplier> supplier = Supplier.Create(
+                BuildCustomSupplierCode(), command.SupplierName, null, 0, 0);
+
+            if (supplier.IsFailure)
+            {
+                return Result<PurchaseOrderId>.Failure(supplier.Errors);
+            }
+
+            Result<SupplierId> saved =
+                await orders.CreateSupplierAsync(supplier.Value, cancellationToken).ConfigureAwait(false);
+
+            if (saved.IsFailure)
+            {
+                return Result<PurchaseOrderId>.Failure(saved.Errors);
+            }
+
+            supplierId = saved.Value;
         }
 
         if (!await orders.CanReceiveGoodsAsync(command.DestinationLocationId, cancellationToken).ConfigureAwait(false))
@@ -59,7 +92,7 @@ public sealed class CreatePurchaseOrderCommandHandler(
         }
 
         Result<PurchaseOrder> created = PurchaseOrder.Create(
-            command.SupplierId,
+            supplierId,
             command.DestinationLocationId,
             command.Lines,
             currentUser.UserId ?? UserId.Empty,
@@ -74,6 +107,11 @@ public sealed class CreatePurchaseOrderCommandHandler(
 
         return await orders.AddAsync(created.Value, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Builds a supremely unlikely-to-collide code for an on-the-fly
+    /// supplier, staying under the sixteen-character supplier code limit.</summary>
+    private static string BuildCustomSupplierCode()
+        => FormattableString.Invariant($"C{Guid.NewGuid():N}")[..Supplier.CodeMaxLength];
 }
 
 /// <summary>Handles <see cref="SubmitPurchaseOrderCommand"/>.</summary>

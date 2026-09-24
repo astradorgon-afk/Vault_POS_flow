@@ -89,6 +89,16 @@ public sealed class SecurityOptions
     [Range(4, 12)]
     public int MinimumPinLength { get; set; } = 6;
 
+    /// <summary>
+    /// Gets or sets whether a device sign-in requires the user to be assigned
+    /// to the location the device belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Enforced in production. Development turns this off so a single account
+    /// can test a register enrolled at any store without editing assignments.
+    /// </remarks>
+    public bool RequireDeviceLocationAssignment { get; set; } = true;
+
     /// <summary>Gets or sets how many failed attempts trigger a lockout.</summary>
     [Range(3, 20)]
     public int MaxFailedAccessAttempts { get; set; } = 5;

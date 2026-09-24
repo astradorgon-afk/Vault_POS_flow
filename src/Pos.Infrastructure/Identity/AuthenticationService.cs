@@ -689,18 +689,22 @@ public sealed class AuthenticationService(
 
         // Signing in at a terminal you are not posted to is refused even with
         // correct credentials: it is the difference between a cashier covering
-        // their own till and one quietly working another store's.
-        UserAuthorization authorization = await permissions
-            .GetAuthorizationAsync(userId, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (!authorization.HasAllLocations && !authorization.Locations.Contains(device.LocationId))
+        // their own till and one quietly working another store's. Development
+        // relaxes this so one seed account can stand at any enrolled register.
+        if (_security.RequireDeviceLocationAssignment)
         {
-            await RecordFailureAsync(
-                identifierHash, LoginFailureReason.LocationNotPermitted, method,
-                userId, deviceId, ipAddress, userAgent, cancellationToken).ConfigureAwait(false);
+            UserAuthorization authorization = await permissions
+                .GetAuthorizationAsync(userId, cancellationToken)
+                .ConfigureAwait(false);
 
-            return Result<Device?>.Failure(AuthenticationErrors.LocationNotPermitted);
+            if (!authorization.HasAllLocations && !authorization.Locations.Contains(device.LocationId))
+            {
+                await RecordFailureAsync(
+                    identifierHash, LoginFailureReason.LocationNotPermitted, method,
+                    userId, deviceId, ipAddress, userAgent, cancellationToken).ConfigureAwait(false);
+
+                return Result<Device?>.Failure(AuthenticationErrors.LocationNotPermitted);
+            }
         }
 
         return Result<Device?>.Success(device);

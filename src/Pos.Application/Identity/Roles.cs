@@ -138,7 +138,8 @@ public static class Roles
 
             [InventoryStaff] =
             [
-                Permissions.Catalog.View,
+                Permissions.Catalog.View, Permissions.Catalog.Create,
+                Permissions.Purchasing.ViewSuppliers, Permissions.Purchasing.Create,
                 Permissions.Purchasing.View, Permissions.Purchasing.Receive,
                 Permissions.Inventory.View, Permissions.Inventory.Receive, Permissions.Inventory.Adjust,
                 Permissions.Inventory.Count, Permissions.Inventory.ViewMovements,

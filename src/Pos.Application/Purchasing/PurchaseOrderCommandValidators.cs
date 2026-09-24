@@ -12,7 +12,13 @@ public sealed class CreatePurchaseOrderCommandValidator : AbstractValidator<Crea
     {
         RuleFor(c => c.SupplierId)
             .NotEqual(SupplierId.Empty)
-            .WithErrorCode(PurchasingErrors.SupplierRequired.Code);
+            .WithErrorCode(PurchasingErrors.SupplierRequired.Code)
+            .When(c => string.IsNullOrWhiteSpace(c.SupplierName));
+
+        RuleFor(c => c.SupplierName)
+            .NotEmpty()
+            .WithErrorCode(PurchasingErrors.CustomSupplierNameRequired.Code)
+            .When(c => c.SupplierId == SupplierId.Empty);
 
         RuleFor(c => c.DestinationLocationId)
             .NotEqual(LocationId.Empty)

@@ -95,6 +95,15 @@ public sealed class AuthorizationTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task InventoryStaff_CanCreateProducts()
+    {
+        UserId staff = await factory.CreateUserAsync("authz-staff-create", Roles.InventoryStaff, [MainWarehouse]);
+
+        // Inventory Staff can register products in the centralized catalog.
+        (await HasPermissionAsync(staff, Permissions.Catalog.Create, MainWarehouse)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Auditor_HoldsNoPermissionThatChangesAnything()
     {
         UserId auditor = await factory.CreateUserAsync(

@@ -106,6 +106,31 @@ public sealed class CatalogEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task InventoryStaff_CanCreateProducts()
+    {
+        CategoryId category = await factory.CreateCategoryAsync("CAT-STAFF", "Staff Category");
+        UnitOfMeasureId unit = await factory.CreateUnitOfMeasureAsync("PCS-STF", "Piece");
+        await factory.CreateUserAsync("cat-staff", Roles.InventoryStaff);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "cat-staff");
+
+        using HttpResponseMessage response = await PostAsJsonAsync(
+            client,
+            "/api/v1/catalog/products",
+            new
+            {
+                sku = "STAFF-01",
+                name = "Staff Created Product",
+                categoryId = category.Value,
+                baseUnitOfMeasureId = unit.Value,
+            },
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
     public async Task MainInventoryManager_CanCreateAProductWithBarcode_ThenReadItBack()
     {
         CategoryId category = await factory.CreateCategoryAsync("BEVERAGES", "Beverages");

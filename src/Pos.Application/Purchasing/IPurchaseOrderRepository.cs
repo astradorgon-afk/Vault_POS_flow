@@ -51,6 +51,13 @@ public interface IPurchaseOrderRepository
     /// <returns><see langword="true"/> when the supplier can be ordered from.</returns>
     Task<bool> IsActiveSupplierAsync(SupplierId supplierId, CancellationToken cancellationToken);
 
+    /// <summary>Persists a lightweight supplier provisioned from an order's typed
+    /// supplier name so the order keeps a normal supplier reference.</summary>
+    /// <param name="supplier">The new supplier aggregate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The persisted identifier.</returns>
+    Task<Result<SupplierId>> CreateSupplierAsync(Supplier supplier, CancellationToken cancellationToken);
+
     /// <summary>
     /// Gets the base unit of measure of an active product, or <see langword="null"/>
     /// when the product does not exist or is inactive.

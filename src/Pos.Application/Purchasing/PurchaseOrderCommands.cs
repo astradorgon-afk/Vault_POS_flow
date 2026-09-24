@@ -6,17 +6,19 @@ using Pos.Domain.Purchasing;
 namespace Pos.Application.Purchasing;
 
 /// <summary>Creates a draft purchase order. No document number is allocated yet.</summary>
-/// <param name="SupplierId">The supplier.</param>
+/// <param name="SupplierId">The managed supplier, or <see cref="SupplierId.Empty"/> when naming a new supplier.</param>
 /// <param name="DestinationLocationId">The location that will receive the goods.</param>
 /// <param name="Lines">The ordered lines; quantities are in the product's base unit.</param>
 /// <param name="CurrencyCode">Three-letter ISO-4217 currency code; defaults to PHP.</param>
 /// <param name="ExpectedAtUtc">Expected delivery instant, or null.</param>
+/// <param name="SupplierName">Name of a new supplier, used only when <paramref name="SupplierId"/> is empty.</param>
 public sealed record CreatePurchaseOrderCommand(
     SupplierId SupplierId,
     LocationId DestinationLocationId,
     IReadOnlyList<PurchaseOrderLineSpec> Lines,
     string? CurrencyCode = null,
-    DateTimeOffset? ExpectedAtUtc = null)
+    DateTimeOffset? ExpectedAtUtc = null,
+    string? SupplierName = null)
     : ICommand<PurchaseOrderId>, IAuthorizedMessage
 {
     /// <inheritdoc />

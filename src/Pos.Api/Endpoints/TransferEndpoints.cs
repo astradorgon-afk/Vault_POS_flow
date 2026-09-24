@@ -12,6 +12,7 @@ using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 using Pos.Domain.Transfers;
+using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
 namespace Pos.Api.Endpoints;
@@ -187,6 +188,34 @@ public sealed record TransferCustodyEventSummary(
     DateTimeOffset OccurredAtUtc,
     string? Note);
 
+/// <summary>A transfer's detail: its lines, picked allocations and arrival state.</summary>
+public sealed record TransferDetailView(
+    TransferSummary Transfer,
+    string Kind,
+    string Mode,
+    string? ReviewNote,
+    IReadOnlyList<TransferLineView> Lines);
+
+/// <summary>One line of a transfer detail.</summary>
+public sealed record TransferLineView(
+    int LineNo,
+    Guid ProductId,
+    string? ProductName,
+    decimal RequestedQuantity,
+    decimal PickedQuantity,
+    decimal ReceivedQuantity,
+    decimal DamagedQuantity,
+    string? Note,
+    string? DiscrepancyState,
+    IReadOnlyList<TransferAllocationView> Allocations);
+
+/// <summary>One picked lot within a transfer line.</summary>
+public sealed record TransferAllocationView(
+    Guid? BatchId,
+    decimal PickedQuantity,
+    decimal ReceivedQuantity,
+    decimal DamagedQuantity);
+
 /// <summary>Transfer order endpoints.</summary>
 public static class TransferEndpoints
 {
@@ -303,6 +332,14 @@ public static class TransferEndpoints
             .WithName("ResolveTransferDiscrepancy")
             .WithSummary("Resolves an arrival discrepancy, posting the ledger.");
 
+        group.MapGet("/{id:guid}", GetTransferAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.View)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetTransfer")
+            .WithSummary("Gets one transfer with its lines, allocations and arrival state.");
+
         group.MapGet("/{id:guid}/custody", GetTransferCustodyAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.View)
             {
@@ -376,18 +413,24 @@ public static class TransferEndpoints
 
     private static async Task<IResult> ListTransfersAsync(
         PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
         IQueryable<Transfer> query = context.Transfers.AsNoTracking();
 
         // The list is scoped to the caller's locations unless they act
         // business-wide: a store manager only sees transfers into and out of
         // their own store.
-        if (!currentUser.HasAllLocations)
+        if (!authorization.HasAllLocations)
         {
-            LocationId[] scoped = [.. currentUser.AssignedLocations];
-            query = query.Where(t => scoped.Contains(t.SourceLocationId) || scoped.Contains(t.DestinationLocationId));
+            query = query.Where(t =>
+                authorization.Locations.Contains(t.SourceLocationId)
+                || authorization.Locations.Contains(t.DestinationLocationId));
         }
 
         List<TransferSummary> summaries = await query
@@ -614,6 +657,120 @@ public static class TransferEndpoints
             .ConfigureAwait(false);
 
         return TypedResults.Ok(events);
+    }
+
+    private static async Task<IResult> GetTransferAsync(
+        PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
+        Guid id,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        TransferOrderId transferId = new(id);
+
+        Transfer? transfer = await context.Transfers
+            .AsNoTracking()
+            .Include(t => t.Lines)
+            .FirstOrDefaultAsync(t => t.Id == transferId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (transfer is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(TransferErrors.TransferUnknown(transferId)),
+                currentUser.CorrelationId.Value);
+        }
+
+        // The detail is scoped like the list: a store manager only sees
+        // transfers into and out of their own stores. Out-of-scope reads and
+        // unknown orders are indistinguishable on purpose.
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!authorization.HasAllLocations)
+        {
+            if (!authorization.Locations.Contains(transfer.SourceLocationId)
+                && !authorization.Locations.Contains(transfer.DestinationLocationId))
+            {
+                return ProblemDetailsMapping.ToProblem(
+                    Result.Failure(TransferErrors.TransferUnknown(transferId)),
+                    currentUser.CorrelationId.Value);
+            }
+        }
+
+        List<TransferPickAllocation> allocations = await context.TransferAllocations
+            .AsNoTracking()
+            .Where(a => a.TransferOrderId == transferId)
+            .OrderBy(a => a.LineNo)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<TransferDiscrepancy> discrepancies = await context.TransferDiscrepancies
+            .AsNoTracking()
+            .Where(d => d.TransferOrderId == transferId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        ProductId[] productIds = [.. transfer.Lines.Select(l => l.ProductId).Distinct()];
+
+        Dictionary<Guid, string> names = await context.Products
+            .AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id.Value, p => p.Name, cancellationToken)
+            .ConfigureAwait(false);
+
+        List<TransferLineView> lines = [];
+
+        foreach (TransferLine line in transfer.Lines.OrderBy(l => l.LineNo))
+        {
+            List<TransferPickAllocation> lineAllocations = allocations
+                .Where(a => a.LineNo == line.LineNo)
+                .ToList();
+
+            string? discrepancyState = discrepancies
+                .Where(d => d.LineNo == line.LineNo && !d.IsResolved)
+                .Select(d => d.Kind.ToString())
+                .FirstOrDefault();
+
+            lines.Add(new TransferLineView(
+                line.LineNo,
+                line.ProductId.Value,
+                names.GetValueOrDefault(line.ProductId.Value),
+                line.RequestedQuantity,
+                lineAllocations.Sum(a => a.Quantity),
+                lineAllocations.Sum(a => a.ReceivedQuantity),
+                lineAllocations.Sum(a => a.DamagedQuantity),
+                line.Note,
+                discrepancyState,
+                lineAllocations
+                    .Select(a => new TransferAllocationView(
+                        a.BatchId?.Value,
+                        a.Quantity,
+                        a.ReceivedQuantity,
+                        a.DamagedQuantity))
+                    .ToList()));
+        }
+
+        TransferDetailView detail = new(
+            new TransferSummary(
+                transfer.Id.Value,
+                transfer.Number,
+                transfer.Status.ToString(),
+                transfer.SourceLocationId.Value,
+                transfer.DestinationLocationId.Value,
+                transfer.CreatedByUserId.Value,
+                transfer.CreatedAtUtc,
+                transfer.DispatchedAtUtc,
+                transfer.ReceivedAtUtc,
+                transfer.TotalValue,
+                transfer.Lines.Count),
+            transfer.Kind.ToString(),
+            transfer.Mode.ToString(),
+            transfer.ReviewNote,
+            lines);
+
+        return TypedResults.Ok(detail);
     }
 
     private static async Task<IResult> InitiateEmergencyTransferAsync(

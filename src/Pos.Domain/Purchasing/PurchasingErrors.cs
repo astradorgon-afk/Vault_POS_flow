@@ -101,6 +101,12 @@ public static class PurchasingErrors
         "purchasing.supplier_unknown",
         FormattableString.Invariant($"Supplier {id.Value} was not found or is inactive."));
 
+    /// <summary>An order with no managed supplier must name a new one.</summary>
+    /// <returns>The error.</returns>
+    public static Error CustomSupplierNameRequired => Error.Validation(
+        "purchasing.custom_supplier_required",
+        "Choose a managed supplier or type the name of the new supplier.");
+
     /// <summary>A referenced product does not exist or is inactive.</summary>
     /// <param name="id">The identifier that was looked up.</param>
     /// <returns>The error.</returns>

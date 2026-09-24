@@ -35,7 +35,7 @@ public static class Permissions
         /// <summary>Read products, barcodes and prices.</summary>
         public const string View = "product.view";
 
-        /// <summary>Create products. Main Warehouse and administrators only.</summary>
+        /// <summary>Create products.</summary>
         public const string Create = "product.create";
 
         /// <summary>Edit product master fields.</summary>
