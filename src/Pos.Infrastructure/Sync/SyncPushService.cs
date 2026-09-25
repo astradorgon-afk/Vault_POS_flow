@@ -526,6 +526,20 @@ public sealed class SyncPushService(
             return Result<Guid>.Failure(number.Errors);
         }
 
+        // A register that sent this sale online and never heard back queues it
+        // under the same event identity. If that first attempt did commit, the
+        // sale is already here: it is the same sale, not a second one.
+        SaleId? existing = await context.Sales
+            .AsNoTracking()
+            .Where(s => s.EventId == new EventId(item.EventId))
+            .Select(s => (SaleId?)s.Id)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (existing is { } alreadyPosted)
+        {
+            return Result<Guid>.Success(alreadyPosted.Value);
+        }
+
         CompleteSaleLine[] lines =
         [
             .. payload.Lines.Select(line => new CompleteSaleLine(

@@ -5,6 +5,7 @@ using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
+using Pos.Domain.Identity;
 using Pos.Domain.Organizations;
 using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Identity;
@@ -42,7 +43,8 @@ public sealed class SyncBaselineService(
         List<ProductBaselineRow> products = await context.Products
             .AsNoTracking()
             .Select(p => new ProductBaselineRow(
-                p.Id.Value, p.Sku.Value, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc))
+                p.Id.Value, p.Sku.Value, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc,
+                p.BaseUnitOfMeasureId.Value))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         foreach (ProductBaselineRow product in products)
@@ -57,6 +59,7 @@ public sealed class SyncBaselineService(
                 tracksExpiry = product.TracksExpiry,
                 sourceVersion = 0L,
                 updatedAtUtc = product.UpdatedAtUtc,
+                baseUnitOfMeasureId = product.BaseUnitOfMeasureId,
             }));
         }
 
@@ -124,7 +127,7 @@ public sealed class SyncBaselineService(
             }));
         }
 
-        await AddSignedInUserAsync(items, currentUser.UserId.Value, device.LocationId, cancellationToken)
+        await AddStoreStaffAsync(items, currentUser.UserId.Value, device.LocationId, cancellationToken)
             .ConfigureAwait(false);
 
         long cursor = await context.SyncChangeLog
@@ -137,16 +140,85 @@ public sealed class SyncBaselineService(
     }
 
     /// <summary>
-    /// Adds the caller's cached identity and offline authority. A register signs
-    /// someone in only while it can reach head office, so this is the moment it
-    /// learns what they may do once the connection drops: offline-capable
-    /// permissions only, scoped to the register's own store, and bounded by
-    /// <see cref="SecurityOptions.PermissionSnapshotHours"/>.
+    /// Adds the cached identity and offline authority of everyone who may work
+    /// at the register's store: the caller always, and every other active
+    /// person assigned to the store or acting business-wide who holds anything
+    /// they could do there offline.
     /// </summary>
-    private async Task AddSignedInUserAsync(
+    /// <remarks>
+    /// <para>
+    /// This is how a register learns what people may do once the connection
+    /// drops: offline-capable permissions only, scoped to the register's own
+    /// store, and bounded by <see cref="SecurityOptions.PermissionSnapshotHours"/>.
+    /// Carrying the whole store's staff rather than the caller alone is what
+    /// lets any of them sign in at the register while head office is
+    /// unreachable, and it keeps their authority fresh whenever anyone signs in
+    /// while connected.
+    /// </para>
+    /// <para>
+    /// A baseline replaces the register's cached people wholesale, so someone
+    /// disabled, or moved to another store, is simply absent from the next one —
+    /// and a register refuses an offline sign-in for anyone its store data does
+    /// not list. Nothing here is a credential: a register can only check a
+    /// password it has itself seen head office accept.
+    /// </para>
+    /// </remarks>
+    private async Task AddStoreStaffAsync(
+        List<SyncBaselineItem> items,
+        UserId callerId,
+        LocationId deviceLocation,
+        CancellationToken cancellationToken)
+    {
+        List<UserId> assigned = await context.UserLocations
+            .AsNoTracking()
+            .Where(a => a.LocationId == deviceLocation)
+            .Select(a => a.UserId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<Guid> viaRole = await (
+                from userRole in context.UserRoles.AsNoTracking()
+                join grant in context.RolePermissions.AsNoTracking() on userRole.RoleId equals grant.RoleId
+                where grant.PermissionCode == Permissions.Administration.AllLocations
+                select userRole.UserId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<UserId> viaOverride = await context.UserPermissionOverrides
+            .AsNoTracking()
+            .Where(o => o.PermissionCode == Permissions.Administration.AllLocations
+                        && o.Effect == PermissionEffect.Grant)
+            .Select(o => o.UserId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // The caller first, as before; everyone else in a stable order. Whether
+        // each of them may really act here is decided by their resolved
+        // authority below, which applies expiry and deny overrides.
+        IEnumerable<Guid> candidates = new[] { callerId.Value }
+            .Concat(assigned.Select(u => u.Value)
+                .Concat(viaRole)
+                .Concat(viaOverride.Select(u => u.Value))
+                .Distinct()
+                .Order());
+
+        foreach (Guid candidate in candidates.Distinct())
+        {
+            await AddPersonAsync(
+                    items,
+                    new UserId(candidate),
+                    deviceLocation,
+                    isCaller: candidate == callerId.Value,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task AddPersonAsync(
         List<SyncBaselineItem> items,
         UserId userId,
         LocationId deviceLocation,
+        bool isCaller,
         CancellationToken cancellationToken)
     {
         AppUser? user = await context.Users
@@ -157,15 +229,6 @@ public sealed class SyncBaselineService(
         {
             return;
         }
-
-        items.Add(Item("UserChanged", user.Id, new
-        {
-            userId = user.Id,
-            userName = user.UserName ?? string.Empty,
-            displayName = user.DisplayName,
-            isActive = user.IsActive,
-            securityVersion = 0L,
-        }));
 
         UserAuthorization authority = await authorization
             .GetAuthorizationAsync(userId, cancellationToken)
@@ -180,6 +243,22 @@ public sealed class SyncBaselineService(
                 .Where(p => Permissions.Find(p)?.IsOfflineCapable == true)
                 .Order(StringComparer.Ordinal)]
             : [];
+
+        // The caller is always described, so the register can show who signed
+        // in. Anyone else is carried only if they could do something here.
+        if (!isCaller && (!user.CanAuthenticate || offline.Length == 0))
+        {
+            return;
+        }
+
+        items.Add(Item("UserChanged", user.Id, new
+        {
+            userId = user.Id,
+            userName = user.UserName ?? string.Empty,
+            displayName = user.DisplayName,
+            isActive = user.IsActive,
+            securityVersion = 0L,
+        }));
 
         DateTimeOffset issuedAt = clock.UtcNow;
         long version = await policyVersion.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
@@ -197,7 +276,7 @@ public sealed class SyncBaselineService(
     private static SyncBaselineItem Item<T>(string type, object key, T payload)
         => new(type, key.ToString() ?? string.Empty, JsonSerializer.SerializeToElement(payload));
 
-    private sealed record ProductBaselineRow(Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry, DateTimeOffset UpdatedAtUtc);
+    private sealed record ProductBaselineRow(Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry, DateTimeOffset UpdatedAtUtc, Guid BaseUnitOfMeasureId);
     private sealed record BarcodeBaselineRow(string Barcode, Guid ProductId, bool IsPrimary, bool IsActive);
     private sealed record PriceBaselineRow(Guid PriceId, Guid ProductId, Guid? LocationId, decimal Amount, string Currency, DateTimeOffset EffectiveFromUtc, DateTimeOffset? EffectiveToUtc);
 }

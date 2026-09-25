@@ -184,12 +184,13 @@ public sealed class ChangeFeedApplier(DeviceDatabaseInitializer database, ISyste
                 {
                     context.Products.Add(new DeviceCachedProduct(
                         p.ProductId, p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry,
-                        p.SourceVersion, p.UpdatedAtUtc));
+                        p.SourceVersion, p.UpdatedAtUtc, p.BaseUnitOfMeasureId));
                 }
                 else
                 {
                     product.Refresh(
-                        p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.SourceVersion, p.UpdatedAtUtc);
+                        p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.SourceVersion, p.UpdatedAtUtc,
+                        p.BaseUnitOfMeasureId);
                 }
 
                 break;

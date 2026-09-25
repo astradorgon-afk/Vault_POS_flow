@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Pos.Client.Models
 @using Pos.Domain.Sales
+@implements IDisposable
 @inject RegisterService Register
 @inject NavigationManager Navigation
 
@@ -20,7 +21,14 @@
         OnMore="OpenMoreAsync"
         OnLock="SignOutAsync" />
 
-    <RegisterStatusStrip Status="Status" ContextError="@_contextError" />
+    <RegisterStatusStrip
+        Status="Status"
+        ContextError="@_contextError"
+        SignedInOffline="SignedInOffline"
+        TillOffline="@(_context?.IsOffline == true)"
+        Backlog="@BacklogText"
+        OfflineAuthorityExpiresUtc="Register.Current?.OfflineAuthorityExpiresAtUtc"
+        OnReconnect="OpenReconnect" />
 
     @if (_completionNoticeOpen && _lastSale is not null)
     {
@@ -37,7 +45,11 @@
                     <strong>@PriceOf(changeDue)</strong>
                 </div>
             }
-            <span class="sale-complete-ready">Ready for the next scan</span>
+            <span class="sale-complete-ready">
+                @(_lastSale.IsOffline
+                    ? "Kept on this register and sent to head office when connected · ready for the next scan"
+                    : "Ready for the next scan")
+            </span>
             <button type="button" class="button-secondary sale-complete-receipt" @onclick="OpenOriginalReceiptAsync">
                 View receipt
             </button>
@@ -92,7 +104,8 @@
                         <p>
                             @(_context is null
                                 ? "Connect to head office so this register can load its business date and shift."
-                                : $"Business date: {@_context.BusinessDate.ToString("ddd, MMM d yyyy", CultureInfo.InvariantCulture)}")
+                                : $"Business date: {@_context.BusinessDate.ToString("ddd, MMM d yyyy", CultureInfo.InvariantCulture)}"
+                                  + (_context.IsOffline ? " · working offline; the shift is sent to head office when connected." : string.Empty))
                         </p>
                         <button type="button" class="button-primary" @onclick="StartShiftOpen" disabled="@(_context is null || _busy)">
                             Open shift
@@ -134,6 +147,7 @@
                         PaymentAllowed="PaymentAllowed"
                         PaymentBlockedMessage="@PaymentBlockedMessage"
                         PaymentBlockedDetail="@RegisterService.OfflineSaleMessaging"
+                        CashOnly="WorkingOffline"
                         FocusTicket="_cashTicket"
                         Busy="_screen == SaleScreen.Completing"
                         OnComplete="CompleteSaleAsync"
@@ -232,6 +246,16 @@
             OnDismiss="DismissShiftOpen" />
     }
 
+    @if (_reconnectOpen && Register.Current is { } offlineUser)
+    {
+        <ReconnectDialog
+            UserName="@offlineUser.DisplayName"
+            Busy="_reconnecting"
+            Error="@_reconnectError"
+            OnConfirm="ReconnectAsync"
+            OnDismiss="() => _reconnectOpen = false" />
+    }
+
     @if (_heldPanelOpen)
     {
         <HeldSalesPanel Held="_heldSales" OnRecall="RecallHeldAsync" OnDismiss="() => _heldPanelOpen = false" />
@@ -280,7 +304,7 @@
         <RegisterMoreMenu
             Open="true"
             HeldCount="_heldSales.Count"
-            ShowReturns="CanReturn && _context?.OpenShift is not null && !ShiftOpenedByOther"
+            ShowReturns="CanReturn && !WorkingOffline && _context?.OpenShift is not null && !ShiftOpenedByOther"
             ShowCloseShift="(CanCloseShift || (ShiftOpenedByOther && CanCloseOtherShift)) && _context?.OpenShift is not null"
             ShowReprint="CanReprint"
             ReprintEnabled="_lastSale is not null"
@@ -378,6 +402,10 @@
     private string? _receiptError;
     private bool _customerDialogOpen;
     private RegisterCustomer? _customer;
+    private bool _reconnectOpen;
+    private bool _reconnecting;
+    private string? _reconnectError;
+    private readonly CancellationTokenSource _watch = new();
 
     /// <summary>The register's status, fed down for the strip and messaging.</summary>
     [Parameter]
@@ -391,24 +419,33 @@
     [Parameter]
     public EventCallback OnRefreshed { get; set; }
 
-    private bool CanCreateSale =>
-        Register.Current?.Session.User.Permissions.Contains("sale.create", StringComparer.Ordinal) == true;
+    private bool CanCreateSale => Register.Current?.Can("sale.create") == true;
 
-    private bool CanReturn =>
-        Register.Current?.Session.User.Permissions.Contains("sale.return", StringComparer.Ordinal) == true;
+    private bool CanReturn => Register.Current?.Can("sale.return") == true;
 
-    private bool CanRefund =>
-        Register.Current?.Session.User.Permissions.Contains("sale.refund", StringComparer.Ordinal) == true;
+    private bool CanRefund => Register.Current?.Can("sale.refund") == true;
 
-    private bool CanReprint =>
-        Register.Current?.Session.User.Permissions.Contains("sale.reprint", StringComparer.Ordinal) == true;
+    private bool CanReprint => Register.Current?.Can("sale.reprint") == true;
 
-    private bool CanCloseShift =>
-        Register.Current?.Session.User.Permissions.Contains("shift.close", StringComparer.Ordinal) == true;
+    private bool CanCloseShift => Register.Current?.Can("shift.close") == true;
 
     /// <summary>Whether this account may close a shift opened by someone else.</summary>
-    private bool CanCloseOtherShift =>
-        Register.Current?.Session.User.Permissions.Contains("shift.close.other", StringComparer.Ordinal) == true;
+    private bool CanCloseOtherShift => Register.Current?.Can("shift.close.other") == true;
+
+    /// <summary>The cashier signed in without head office.</summary>
+    private bool SignedInOffline => Register.Current?.IsOffline == true;
+
+    /// <summary>
+    /// The till is trading without head office: either nobody could sign in
+    /// with it, or it stopped answering after they did.
+    /// </summary>
+    private bool WorkingOffline => SignedInOffline || _context?.IsOffline == true;
+
+    private string? BacklogText =>
+        Register.LastUpload is { } backlog
+            ? RegisterService.DescribeBacklog(backlog)
+              + (Register.LastUploadRefusal is { Length: > 0 } refusal ? " Head office refused them: " + refusal : string.Empty)
+            : null;
 
     /// <summary>
     /// A shift is open on this device, but the signed-in cashier did not open it:
@@ -416,17 +453,17 @@
     /// </summary>
     private bool ShiftOpenedByOther =>
         _context?.OpenShift is { } shift
-        && shift.CashierUserId != Register.Current?.Session.User.UserId;
+        && shift.CashierUserId != Register.Current?.UserId.Value;
 
-    private bool CanViewSales =>
-        Register.Current?.Session.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
+    private bool CanViewSales => Register.Current?.Can("sale.view") == true && !WorkingOffline;
 
-    private bool CanViewCustomers =>
-        Register.Current?.Session.User.Permissions.Contains("customer.view", StringComparer.Ordinal) == true;
+    private bool CanViewCustomers => Register.Current?.Can("customer.view") == true && !WorkingOffline;
 
-    // Same rule the sign-in uses to land an account on the office console.
+    // Same rule the sign-in uses to land an account on the office console. The
+    // office is head office's, so it is not offered while working offline.
     private bool CanOpenOffice =>
-        Register.Current?.Session.User.Permissions.Any(perm =>
+        !WorkingOffline
+        && Register.Current?.Permissions.Any(perm =>
             perm is "inventory.view" or "transfer.view" or "purchase.view" or "report.view") == true;
 
     private void OpenOffice()
@@ -444,8 +481,7 @@
     // A click on the shortcut bar behaves exactly like the key it shows.
     private Task PressShortcutAsync(string key) => HandleKeyDownAsync(new KeyboardEventArgs { Key = key });
 
-    private bool CanCreateCustomer =>
-        Register.Current?.Session.User.Permissions.Contains("customer.manage", StringComparer.Ordinal) == true;
+    private bool CanCreateCustomer => Register.Current?.Can("customer.manage") == true && !WorkingOffline;
 
     private bool _busy => _refreshing || _openingShift || _screen is SaleScreen.Completing or SaleScreen.Loading;
 
@@ -453,22 +489,17 @@
 
     private decimal NetTotal => decimal.Round(_cart.Sum(line => line.Total), 4, MidpointRounding.ToEven);
 
-    private bool _online => Status?.Connectivity != DeviceConnectivityState.Offline && _contextError is null;
+    private bool _online => !WorkingOffline && _contextError is null;
 
-    private bool PaymentAllowed => _context?.OpenShift is not null && _online && Status?.Authority != DeviceAuthorityState.Expired;
+    // Offline, the register takes cash on the cached authority; once that has
+    // expired it takes nothing until someone signs in with head office.
+    private bool PaymentAllowed =>
+        _context?.OpenShift is not null && !(WorkingOffline && Status?.Authority == DeviceAuthorityState.Expired);
 
     private string? PaymentBlockedMessage
-    {
-        get
-        {
-            if (!_online || Status?.Authority == DeviceAuthorityState.Expired)
-            {
-                return "This sale can only be completed with head office.";
-            }
-
-            return null;
-        }
-    }
+        => WorkingOffline && Status?.Authority == DeviceAuthorityState.Expired
+            ? "Your offline access on this register has expired. Connect to head office to complete sales."
+            : null;
 
     private string BusinessDateText =>
         _context?.BusinessDate is { } date
@@ -493,6 +524,112 @@
             {
                 _screen = ApplyPostLoadScreen();
             }
+        }
+
+        _ = WatchForHeadOfficeAsync(_watch.Token);
+    }
+
+    /// <summary>
+    /// While a connected cashier's till is working offline because head office
+    /// stopped answering, asks again every so often. When it answers, the till
+    /// sends what it kept and goes back to trading through head office.
+    /// </summary>
+    private async Task WatchForHeadOfficeAsync(CancellationToken token)
+    {
+        using PeriodicTimer timer = new(TimeSpan.FromSeconds(45));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await InvokeAsync(TryReturnOnlineAsync);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The till was closed.
+        }
+        catch (ObjectDisposedException)
+        {
+            // The till closed between ticks.
+        }
+    }
+
+    private async Task TryReturnOnlineAsync()
+    {
+        if (SignedInOffline
+            || _context?.IsOffline != true
+            || _busy
+            || _screen is SaleScreen.Payment or SaleScreen.Completing)
+        {
+            return;
+        }
+
+        try
+        {
+            RegisterCheckoutContext context = await Register.GetCheckoutContextAsync();
+            if (context.IsOffline)
+            {
+                return;
+            }
+
+            _context = context;
+            _contextError = null;
+            if (_screen is SaleScreen.NeedsShift or SaleScreen.OtherShift or SaleScreen.Selling)
+            {
+                _screen = ShiftScreenForContext();
+            }
+
+            await OnRefreshed.InvokeAsync();
+            StateHasChanged();
+        }
+        catch (HeadOfficeException)
+        {
+            // Still unreachable, or refusing; the till keeps working offline.
+        }
+    }
+
+    /// <summary>Stops watching for head office when the till closes.</summary>
+    public void Dispose()
+    {
+        _watch.Cancel();
+        _watch.Dispose();
+    }
+
+    private void OpenReconnect()
+    {
+        _moreOpen = false;
+        _reconnectError = null;
+        _reconnectOpen = true;
+    }
+
+    private async Task ReconnectAsync(string password)
+    {
+        if (_reconnecting)
+        {
+            return;
+        }
+
+        _reconnecting = true;
+        _reconnectError = null;
+        try
+        {
+            await Register.ReconnectAsync(password);
+            _reconnectOpen = false;
+            await LoadTillAsync();
+            if (_screen is SaleScreen.NeedsShift or SaleScreen.OtherShift or SaleScreen.Selling)
+            {
+                _screen = ShiftScreenForContext();
+            }
+
+            await OnRefreshed.InvokeAsync();
+        }
+        catch (HeadOfficeException ex)
+        {
+            _reconnectError = ex.Message;
+        }
+        finally
+        {
+            _reconnecting = false;
         }
     }
 
@@ -567,6 +704,13 @@
     {
         if (_busy)
         {
+            return;
+        }
+
+        if (SignedInOffline)
+        {
+            // Store data comes from head office; connect this session first.
+            OpenReconnect();
             return;
         }
 
@@ -899,7 +1043,10 @@
                 line.Item.ProductId,
                 line.Item.BaseUnitOfMeasureId!.Value,
                 line.Item.Barcode,
-                line.Quantity))];
+                line.Quantity,
+                line.Item.Sku,
+                line.Item.Name,
+                line.Item.Price!.Value))];
 
             List<RegisterSalePayment> payments =
             [
@@ -911,7 +1058,8 @@
                 shift.BusinessDate,
                 _customer?.Id,
                 lines,
-                payments);
+                payments,
+                _customer?.DisplayName);
 
             _changeDue = payment.Method == PaymentMethod.Cash && payment.Tendered is { } tendered && tendered > NetTotal
                 ? RoundToIncrement(tendered - NetTotal)
@@ -924,6 +1072,28 @@
             StartNextSale();
             _changeDue = completedSaleChange;
             _completionNoticeOpen = true;
+
+            if (_context?.IsOffline == true && !_lastSale.IsOffline)
+            {
+                // Head office answered again: send what was kept offline and
+                // trade through it from here on.
+                await TryReturnOnlineAsync();
+            }
+            else if (_context is { IsOffline: false } && _lastSale.IsOffline)
+            {
+                // Head office stopped answering mid-sale: show the till as
+                // offline, which also starts the check for its return.
+                try
+                {
+                    _context = await Register.GetCheckoutContextAsync();
+                }
+                catch (HeadOfficeException)
+                {
+                    // Keep the context the sale was made under.
+                }
+            }
+
+            await OnRefreshed.InvokeAsync();
         }
         catch (HeadOfficeException ex)
         {
@@ -1082,8 +1252,8 @@
         try
         {
             _receiptText = afterSale
-                ? await Register.GetOriginalReceiptTextAsync(_lastSale.Id)
-                : await Register.ReprintReceiptTextAsync(_lastSale.Id, "Reprinted from the register menu");
+                ? await Register.GetOriginalReceiptTextAsync(_lastSale)
+                : await Register.ReprintReceiptTextAsync(_lastSale, "Reprinted from the register menu");
         }
         catch (HeadOfficeException ex)
         {
@@ -1265,6 +1435,16 @@
 
     private void HandleEscape()
     {
+        if (_reconnectOpen)
+        {
+            if (!_reconnecting)
+            {
+                _reconnectOpen = false;
+            }
+
+            return;
+        }
+
         if (_screen == SaleScreen.Payment)
         {
             _screen = SaleScreen.Selling;

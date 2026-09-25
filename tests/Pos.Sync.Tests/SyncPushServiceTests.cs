@@ -13,6 +13,7 @@ using Pos.Application.Sales;
 using NSubstitute;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
+using Pos.Domain.Identity;
 using Pos.Domain.Sales;
 using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Identity;
@@ -519,6 +520,78 @@ public sealed class SyncPushServiceTests
     }
 
     [Fact]
+    public async Task Baseline_CarriesTheStoresStaff_SoAnyOfThemCanSignInOffline()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        Guid colleague = Guid.CreateVersion7();
+        Guid owner = Guid.CreateVersion7();
+        Guid disabled = Guid.CreateVersion7();
+        Guid elsewhere = Guid.CreateVersion7();
+
+        await using (PosDbContext context = host.CreateContext())
+        {
+            Guid cashierRole = await host.AddRoleAsync(context, "Cashier", Permissions.Sales.Create, Permissions.Sales.OpenShift);
+            Guid ownerRole = await host.AddRoleAsync(
+                context, "Owner", Permissions.Sales.Create, Permissions.Administration.AllLocations);
+
+            host.AddUser(context, host.User.Value, "cashier1", "Cashier One", cashierRole, host.Location);
+            host.AddUser(context, colleague, "cashier2", "Cashier Two", cashierRole, host.Location);
+            host.AddUser(context, owner, "owner", "The Owner", ownerRole, location: null);
+            host.AddUser(context, disabled, "leaver", "Has Left", cashierRole, host.Location, isActive: false);
+            host.AddUser(context, elsewhere, "cashier9", "Other Store", cashierRole, LocationId.New());
+            await context.SaveChangesAsync();
+        }
+
+        SyncBaselineResponse response = await host.Baseline.GetAsync(CancellationToken.None);
+
+        List<Guid> described = [.. response.Items
+            .Where(i => i.Type == "UserChanged")
+            .Select(i => i.Payload.GetProperty("userId").GetGuid())];
+
+        described.First().Should().Be(host.User.Value, "the caller comes first, as before");
+        described.Should().BeEquivalentTo([host.User.Value, colleague, owner]);
+        described.Should().NotContain(disabled, "someone disabled drops out, and with them any offline sign-in");
+        described.Should().NotContain(elsewhere, "another store's staff get nothing to hold here");
+
+        SyncBaselineItem ownerSnapshot = response.Items.Single(i =>
+            i.Type == "PermissionSnapshotIssued" && i.Payload.GetProperty("userId").GetGuid() == owner);
+        ownerSnapshot.Payload.GetProperty("grants").EnumerateArray()
+            .Select(g => g.GetProperty("permission").GetString())
+            .Should().Equal(Permissions.Sales.Create);
+    }
+
+    [Fact]
+    public async Task ASaleHeadOfficeAlreadyHolds_IsNotPostedTwice()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        SaleSyncPayload payload = new(
+            "SAL-2026-D03-0001",
+            host.Location.Value,
+            CashierShiftId.New().Value,
+            host.Device.Id.Value,
+            host.User.Value,
+            null,
+            new DateOnly(2026, 9, 18),
+            host.Now,
+            [new SaleSyncLine(ProductId.New().Value, 1m, UnitOfMeasureId.New().Value, null, null, null, 0m, null, false, null)],
+            [new SaleSyncPayment(PaymentMethod.Cash, 10m, 10m, null)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "SaleCompleted");
+
+        // The register sent it online, the answer never came back, and it queued
+        // the same sale under the same event identity.
+        SaleId posted = await host.AddSaleAsync(item.EventId, payload);
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("Accepted");
+        await host.Dispatcher.DidNotReceive().SendAsync<SaleId>(
+            Arg.Any<ICommand<SaleId>>(), Arg.Any<CancellationToken>());
+        await using PosDbContext context = host.CreateContext();
+        (await context.ProcessedSyncEvents.SingleAsync()).ResponseJson.Should().Contain(posted.Value.ToString());
+    }
+
+    [Fact]
     public async Task Status_ReturnsDeviceCheckpointFeedCursorAndOpenFailures()
     {
         await using TestHost host = await TestHost.CreateAsync();
@@ -621,6 +694,108 @@ public sealed class SyncPushServiceTests
         }
 
         public PosDbContext CreateContext() => new(options);
+
+        public async Task<Guid> AddRoleAsync(PosDbContext context, string name, params string[] codes)
+        {
+            Guid roleId = Guid.CreateVersion7();
+            context.Roles.Add(new AppRole { Id = roleId, Name = name, CreatedAtUtc = Now });
+            foreach (string code in codes)
+            {
+                if (!context.Permissions.Local.Any(p => p.Code == code)
+                    && !await context.Permissions.AnyAsync(p => p.Code == code))
+                {
+                    PermissionDefinition definition = Permissions.Find(code)!;
+                    context.Permissions.Add(new PermissionRecord
+                    {
+                        Code = code,
+                        Module = definition.Module,
+                        Description = definition.Description,
+                        IsOfflineCapable = definition.IsOfflineCapable,
+                        IsReadOnly = definition.IsReadOnly,
+                    });
+                }
+
+                context.RolePermissions.Add(new RolePermissionGrant { RoleId = roleId, PermissionCode = code, GrantedAtUtc = Now });
+            }
+
+            return roleId;
+        }
+
+        public void AddUser(
+            PosDbContext context,
+            Guid id,
+            string userName,
+            string displayName,
+            Guid roleId,
+            LocationId? location,
+            bool isActive = true)
+        {
+            context.Users.Add(new AppUser
+            {
+                Id = id,
+                UserName = userName,
+                DisplayName = displayName,
+                CreatedAtUtc = Now,
+                IsActive = isActive,
+            });
+            context.UserRoles.Add(new IdentityUserRole<Guid> { UserId = id, RoleId = roleId });
+            if (location is { } assigned)
+            {
+                context.UserLocations.Add(UserLocationAssignment.Create(new UserId(id), assigned, true, Now, new UserId(id)));
+            }
+        }
+
+        /// <summary>Writes the sale an online completion would have written, under the given event.</summary>
+        public async Task<SaleId> AddSaleAsync(Guid eventId, SaleSyncPayload payload)
+        {
+            SaleSyncLine line = payload.Lines.Single();
+            ItemSpec item = new(
+                new ProductId(line.ProductId),
+                "Widget",
+                Barcode: null,
+                line.Quantity,
+                new UnitOfMeasureId(line.UnitOfMeasureId),
+                10m,
+                PriceVersion: ProductPriceId.New(),
+                PriceWasOverridden: false,
+                PriceOverrideAuthorizedByUserId: null,
+                Discount: 0m,
+                DiscountAuthorizedByUserId: null,
+                VatRate: null,
+                IsVatExempt: false,
+                IsZeroRated: true,
+                BatchId: null,
+                BatchCode: null,
+                BatchExpiresOn: null,
+                UnitCost: 0m,
+                TracksBatches: false);
+
+            Sale sale = Sale.Create(
+                    DocumentNumber.FromTrustedSource(payload.Number),
+                    new EventId(eventId),
+                    new LocationId(payload.LocationId),
+                    new CashierShiftId(payload.CashierShiftId),
+                    new DeviceId(payload.DeviceId),
+                    customerId: null,
+                    payload.BusinessDate,
+                    payload.CompletedAtUtc,
+                    new UserId(payload.CashierId),
+                    [item],
+                    [new PaymentSpec(PaymentMethod.Cash, 10m, 10m, ProviderReference: null)])
+                .Value;
+
+            // Only the sale row matters here, not the catalogue it refers to.
+            await using (SqliteCommand pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA foreign_keys = OFF;";
+                await pragma.ExecuteNonQueryAsync();
+            }
+
+            await using PosDbContext context = CreateContext();
+            context.Sales.Add(sale);
+            await context.SaveChangesAsync();
+            return sale.Id;
+        }
 
         public SyncPushEvent Event(long sequence, string payload, string eventType = "FutureEvent")
             => new(

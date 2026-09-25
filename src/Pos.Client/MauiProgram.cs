@@ -59,11 +59,21 @@ public static class MauiProgram
 
         // Head office: enrolment, sign-in and the store-data download. The
         // register's key pair lives in the platform's secure store.
-        builder.Services.AddSingleton(_ => new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
+        builder.Services.AddSingleton(_ => CreateHeadOfficeHttpClient());
         builder.Services.AddSingleton<HeadOfficeClient>();
         builder.Services.AddSingleton(SecureStorage.Default);
         builder.Services.AddSingleton(Preferences.Default);
         builder.Services.AddSingleton<DeviceKeyStore>();
+
+        // Working without head office: sign-in against the password head office
+        // last accepted here, the till's view of its open shift, cash sales it
+        // queues, and the upload that delivers the queue once connected.
+        builder.Services.AddSingleton(sp => new DeviceOfflineSignIn(
+            sp.GetRequiredService<DeviceDatabaseInitializer>(),
+            sp.GetRequiredService<ISystemClock>()));
+        builder.Services.AddSingleton<DeviceShiftMirror>();
+        builder.Services.AddSingleton<DeviceOfflineSales>();
+        builder.Services.AddSingleton<DeviceOutboxUploader>();
         builder.Services.AddSingleton<RegisterService>();
 
         // The office console: the same signed-in session drives the head-office
@@ -116,5 +126,23 @@ public static class MauiProgram
         });
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// The client every head-office call goes through. A head office that is
+    /// down should be noticed in seconds, not after the full request timeout,
+    /// because the register works offline as soon as it knows; on Windows the
+    /// connection attempt itself is bounded for that reason.
+    /// </summary>
+    private static HttpClient CreateHeadOfficeHttpClient()
+    {
+#if WINDOWS
+        return new HttpClient(new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(5) }, disposeHandler: true)
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+#else
+        return new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+#endif
     }
 }

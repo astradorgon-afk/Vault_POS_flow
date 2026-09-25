@@ -1045,3 +1045,62 @@ counter. Physical devices keep allocating locally as ADR-0015. The web
 terminal's per-device sequence is exactly what the same device would have
 produced had it allocated online, which keeps the eventual offline flows
 interchangeable rather than a fork.
+
+---
+
+## ADR-0033 — A register signs people in, opens shifts and takes cash without head office
+
+**Date:** 2026-09-25 · **Status:** Accepted
+
+**Context.** Through C70 the desktop register needed head office for every
+sign-in, every shift and every sale: the design in OFFLINE_SYNC.md §1 had the
+storage, the command boundary, the outbox and the server's replay, but nothing
+on the register used them, and `SyncBaselineService` assumed "a register signs
+someone in only while it can reach head office". With the API down, the sign-in
+screen said *"Head office could not be reached"* and the register was unusable.
+
+**Decision.**
+
+1. *Offline sign-in against a device-held verifier.* After head office accepts
+   a password at a register, the register stores a PBKDF2-SHA256 verifier of it
+   (device-owned `local_offline_credential`, never feed-owned). When head
+   office cannot be reached — and only then — the register checks the password
+   against it, requires the person to be active in its last store data, and
+   requires unexpired offline authority at its store (SECURITY.md §2.5).
+2. *The baseline carries the store's staff.* `GET /api/v1/sync/baseline`
+   now includes the `UserChanged` row and offline snapshot of every active
+   person assigned to the register's store or acting business-wide who holds an
+   offline-capable permission there, not the caller alone. The caller is still
+   first and always included. Because a baseline replaces the cached people
+   wholesale, anyone disabled or reassigned disappears at the next connected
+   sign-in by anyone, and so does their offline sign-in.
+3. *Offline trading on the register.* The till answers its business date, cash
+   rounding and open shift from its own store data; opens a shift through the
+   already-whitelisted `OpenShiftCommand`; and completes **cash** sales through
+   `DeviceOfflineSales`, which checks `sale.create` in the snapshot and that the
+   cashier owns the open shift, numbers the sale under the register's own SAL
+   counter, records it in `local_sale` for the receipt, and queues the
+   `SaleCompleted` event in the same transaction. `CompleteSaleCommand` stays
+   `Pending` in the offline catalogue: the device does not run the server's
+   sale use case, it queues the same command input the online path sends, and
+   head office settles price, VAT and stock when it replays it.
+4. *Upload.* `DeviceOutboxUploader` sends the signed-in person's queued events
+   in sequence to `/api/v1/sync/push` whenever they are signed in while
+   connected, and stops at the first event of someone else, which head office
+   would refuse in this session.
+5. *A sale whose online answer never came back* is queued under the same SAL
+   number and event identity, and the server's sale replay recognises a sale it
+   already holds under that event instead of posting it twice.
+6. The product's base unit of measure now travels in the baseline and is cached
+   on `cache_product`, so a product can be rung up with no head-office call.
+
+**Consequences.** A register keeps selling for cash through an outage, and
+anything it did reaches head office through the same replay and conflict rules
+as every other offline event (OFFLINE_SYNC.md §7). The limits are deliberate:
+only people who have signed in on that register while connected can sign in on
+it offline; card and e-wallet need a connection; returns, customer lookup and
+the office console need a connection; closing a shift needs a connection and
+waits until the register has delivered its offline sales, so the drawer is
+counted against all of them. Queued events of one person wait for that person
+to sign in while connected, because head office accepts a person's events only
+in their own session.

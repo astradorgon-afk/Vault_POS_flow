@@ -105,7 +105,7 @@ public sealed class DeviceOutboxTests
     [InlineData(OutboxStatus.Pending, true)]
     [InlineData(OutboxStatus.Sending, true)]
     [InlineData(OutboxStatus.Failed, true)]
-    [InlineData(OutboxStatus.RequiresReview, true)]
+    [InlineData(OutboxStatus.RequiresReview, false)]
     [InlineData(OutboxStatus.Synchronized, false)]
     [InlineData(OutboxStatus.Conflict, false)]
     public async Task WhatCountsAsUnsent_IsWhatCouldStillBeLost(OutboxStatus status, bool counted)
@@ -115,8 +115,9 @@ public sealed class DeviceOutboxTests
         OutboxEvent queued = await host.EnqueueAsync(SyncEventType.ShiftOpened, new { N = 1 });
         await host.SaveAsync();
 
-        // Failed and RequiresReview still count: retries are never abandoned, so
-        // that work has not reached head office yet. A conflict has been decided.
+        // Failed still counts: retries are never abandoned, so that work has not
+        // reached head office yet. RequiresReview and Conflict are head office's
+        // own answers, so it holds that work; a person resolves it there.
         await host.SetStatusAsync(queued.EventId, status);
 
         (await host.Outbox.CountUnsentAsync(CancellationToken.None)).Should().Be(counted ? 1 : 0);

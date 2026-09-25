@@ -96,6 +96,44 @@ it with its platform details and a generated key pair; the server stores the
 public key thumbprint and returns the `DeviceId` + first token pair.
 `Suspended`/`Revoked` devices are refused at token refresh and at every sync call.
 
+### 2.5 Offline sign-in at a register (ADR-0033)
+
+A register signs people in while head office is unreachable, so a store keeps
+trading through an outage. It does so without ever holding a credential head
+office would not accept:
+
+- **The register keeps its own verifier, never the password or the server's
+  hash.** When head office accepts a password at the register, the register
+  derives a PBKDF2-HMAC-SHA256 verifier (600,000 iterations, 16-byte random salt,
+  32-byte output) and stores it in `local_offline_credential` inside the
+  SQLCipher-encrypted device database. It is replaced at every connected
+  sign-in, so a changed password takes over the next time the person signs in
+  while connected. Only people who have signed in on that register while it was
+  connected can sign in on it offline.
+- **Offline sign-in is only a fallback for an unreachable head office.** A
+  connection that cannot be made, a timeout, or a gateway answering `502`/`504`
+  (or a `503` that is not the API's own problem document) falls back; any answer
+  from head office itself — a wrong password, a disabled or locked account —
+  is final and is shown as it is.
+- **Three conditions, each failing closed.** The password must match the
+  verifier (constant-time comparison); the person must still be listed and
+  active in the store data the register last received — a baseline drops anyone
+  disabled or no longer assigned to the store; and they must hold unexpired
+  offline authority at the register's store. The snapshot's expiry
+  (`Security:PermissionSnapshotHours`, 72 h) therefore bounds how long a
+  register may act on what it last knew.
+- **An offline session grants only the cached snapshot**, which is itself only
+  offline-capable permissions scoped to the register's store (ADR-0011,
+  PERMISSIONS.md §5). Every action is re-checked against the snapshot as it
+  runs, and head office re-verifies authority when the queued events arrive.
+- **Throttled on the device.** Five consecutive failures lock that person's
+  offline sign-in on the register for five minutes. The lock is stored, so
+  restarting the app does not lift it.
+
+Access tokens are renewed with the refresh token when head office answers
+`401`; renewals are serialized on the register, because a refresh token
+presented twice is treated as theft (§2.3).
+
 ---
 
 ## 3. Authorization

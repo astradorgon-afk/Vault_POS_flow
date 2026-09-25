@@ -1,0 +1,72 @@
+<div class="dialog-backdrop" @onclick="DismissAsync">
+    <section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="reconnect-title" @onclick:stopPropagation>
+        <h3 id="reconnect-title">Reconnect to head office</h3>
+        <p class="dialog-lead">
+            You signed in offline as <strong>@UserName</strong>. Enter your password to connect this
+            session to head office and send what the register kept while it was offline.
+        </p>
+
+        <form @onsubmit="ConfirmAsync" @onsubmit:preventDefault>
+            <label class="dialog-field">
+                <span>Password</span>
+                <input type="password" @bind="_password" autocomplete="current-password" aria-label="Password" />
+            </label>
+
+            @if (Error is not null)
+            {
+                <p class="form-error" role="alert">@Error</p>
+            }
+
+            <div class="dialog-actions">
+                <button type="button" class="button-secondary" @onclick="DismissAsync" disabled="@Busy">Not now</button>
+                <button type="submit" class="button-primary" disabled="@Busy">@(Busy ? "Connecting…" : "Reconnect")</button>
+            </div>
+        </form>
+    </section>
+</div>
+
+@code {
+    private string _password = string.Empty;
+
+    /// <summary>Who is signed in offline.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string UserName { get; set; } = string.Empty;
+
+    /// <summary>True while the register is connecting.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Why the last attempt failed, if it did.</summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>Raised with the password the cashier typed.</summary>
+    [Parameter]
+    public EventCallback<string> OnConfirm { get; set; }
+
+    /// <summary>Raised when the cashier backs out.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    private async Task ConfirmAsync()
+    {
+        if (Busy || string.IsNullOrEmpty(_password))
+        {
+            return;
+        }
+
+        string password = _password;
+        _password = string.Empty;
+        await OnConfirm.InvokeAsync(password);
+    }
+
+    private async Task DismissAsync()
+    {
+        if (!Busy)
+        {
+            _password = string.Empty;
+            await OnDismiss.InvokeAsync();
+        }
+    }
+}

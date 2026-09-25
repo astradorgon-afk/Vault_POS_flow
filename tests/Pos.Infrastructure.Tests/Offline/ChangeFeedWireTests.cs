@@ -46,6 +46,40 @@ public sealed class ChangeFeedWireTests
     }
 
     [Fact]
+    public async Task TheProductsBaseUnit_TravelsWithIt_SoTheTillCanRingItUpOffline()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+        Guid product = Guid.CreateVersion7();
+        Guid unit = Guid.CreateVersion7();
+
+        Result<ChangeFeedBaseline> baseline = ChangeFeedWire.ReadBaseline(
+            1,
+            [Item("ProductChanged", new { productId = product, sku = "RICE-01", name = "Rice", isActive = true, tracksBatches = false, tracksExpiry = false, sourceVersion = 0L, updatedAtUtc = Now, baseUnitOfMeasureId = unit })]);
+        (await database.Applier.ReplaceBaselineAsync(baseline.Value)).IsSuccess.Should().BeTrue();
+
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+        (await context.Products.SingleAsync()).BaseUnitOfMeasureId.Should().Be(new UnitOfMeasureId(unit));
+    }
+
+    [Fact]
+    public async Task AFeedWithoutTheBaseUnit_LeavesTheOneAlreadyKnown()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+        ProductId product = ProductId.New();
+        UnitOfMeasureId unit = UnitOfMeasureId.New();
+
+        (await database.Applier.ApplyAsync(new ChangeFeedPage(0, 1,
+            [new ProductChanged(1, product, "RICE-01", "Rice", true, false, false, 1, Now, unit)]))).IsSuccess.Should().BeTrue();
+        (await database.Applier.ApplyAsync(new ChangeFeedPage(1, 2,
+            [new ProductChanged(2, product, "RICE-01", "Rice 5kg", true, false, false, 2, Now)]))).IsSuccess.Should().BeTrue();
+
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+        DeviceCachedProduct cached = await context.Products.SingleAsync();
+        cached.Name.Should().Be("Rice 5kg");
+        cached.BaseUnitOfMeasureId.Should().Be(unit, "a product's base unit never changes once it has moved");
+    }
+
+    [Fact]
     public void Read_RefusesAChangeTypeThisClientDoesNotKnow()
     {
         Result<ChangeFeedChange> result = ChangeFeedWire.Read(4, "SupplierChanged", Element(new { supplierId = Guid.CreateVersion7() }));

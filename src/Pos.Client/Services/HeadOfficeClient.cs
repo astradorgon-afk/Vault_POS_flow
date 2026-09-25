@@ -51,25 +51,39 @@ public sealed record RegisterOpenShift(
     DateOnly BusinessDate,
     decimal OpeningFloat);
 
-/// <summary>The server-authoritative checkout context for this register.</summary>
+/// <summary>The checkout context for this register.</summary>
 /// <param name="BusinessDate">The store business date.</param>
 /// <param name="CashRoundingIncrement">The increment used for cash change.</param>
 /// <param name="OpenShift">The open shift, if there is one.</param>
+/// <param name="IsOffline">
+/// True when head office could not be asked and the register answered from its
+/// own store data: the business date is the device clock's, in the store's time zone.
+/// </param>
 public sealed record RegisterCheckoutContext(
     DateOnly BusinessDate,
     decimal CashRoundingIncrement,
-    RegisterOpenShift? OpenShift);
+    RegisterOpenShift? OpenShift,
+    bool IsOffline = false);
 
 /// <summary>One line sent from the physical register to sale completion.</summary>
 /// <param name="ProductId">The product sold.</param>
 /// <param name="UnitOfMeasureId">The unit in which it was sold.</param>
 /// <param name="Barcode">The scanned barcode, if any.</param>
 /// <param name="Quantity">The quantity sold.</param>
+/// <param name="Sku">The SKU, printed on an offline receipt.</param>
+/// <param name="Name">The product name, printed on an offline receipt.</param>
+/// <param name="UnitPrice">
+/// The cached price rung up. Head office re-derives the price itself; this is
+/// what an offline receipt prints and what the register checks the payment against.
+/// </param>
 public sealed record RegisterSaleLine(
     Guid ProductId,
     Guid UnitOfMeasureId,
     string? Barcode,
-    decimal Quantity);
+    decimal Quantity,
+    string Sku = "",
+    string Name = "",
+    decimal UnitPrice = 0m);
 
 /// <summary>One payment allocated to a physical-register sale.</summary>
 /// <param name="Method">The payment rail.</param>
@@ -82,10 +96,11 @@ public sealed record RegisterSalePayment(
     decimal? Tendered,
     string? ProviderReference);
 
-/// <summary>A sale accepted by head office.</summary>
-/// <param name="Id">The sale identifier.</param>
+/// <summary>A sale the register completed.</summary>
+/// <param name="Id">The sale identifier, or for an offline sale the event it will reach head office as.</param>
 /// <param name="Number">The printed sale number.</param>
-public sealed record CompletedRegisterSale(Guid Id, string Number);
+/// <param name="IsOffline">True when head office could not be reached and the sale is queued on this register.</param>
+public sealed record CompletedRegisterSale(Guid Id, string Number, bool IsOffline = false);
 
 /// <summary>The X-REPORT facts head office keeps for a cashier shift.</summary>
 /// <param name="ShiftId">The shift identifier.</param>
@@ -179,7 +194,7 @@ public sealed record RegisterCustomer(
     string? Email);
 
 /// <summary>A refusal or failure reported by head office, in words a manager can act on.</summary>
-public sealed class HeadOfficeException : Exception
+public class HeadOfficeException : Exception
 {
     /// <summary>Initializes a new instance of the <see cref="HeadOfficeException"/> class.</summary>
     public HeadOfficeException()
@@ -200,6 +215,44 @@ public sealed class HeadOfficeException : Exception
         : base(message, innerException)
     {
     }
+
+    /// <summary>Gets the HTTP status head office answered with, when it answered at all.</summary>
+    public int? StatusCode { get; init; }
+}
+
+/// <summary>
+/// Head office could not be reached, or did not answer in time. This is the one
+/// failure a register works through on its own instead of showing it: it signs
+/// people in, opens shifts and takes cash from its own store data.
+/// </summary>
+public sealed class HeadOfficeUnreachableException : HeadOfficeException
+{
+    /// <summary>Initializes a new instance of the <see cref="HeadOfficeUnreachableException"/> class.</summary>
+    public HeadOfficeUnreachableException()
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="HeadOfficeUnreachableException"/> class.</summary>
+    /// <param name="message">What went wrong.</param>
+    public HeadOfficeUnreachableException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="HeadOfficeUnreachableException"/> class.</summary>
+    /// <param name="message">What went wrong.</param>
+    /// <param name="innerException">The underlying failure.</param>
+    public HeadOfficeUnreachableException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the request may have reached head office
+    /// before the failure — a timeout, or a connection lost mid-answer — as
+    /// opposed to a connection that was never made.
+    /// </summary>
+    public bool MayHaveArrived { get; init; } = true;
 }
 
 /// <summary>
@@ -267,6 +320,31 @@ public sealed class HeadOfficeClient(HttpClient http)
             // The refresh token expires on its own; there is nothing more to do here.
         }
     }
+
+    /// <summary>
+    /// Exchanges a refresh token for a new pair. The old refresh token is spent:
+    /// presenting it again is treated as theft, so callers must serialize this.
+    /// </summary>
+    public async Task<HeadOfficeSession> RefreshAsync(
+        Uri server, string refreshToken, Guid? deviceId, CancellationToken cancellationToken)
+    {
+        SignInResponse response = await SendAsync<SignInResponse>(
+            HttpMethod.Post,
+            server,
+            "api/v1/auth/refresh",
+            new { refreshToken },
+            accessToken: null,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return new HeadOfficeSession(response.AccessToken, response.RefreshToken, response.User);
+    }
+
+    /// <summary>Uploads a batch of this register's queued events.</summary>
+    public Task<SyncPushResponse> PushEventsAsync(
+        Uri server, string accessToken, Guid deviceId, SyncPushRequest batch, CancellationToken cancellationToken)
+        => SendAsync<SyncPushResponse>(
+            HttpMethod.Post, server, "api/v1/sync/push", batch, accessToken, deviceId, cancellationToken);
 
     /// <summary>Lists the active stores a manager can set a register up for.</summary>
     public async Task<IReadOnlyList<StoreChoice>> GetStoresAsync(
@@ -473,27 +551,13 @@ public sealed class HeadOfficeClient(HttpClient http)
 
         ApplyAuth(request, accessToken, deviceId);
 
-        HttpResponseMessage response;
-        try
-        {
-            response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new HeadOfficeException(
-                FormattableString.Invariant($"Head office could not be reached at {server}. Check the address and that it is running."),
-                ex);
-        }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new HeadOfficeException("Head office took too long to answer. Try again.", ex);
-        }
+        HttpResponseMessage response = await TransmitAsync(request, server, cancellationToken).ConfigureAwait(false);
 
         using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
-                throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+                throw await RefusalAsync(response, cancellationToken).ConfigureAwait(false);
             }
 
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent
@@ -765,13 +829,72 @@ public sealed class HeadOfficeClient(HttpClient http)
             new Uri(server, FormattableString.Invariant($"api/v1/sales/{saleId:D}/receipt")));
         ApplyAuth(request, accessToken, deviceId);
 
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await TransmitAsync(request, server, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+            throw await RefusalAsync(response, cancellationToken).ConfigureAwait(false);
         }
 
         return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Sends a request, turning a transport failure into
+    /// <see cref="HeadOfficeUnreachableException"/> and saying whether the
+    /// request can have reached head office before it failed.
+    /// </summary>
+    private async Task<HttpResponseMessage> TransmitAsync(
+        HttpRequestMessage request, Uri server, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new HeadOfficeUnreachableException(
+                FormattableString.Invariant($"Head office could not be reached at {server}. Check the address and that it is running."),
+                ex)
+            {
+                // Refused, unresolvable or failed before a byte was sent: nothing
+                // reached head office. Anything else may have.
+                MayHaveArrived = ex.HttpRequestError is not (
+                    HttpRequestError.ConnectionError
+                    or HttpRequestError.NameResolutionError
+                    or HttpRequestError.SecureConnectionError
+                    or HttpRequestError.ProxyTunnelError),
+            };
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new HeadOfficeUnreachableException("Head office took too long to answer.", ex) { MayHaveArrived = true };
+        }
+    }
+
+    private static async Task<HeadOfficeException> RefusalAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        int status = (int)response.StatusCode;
+
+        // A gateway in front of head office answering for it — the service
+        // behind it is down or did not answer in time — is an outage, not a
+        // refusal. Head office's own answers are problem documents.
+        bool fromGateway = status is 502 or 504
+            || (status == 503 && response.Content.Headers.ContentType?.MediaType != "application/problem+json");
+        if (fromGateway)
+        {
+            return new HeadOfficeUnreachableException(
+                FormattableString.Invariant($"Head office is not answering ({status} {response.ReasonPhrase})."))
+            {
+                StatusCode = status,
+                MayHaveArrived = status == 504,
+            };
+        }
+
+        return new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false))
+        {
+            StatusCode = status,
+        };
     }
 
     private static void ApplyAuth(HttpRequestMessage request, string? accessToken, Guid? deviceId)
@@ -787,7 +910,7 @@ public sealed class HeadOfficeClient(HttpClient http)
         }
     }
 
-        private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
         {

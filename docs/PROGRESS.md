@@ -359,6 +359,45 @@ and refunds), `4a81731` (C1 — void completed sale), then Phase 10 as `70f4dda`
 
 ## Log
 
+### 2026-09-25 — C71 the register works offline (ADR-0033)
+
+- **Why.** With the API stopped the register refused every sign-in with *"Head
+  office could not be reached"*: nothing on the register used the offline
+  storage, outbox or server replay that Phase 12/13 built. The 2026-09-19 fix
+  only covered the `https` launch-profile cause.
+- **Offline sign-in (`DeviceOfflineSignIn`).** A connected sign-in stores a
+  PBKDF2-SHA256 verifier in the new device-owned `local_offline_credential`;
+  when head office is unreachable the register checks the password against it,
+  requires the person to be active in its store data and to hold unexpired
+  offline authority at its store; five failures lock it for five minutes.
+- **Baseline carries the store's staff.** `SyncBaselineService` now issues the
+  `UserChanged` row and offline snapshot of every active person assigned to the
+  register's store or acting business-wide, not only the caller, and each
+  product's base unit (new `cache_product.base_unit_of_measure_id`).
+- **Offline till.** `DeviceShiftMirror` answers business date, rounding and the
+  open shift from the register and mirrors head office's open shift;
+  shifts open through the whitelisted `OpenShiftCommand`; `DeviceOfflineSales`
+  takes cash sales into the new `local_sale` table and queues `SaleCompleted`
+  in the same transaction; receipts print locally. Card/e-wallet, returns,
+  customers, closing a shift and the office need a connection.
+- **Delivery.** `DeviceOutboxUploader` pushes the signed-in person's events to
+  `/api/v1/sync/push` at every connected sign-in, on **Reconnect**, when a
+  connected till regains head office (45-second check) and before a shift
+  closes. The server's sale replay now recognises a sale it already holds under
+  the same event (a sale whose online answer was lost).
+- **Session renewal.** The register and the office console renew the access
+  token with the refresh token on `401` (serialized; reuse is treated as theft).
+  Gateway `502`/`504` count as an outage. Windows connects with a 5-second
+  connect timeout so an outage is noticed quickly.
+- Device migration `DeviceOfflineSignInAndSales`. Docs: OFFLINE_SYNC.md §1, §2,
+  §5 and new §11; SECURITY.md §2.5; LOCAL_TESTING.md; ADR-0033.
+- Tests: 16 offline sign-in, 21 offline trading/upload, 2 change-feed unit
+  cases; 2 sync cases (store-staff baseline, duplicate sale replay). Without
+  Docker: Domain 378, Application 247, Infrastructure 270 (+21 PostgreSQL
+  skipped), API 181 (2 PostgreSQL tests need Docker), Sync 24, Security 53,
+  Architecture 25. `Pos.Client` builds for `net10.0-android` with 0 warnings;
+  the Windows target was not built in this environment.
+
 ### 2026-09-19 — register restyle, web receipts, demo-ready seed
 
 - **POS sale/payment restyle (`Pos.Client`).** `SalePanel.razor` and `app.css`

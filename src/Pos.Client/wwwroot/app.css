@@ -445,6 +445,7 @@ kbd {
 .vf-statusstrip-blocked .vf-statusstrip-lamp { background: var(--danger); }
 .vf-statusstrip-blocked .vf-statusstrip-headline { color: var(--danger); }
 .vf-statusstrip-blocked .vf-statusstrip-detail { color: #f3c7c1; }
+.vf-statusstrip-action { flex: none; margin-left: auto; min-height: 2.1rem; padding: 0.3rem 0.9rem; font-size: 0.84rem; }
 
 /* --- Completed-sale strip -------------------------------------------------- */
 .sale-complete-strip {

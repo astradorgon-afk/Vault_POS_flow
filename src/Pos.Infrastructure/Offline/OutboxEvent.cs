@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -153,6 +154,41 @@ public sealed class OutboxEvent
 
     /// <summary>Gets the server's last response, kept verbatim for escalation.</summary>
     public string? ServerResponseJson { get; private set; }
+
+    /// <summary>
+    /// Selects the events head office has not received yet: queued, in flight,
+    /// or given up on by the device, which never abandons them. Everything else
+    /// carries head office's own answer — accepted, or parked, refused or disputed
+    /// on its sync-failure queue — so it is no longer the device's to deliver and
+    /// is kept here for the audit trail.
+    /// </summary>
+    internal static Expression<Func<OutboxEvent, bool>> IsUnsent { get; } =
+        e => e.Status == OutboxStatus.Pending || e.Status == OutboxStatus.Sending || e.Status == OutboxStatus.Failed;
+
+    /// <summary>Records that the event is being handed to head office.</summary>
+    internal void MarkSending(DateTimeOffset now)
+    {
+        Status = OutboxStatus.Sending;
+        AttemptCount++;
+        LastAttemptAtUtc = now;
+    }
+
+    /// <summary>Puts the event back in the queue after the upload did not complete.</summary>
+    internal void ReturnToQueue(string reason, DateTimeOffset? nextRetryAtUtc)
+    {
+        Status = OutboxStatus.Pending;
+        LastError = reason;
+        NextRetryAtUtc = nextRetryAtUtc;
+    }
+
+    /// <summary>Records head office's answer for this event.</summary>
+    internal void RecordOutcome(OutboxStatus status, string? error, string? serverResponseJson)
+    {
+        Status = status;
+        LastError = error;
+        ServerResponseJson = serverResponseJson;
+        NextRetryAtUtc = null;
+    }
 }
 
 /// <summary>

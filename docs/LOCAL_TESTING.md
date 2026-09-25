@@ -120,7 +120,9 @@ Visual Studio works too: set **Pos.Client** as the startup project, pick
 2. **Sign in** as a user assigned to the register's store, for example
    `cashier` or `manager` for Store One (any development account signs in with
    the shared password `cash1234`). Signing in downloads the store's
-   products and the user's offline permissions; the banner turns **Ready**.
+   products and the offline permissions of the store's staff, and lets the
+   register remember this password for offline sign-in; the banner turns
+   **Ready**.
 3. The catalogue lists the store's products. The development seed creates a
    selling price for every product and an opening stock balance at the Main
    Warehouse and each store, so a sale completes against real
@@ -154,7 +156,36 @@ register code: codes are unique even after a register is revoked.
 > register's connection then fails on the untrusted development certificate
 > with *"Head office could not be reached at http://localhost:5177/"*. The
 > `/health*` endpoints are exempt from the redirect so liveness probes keep
-> working either way.
+> working either way. With head office unreachable the register now works
+> offline (see [Work offline at the register](#work-offline-at-the-register)),
+> but it can only sign in people who have signed in on it while connected.
+
+## Work offline at the register
+
+The register keeps trading when head office cannot be reached (ADR-0033,
+`docs/OFFLINE_SYNC.md` §11). To see it:
+
+1. With the API running, sign in once at the register as each person who
+   should be able to work offline, for example `cashier`. A connected sign-in
+   is what lets the register check that password later without head office,
+   and it downloads the store's products, prices and staff.
+2. Stop the API (close `scripts/dev-desktop.ps1`, or stop the `http` profile).
+3. Lock the register and sign in again as `cashier` / `cash1234`. The register
+   signs in offline: the strip reads **Signed in offline** and the header shows
+   **Offline**.
+4. Open a shift, ring up a sale and take **cash**; card and e-wallet are
+   disabled offline. The receipt prints from the register and is marked as
+   recorded offline. The header counts the records waiting to be sent.
+5. Start the API again and choose **Reconnect** on the strip (or lock and sign
+   in again). The register uploads the shift and the sales, head office replays
+   them through the normal sale pipeline, and the count returns to **All sent**.
+   Closing the shift works once everything has been delivered.
+
+Offline sign-in is refused, with the reason on screen, for someone who has
+never signed in on this register while connected, after five wrong passwords
+(for five minutes), and once their cached authority has expired
+(`Security:PermissionSnapshotHours`, 72 hours from the last connected sign-in
+by anyone at that store).
 
 ## Load the demo business
 

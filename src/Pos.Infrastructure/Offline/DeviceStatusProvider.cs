@@ -110,9 +110,7 @@ public sealed class DeviceStatusProvider(
 
         int unsent = await context.Outbox
             .AsNoTracking()
-            .CountAsync(
-                e => e.Status != OutboxStatus.Synchronized && e.Status != OutboxStatus.Conflict,
-                cancellationToken)
+            .CountAsync(OutboxEvent.IsUnsent, cancellationToken)
             .ConfigureAwait(false);
 
         return new DeviceStatusView(

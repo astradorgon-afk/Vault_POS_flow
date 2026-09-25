@@ -25,7 +25,7 @@ public sealed class BackOfficeService(HttpClient http, RegisterService register,
 
     /// <summary>Gets whether the signed-in user holds the given permission.</summary>
     public bool HasPermission(string code)
-        => register.Current?.Session.User.Permissions.Contains(code, StringComparer.Ordinal) == true;
+        => register.Current?.Can(code) == true;
 
     /// <summary>Gets the signed-in user's identifier.</summary>
     public Guid UserId => register.Current is { } user ? user.UserId.Value : Guid.Empty;
@@ -436,42 +436,61 @@ public sealed class BackOfficeService(HttpClient http, RegisterService register,
     // ---- Transport ----
 
     /// <summary>Gets and deserializes an authenticated API resource.</summary>
-    public async Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
-    {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
-        using HttpResponseMessage? response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (response is null)
-        {
-            return ApiResult<T>.Failure("Head office could not be reached. Check the address and your connection.");
-        }
-
-        using (response)
-        {
-            return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
-        }
-    }
+    public Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
+        => ExchangeAsync<T>(HttpMethod.Get, path, body: null, cancellationToken);
 
     /// <summary>Posts a JSON body to the API and reads the response.</summary>
-    public async Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
+    public Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
+        => ExchangeAsync<T>(HttpMethod.Post, path, body, cancellationToken);
+
+    /// <summary>
+    /// Sends one request with the current access token, renewing the session
+    /// once if head office says the token has expired.
+    /// </summary>
+    private async Task<ApiResult<T>> ExchangeAsync<T>(
+        HttpMethod method, string path, object? body, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
-        request.Content = JsonContent.Create(body, options: Json);
-        using HttpResponseMessage? response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (response is null)
+        if (register.Current is { IsOffline: true })
         {
-            return ApiResult<T>.Failure("Head office could not be reached. Check the address and your connection.");
+            return ApiResult<T>.Failure(RegisterService.NeedsConnectionMessaging);
         }
 
-        using (response)
+        string? token = await register.GetAccessTokenAsync().ConfigureAwait(false);
+        for (int attempt = 0; ; attempt++)
         {
+            using HttpRequestMessage request = CreateRequest(method, path, token);
+            if (body is not null)
+            {
+                request.Content = JsonContent.Create(body, options: Json);
+            }
+
+            using HttpResponseMessage? response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response is null)
+            {
+                return ApiResult<T>.Failure("Head office could not be reached. Check the address and your connection.");
+            }
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && attempt == 0 && token is not null)
+            {
+                try
+                {
+                    token = await register.GetAccessTokenAsync(refused: token).ConfigureAwait(false);
+                    continue;
+                }
+                catch (HeadOfficeException ex)
+                {
+                    return ApiResult<T>.Failure(ex.Message);
+                }
+            }
+
             return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private HttpRequestMessage CreateRequest(HttpMethod method, string path)
+    private HttpRequestMessage CreateRequest(HttpMethod method, string path, string? token)
     {
         HttpRequestMessage request = new(method, new Uri(register.Server, path.TrimStart('/')));
-        if (register.Current is { Session: { AccessToken: { } token } })
+        if (token is not null)
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }

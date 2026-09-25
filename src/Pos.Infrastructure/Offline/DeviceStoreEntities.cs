@@ -100,7 +100,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        UnitOfMeasureId? baseUnitOfMeasureId = null)
     {
         Id = id;
         Sku = sku;
@@ -110,6 +111,7 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        BaseUnitOfMeasureId = baseUnitOfMeasureId;
     }
 
     public ProductId Id { get; private init; }
@@ -121,6 +123,12 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
     public long SourceVersion { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Gets the unit the ledger counts the product in, which is the unit a
+    /// register sells it in; null when head office has not sent it.
+    /// </summary>
+    public UnitOfMeasureId? BaseUnitOfMeasureId { get; private set; }
+
     internal void Refresh(
         string sku,
         string name,
@@ -128,7 +136,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        UnitOfMeasureId? baseUnitOfMeasureId = null)
     {
         Sku = sku;
         Name = name;
@@ -137,6 +146,10 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+
+        // A feed that does not carry the unit leaves the one already known:
+        // the base unit of a product is immutable once it has moved.
+        BaseUnitOfMeasureId = baseUnitOfMeasureId ?? BaseUnitOfMeasureId;
     }
 }
 

@@ -11,6 +11,10 @@
         {
             <span class="vf-statusstrip-detail" title="@detail">@detail</span>
         }
+        @if (SignedInOffline && OnReconnect.HasDelegate)
+        {
+            <button type="button" class="button-secondary vf-statusstrip-action" @onclick="OnReconnect">Reconnect</button>
+        }
     </div>
 }
 
@@ -26,11 +30,34 @@
     [Parameter]
     public string? ContextError { get; set; }
 
-    private bool Offline => Status?.Connectivity == DeviceConnectivityState.Offline || ContextError is not null;
+    /// <summary>True when the cashier signed in without head office.</summary>
+    [Parameter]
+    public bool SignedInOffline { get; set; }
+
+    /// <summary>True when the till answered its shift and business date from its own store data.</summary>
+    [Parameter]
+    public bool TillOffline { get; set; }
+
+    /// <summary>What is still waiting to reach head office, in words; empty when nothing is.</summary>
+    [Parameter]
+    public string? Backlog { get; set; }
+
+    /// <summary>When an offline sign-in's cached authority runs out.</summary>
+    [Parameter]
+    public DateTimeOffset? OfflineAuthorityExpiresUtc { get; set; }
+
+    /// <summary>Raised when the cashier asks to connect an offline sign-in to head office.</summary>
+    [Parameter]
+    public EventCallback OnReconnect { get; set; }
+
+    private bool Offline => SignedInOffline
+        || TillOffline
+        || Status?.Connectivity == DeviceConnectivityState.Offline
+        || ContextError is not null;
 
     private string StateClass => ContextError is not null || Status?.Severity == DeviceStatusSeverity.Blocked
         ? "vf-statusstrip-blocked"
-        : Status?.Severity == DeviceStatusSeverity.Warning || Offline
+        : Status?.Severity == DeviceStatusSeverity.Warning || Offline || Backlog is { Length: > 0 }
             ? "vf-statusstrip-warning"
             : "vf-statusstrip-ready";
 
@@ -43,12 +70,26 @@
                 return "Connection needed";
             }
 
+            if (Status?.Concern is DeviceStatusConcern.AuthorityExpired)
+            {
+                return "Sign-in has expired";
+            }
+
+            if (SignedInOffline)
+            {
+                return "Signed in offline";
+            }
+
+            if (TillOffline)
+            {
+                return "Offline";
+            }
+
             return Status?.Concern switch
             {
-                DeviceStatusConcern.AuthorityExpired => "Sign-in has expired",
                 DeviceStatusConcern.AuthorityExpiringSoon => "Sign-in expires soon",
                 DeviceStatusConcern.WorkingOffline => "Offline",
-                _ => "Online",
+                _ => Backlog is { Length: > 0 } ? "Waiting to send" : "Online",
             };
         }
     }
@@ -57,14 +98,29 @@
     {
         get
         {
+            string backlog = Backlog is { Length: > 0 } waiting ? " " + waiting : string.Empty;
+
             if (ContextError is { Length: > 0 } context)
             {
                 return $"{context} {RegisterService.OfflineSaleMessaging}";
             }
 
+            if (Status?.Concern == DeviceStatusConcern.AuthorityExpired)
+            {
+                return "Connect to head office to sign in again. Until then this register can only browse products.";
+            }
+
+            if (SignedInOffline)
+            {
+                string until = OfflineAuthorityExpiresUtc is { } expires
+                    ? $" Your offline access here lasts until {expires.ToLocalTime():ddd HH:mm}."
+                    : string.Empty;
+                return RegisterService.OfflineSaleMessaging + backlog + until;
+            }
+
             if (Offline)
             {
-                return RegisterService.OfflineSaleMessaging;
+                return RegisterService.OfflineSaleMessaging + backlog;
             }
 
             if (Status?.Concern == DeviceStatusConcern.AuthorityExpiringSoon)
@@ -72,9 +128,9 @@
                 return $"Connect to head office before {Status.AuthorityExpiresUtc?.ToLocalTime():HH:mm}, or this register stops taking sales.";
             }
 
-            if (Status?.Concern == DeviceStatusConcern.AuthorityExpired)
+            if (Backlog is { Length: > 0 })
             {
-                return "Connect to head office to sign in again. Until then this register can only browse products.";
+                return Backlog;
             }
 
             string sync = Status?.LastSynchronisedUtc is { } received

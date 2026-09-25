@@ -42,7 +42,7 @@ whose fully-qualified names contain `Postgres`; CI runs them with Docker.
 Sixteen documents in `docs/`, ~4,500 lines. The load-bearing ones are
 [INVENTORY_LEDGER.md](INVENTORY_LEDGER.md), [OFFLINE_SYNC.md](OFFLINE_SYNC.md),
 [SECURITY.md](SECURITY.md) and [PERMISSIONS.md](PERMISSIONS.md). Every
-significant choice is recorded in [DECISIONS.md](DECISIONS.md) (31 ADRs).
+significant choice is recorded in [DECISIONS.md](DECISIONS.md) (33 ADRs).
 
 ### Phase 1 — Foundation
 Clean Architecture solution, 7 source projects and 7 test projects with

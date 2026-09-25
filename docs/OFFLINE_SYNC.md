@@ -10,13 +10,14 @@ downloads a scoped, versioned change feed.
 
 | Capability | Offline | Notes |
 |---|---|---|
+| Sign in | yes | only someone who has signed in on this register while connected, with the same password, while their cached authority lasts (§11) |
 | Product lookup / barcode scan | yes | from cached catalog |
 | Price lookup | yes | cached effective-dated prices for the device's location |
 | POS sale (cash) | yes | full ledger posting locally |
 | POS sale (card) | no | requires the payment provider; cash-only fallback |
 | Receipt print / reprint | yes | reprint still requires `sale.reprint` |
 | Local sales history (current + prior shifts held locally) | yes | 90-day local retention |
-| Open / close shift | yes | shift totals reconciled on sync |
+| Open / close shift | open yes, close no | opening is built (C33, C71); closing waits for the connection and for the offline sales to be delivered, so the drawer is counted against them (§11) |
 | Void (same shift, same day) | yes | requires `sale.void` in the cached snapshot |
 | Customer return referencing a **local** sale | yes | goods land in `ReturnPending` |
 | Customer return referencing a **remote** sale | no | needs server lookup; queued as a request |
@@ -61,7 +62,9 @@ device.db (SQLite, encrypted)
 ├── snapshot_token        pre-approval tokens (signed, scoped, expiring)
 ├── local_*        authoritative-until-synced local records
 │    cashier_shift, audit                               (built, C33)
-│    sale, sale_item, payment, sales_return,
+│    offline_credential   PBKDF2 verifier per person    (built, C71)
+│    sale                 what an offline cash sale printed (built, C71)
+│    sale_item, payment, sales_return,
 │    inventory_movement, inventory_balance, transfer_order (local),
 │    quarantine_incident, inventory_count               (not built yet)
 ├── document_counter  the device's own SAL/RET/SHF sequences
@@ -334,9 +337,12 @@ Changes are saved one at a time inside the transaction, so a later change always
 sees an earlier one to the same row exactly as the server ordered them.
 
 Full re-baseline uses `GET /api/v1/sync/baseline`, which returns the scoped
-catalog, prices, barcodes, location and current feed cursor, plus the calling
-user's `UserChanged` row and a `PermissionSnapshotIssued` holding only their
-offline-capable permissions, scoped to the device's location and expiring after
+catalog (with each product's base unit of measure, the unit a register sells
+it in), prices, barcodes, location and current feed cursor, plus a `UserChanged`
+row and a `PermissionSnapshotIssued` for the caller and for every other active
+person assigned to the device's location or acting business-wide who holds an
+offline-capable permission there. Each snapshot holds only offline-capable
+permissions, scoped to the device's location and expiring after
 `Security:PermissionSnapshotHours`. The desktop client downloads it at every
 sign-in; `ReplaceBaselineAsync` validates it like a page and records the cursor
 even at position zero, so the register reports when its store data arrived. When
@@ -455,3 +461,51 @@ Both are shown in the client status bar and in the HQ sync-health dashboard:
 | `FailedTransaction_RollsBackEntirely` | ledger + sale + processed_event |
 | `Rebaseline_PreservesOutbox` | 410 handling |
 | `ClockSkew20Minutes_FlagsEvents` | skew policy |
+
+---
+
+## 11. The register's offline mode (C71, ADR-0033)
+
+What a cashier sees when head office cannot be reached, and what happens to
+their work.
+
+**Signing in.** The register tries head office first. Only when head office
+cannot be reached — no connection, a timeout, or a gateway answering for it —
+does it check the password against the verifier it stored the last time head
+office accepted that password on this register (SECURITY.md §2.5). The person
+must still be active in the register's store data and hold unexpired offline
+authority at its store. The first sign-in on a register therefore has to be
+connected, and so does the first one after a password change.
+
+**The till.** Business date (the device clock in the store's time zone), cash
+rounding and the open shift come from the register's own store data. The
+register mirrors the shift head office reports as open into
+`local_cashier_shift` without queuing anything, so a drawer opened online is
+still known if the connection then drops; a shift head office no longer reports
+is dropped once every queued event has been delivered. With no open shift the
+cashier opens one through `OpenShiftCommand`, numbered by the register.
+
+**Selling.** Cash only. `DeviceOfflineSales` re-checks `sale.create` in the
+snapshot on every sale, checks the cashier owns the open shift on this
+register, numbers the sale with the register's SAL counter, keeps what was
+printed in `local_sale`, and queues `SaleCompleted` with the same command input
+the online path sends, all in one transaction. The receipt is printed from
+`local_sale` and says it was recorded offline; VAT is itemized once head office
+replays the sale. A connected cashier whose link drops mid-sale gets the same
+treatment, with the sale queued under the number and event identity it was
+first sent with, so head office recognises it if the first attempt did land.
+
+**Not offline.** Card and e-wallet payments, returns and refunds, customer
+lookup, receipt reprints of sales made online, closing a shift, and the office
+console.
+
+**Delivery.** When the person who queued work signs in while connected — or,
+signed in offline, chooses **Reconnect** and re-enters their password — the
+register uploads their events in sequence through `/api/v1/sync/push`. A
+connected till that lost head office re-checks every 45 seconds and uploads as
+soon as it answers. Head office's per-event answer is recorded on the event:
+accepted events are `Synchronized`; parked, refused or disputed ones are
+`RequiresReview` or `Conflict` and sit on head office's sync-failure queue
+with their full payload. The upload stops at the first event that belongs to
+someone else; the till says whose sign-in it is waiting for.
+

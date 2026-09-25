@@ -24,6 +24,12 @@ public sealed record ChangeFeedBaseline(long Cursor, IReadOnlyList<ChangeFeedCha
 public abstract record ChangeFeedChange(long Sequence);
 
 /// <summary>A product was created or changed.</summary>
+/// <remarks>
+/// <paramref name="BaseUnitOfMeasureId"/> is the unit the ledger counts the
+/// product in, which is the unit a register sells it in. It is optional on the
+/// wire so a feed from a server that does not send it still applies; a product
+/// without it simply cannot be rung up until the next baseline carries it.
+/// </remarks>
 public sealed record ProductChanged(
     long Sequence,
     ProductId ProductId,
@@ -33,7 +39,8 @@ public sealed record ProductChanged(
     bool TracksBatches,
     bool TracksExpiry,
     long SourceVersion,
-    DateTimeOffset UpdatedAtUtc) : ChangeFeedChange(Sequence);
+    DateTimeOffset UpdatedAtUtc,
+    UnitOfMeasureId? BaseUnitOfMeasureId = null) : ChangeFeedChange(Sequence);
 
 /// <summary>A barcode was attached, retired or made primary.</summary>
 public sealed record ProductBarcodeChanged(

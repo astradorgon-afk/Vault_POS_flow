@@ -25,11 +25,18 @@
     <div class="pay-methods" role="group" aria-label="Payment method">
         <button type="button" class="@MethodClass(PaymentMethod.Cash)" @onclick="() => SelectMethod(PaymentMethod.Cash)">
             <i class="method-dot method-cash" aria-hidden="true"></i>Cash</button>
-        <button type="button" class="@MethodClass(PaymentMethod.Card)" @onclick="() => SelectMethod(PaymentMethod.Card)">
+        <button type="button" class="@MethodClass(PaymentMethod.Card)" @onclick="() => SelectMethod(PaymentMethod.Card)"
+                disabled="@CashOnly" title="@(CashOnly ? "Card payments need a connection to head office" : null)">
             <i class="method-dot method-card" aria-hidden="true"></i>Card</button>
-        <button type="button" class="@MethodClass(PaymentMethod.EWallet)" @onclick="() => SelectMethod(PaymentMethod.EWallet)">
+        <button type="button" class="@MethodClass(PaymentMethod.EWallet)" @onclick="() => SelectMethod(PaymentMethod.EWallet)"
+                disabled="@CashOnly" title="@(CashOnly ? "E-wallet payments need a connection to head office" : null)">
             <i class="method-dot method-wallet" aria-hidden="true"></i>E-wallet</button>
     </div>
+
+    @if (CashOnly)
+    {
+        <p class="pay-method-note">Working offline: cash only. The sale is kept on this register and sent to head office when the connection is back.</p>
+    }
 
     @if (Method == PaymentMethod.Cash)
     {
@@ -117,6 +124,13 @@
     [Parameter]
     public string? PaymentBlockedDetail { get; set; }
 
+    /// <summary>
+    /// True while the register works without head office: only cash can be
+    /// taken, because a card or wallet payment needs its provider.
+    /// </summary>
+    [Parameter]
+    public bool CashOnly { get; set; }
+
     /// <summary>Raised when the cashier completes the sale (F10).</summary>
     [Parameter]
     public EventCallback<RegisterPaymentInput> OnComplete { get; set; }
@@ -171,6 +185,11 @@
 
     protected override void OnParametersSet()
     {
+        if (CashOnly && _method != PaymentMethod.Cash)
+        {
+            SelectMethod(PaymentMethod.Cash);
+        }
+
         if (Total != _lastTotal)
         {
             _lastTotal = Total;
@@ -248,6 +267,11 @@
 
     private void SelectMethod(PaymentMethod method)
     {
+        if (CashOnly && method != PaymentMethod.Cash)
+        {
+            return;
+        }
+
         _method = method;
         _providerReference = string.Empty;
         _cashTendered = string.Empty;

@@ -29,12 +29,17 @@ public interface IDeviceOutbox
     /// <param name="payload">What happened, serialized canonically.</param>
     /// <param name="locationId">The location it applies to.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="eventId">
+    /// The event's identity when the business event already has one — a sale
+    /// that was first sent to head office under it — or null for a new one.
+    /// </param>
     /// <returns>The queued event.</returns>
     Task<OutboxEvent> EnqueueAsync<TPayload>(
         SyncEventType type,
         TPayload payload,
         LocationId locationId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        EventId? eventId = null);
 
     /// <summary>Counts events still waiting to reach head office.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -63,14 +68,15 @@ public sealed class DeviceOutbox(
         SyncEventType type,
         TPayload payload,
         LocationId locationId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EventId? eventId = null)
     {
         DeviceStoreProfile enrolled = await profile.GetAsync(cancellationToken).ConfigureAwait(false);
 
         long sequence = await NextSequenceAsync(cancellationToken).ConfigureAwait(false);
 
         OutboxEvent queued = new(
-            EventId.New(),
+            eventId ?? EventId.New(),
             sequence,
             type,
             CanonicalJson.Serialize(payload),
@@ -92,9 +98,7 @@ public sealed class DeviceOutbox(
     public Task<int> CountUnsentAsync(CancellationToken cancellationToken)
         => context.Outbox
             .AsNoTracking()
-            .CountAsync(
-                e => e.Status != OutboxStatus.Synchronized && e.Status != OutboxStatus.Conflict,
-                cancellationToken);
+            .CountAsync(OutboxEvent.IsUnsent, cancellationToken);
 
     /// <summary>
     /// Allocates the next sequence value in the caller's transaction, so a

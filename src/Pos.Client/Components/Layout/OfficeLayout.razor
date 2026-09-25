@@ -103,6 +103,14 @@ else if (!_booted)
             return;
         }
 
+        if (Register.Current.IsOffline)
+        {
+            // Every office page is head office's; an offline sign-in trades at the till.
+            Navigation.NavigateTo("/register");
+            _booted = true;
+            return;
+        }
+
         try
         {
             _store = await Register.GetStoreIdentityAsync();

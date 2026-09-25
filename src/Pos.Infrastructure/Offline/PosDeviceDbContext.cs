@@ -33,6 +33,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
     public DbSet<CashierShift> LocalShifts => Set<CashierShift>();
     public DbSet<OutboxEvent> Outbox => Set<OutboxEvent>();
     public DbSet<DeviceSequence> Sequences => Set<DeviceSequence>();
+    public DbSet<DeviceOfflineCredential> OfflineCredentials => Set<DeviceOfflineCredential>();
+    public DbSet<DeviceLocalSale> LocalSales => Set<DeviceLocalSale>();
 
     /// <summary>Gets the applier's write window for this context instance.</summary>
     internal ChangeFeedWriteScope ChangeFeedWrites { get; } = new();
@@ -103,6 +105,7 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.Property(x => x.TracksExpiry).HasColumnName("tracks_expiry").IsRequired();
             entity.Property(x => x.SourceVersion).HasColumnName("source_version").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+            entity.Property(x => x.BaseUnitOfMeasureId).HasColumnName("base_unit_of_measure_id");
             entity.HasIndex(x => x.Sku).IsUnique().HasDatabaseName("ux_cache_product_sku");
         });
 
@@ -270,6 +273,49 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             // so the queue is always read by sequence within status.
             entity.HasIndex(e => e.DeviceSequence).IsUnique().HasDatabaseName("ux_local_outbox_sequence");
             entity.HasIndex(e => new { e.Status, e.DeviceSequence }).HasDatabaseName("ix_local_outbox_status_sequence");
+        });
+
+        // Device-owned: written after head office accepts a password here, read
+        // when it cannot be reached. Never feed-owned, so a baseline keeps it.
+        builder.Entity<DeviceOfflineCredential>(entity =>
+        {
+            entity.ToTable("local_offline_credential");
+            entity.HasKey(c => c.UserId);
+            entity.Property(c => c.UserId).HasColumnName("user_id").ValueGeneratedNever();
+            entity.Property(c => c.UserName).HasColumnName("user_name").HasMaxLength(256).IsRequired();
+            entity.Property(c => c.LoginName).HasColumnName("login_name").HasMaxLength(256).IsRequired();
+            entity.Property(c => c.DisplayName).HasColumnName("display_name").HasMaxLength(160).IsRequired();
+            entity.Property(c => c.Salt).HasColumnName("salt").IsRequired();
+            entity.Property(c => c.Verifier).HasColumnName("verifier").IsRequired();
+            entity.Property(c => c.Iterations).HasColumnName("iterations").IsRequired();
+            entity.Property(c => c.RecordedAtUtc).HasColumnName("recorded_at_utc").IsRequired();
+            entity.Property(c => c.FailedAttempts).HasColumnName("failed_attempts").IsRequired();
+            entity.Property(c => c.LockedUntilUtc).HasColumnName("locked_until_utc");
+            entity.HasIndex(c => c.UserName).IsUnique().HasDatabaseName("ux_local_offline_credential_user_name");
+            entity.HasIndex(c => c.LoginName).HasDatabaseName("ix_local_offline_credential_login_name");
+        });
+
+        builder.Entity<DeviceLocalSale>(entity =>
+        {
+            entity.ToTable("local_sale");
+            entity.HasKey(s => s.EventId);
+            entity.Property(s => s.EventId).HasColumnName("event_id").ValueGeneratedNever();
+            entity.Property(s => s.Number).HasColumnName("number").HasMaxLength(DocumentNumber.MaxLength).IsRequired();
+            entity.Property(s => s.LocationId).HasColumnName("location_id").IsRequired();
+            entity.Property(s => s.ShiftId).HasColumnName("shift_id").IsRequired();
+            entity.Property(s => s.DeviceId).HasColumnName("device_id").IsRequired();
+            entity.Property(s => s.CashierUserId).HasColumnName("cashier_user_id").IsRequired();
+            entity.Property(s => s.CashierName).HasColumnName("cashier_name").HasMaxLength(160).IsRequired();
+            entity.Property(s => s.CustomerId).HasColumnName("customer_id");
+            entity.Property(s => s.CustomerName).HasColumnName("customer_name").HasMaxLength(200);
+            entity.Property(s => s.BusinessDate).HasColumnName("business_date").IsRequired();
+            entity.Property(s => s.CompletedAtUtc).HasColumnName("completed_at_utc").IsRequired();
+            entity.Property(s => s.NetTotal).HasColumnName("net_total").HasPrecision(19, Money.StorageScale).IsRequired();
+            entity.Property(s => s.Currency).HasColumnName("currency").HasMaxLength(3).IsRequired();
+            entity.Property(s => s.LinesJson).HasColumnName("lines_json").HasMaxLength(64000).IsRequired();
+            entity.Property(s => s.PaymentsJson).HasColumnName("payments_json").HasMaxLength(8000).IsRequired();
+            entity.HasIndex(s => s.Number).IsUnique().HasDatabaseName("ux_local_sale_number");
+            entity.HasIndex(s => s.ShiftId).HasDatabaseName("ix_local_sale_shift");
         });
 
         ApplySqliteTypeMappings(builder);
