@@ -30,6 +30,12 @@ body { min-height: 100vh; }
 a { color: inherit; }
 button, input { font: inherit; }
 button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; }
+/* Blazor's FocusOnNavigate moves keyboard focus to each page's h1 after every
+   navigation, purely so screen readers announce the new page — it's never a
+   click target. Suppress the browser's raw default outline there instead of
+   styling it, matching the same choice already made for jump-to-results
+   headings (e.g. .sk-results-head h2:focus) elsewhere in this file. */
+h1:focus { outline: none; }
 
 .page { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; z-index: 30; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--forest); color: #fff; box-shadow: 8px 0 30px rgba(17,51,36,.08); }
