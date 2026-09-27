@@ -65,6 +65,16 @@ else
         }
     </section>
 
+    @if (IsCounting && CanCount)
+    {
+        <ScanTarget OnScan="OnScannedAsync" />
+        <div class="scan-strip" role="status">
+            <span class="scan-strip-mark" aria-hidden="true">▥</span>
+            <span>@(scanNote ?? "Scan items to count them: each scan adds one to that product.")</span>
+            <ScanButton />
+        </div>
+    }
+
     <section class="results-panel sheet-panel" aria-live="polite">
         <table class="sheet-table">
             <thead>
@@ -73,7 +83,7 @@ else
             <tbody>
                 @foreach (PosInventoryCountLineView line in detail.Lines)
                 {
-                    <tr @key="line.LineNo">
+                    <tr @key="line.LineNo" class="@(line.LineNo == lastScannedLine ? "scan-hit" : null)">
                         <td class="sheet-line-no">@line.LineNo</td>
                         <td>
                             <div class="product-name">@ProductDisplayName(line.ProductId)</div>
@@ -265,6 +275,57 @@ else
     }
 
     private decimal? Gauge(int lineNo) => gauges.TryGetValue(lineNo, out decimal? value) ? value : null;
+
+    private string? scanNote;
+    private int? lastScannedLine;
+    private ScanLine? scanQueue;
+
+    private Task OnScannedAsync(BarcodeScan scan)
+    {
+        scanQueue ??= new ScanLine(CountScannedAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    // One scan, one unit: the product's counted quantity goes up by one.
+    private async Task CountScannedAsync(BarcodeScan scan)
+    {
+        if (detail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } product })
+            {
+                scanNote = $"{scan.Code}: {found.Error ?? "not a known product."}";
+                lastScannedLine = null;
+                return;
+            }
+
+            PosInventoryCountLineView? line = detail.Lines.FirstOrDefault(l => l.ProductId == product.Id);
+            if (line is null)
+            {
+                scanNote = $"{product.Name} is not on this count.";
+                lastScannedLine = null;
+                return;
+            }
+
+            decimal counted = (Gauge(line.LineNo) ?? 0m) + 1m;
+            gauges[line.LineNo] = counted;
+            lastScannedLine = line.LineNo;
+            scanNote = $"{product.Name}: {counted.ToString("0.###", CultureInfo.InvariantCulture)} counted.";
+        }
+        catch (HttpRequestException)
+        {
+            scanNote = "Head office could not be reached to look that barcode up.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
 
     private void OnGaugeChangedAsync(int lineNo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {

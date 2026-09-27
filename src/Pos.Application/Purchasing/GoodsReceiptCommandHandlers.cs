@@ -261,10 +261,11 @@ public sealed class CreateGoodsReceiptCommandHandler(
 
         Dictionary<PurchaseOrderLineId, decimal> cumulativeAfter = new(context.CumulativeReceivedByLine);
 
+        // Only good units fill the order; refused ones leave the line still due.
         foreach (GoodsReceiptLine line in receipt.Lines)
         {
             cumulativeAfter[line.PurchaseOrderLineId] =
-                cumulativeAfter.GetValueOrDefault(line.PurchaseOrderLineId) + line.QuantityReceived;
+                cumulativeAfter.GetValueOrDefault(line.PurchaseOrderLineId) + line.QuantityReceived - line.QuantityRejected;
         }
 
         Result reconciled = order.RecordReceipt(cumulativeAfter);

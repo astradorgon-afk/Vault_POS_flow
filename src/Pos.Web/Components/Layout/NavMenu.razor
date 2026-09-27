@@ -32,6 +32,7 @@
             {
                 <NavLink class="nav-link" href="stores" @onclick="NotifyNavigation"><AppIcon Name="coins" /> <span>Store performance</span></NavLink>
                 <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
+                <NavLink class="nav-link" href="analytics/products" @onclick="NotifyNavigation"><AppIcon Name="trend-up" /> <span>Product analytics</span></NavLink>
             }
             @if (CanViewInventory)
             {
@@ -45,6 +46,14 @@
             {
                 <NavLink class="nav-link" href="inventory/exceptions" @onclick="NotifyNavigation"><AppIcon Name="alert" /> <span>Inventory exceptions</span></NavLink>
             }
+        </div>
+    }
+
+    @if (CanViewPurchasing)
+    {
+        <div class="nav-group">
+            <span class="nav-heading">Purchasing</span>
+            <NavLink class="nav-link" href="purchasing" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Purchase orders</span></NavLink>
         </div>
     }
 
@@ -88,6 +97,7 @@
 
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
+    private bool CanViewPurchasing => Session.HasPermission("purchase.view");
     private bool CanViewReports => Session.HasPermission("report.view");
     private bool CanViewExceptions => Session.HasPermission("inventory.view.all");
     private bool CanViewLocations => Session.HasPermission("product.view");

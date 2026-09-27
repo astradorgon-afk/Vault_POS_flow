@@ -87,6 +87,7 @@ try
     builder.Services.AddAuthorization();
     builder.Services.AddSignalR();
     builder.Services.AddSingleton<INotificationPublisher, SignalRNotificationPublisher>();
+    builder.Services.AddSingleton<IInventoryChangePublisher, SignalRInventoryChangePublisher>();
     builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
     builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
@@ -276,6 +277,7 @@ try
     app.MapNotificationEndpoints();
     app.MapDashboardEndpoints();
     app.MapStoreMonitoringEndpoints();
+    app.MapProductAnalyticsEndpoints();
     app.MapHub<NotificationHub>(NotificationHub.Route).RequireAuthorization();
 
     await app.RunAsync();

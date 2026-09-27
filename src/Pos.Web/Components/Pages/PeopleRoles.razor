@@ -13,7 +13,7 @@
     <div>
         <span class="eyebrow">Administration</span>
         <h1>People &amp; roles</h1>
-        <p>Accounts bundle permissions from roles; roles bundle permissions from the catalogue. Overrides bend one account without touching the role.</p>
+        <p>Choose a person to change what they can do and where they work. Roles bundle permissions; overrides bend one account without touching its role.</p>
     </div>
 </section>
 
@@ -27,186 +27,107 @@
 }
 else
 {
-    <nav class="tab-strip" aria-label="Sections">
-        <button type="button" class="tab@(activeTab == "users" ? " tab-active" : "")" @onclick="SelectUsersTabAsync">Users</button>
-        <button type="button" class="tab@(activeTab == "roles" ? " tab-active" : "")" @onclick="SelectRolesTabAsync">Roles</button>
+    <nav class="tab-strip" role="tablist" aria-label="Sections">
+        <button type="button" role="tab" aria-selected="@((activeTab == "users") ? "true" : "false")" class="tab@(activeTab == "users" ? " tab-active" : "")" @onclick="SelectUsersTabAsync">People</button>
+        <button type="button" role="tab" aria-selected="@((activeTab == "roles") ? "true" : "false")" class="tab@(activeTab == "roles" ? " tab-active" : "")" @onclick="SelectRolesTabAsync">Roles</button>
     </nav>
 
     @if (!string.IsNullOrWhiteSpace(message))
     {
-        <div class="pos-message" role="status">@message</div>
+        <div class="pr-notice @(messageOk ? "ok" : "bad")" role="@(messageOk ? "status" : "alert")">
+            <span class="pr-notice-mark" aria-hidden="true">@(messageOk ? "✓" : "!")</span>
+            <span>@message</span>
+            <button type="button" aria-label="Dismiss message" @onclick="ClearMessage">×</button>
+        </div>
     }
 
     @if (activeTab == "users")
     {
         bool canManageUsersLocal = CanManageUsers;
+        bool modalOpen = canManageUsersLocal && (selectedUserId is not null || showCreate);
 
-        <section class="search-strip">
-            <span>@(users.Count) account@(users.Count == 1 ? "" : "s")@(hasSearched ? " shown" : "")</span>
-            <div class="strip-controls">
-                <input type="search" class="text-filter" placeholder="Name, e-mail or code" @bind="searchText" />
-                <label class="switch-label">
-                    <input type="checkbox" @bind="includeInactive" />
-                    <span>Include disabled</span>
-                </label>
-                <button type="button" class="search-action" @onclick="FindUsersAsync"
-                        disabled="@(loadingUsers)">
-                    @(loadingUsers ? "Loading…" : "Find")
-                </button>
-                <button type="button" class="search-action" @onclick="ToggleCreateAsync"
-                        disabled="@(!canManageUsersLocal)">
-                    @(showCreate ? "Hide new account" : "New account")
-                </button>
-            </div>
+
+        <section class="pr-toolbar" aria-label="Find people">
+            <input type="search" class="pr-toolbar-search" placeholder="Search name, user name, e-mail, role or location"
+                   aria-label="Search people"
+                   @bind="searchText" @bind:event="oninput" @onkeydown="OnSearchKeyAsync" />
+            <select aria-label="Filter by location" @bind="locationFilter">
+                <option value="">All locations</option>
+                @foreach (PosLocation location in AssignableLocations)
+                {
+                    <option value="@location.Id">@location.Code · @location.Name</option>
+                }
+            </select>
+            <label class="switch-label">
+                <input type="checkbox" checked="@includeInactive" @onchange="ToggleIncludeInactiveAsync" />
+                <span>Show disabled</span>
+            </label>
+            <span class="pr-toolbar-count">@VisibleUsers.Count of @users.Count @(users.Count == 1 ? "person" : "people")</span>
+            @if (canManageUsersLocal)
+            {
+                <button type="button" class="pr-btn primary" @onclick="StartCreateAsync">+ New account</button>
+            }
         </section>
 
-        @if (showCreate && canManageUsersLocal)
-        {
-            <section class="open-count">
-                <div class="open-count-title">
-                    <strong>Create an account</strong>
-                    <span>Passwords need at least 12 characters with 4 different characters. Roles and locations can be tuned after creation.</span>
-                </div>
-                <div class="open-count-fields">
-                    <label class="location-picker">
-                        <span>User name</span>
-                        <input type="text" @bind="createUserName" placeholder="e.g. valeria" />
-                    </label>
-                    <label class="location-picker">
-                        <span>Display name</span>
-                        <input type="text" @bind="createDisplayName" placeholder="e.g. Valeria Ndoro" />
-                    </label>
-                    <label class="location-picker">
-                        <span>Password</span>
-                        <input type="password" @bind="createPassword" placeholder="At least 12 characters" />
-                    </label>
-                    <label class="location-picker">
-                        <span>E-mail</span>
-                        <input type="email" @bind="createEmail" placeholder="Optional" />
-                    </label>
-                    <label class="location-picker">
-                        <span>Employee code</span>
-                        <input type="text" @bind="createEmployeeCode" placeholder="Optional" />
-                    </label>
-                    <label class="location-picker">
-                        <span>Approval tier</span>
-                        <select @bind="createApprovalTier">
-                            @foreach (TierOption option in TierOptions)
-                            {
-                                <option value="@option.Value">@option.Label</option>
-                            }
-                        </select>
-                    </label>
-                </div>
-                <div class="picker-block">
-                    <span class="picker-block-title">Roles</span>
-                    @if (roles.Count == 0)
-                    {
-                        <span class="picker-block-hint">None found. The role catalogue may be unavailable.</span>
-                    }
-                    <div class="check-grid">
-                        @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
-                        {
-                            <label class="check-chip">
-                                <input type="checkbox" value="@role.Name" @onchange="() => ToggleCreateRole(role.Name)" />
-                                <span>@role.Name</span>
-                            </label>
-                        }
-                    </div>
-                </div>
-                <div class="picker-block">
-                    <span class="picker-block-title">Locations</span>
-                    @if (locations.Count == 0)
-                    {
-                        <span class="picker-block-hint">None found. The location directory may be unavailable.</span>
-                    }
-                    <div class="check-grid">
-                        @foreach (PosLocation location in locations.OrderBy(l => l.Code, StringComparer.Ordinal))
-                        {
-                            <label class="check-chip">
-                                <input type="checkbox" value="@location.Id" @onchange="() => ToggleCreateLocation(location.Id)" />
-                                <span>@location.Code · @location.Name</span>
-                            </label>
-                        }
-                    </div>
-                </div>
-                <div class="open-count-actions">
-                    <button type="button" class="search-action" @onclick="CreateUserAsync"
-                            disabled="@(creatingUser || !CanSubmitCreate)">
-                        @(creatingUser ? "Creating…" : "Create account")
-                    </button>
-                </div>
-            </section>
-        }
-
-        <section class="results-panel" aria-live="polite">
+        <section class="pr-table-card" aria-live="polite">
             @if (loadingUsers)
             {
-                <div class="results-empty"><span>Loading accounts…</span></div>
+                <p class="pr-empty">Loading people…</p>
             }
-            else if (users.Count == 0)
+            else if (VisibleUsers.Count == 0)
             {
-                <div class="results-empty">
-                    <strong>No accounts found</strong>
-                    <span>@(includeInactive ? "No accounts match that search." : "Only active accounts are shown. Tick “Include disabled” to see the rest.")</span>
+                <div class="pr-empty">
+                    <strong>No one matches</strong>
+                    <span>@(string.IsNullOrWhiteSpace(searchText) ? "Try another location, or show disabled accounts." : "Press Enter to search every account for “" + searchText.Trim() + "”.")</span>
                 </div>
             }
             else
             {
-                <table class="sales-table">
+                <table class="pr-table">
                     <thead>
                         <tr>
-                            <th>Account</th>
-                            <th>Roles</th>
-                            <th>Locations</th>
-                            <th>Tier</th>
-                            <th>State</th>
+                            <th scope="col">Person</th>
+                            <th scope="col">Roles</th>
+                            <th scope="col">Locations</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Last sign-in</th>
+                            <th scope="col"><span class="pr-sr">Edit</span></th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (PosUserSummary user in users)
+                        @foreach (PosUserSummary user in VisibleUsers)
                         {
-                            <tr @onclick="() => OpenUserAsync(user.Id)" class="@(selectedUserId == user.Id ? "row-selected" : "")">
+                            <tr class="@(user.IsActive ? "" : "is-disabled") @(selectedUserId == user.Id ? "is-current" : "")" @onclick="() => RequestOpenUserAsync(user.Id)">
                                 <td>
-                                    <div class="account-cell">
-                                        <strong>@user.DisplayName</strong>
-                                        <span>@@@user.UserName@(string.IsNullOrWhiteSpace(user.Email) ? "" : $" · {user.Email}")</span>
+                                    <div class="pr-who">
+                                        <span class="pr-avatar" aria-hidden="true">@Initials(user.DisplayName)</span>
+                                        <div>
+                                            <strong>@user.DisplayName</strong>
+                                            <span>@@@user.UserName@(string.IsNullOrWhiteSpace(user.Email) ? "" : " · " + user.Email)</span>
+                                        </div>
                                     </div>
                                 </td>
                                 <td>
                                     <div class="chip-row">
-                                        @foreach (string role in user.Roles)
-                                        {
-                                            <span class="role-chip">@role</span>
-                                        }
+                                        @if (user.Roles.Count == 0) { <span class="pr-muted">No role</span> }
+                                        @foreach (string role in user.Roles) { <span class="pr-chip">@role</span> }
                                     </div>
                                 </td>
                                 <td>
                                     <div class="chip-row">
-                                        @if (user.LocationIds.Count == 0)
-                                        {
-                                            <span class="muted-cell">All locations</span>
-                                        }
-                                        @foreach (string label in LocationLabels(user.LocationIds))
-                                        {
-                                            <span class="role-chip location-chip">@label</span>
-                                        }
+                                        @if (user.LocationIds.Count == 0) { <span class="pr-muted">All locations</span> }
+                                        @foreach (string place in LocationLabels(user.LocationIds)) { <span class="pr-chip place">@place</span> }
                                     </div>
                                 </td>
-                                <td><span class="tier-label">@TierName(user.ApprovalTier)</span></td>
                                 <td>
-                                    @if (!user.IsActive)
-                                    {
-                                        <span class="status-chip status-disabled">Disabled</span>
-                                    }
-                                    else if (user.TwoFactorEnabled)
-                                    {
-                                        <span class="status-chip status-submitted">2FA</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="status-chip status-approved">Active</span>
-                                    }
+                                    @if (!user.IsActive) { <span class="status-chip status-disabled">Disabled</span> }
+                                    else if (user.TwoFactorEnabled) { <span class="status-chip status-submitted">Active · 2FA</span> }
+                                    else { <span class="status-chip status-approved">Active</span> }
+                                </td>
+                                <td class="pr-muted">@(user.LastLoginAtUtc is { } last ? last.InStoreTime().ToString("d MMM, h:mm tt", CultureInfo.InvariantCulture) : "Never")</td>
+                                <td class="pr-row-action">
+                                    <button type="button" class="pr-btn" aria-label="Edit @user.DisplayName"
+                                            @onclick="() => RequestOpenUserAsync(user.Id)" @onclick:stopPropagation="true">Edit</button>
                                 </td>
                             </tr>
                         }
@@ -215,413 +136,565 @@ else
             }
         </section>
 
-        @if (selectedUser is { } detail && canManageUsersLocal)
+        @if (modalOpen)
         {
-            <section class="user-detail">
-                <div class="user-detail-head">
-                    <div class="account-cell">
-                        <strong>@detail.User.DisplayName</strong>
-                        <span>@@@detail.User.UserName@(string.IsNullOrWhiteSpace(detail.User.Email) ? "" : $" · {detail.User.Email}")</span>
+            <div class="pr-overlay" @onclick="RequestCloseUser">
+            <div class="pr-dialog" role="dialog" aria-modal="true" aria-labelledby="pr-dialog-title" tabindex="-1"
+                 @ref="dialogRef" @onclick:stopPropagation="true" @onkeydown="OnUserDialogKey">
+                @if (pendingUserId is { } pending)
+                {
+                    <div class="pr-confirm" role="alertdialog" aria-label="Unsaved changes">
+                        <span>You have unsaved changes for @(showCreate ? "this new account" : selectedUser?.User.DisplayName ?? "this account"). Leave them?</span>
+                        <div>
+                            <button type="button" class="pr-btn" @onclick="() => pendingUserId = null">Keep editing</button>
+                            <button type="button" class="pr-btn danger" @onclick="() => DiscardAndOpenAsync(pending)">Discard changes</button>
+                        </div>
                     </div>
-                    <div class="chip-row">
-                        @if (!detail.User.IsActive)
-                        {
-                            <span class="status-chip status-disabled">Disabled</span>
-                        }
-                        else
-                        {
-                            <span class="status-chip status-approved">Active</span>
-                        }
-                        @if (detail.User.TwoFactorEnabled)
-                        {
-                            <span class="status-chip status-submitted">2FA enrolled</span>
-                        }
-                        @if (detail.HasPin)
-                        {
-                            <span class="status-chip status-picking">PIN set</span>
-                        }
-                        @if (detail.IsLockedOut)
-                        {
-                            <span class="status-chip status-disabled">Locked out</span>
-                        }
-                    </div>
-                </div>
-                <p class="user-detail-meta">
-                    Tier @TierName(detail.User.ApprovalTier) ·
-                    Created @detail.User.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)
-                    @if (detail.User.LastLoginAtUtc is { } lastLogin)
-                    {
-                        <text> · Last sign-in @lastLogin.InStoreTime().ToString("g", CultureInfo.InvariantCulture)</text>
-                    }
-                    @if (detail.DisabledAtUtc is { } disabledAt && !string.IsNullOrWhiteSpace(detail.DisabledReason))
-                    {
-                        <text> · Disabled @disabledAt.InStoreTime().ToString("g", CultureInfo.InvariantCulture) — @detail.DisabledReason</text>
-                    }
-                    @if (detail.User.Id == CurrentUserId)
-                    {
-                        <text> · This is the account you are signed in as; its own authority cannot be edited here.</text>
-                    }
-                </p>
+                }
 
-                <div class="detail-grid">
-                    <div class="detail-card">
-                        <div class="detail-card-title">
-                            <strong>Roles</strong>
-                            @if (!IsSelf)
-                            {
-                                <button type="button" class="card-action" @onclick="SaveUserRolesAsync"
-                                        disabled="@(savingRoles || !userDetailRoles.SetEquals(detail.User.Roles))">
-                                    @(savingRoles ? "Saving…" : "Save roles")
-                                </button>
-                            }
-                        </div>
-                        @if (IsSelf)
-                        {
-                            <p class="detail-note">Your own roles cannot be edited here.</p>
-                        }
-                        <div class="check-grid">
-                            @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
-                            {
-                                if (IsSelf)
-                                {
-                                    <span class="check-chip static-chip">@role.Name</span>
-                                }
-                                else
-                                {
-                                    <label class="check-chip">
-                                        <input type="checkbox" value="@role.Name"
-                                               checked="@userDetailRoles.Contains(role.Name)"
-                                               @onchange="() => ToggleUserRole(role.Name)" />
-                                        <span>@role.Name</span>
-                                    </label>
-                                }
-                            }
-                        </div>
-                    </div>
 
-                    <div class="detail-card">
-                        <div class="detail-card-title">
-                            <strong>Locations</strong>
-                            <button type="button" class="card-action" @onclick="SaveUserLocationsAsync"
-                                    disabled="@(savingLocations || (userDetailLocations.Count == 0 && detail.Locations.Count == 0))">
-                                @(savingLocations ? "Saving…" : "Save locations")
-                            </button>
+                @if (showCreate && canManageUsersLocal)
+                {
+                    <header class="pr-pane-head">
+                        <div class="pr-identity">
+                            <span class="pr-avatar big" aria-hidden="true">@(string.IsNullOrWhiteSpace(createDisplayName) ? "+" : Initials(createDisplayName))</span>
+                            <div>
+                                <h2 id="pr-dialog-title">@(string.IsNullOrWhiteSpace(createDisplayName) ? "New account" : createDisplayName.Trim())</h2>
+                                <p>Four quick steps. You can change anything later.</p>
+                            </div>
                         </div>
-                        @if (locations.Count == 0)
-                        {
-                            <p class="detail-note">The location directory is unavailable.</p>
-                        }
-                        else
-                        {
-                            <div class="check-grid">
-                                @foreach (PosLocation location in locations.OrderBy(l => l.Code, StringComparer.Ordinal).ThenBy(l => l.Name, StringComparer.Ordinal))
+                        <button type="button" class="pr-close" aria-label="Close" @onclick="RequestCloseUser">×</button>
+                    </header>
+
+                    <ol class="nc-steps" aria-label="Progress">
+                        <li class="@(StepPersonDone ? "done" : "")">Person</li>
+                        <li class="@(StepRoleDone ? "done" : "")">Job</li>
+                        <li class="@(StepPlaceDone ? "done" : "")">Where</li>
+                        <li class="@(StepSignInDone ? "done" : "")">Sign-in</li>
+                    </ol>
+
+                    <div class="pr-pane-body">
+                        <section class="nc-step @(StepPersonDone ? "done" : "")" aria-labelledby="nc-person">
+                            <h3 id="nc-person"><span class="nc-num">@(StepPersonDone ? "✓" : "1")</span> Who is this?</h3>
+                            <div class="nc-grid">
+                                <label class="pr-field">
+                                    <span>Full name</span>
+                                    <input type="text" @bind="createDisplayName" @bind:event="oninput" @bind:after="SuggestUserName" placeholder="e.g. Maria Santos" autocomplete="off" />
+                                    <small>Shown on receipts and reports.</small>
+                                </label>
+                                <label class="pr-field">
+                                    <span>User name</span>
+                                    <input type="text" @bind="createUserName" @bind:event="oninput" @bind:after="() => userNameTouched = true" placeholder="e.g. maria" autocomplete="off" spellcheck="false" />
+                                    <small class="@(UserNameProblem is null ? "" : "bad")">@(UserNameProblem ?? "What they type to sign in.")</small>
+                                </label>
+                            </div>
+                            <details class="nc-optional" open="@(createEmail.Length > 0 || createEmployeeCode.Length > 0)">
+                                <summary>Add e-mail or employee code <em>optional</em></summary>
+                                <div class="nc-grid">
+                                    <label class="pr-field"><span>E-mail</span><input type="email" @bind="createEmail" placeholder="name@example.com" /></label>
+                                    <label class="pr-field"><span>Employee code</span><input type="text" @bind="createEmployeeCode" placeholder="e.g. EMP-014" /></label>
+                                </div>
+                            </details>
+                        </section>
+
+                        <section class="nc-step @(StepRoleDone ? "done" : "")" aria-labelledby="nc-role">
+                            <h3 id="nc-role"><span class="nc-num">@(StepRoleDone ? "✓" : "2")</span> What is their job?</h3>
+                            <p class="pr-note">Pick the one that fits. Most people need only one.</p>
+                            @if (roles.Count == 0)
+                            {
+                                <p class="pr-note">The list of jobs could not be loaded.</p>
+                            }
+                            <div class="nc-roles" role="group" aria-label="Job">
+                                @foreach (PosRoleView role in roles.OrderBy(r => RoleRank(r.Name)).ThenBy(r => r.Name, StringComparer.Ordinal))
                                 {
-                                    bool assigned = userDetailLocations.Contains(location.Id);
-                                    <label class="check-chip">
-                                        <input type="checkbox" value="@location.Id"
-                                               checked="@assigned"
-                                               @onchange="() => ToggleUserLocation(location.Id)" />
-                                        <span>@location.Code · @location.Name</span>
+                                    bool on = createRoles.Contains(role.Name);
+                                    <label class="nc-role @(on ? "on" : "")">
+                                        <input type="checkbox" checked="@on" @onchange="() => ToggleCreateRole(role.Name)" />
+                                        <span>
+                                            <strong>@SplitWords(role.Name)</strong>
+                                            <small>@RoleBlurb(role)</small>
+                                        </span>
                                     </label>
-                                    @if (assigned)
-                                    {
-                                        <label class="primary-label">
-                                            <input type="radio" name="primary-location" value="@location.Id"
-                                                   checked="@(userDetailPrimaryId == location.Id)"
-                                                   @onchange="() => userDetailPrimaryId = location.Id" />
-                                            <span>Primary</span>
-                                        </label>
-                                    }
                                 }
                             </div>
-                        }
+                        </section>
+
+                        <section class="nc-step @(StepPlaceDone ? "done" : "")" aria-labelledby="nc-place">
+                            <h3 id="nc-place"><span class="nc-num">@(StepPlaceDone ? "✓" : "3")</span> Where do they work?</h3>
+                            @if (createRoles.Count > 0 && !CreateNeedsLocation)
+                            {
+                                <p class="nc-info">@string.Join(" and ", createRoles.Select(SplitWords)) already covers every location, so you can skip this.</p>
+                            }
+                            else
+                            {
+                                <p class="pr-note">Their registers and store permissions work only at the places you tick. The first one ticked is their home location.</p>
+                            }
+                            <div class="pr-locations">
+                                @foreach (PosLocation location in AssignableLocations)
+                                {
+                                    bool on = createLocations.Contains(location.Id);
+                                    <label class="pr-location @(on ? "on" : "")">
+                                        <input type="checkbox" checked="@on" @onchange="() => ToggleCreateLocation(location.Id)" />
+                                        <span><strong>@location.Code</strong> @location.Name</span>
+                                        @if (on && createLocations.First() == location.Id)
+                                        {
+                                            <span class="nc-home">Home</span>
+                                        }
+                                        <small>@KindName(location.Kind)</small>
+                                    </label>
+                                }
+                            </div>
+                        </section>
+
+                        <section class="nc-step @(StepSignInDone ? "done" : "")" aria-labelledby="nc-signin">
+                            <h3 id="nc-signin"><span class="nc-num">@(StepSignInDone ? "✓" : "4")</span> How do they sign in?</h3>
+                            <p class="pr-note">Set a first password and give it to them privately.</p>
+                            <div class="nc-password">
+                                <input type="@(showCreatePassword ? "text" : "password")" aria-label="Password" @bind="createPassword" @bind:event="oninput" autocomplete="new-password" spellcheck="false" placeholder="Their first password" />
+                                <button type="button" class="pr-btn" @onclick="() => showCreatePassword = !showCreatePassword">@(showCreatePassword ? "Hide" : "Show")</button>
+                                <button type="button" class="pr-btn" @onclick="GeneratePassword">Generate</button>
+                            </div>
+                            <p class="pr-note">Head office checks it against your password rules when you create the account.</p>
+                            <label class="pr-field nc-tier">
+                                <span>Approval limit</span>
+                                <select @bind="createApprovalTier" @bind:after="() => tierTouched = true">
+                                    @foreach (TierOption option in TierOptions)
+                                    {
+                                        <option value="@option.Value">@option.Label</option>
+                                    }
+                                </select>
+                                <small>@TierHint(createApprovalTier)@(tierTouched ? "" : " Set from their job.")</small>
+                            </label>
+                        </section>
                     </div>
 
-                    <div class="detail-card">
-                        <div class="detail-card-title">
-                            <strong>Overrides</strong>
-                            <span class="detail-note">Grant or deny one permission for this account.</span>
+                    <footer class="pr-pane-foot">
+                        <span class="@(CanSubmitCreate ? "nc-ready" : "")">@CreateSummary</span>
+                        <button type="button" class="pr-btn" @onclick="RequestCloseUser">Cancel</button>
+                        <button type="button" class="pr-btn primary" @onclick="CreateUserAsync" disabled="@(creatingUser || !CanSubmitCreate)">
+                            @(creatingUser ? "Creating…" : "Create account")
+                        </button>
+                    </footer>
+                }
+                else if (selectedUser is { } detail && canManageUsersLocal)
+                {
+                    <header class="pr-pane-head">
+                        <div class="pr-identity">
+                            <span class="pr-avatar big" aria-hidden="true">@Initials(detail.User.DisplayName)</span>
+                            <div>
+                                <h2 id="pr-dialog-title">@detail.User.DisplayName</h2>
+                                <p>@@@detail.User.UserName@(string.IsNullOrWhiteSpace(detail.User.Email) ? "" : " · " + detail.User.Email)@(string.IsNullOrWhiteSpace(detail.User.EmployeeCode) ? "" : " · " + detail.User.EmployeeCode)</p>
+                                <div class="chip-row">
+                                    <span class="status-chip @(detail.User.IsActive ? "status-approved" : "status-disabled")">@(detail.User.IsActive ? "Active" : "Disabled")</span>
+                                    @if (detail.User.TwoFactorEnabled) { <span class="status-chip status-submitted">2FA enrolled</span> }
+                                    @if (detail.HasPin) { <span class="status-chip status-submitted">PIN set</span> }
+                                    @if (detail.IsLockedOut) { <span class="status-chip status-disabled">Locked out</span> }
+                                    <span class="pr-meta">@TierName(detail.User.ApprovalTier) · @(detail.User.LastLoginAtUtc is { } last ? "last sign-in " + last.InStoreTime().ToString("d MMM, h:mm tt", CultureInfo.InvariantCulture) : "never signed in")</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="override-list">
-                            @foreach (PosUserOverride item in detail.Overrides)
-                            {
-                                <div class="override-row">
-                                    <div class="override-main">
-                                        <span class="status-chip @(item.Effect == "Grant" ? "status-approved" : "status-disabled")">@item.Effect</span>
-                                        <code class="override-code">@item.PermissionCode</code>
-                                        <span class="override-scope">@(item.LocationId is { } oid ? $"at {LocationLabel(oid)}" : "everywhere")</span>
-                                        @if (item.ExpiresAtUtc is { } expiry)
+                        <button type="button" class="pr-close" aria-label="Close" @onclick="RequestCloseUser">×</button>
+                    </header>
+
+                    @if (IsSelf)
+                    {
+                        <div class="pr-self">This is your own account. Nobody changes their own roles, locations, sign-in or status. Ask another administrator.</div>
+                    }
+
+                    <nav class="pr-tabs" role="tablist" aria-label="Account sections">
+                        @foreach (var (key, label, dirty, count) in DetailTabs(detail))
+                        {
+                            <button type="button" role="tab" aria-selected="@((detailTab == key) ? "true" : "false")"
+                                    class="@(detailTab == key ? "on" : "")" @onclick="() => detailTab = key">
+                                @label
+                                @if (dirty) { <span class="pr-dot" title="Unsaved changes"></span> }
+                                @if (count > 0) { <span class="pr-count">@count</span> }
+                            </button>
+                        }
+                    </nav>
+
+                    <div class="pr-pane-body">
+                        @switch (detailTab)
+                        {
+                            case "access":
+                                <div class="pr-card @(RolesDirty ? "dirty" : "")">
+                                    <div class="pr-card-head">
+                                        <h3>Roles <small>What they can do</small></h3>
+                                        @if (RolesDirty && !IsSelf)
                                         {
-                                            <span class="override-scope">until @expiry.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                            <span class="pr-unsaved">Unsaved</span>
+                                            <button type="button" class="pr-btn" @onclick="UndoRoles">Undo</button>
+                                            <button type="button" class="pr-btn primary" @onclick="SaveUserRolesAsync" disabled="@savingRoles">@(savingRoles ? "Saving…" : "Save roles")</button>
                                         }
-                                        <span class="override-scope">— @item.Reason</span>
                                     </div>
-                                    <div class="override-actions">
-                                        @if (revokeTargetId != item.Id)
+                                    <div class="check-grid">
+                                        @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
                                         {
-                                            <button type="button" class="link-action"
-                                                    @onclick="() => revokeTargetId = item.Id">
-                                                Revoke
-                                            </button>
-                                        }
-                                        else
-                                        {
-                                            <input type="text" class="text-filter" placeholder="Reason (5+ characters)" @bind="revokeReason" />
-                                            <button type="button" class="link-action"
-                                                    @onclick="() => RevokeOverrideAsync(item.Id)"
-                                                    disabled="@(revokingOverride || revokeReason.Trim().Length < 5)">
-                                                @(revokingOverride ? "Revoking…" : "Confirm")
-                                            </button>
-                                            <button type="button" class="link-action"
-                                                    @onclick="() => { revokeTargetId = null; revokeReason = string.Empty; }">
-                                                Cancel
-                                            </button>
+                                            bool on = userDetailRoles.Contains(role.Name);
+                                            <label class="check-chip @(on ? "on" : "") @(IsSelf ? "static-chip" : "")" title="@role.Description">
+                                                <input type="checkbox" checked="@on" disabled="@IsSelf" @onchange="() => ToggleUserRole(role.Name)" />
+                                                <span>@role.Name</span>
+                                            </label>
                                         }
                                     </div>
                                 </div>
-                            }
-                            @if (detail.Overrides.Count == 0)
-                            {
-                                <p class="detail-note">No overrides. This account follows its roles and nothing else.</p>
-                            }
-                        </div>
-                        <div class="override-grant">
-                            <label class="location-picker">
-                                <span>Permission</span>
-                                <select @bind="newOverrideCode">
-                                    <option value="">Select a permission…</option>
-                                    @foreach (IGrouping<string, PosPermissionView> module in permissions.GroupBy(p => p.Module).OrderBy(g => g.Key, StringComparer.Ordinal))
-                                    {
-                                        <optgroup label="@SplitWords(module.Key)">
-                                            @foreach (PosPermissionView permission in module.OrderBy(p => p.Code, StringComparer.Ordinal))
-                                            {
-                                                <option value="@permission.Code">@SplitWords(permission.Code)@(permission.IsPrivileged ? " (privileged)" : "")</option>
-                                            }
-                                        </optgroup>
-                                    }
-                                </select>
-                            </label>
-                            <label class="location-picker">
-                                <span>Effect</span>
-                                <select @bind="newOverrideEffect">
-                                    <option value="0">Grant</option>
-                                    <option value="1">Deny</option>
-                                </select>
-                            </label>
-                            <label class="location-picker">
-                                <span>Scope</span>
-                                <select @bind="newOverrideLocationId">
-                                    <option value="">Everywhere</option>
-                                    @foreach (PosLocation location in locations)
-                                    {
-                                        <option value="@location.Id">@location.Code · @location.Name</option>
-                                    }
-                                </select>
-                            </label>
-                            <label class="location-picker">
-                                <span>Expires</span>
-                                <input type="date" @bind="newOverrideExpires" />
-                            </label>
-                            <label class="location-picker">
-                                <span>Reason</span>
-                                <input type="text" @bind="newOverrideReason" placeholder="Why this override?" />
-                            </label>
-                            <button type="button" class="search-action" @onclick="GrantOverrideAsync"
-                                    disabled="@(grantingOverride || newOverrideCode.Length == 0 || newOverrideReason.Trim().Length < 5)">
-                                @(grantingOverride ? "Granting…" : "Add override")
-                            </button>
-                        </div>
-                    </div>
 
-                    <div class="detail-card">
-                        <div class="detail-card-title">
-                            <strong>Account controls</strong>
-                        </div>
-                        <div class="control-block">
-                            <div class="control-row">
-                                <label class="location-picker">
-                                    <span>Display name</span>
-                                    <input type="text" @bind="editDisplayName" />
-                                </label>
-                                <label class="location-picker">
-                                    <span>E-mail</span>
-                                    <input type="email" @bind="editEmail" />
-                                </label>
-                                <label class="location-picker">
-                                    <span>Employee code</span>
-                                    <input type="text" @bind="editEmployeeCode" />
-                                </label>
-                                <label class="location-picker">
-                                    <span>Approval tier</span>
-                                    <select @bind="editApprovalTier">
-                                        @foreach (TierOption option in TierOptions)
+                                <div class="pr-card @(LocationsDirty ? "dirty" : "")">
+                                    <div class="pr-card-head">
+                                        <h3>Locations <small>Where they work</small></h3>
+                                        @if (LocationsDirty && !IsSelf)
                                         {
-                                            <option value="@option.Value">@option.Label</option>
+                                            <span class="pr-unsaved">Unsaved</span>
+                                            <button type="button" class="pr-btn" @onclick="UndoLocations">Undo</button>
+                                            <button type="button" class="pr-btn primary" @onclick="SaveUserLocationsAsync" disabled="@savingLocations">@(savingLocations ? "Saving…" : "Save locations")</button>
                                         }
-                                    </select>
-                                </label>
-                                <button type="button" class="search-action" @onclick="SaveUserDetailsAsync"
-                                        disabled="@(savingDetails || IsSelf)">
-                                    @(savingDetails ? "Saving…" : "Save details")
-                                </button>
-                            </div>
-                            <div class="control-row">
-                                <label class="location-picker">
-                                    <span>New password</span>
-                                    <input type="password" @bind="resetPassword" placeholder="12+ characters" disabled="@IsSelf" />
-                                </label>
-                                <label class="location-picker">
-                                    <span>Confirm</span>
-                                    <input type="password" @bind="resetPasswordConfirm" placeholder="Repeat the new password" disabled="@IsSelf" />
-                                </label>
-                                <button type="button" class="search-action" @onclick="ResetPasswordAsync"
-                                        disabled="@(resettingPassword || IsSelf || !PasswordsMatch)">
-                                    @(resettingPassword ? "Resetting…" : "Reset password")
-                                </button>
-                            </div>
-                            <div class="control-row">
-                                <label class="location-picker">
-                                    <span>Cashier PIN</span>
-                                    <input type="text" inputmode="numeric" @bind="pinText" placeholder="6+ digits" disabled="@IsSelf" />
-                                </label>
-                                <button type="button" class="search-action" @onclick="SetPinAsync"
-                                        disabled="@(settingPin || IsSelf || pinText.Length < 6 || !pinText.All(char.IsDigit))">
-                                    @(settingPin ? "Saving…" : "Set PIN")
-                                </button>
-                                <label class="location-picker">
-                                    <span>Two-factor reset reason</span>
-                                    <input type="text" @bind="twoFactorReason" placeholder="5+ characters" disabled="@IsSelf" />
-                                </label>
-                                <button type="button" class="search-action"
-                                        @onclick="ResetTwoFactorAsync"
-                                        disabled="@(resettingTwoFactor || IsSelf || twoFactorReason.Trim().Length < 5)">
-                                    @(resettingTwoFactor ? "Resetting…" : "Reset 2FA")
-                                </button>
-                            </div>
-                            <div class="control-row">
-                                <label class="location-picker">
-                                    <span>Disable reason</span>
-                                    <input type="text" @bind="disableReason" placeholder="5+ characters" disabled="@IsSelf" />
-                                </label>
-                                @if (detail.User.IsActive)
+                                    </div>
+                                    <p class="pr-note">Registers at a ticked location accept this person's sign-in. The <strong>home</strong> location is where they usually work.</p>
+                                    @if (locations.Count == 0)
+                                    {
+                                        <p class="pr-note">The location directory is unavailable.</p>
+                                    }
+                                    <div class="pr-locations">
+                                        @foreach (PosLocation location in LocationsFor(userDetailLocations))
+                                        {
+                                            bool assigned = userDetailLocations.Contains(location.Id);
+                                            <div class="pr-location @(assigned ? "on" : "")">
+                                                <label>
+                                                    <input type="checkbox" checked="@assigned" disabled="@IsSelf" @onchange="() => ToggleUserLocation(location.Id)" />
+                                                    <span><strong>@location.Code</strong> @location.Name</span>
+                                                </label>
+                                                <small>@KindName(location.Kind)</small>
+                                                @if (assigned)
+                                                {
+                                                    <label class="pr-home">
+                                                        <input type="radio" name="home-location" checked="@(userDetailPrimaryId == location.Id)" disabled="@IsSelf"
+                                                               @onchange="() => userDetailPrimaryId = location.Id" />
+                                                        <span>Home</span>
+                                                    </label>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                                break;
+
+                            case "profile":
+                                <div class="pr-card @(ProfileDirty ? "dirty" : "")">
+                                    <div class="pr-card-head">
+                                        <h3>Profile</h3>
+                                        @if (ProfileDirty && !IsSelf)
+                                        {
+                                            <span class="pr-unsaved">Unsaved</span>
+                                            <button type="button" class="pr-btn" @onclick="UndoProfile">Undo</button>
+                                            <button type="button" class="pr-btn primary" @onclick="SaveUserDetailsAsync" disabled="@(savingDetails || editDisplayName.Trim().Length == 0)">@(savingDetails ? "Saving…" : "Save profile")</button>
+                                        }
+                                    </div>
+                                    <div class="pr-fields">
+                                        <label class="pr-field"><span>Display name</span><input type="text" @bind="editDisplayName" @bind:event="oninput" disabled="@IsSelf" /></label>
+                                        <label class="pr-field"><span>E-mail</span><input type="email" @bind="editEmail" @bind:event="oninput" disabled="@IsSelf" /></label>
+                                        <label class="pr-field"><span>Employee code</span><input type="text" @bind="editEmployeeCode" @bind:event="oninput" disabled="@IsSelf" /></label>
+                                        <label class="pr-field">
+                                            <span>Approval tier</span>
+                                            <select @bind="editApprovalTier" disabled="@IsSelf">
+                                                @foreach (TierOption option in TierOptions)
+                                                {
+                                                    <option value="@option.Value">@option.Label</option>
+                                                }
+                                            </select>
+                                            <small>@TierHint(editApprovalTier)</small>
+                                        </label>
+                                    </div>
+                                    <p class="pr-note">Created @detail.User.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture).</p>
+                                </div>
+                                break;
+
+                            case "security":
+                                <div class="pr-card">
+                                    <h3>Reset password</h3>
+                                    <p class="pr-note">Sets a new password. Tell the person privately; their other sessions keep working until they sign out.</p>
+                                    <div class="pr-fields">
+                                        <label class="pr-field"><span>New password</span><input type="@(showResetPassword ? "text" : "password")" @bind="resetPassword" @bind:event="oninput" autocomplete="new-password" spellcheck="false" disabled="@IsSelf" /></label>
+                                        <label class="pr-field"><span>Repeat it</span><input type="@(showResetPassword ? "text" : "password")" @bind="resetPasswordConfirm" @bind:event="oninput" autocomplete="new-password" spellcheck="false" disabled="@IsSelf" /></label>
+                                    </div>
+                                    <ul class="pr-rules @(resetPassword.Length > 0 ? "checking" : "")">
+                                        <li class="@(resetPassword.Length > 0 && resetPassword == resetPasswordConfirm ? "met" : "")">Both entries match</li>
+                                    </ul>
+                                    <div class="pr-actions">
+                                        <button type="button" class="pr-btn" disabled="@IsSelf" @onclick="() => showResetPassword = !showResetPassword">@(showResetPassword ? "Hide" : "Show")</button>
+                                        <button type="button" class="pr-btn" disabled="@IsSelf" @onclick="GenerateResetPassword">Generate</button>
+                                        <button type="button" class="pr-btn primary" @onclick="ResetPasswordAsync" disabled="@(resettingPassword || IsSelf || ResetPasswordProblem is not null)">@(resettingPassword ? "Resetting…" : ResetPasswordProblem ?? "Reset password")</button>
+                                    </div>
+                                </div>
+
+                                <div class="pr-card">
+                                    <h3>Register PIN <small>@(detail.HasPin ? "A PIN is set" : "No PIN yet")</small></h3>
+                                    <p class="pr-note">A quick sign-in at an enrolled register. Six or more digits.</p>
+                                    <div class="pr-inline">
+                                        <input type="password" inputmode="numeric" autocomplete="off" aria-label="New PIN" placeholder="6+ digits" @bind="pinText" @bind:event="oninput" disabled="@IsSelf" />
+                                        <button type="button" class="pr-btn primary" @onclick="SetPinAsync" disabled="@(settingPin || IsSelf || pinText.Length < 6 || !pinText.All(char.IsDigit))">@(settingPin ? "Saving…" : detail.HasPin ? "Replace PIN" : "Set PIN")</button>
+                                    </div>
+                                    @if (pinText.Length > 0 && !pinText.All(char.IsDigit))
+                                    {
+                                        <small class="bad">Digits only.</small>
+                                    }
+                                </div>
+
+                                <div class="pr-card">
+                                    <h3>Two-factor sign-in <small>@(detail.User.TwoFactorEnabled ? "Enrolled" : "Not enrolled")</small></h3>
+                                    <p class="pr-note">Resetting removes their authenticator; they enrol again at next sign-in. Use this when a phone is lost.</p>
+                                    <div class="pr-inline">
+                                        <input type="text" aria-label="Reason for resetting two-factor" placeholder="Reason (5+ characters)" @bind="twoFactorReason" @bind:event="oninput" disabled="@(IsSelf || !detail.User.TwoFactorEnabled)" />
+                                        <button type="button" class="pr-btn" @onclick="ResetTwoFactorAsync" disabled="@(resettingTwoFactor || IsSelf || !detail.User.TwoFactorEnabled || twoFactorReason.Trim().Length < 5)">@(resettingTwoFactor ? "Resetting…" : "Reset two-factor")</button>
+                                    </div>
+                                </div>
+                                break;
+
+                            case "overrides":
+                                <div class="pr-card">
+                                    <h3>Overrides <small>One permission, for this person only</small></h3>
+                                    @if (detail.Overrides.Count == 0)
+                                    {
+                                        <p class="pr-note">None. This person gets exactly what their roles give.</p>
+                                    }
+                                    <div class="override-list">
+                                        @foreach (PosUserOverride item in detail.Overrides)
+                                        {
+                                            <div class="override-row">
+                                                <div class="override-main">
+                                                    <span class="status-chip @(item.Effect == "Grant" ? "status-approved" : "status-disabled")">@item.Effect</span>
+                                                    <code class="override-code">@item.PermissionCode</code>
+                                                    <span class="override-scope">@(item.LocationId is { } oid ? $"at {LocationLabel(oid)}" : "everywhere")</span>
+                                                    @if (item.ExpiresAtUtc is { } expiry)
+                                                    {
+                                                        <span class="override-scope">until @expiry.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                                    }
+                                                    <span class="override-scope">— @item.Reason</span>
+                                                </div>
+                                                @if (!IsSelf)
+                                                {
+                                                    <div class="override-actions">
+                                                        @if (revokeTargetId != item.Id)
+                                                        {
+                                                            <button type="button" class="link-action" @onclick="() => { revokeTargetId = item.Id; revokeReason = string.Empty; }">Revoke…</button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <input type="text" class="text-filter" aria-label="Reason for revoking" placeholder="Reason (5+ characters)" @bind="revokeReason" @bind:event="oninput" />
+                                                            <button type="button" class="link-action" @onclick="() => RevokeOverrideAsync(item.Id)" disabled="@(revokingOverride || revokeReason.Trim().Length < 5)">@(revokingOverride ? "Revoking…" : "Confirm revoke")</button>
+                                                            <button type="button" class="link-action muted" @onclick="() => { revokeTargetId = null; revokeReason = string.Empty; }">Cancel</button>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+
+                                @if (!IsSelf)
                                 {
-                                    <button type="button" class="search-action danger-action"
-                                            @onclick="DisableUserAsync"
-                                            disabled="@(disablingUser || IsSelf || disableReason.Trim().Length < 5)">
-                                        @(disablingUser ? "Disabling…" : "Disable account")
-                                    </button>
+                                    <div class="pr-card">
+                                        <h3>Add an override</h3>
+                                        <div class="pr-fields">
+                                            <label class="pr-field wide">
+                                                <span>Permission</span>
+                                                <select @bind="newOverrideCode">
+                                                    <option value="">Select a permission…</option>
+                                                    @foreach (IGrouping<string, PosPermissionView> module in permissions.GroupBy(p => p.Module).OrderBy(g => g.Key, StringComparer.Ordinal))
+                                                    {
+                                                        <optgroup label="@SplitWords(module.Key)">
+                                                            @foreach (PosPermissionView permission in module.OrderBy(p => p.Code, StringComparer.Ordinal))
+                                                            {
+                                                                <option value="@permission.Code">@SplitWords(permission.Code)@(permission.IsPrivileged ? " (privileged)" : "")</option>
+                                                            }
+                                                        </optgroup>
+                                                    }
+                                                </select>
+                                                @if (permissions.FirstOrDefault(p => p.Code == newOverrideCode) is { } chosen)
+                                                {
+                                                    <small>@chosen.Description</small>
+                                                }
+                                            </label>
+                                            <fieldset class="pr-field pr-segment">
+                                                <legend>Effect</legend>
+                                                <label class="@(newOverrideEffect == 0 ? "on" : "")"><input type="radio" name="override-effect" checked="@(newOverrideEffect == 0)" @onchange="() => newOverrideEffect = 0" />Grant</label>
+                                                <label class="@(newOverrideEffect == 1 ? "on deny" : "")"><input type="radio" name="override-effect" checked="@(newOverrideEffect == 1)" @onchange="() => newOverrideEffect = 1" />Deny</label>
+                                            </fieldset>
+                                            <label class="pr-field">
+                                                <span>Where</span>
+                                                <select @bind="newOverrideLocationId">
+                                                    <option value="">Everywhere</option>
+                                                    @foreach (PosLocation location in AssignableLocations)
+                                                    {
+                                                        <option value="@location.Id">@location.Code · @location.Name</option>
+                                                    }
+                                                </select>
+                                            </label>
+                                            <label class="pr-field">
+                                                <span>Expires <em>optional</em></span>
+                                                <input type="date" @bind="newOverrideExpires" />
+                                            </label>
+                                            <label class="pr-field wide">
+                                                <span>Reason</span>
+                                                <input type="text" @bind="newOverrideReason" @bind:event="oninput" placeholder="Why does this person need it? (5+ characters)" />
+                                            </label>
+                                        </div>
+                                        <div class="pr-actions">
+                                            <button type="button" class="pr-btn primary" @onclick="GrantOverrideAsync" disabled="@(grantingOverride || newOverrideCode.Length == 0 || newOverrideReason.Trim().Length < 5)">@(grantingOverride ? "Adding…" : newOverrideEffect == 1 ? "Add deny override" : "Add grant override")</button>
+                                        </div>
+                                    </div>
                                 }
-                                else
-                                {
-                                    <button type="button" class="search-action"
-                                            @onclick="EnableUserAsync"
-                                            disabled="@(enablingUser || IsSelf)">
-                                        @(enablingUser ? "Re-enabling…" : "Re-enable account")
-                                    </button>
-                                }
-                            </div>
-                            @if (IsSelf)
-                            {
-                                <p class="detail-note">You cannot change your own password, PIN, verification or status from here.</p>
-                            }
-                        </div>
+                                break;
+
+                            case "status":
+                                <div class="pr-card @(detail.User.IsActive ? "danger" : "")">
+                                    @if (detail.User.IsActive)
+                                    {
+                                        <h3>Disable this account</h3>
+                                        <p class="pr-note">They are signed out everywhere and cannot sign in, online or at a register, until re-enabled. Their history is kept.</p>
+                                        <div class="pr-inline">
+                                            <input type="text" aria-label="Reason for disabling" placeholder="Reason (5+ characters)" @bind="disableReason" @bind:event="oninput" disabled="@IsSelf" />
+                                            <button type="button" class="pr-btn danger" @onclick="DisableUserAsync" disabled="@(disablingUser || IsSelf || disableReason.Trim().Length < 5)">@(disablingUser ? "Disabling…" : "Disable account")</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <h3>This account is disabled</h3>
+                                        @if (detail.DisabledAtUtc is { } disabledAt)
+                                        {
+                                            <p class="pr-note">Disabled @disabledAt.InStoreTime().ToString("d MMM yyyy, h:mm tt", CultureInfo.InvariantCulture)@(string.IsNullOrWhiteSpace(detail.DisabledReason) ? "" : " — " + detail.DisabledReason)</p>
+                                        }
+                                        <div class="pr-actions">
+                                            <button type="button" class="pr-btn primary" @onclick="EnableUserAsync" disabled="@(enablingUser || IsSelf)">@(enablingUser ? "Re-enabling…" : "Re-enable account")</button>
+                                        </div>
+                                    }
+                                </div>
+                                break;
+                        }
                     </div>
-                </div>
-            </section>
+                }
+                else
+                {
+                    <p class="pr-placeholder" id="pr-dialog-title">Loading…</p>
+                }
+            </div>
+            </div>
         }
     }
     else
     {
         bool canManageRolesLocal = CanManageRoles;
 
-        <section class="results-panel" aria-live="polite">
+
+        <section class="pr-role-grid" aria-live="polite">
             @if (loadingRoles)
             {
-                <div class="results-empty"><span>Loading roles…</span></div>
+                <p class="pr-empty">Loading roles…</p>
             }
             else
             {
-                <div class="role-grid">
-                    @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
-                    {
-                        <button type="button" class="role-card@(selectedRoleId == role.Id ? " role-card-active" : "")"
-                                @onclick="() => SelectRoleAsync(role.Id)">
-                            <div class="role-card-head">
-                                <strong>@role.Name</strong>
-                                @if (role.IsSystemRole)
-                                {
-                                    <span class="status-chip status-submitted">System</span>
-                                }
-                            </div>
-                            <span class="role-card-desc">@role.Description</span>
-                            <span class="role-card-meta">@role.Permissions.Count permission@(role.Permissions.Count == 1 ? "" : "s") · @role.MemberCount member@(role.MemberCount == 1 ? "" : "s")</span>
-                        </button>
-                    }
-                </div>
+                @foreach (PosRoleView role in roles.OrderBy(r => r.Name, StringComparer.Ordinal))
+                {
+                    <button type="button" class="pr-role-card" @onclick="() => SelectRoleAsync(role.Id)">
+                        <span class="pr-role-head">
+                            <strong>@role.Name</strong>
+                            @if (role.IsSystemRole) { <span class="pr-flag">System</span> }
+                        </span>
+                        <span class="pr-role-desc">@role.Description</span>
+                        <span class="pr-role-meta">@role.Permissions.Count permission@(role.Permissions.Count == 1 ? "" : "s") · @role.MemberCount @(role.MemberCount == 1 ? "person" : "people")</span>
+                    </button>
+                }
             }
         </section>
 
         @if (selectedRole is { } selected && canManageRolesLocal)
         {
-            <section class="user-detail">
-                <div class="user-detail-head">
-                    <div class="account-cell">
-                        <strong>@selected.Name</strong>
-                        <span>@selected.Description</span>
+            <div class="pr-overlay" @onclick="RequestCloseRole">
+            <div class="pr-dialog wide" role="dialog" aria-modal="true" aria-labelledby="pr-dialog-title" tabindex="-1"
+                 @ref="dialogRef" @onclick:stopPropagation="true" @onkeydown="OnRoleDialogKey">
+                @if (pendingRoleClose)
+                {
+                    <div class="pr-confirm" role="alertdialog" aria-label="Unsaved changes">
+                        <span>You have unsaved permission changes for @selected.Name. Leave them?</span>
+                        <div>
+                            <button type="button" class="pr-btn" @onclick="() => pendingRoleClose = false">Keep editing</button>
+                            <button type="button" class="pr-btn danger" @onclick="DiscardRoleChanges">Discard changes</button>
+                        </div>
                     </div>
-                    <div class="chip-row">
-                        <span class="status-chip status-submitted">@selected.MemberCount member@(selected.MemberCount == 1 ? "" : "s")</span>
-                        @if (SelectedRoleIsMine)
-                        {
-                            <span class="status-chip status-picking">Held by you</span>
-                        }
-                    </div>
-                </div>
-                <p class="user-detail-meta">
-                    Tick the permissions this role bundles, then save with a reason. Privileged permissions are shown as such but carry no extra weight here.
-                    @if (SelectedRoleIsMine)
-                    {
-                        <text>You hold this role, so its permissions cannot be edited here — ask another administrator.</text>
-                    }
-                </p>
-
-                <div class="role-permission-block">
-                    @foreach (IGrouping<string, PosPermissionView> module in permissions.GroupBy(p => p.Module).OrderBy(g => g.Key, StringComparer.Ordinal))
-                    {
-                        <div class="role-module">
-                            <span class="role-module-title">@SplitWords(module.Key)</span>
-                            <div class="check-grid">
-                                @foreach (PosPermissionView permission in module.OrderBy(p => p.Code, StringComparer.Ordinal))
-                                {
-                                    if (SelectedRoleIsMine)
-                                    {
-                                        <span class="check-chip static-chip">@SplitWords(permission.Code)</span>
-                                    }
-                                    else
-                                    {
-                                        <label class="check-chip">
-                                            <input type="checkbox" value="@permission.Code"
-                                                   checked="@rolePermissionCodes.Contains(permission.Code)"
-                                                   @onchange="() => ToggleRolePermission(permission.Code)" />
-                                            <span title="@permission.Description">@SplitWords(permission.Code)@(permission.IsPrivileged ? " ⛨" : "")</span>
-                                        </label>
-                                    }
-                                }
+                }
+                    <header class="pr-pane-head">
+                        <div class="pr-identity">
+                            <div>
+                                <h2 id="pr-dialog-title">@selected.Name</h2>
+                                <p>@selected.Description</p>
+                                <div class="chip-row">
+                                    <span class="status-chip status-submitted">@selected.MemberCount @(selected.MemberCount == 1 ? "person" : "people")</span>
+                                    <span class="pr-meta">@rolePermissionCodes.Count of @permissions.Count permissions</span>
+                                    @if (SelectedRoleIsMine) { <span class="status-chip status-disabled">You hold this role</span> }
+                                </div>
                             </div>
                         </div>
+                        <button type="button" class="pr-close" aria-label="Close" @onclick="RequestCloseRole">×</button>
+                    </header>
+
+                    @if (SelectedRoleIsMine)
+                    {
+                        <div class="pr-self">You hold this role, so you cannot change its permissions. Ask another administrator.</div>
                     }
-                </div>
-                <div class="control-row">
-                    <label class="location-picker">
-                        <span>Reason</span>
-                        <input type="text" @bind="roleChangeReason" placeholder="5+ characters" />
-                    </label>
-                    <button type="button" class="search-action" @onclick="SaveRolePermissionsAsync"
-                            disabled="@(savingRolePermissions || roleChangeReason.Trim().Length < 5)">
-                        @(savingRolePermissions ? "Saving…" : "Save permissions")
-                    </button>
-                </div>
-            </section>
+
+                    <div class="pr-perm-tools">
+                        <input type="search" aria-label="Filter permissions" placeholder="Filter permissions" @bind="permissionFilter" @bind:event="oninput" />
+                        <label class="switch-label">
+                            <input type="checkbox" @bind="showGrantedOnly" />
+                            <span>Only what this role has</span>
+                        </label>
+                    </div>
+
+                    <div class="pr-pane-body">
+                        @foreach (IGrouping<string, PosPermissionView> module in VisiblePermissions.GroupBy(p => p.Module).OrderBy(g => g.Key, StringComparer.Ordinal))
+                        {
+                            int granted = module.Count(p => rolePermissionCodes.Contains(p.Code));
+                            <div class="pr-card">
+                                <div class="pr-card-head">
+                                    <h3>@SplitWords(module.Key) <small>@granted of @module.Count()</small></h3>
+                                    @if (!SelectedRoleIsMine)
+                                    {
+                                        <button type="button" class="link-action muted" @onclick="() => SetModule(module, true)" disabled="@(granted == module.Count())">Select all</button>
+                                        <button type="button" class="link-action muted" @onclick="() => SetModule(module, false)" disabled="@(granted == 0)">Clear</button>
+                                    }
+                                </div>
+                                <div class="pr-perms">
+                                    @foreach (PosPermissionView permission in module.OrderBy(p => p.Code, StringComparer.Ordinal))
+                                    {
+                                        bool on = rolePermissionCodes.Contains(permission.Code);
+                                        bool changed = on != selected.Permissions.Contains(permission.Code);
+                                        <label class="pr-perm @(on ? "on" : "") @(changed ? "changed" : "")">
+                                            <input type="checkbox" checked="@on" disabled="@SelectedRoleIsMine" @onchange="() => ToggleRolePermission(permission.Code)" />
+                                            <span>
+                                                <strong>@SplitWords(permission.Code)@(permission.IsPrivileged ? " ⛨" : "")</strong>
+                                                <small>@permission.Description</small>
+                                            </span>
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        @if (!VisiblePermissions.Any())
+                        {
+                            <p class="pr-note">No permissions match that filter.</p>
+                        }
+                    </div>
+
+                    @if (RolePermissionsDirty && !SelectedRoleIsMine)
+                    {
+                        <footer class="pr-pane-foot">
+                            <span class="pr-unsaved">@RoleChangeSummary</span>
+                            <input type="text" aria-label="Reason for the change" placeholder="Reason for the change (5+ characters)" @bind="roleChangeReason" @bind:event="oninput" />
+                            <button type="button" class="pr-btn" @onclick="UndoRolePermissions">Undo</button>
+                            <button type="button" class="pr-btn primary" @onclick="SaveRolePermissionsAsync" disabled="@(savingRolePermissions || roleChangeReason.Trim().Length < 5)">@(savingRolePermissions ? "Saving…" : "Save permissions")</button>
+                        </footer>
+                    }
+            </div>
+            </div>
         }
     }
 }
@@ -641,6 +714,16 @@ else
 
     private string activeTab = "users";
     private string? message;
+    private bool messageOk;
+    private string detailTab = "access";
+    private Guid? pendingUserId;
+    private Guid? locationFilter;
+    private string lastServerSearch = string.Empty;
+    private string permissionFilter = string.Empty;
+    private bool showGrantedOnly;
+    private bool pendingRoleClose;
+    private ElementReference dialogRef;
+    private bool focusDialog;
 
     private List<PosUserSummary> users = [];
     private List<PosRoleView> roles = [];
@@ -662,7 +745,10 @@ else
     private string createEmployeeCode = string.Empty;
     private int createApprovalTier;
     private readonly HashSet<string> createRoles = [];
-    private readonly HashSet<Guid> createLocations = [];
+    private readonly List<Guid> createLocations = [];
+    private bool userNameTouched;
+    private bool tierTouched;
+    private bool showCreatePassword;
 
     private Guid? selectedUserId;
     private PosUserDetail? selectedUser;
@@ -711,11 +797,216 @@ else
     private bool IsSelf => selectedUser is { } detail && detail.User.Id == CurrentUserId;
     private bool SelectedRoleIsMine => selectedRole is { } role
         && Session.Current?.User.Roles.Contains(role.Name, StringComparer.Ordinal) == true;
-    private bool PasswordsMatch => resetPassword.Length >= 12
-        && resetPassword == resetPasswordConfirm;
-    private bool CanSubmitCreate => createUserName.Trim().Length >= 3
-        && createDisplayName.Trim().Length >= 1
-        && createPassword.Length >= 12;
+    private bool PasswordsMatch => ResetPasswordProblem is null;
+
+    // Says what is missing on the button itself, rather than just greying it out.
+    private string? ResetPasswordProblem
+        => resetPassword.Length == 0 ? "Type a new password"
+            : resetPassword != resetPasswordConfirm ? (resetPasswordConfirm.Length == 0 ? "Repeat it to confirm" : "The two entries differ")
+            : null;
+
+    private bool showResetPassword;
+
+    private void GenerateResetPassword()
+    {
+        GeneratePassword();
+        resetPassword = createPassword;
+        resetPasswordConfirm = createPassword;
+        createPassword = string.Empty;
+        showCreatePassword = false;
+        showResetPassword = true;
+    }
+    private bool CanSubmitCreate => StepPersonDone && StepRoleDone && StepPlaceDone && StepSignInDone;
+
+    private bool StepPersonDone => createDisplayName.Trim().Length >= 1 && UserNameProblem is null && createUserName.Trim().Length >= 3;
+
+    private bool StepRoleDone => createRoles.Count > 0;
+
+    // A store job means nothing without a store; a business-wide job needs none.
+    private bool StepPlaceDone => StepRoleDone && (!CreateNeedsLocation || createLocations.Count > 0);
+
+    private bool StepSignInDone => createPassword.Length > 0;
+
+    private bool CreateNeedsLocation => createRoles.Any(name => roles.FirstOrDefault(r => r.Name == name) is not { } role || !IsBusinessWide(role));
+
+    private string? UserNameProblem
+    {
+        get
+        {
+            string name = createUserName.Trim();
+            if (name.Length == 0)
+            {
+                return null;
+            }
+
+            if (name.Length < 3)
+            {
+                return "At least 3 characters.";
+            }
+
+            if (name.Any(char.IsWhiteSpace))
+            {
+                return "No spaces.";
+            }
+
+            return users.Any(u => string.Equals(u.UserName, name, StringComparison.OrdinalIgnoreCase))
+                ? "Someone already uses that user name."
+                : null;
+        }
+    }
+
+    private string CreateSummary
+    {
+        get
+        {
+            List<string> missing = [];
+            if (!StepPersonDone) missing.Add("name and user name");
+            if (!StepRoleDone) missing.Add("a job");
+            else if (!StepPlaceDone) missing.Add("a location");
+            if (!StepSignInDone) missing.Add("a password");
+            if (missing.Count > 0)
+            {
+                return "Still needed: " + string.Join(", ", missing);
+            }
+
+            string job = string.Join(" and ", createRoles.Select(SplitWords));
+            string where = createLocations.Count == 0
+                ? "every location"
+                : string.Join(", ", createLocations.Select(id => locations.FirstOrDefault(l => l.Id == id)?.Name ?? "a location"));
+            return $"Ready: {createDisplayName.Trim()}, {job} at {where}.";
+        }
+    }
+
+    // Warehouses and stores; the system's external counterparties are not
+    // places anybody works.
+    private List<PosLocation> AssignableLocations => [.. locations
+        .Where(location => location.Kind is 0 or 1)
+        .OrderBy(location => location.Kind)
+        .ThenBy(location => location.Code, StringComparer.Ordinal)];
+
+    // An assignment to anything else is still shown, so saving never drops it unseen.
+    private IEnumerable<PosLocation> LocationsFor(HashSet<Guid> assigned)
+        => AssignableLocations.Concat(locations.Where(location => location.Kind is not (0 or 1) && assigned.Contains(location.Id)));
+
+    private List<PosUserSummary> VisibleUsers => [.. users.Where(MatchesFilters)];
+
+    private bool MatchesFilters(PosUserSummary user)
+    {
+        if (locationFilter is { } location && !user.LocationIds.Contains(location))
+        {
+            return false;
+        }
+
+        string term = searchText.Trim();
+        if (term.Length == 0)
+        {
+            return true;
+        }
+
+        return user.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || user.UserName.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || user.Email?.Contains(term, StringComparison.OrdinalIgnoreCase) == true
+            || user.EmployeeCode?.Contains(term, StringComparison.OrdinalIgnoreCase) == true
+            || user.Roles.Any(role => role.Contains(term, StringComparison.OrdinalIgnoreCase))
+            || user.LocationIds.Any(id => LocationLabel(id).Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool RolesDirty => selectedUser is { } detail && !userDetailRoles.SetEquals(detail.User.Roles);
+
+    private bool LocationsDirty => selectedUser is { } detail
+        && (!userDetailLocations.SetEquals(detail.Locations.Select(spec => spec.LocationId))
+            || userDetailPrimaryId != detail.Locations.FirstOrDefault(spec => spec.IsPrimary)?.LocationId);
+
+    private bool ProfileDirty => selectedUser is { } detail
+        && (editDisplayName != detail.User.DisplayName
+            || editEmail != (detail.User.Email ?? string.Empty)
+            || editEmployeeCode != (detail.User.EmployeeCode ?? string.Empty)
+            || editApprovalTier != detail.User.ApprovalTier);
+
+    private bool AnyDirty => RolesDirty || LocationsDirty || ProfileDirty
+        || resetPassword.Length > 0 || pinText.Length > 0
+        || (showCreate && CreateDirty);
+
+    private bool CreateDirty => createUserName.Length > 0 || createDisplayName.Length > 0
+        || createPassword.Length > 0 || createEmail.Length > 0 || createEmployeeCode.Length > 0
+        || createRoles.Count > 0 || createLocations.Count > 0;
+
+    private bool RolePermissionsDirty => selectedRole is { } role && !rolePermissionCodes.SetEquals(role.Permissions);
+
+    private string RoleChangeSummary => selectedRole is { } role
+        ? $"{rolePermissionCodes.Except(role.Permissions).Count()} added, {role.Permissions.Except(rolePermissionCodes).Count()} removed"
+        : string.Empty;
+
+    private IEnumerable<PosPermissionView> VisiblePermissions => permissions.Where(permission =>
+        (!showGrantedOnly || rolePermissionCodes.Contains(permission.Code))
+        && (permissionFilter.Trim().Length == 0
+            || SplitWords(permission.Code).Contains(permissionFilter.Trim(), StringComparison.OrdinalIgnoreCase)
+            || permission.Code.Contains(permissionFilter.Trim(), StringComparison.OrdinalIgnoreCase)
+            || permission.Module.Contains(permissionFilter.Trim(), StringComparison.OrdinalIgnoreCase)
+            || permission.Description.Contains(permissionFilter.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+    private IEnumerable<(string Key, string Label, bool Dirty, int Count)> DetailTabs(PosUserDetail detail) =>
+    [
+        ("access", "Access", RolesDirty || LocationsDirty, 0),
+        ("profile", "Profile", ProfileDirty, 0),
+        ("security", "Sign-in & security", resetPassword.Length > 0 || pinText.Length > 0, 0),
+        ("overrides", "Overrides", false, detail.Overrides.Count),
+        ("status", detail.User.IsActive ? "Account status" : "Disabled", false, 0),
+    ];
+
+    private CancellationTokenSource? noticeTimer;
+
+    private void ClearMessage()
+    {
+        noticeTimer?.Cancel();
+        message = null;
+        messageOk = false;
+    }
+
+    // Good news fades on its own; problems stay until dismissed.
+    private void ShowSuccess(string text)
+    {
+        message = text;
+        messageOk = true;
+        noticeTimer?.Cancel();
+        CancellationTokenSource timer = new();
+        noticeTimer = timer;
+        _ = FadeAsync(timer.Token);
+    }
+
+    private async Task FadeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            await InvokeAsync(() =>
+            {
+                ClearMessage();
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer message replaced it, or it was dismissed.
+        }
+        catch (ObjectDisposedException)
+        {
+            // The page was left before the notice faded.
+        }
+    }
+
+    private void ShowResult(bool succeeded, string success, string? error)
+    {
+        if (succeeded)
+        {
+            ShowSuccess(success);
+        }
+        else
+        {
+            message = error;
+            messageOk = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -797,7 +1088,6 @@ else
     private async Task FindUsersAsync()
     {
         loadingUsers = true;
-        message = null;
         try
         {
             ApiResult<List<PosUserSummary>> response = await Api.GetUsersAsync(
@@ -812,10 +1102,7 @@ else
 
             users = response.Value;
             hasSearched = true;
-            if (users.Count == 0)
-            {
-                message = "No accounts matched that search.";
-            }
+            lastServerSearch = searchText.Trim();
         }
         catch (HttpRequestException)
         {
@@ -827,15 +1114,179 @@ else
         }
     }
 
-    private void ToggleCreate() => showCreate = !showCreate;
-
-    private async Task ToggleCreateAsync()
+    // Typing filters the loaded list at once; Enter asks head office, which
+    // also finds accounts beyond the first page.
+    private async Task OnSearchKeyAsync(KeyboardEventArgs e)
     {
-        ToggleCreate();
-        if (showCreate)
+        if (e.Key == "Enter")
+        {
+            await FindUsersAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            searchText = string.Empty;
+            if (lastServerSearch.Length > 0)
+            {
+                await FindUsersAsync();
+            }
+        }
+    }
+
+    private async Task ToggleIncludeInactiveAsync(ChangeEventArgs e)
+    {
+        includeInactive = e.Value is true;
+        await FindUsersAsync();
+    }
+
+    private async Task StartCreateAsync()
+    {
+        pendingUserId = null;
+        selectedUserId = null;
+        selectedUser = null;
+        ClearMessage();
+        showCreate = true;
+        focusDialog = true;
+        if (roles.Count == 0)
         {
             await LoadRolesAsync();
         }
+    }
+
+    private void CloseCreate()
+    {
+        ResetCreateForm();
+        showCreate = false;
+    }
+
+    // Leaving an account with unsaved edits asks first. Guid.Empty stands for
+    // "close the account" rather than "open another".
+    private async Task RequestOpenUserAsync(Guid userId)
+    {
+        if (userId == selectedUserId && !showCreate)
+        {
+            return;
+        }
+
+        if (AnyDirty)
+        {
+            pendingUserId = userId;
+            return;
+        }
+
+        ClearMessage();
+        await OpenUserAsync(userId);
+    }
+
+    private void RequestCloseUser()
+    {
+        if (pendingUserId is not null)
+        {
+            return;
+        }
+
+        if (AnyDirty)
+        {
+            pendingUserId = Guid.Empty;
+            return;
+        }
+
+        CloseUser();
+    }
+
+    private async Task DiscardAndOpenAsync(Guid userId)
+    {
+        pendingUserId = null;
+        resetPassword = string.Empty;
+        resetPasswordConfirm = string.Empty;
+        pinText = string.Empty;
+        ClearMessage();
+        if (userId == Guid.Empty)
+        {
+            CloseUser();
+            return;
+        }
+
+        await OpenUserAsync(userId);
+    }
+
+    private void CloseUser()
+    {
+        ClearMessage();
+        selectedUserId = null;
+        selectedUser = null;
+        if (showCreate)
+        {
+            CloseCreate();
+        }
+    }
+
+    // Keyboard focus moves into a dialog when it opens, so Esc and Tab work
+    // from the first keystroke.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusDialog)
+        {
+            return;
+        }
+
+        focusDialog = false;
+        try
+        {
+            await dialogRef.FocusAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The dialog closed before it could take focus.
+        }
+    }
+
+    private void OnUserDialogKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape")
+        {
+            return;
+        }
+
+        if (pendingUserId is not null)
+        {
+            pendingUserId = null;
+            return;
+        }
+
+        RequestCloseUser();
+    }
+
+    private void OnRoleDialogKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape")
+        {
+            return;
+        }
+
+        if (pendingRoleClose)
+        {
+            pendingRoleClose = false;
+            return;
+        }
+
+        RequestCloseRole();
+    }
+
+    private void RequestCloseRole()
+    {
+        if (RolePermissionsDirty && !SelectedRoleIsMine)
+        {
+            pendingRoleClose = true;
+            return;
+        }
+
+        CloseRole();
+    }
+
+    private void DiscardRoleChanges()
+    {
+        pendingRoleClose = false;
+        CloseRole();
     }
 
     private void ToggleCreateRole(string roleName)
@@ -844,15 +1295,89 @@ else
         {
             createRoles.Remove(roleName);
         }
+
+        // The approval limit follows the job until someone sets it by hand.
+        if (!tierTouched)
+        {
+            createApprovalTier = createRoles.Count == 0 ? 0 : createRoles.Max(DefaultTier);
+        }
     }
 
     private void ToggleCreateLocation(Guid locationId)
     {
-        if (!createLocations.Add(locationId))
+        if (!createLocations.Remove(locationId))
         {
-            createLocations.Remove(locationId);
+            createLocations.Add(locationId);
         }
     }
+
+    // "Maria Santos" becomes "maria", or "maria.santos" when "maria" is taken.
+    private void SuggestUserName()
+    {
+        if (userNameTouched)
+        {
+            return;
+        }
+
+        string[] words = [.. createDisplayName.Trim().ToLowerInvariant()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => new string([.. word.Where(char.IsLetterOrDigit)]))
+            .Where(word => word.Length > 0)];
+        if (words.Length == 0)
+        {
+            createUserName = string.Empty;
+            return;
+        }
+
+        string first = words[0];
+        bool taken = users.Any(u => string.Equals(u.UserName, first, StringComparison.OrdinalIgnoreCase));
+        createUserName = taken && words.Length > 1 ? $"{first}.{words[^1]}" : first;
+    }
+
+    private void GeneratePassword()
+    {
+        // No look-alike characters (0/O, 1/l/I), since it will be read aloud or copied by hand.
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        createPassword = string.Concat(Enumerable.Range(0, 14)
+            .Select(_ => alphabet[System.Security.Cryptography.RandomNumberGenerator.GetInt32(alphabet.Length)]));
+        showCreatePassword = true;
+    }
+
+    private static bool IsBusinessWide(PosRoleView role) => role.Permissions.Contains("location.all");
+
+    private static int DefaultTier(string roleName) => roleName switch
+    {
+        "Owner" => 4,
+        "Administrator" => 3,
+        "MainInventoryManager" => 2,
+        "StoreManager" => 1,
+        _ => 0,
+    };
+
+    // Store jobs first, the way most accounts are created.
+    private static int RoleRank(string roleName) => roleName switch
+    {
+        "Cashier" => 0,
+        "StoreManager" => 1,
+        "InventoryStaff" => 2,
+        "MainInventoryManager" => 3,
+        "Administrator" => 4,
+        "Auditor" => 5,
+        "Owner" => 6,
+        _ => 7,
+    };
+
+    private static string RoleBlurb(PosRoleView role) => role.Name switch
+    {
+        "Cashier" => "Sells, takes returns and runs a till at their store.",
+        "StoreManager" => "Runs a store: overrides at the till, counts, receiving and transfers.",
+        "InventoryStaff" => "Stockroom work: receives deliveries, counts and moves stock. Cannot sell.",
+        "MainInventoryManager" => "Runs the warehouse and purchasing; sees stock everywhere.",
+        "Administrator" => "Sets up people, stores and devices; approves up to ₱250,000.",
+        "Auditor" => "Looks at everything, changes nothing. For accountants and auditors.",
+        "Owner" => "Full control of the business, with no approval limit.",
+        _ => role.Description,
+    };
 
     private async Task CreateUserAsync()
     {
@@ -862,7 +1387,7 @@ else
         }
 
         creatingUser = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<PosReference> response = await Api.CreateUserAsync(
@@ -875,7 +1400,7 @@ else
                     createApprovalTier,
                     createRoles.ToArray(),
                     createLocations
-                        .Select(locationId => new PosUserLocationSpec(locationId, false))
+                        .Select((locationId, index) => new PosUserLocationSpec(locationId, index == 0))
                         .ToArray()),
                 CancellationToken.None);
 
@@ -885,13 +1410,15 @@ else
                 return;
             }
 
+            string createdName = createDisplayName.Trim();
             ResetCreateForm();
             showCreate = false;
             await FindUsersAsync();
             selectedUserId = null;
             selectedUser = null;
-            message = "The account was created.";
+            string created = createdName;
             await OpenUserAsync(response.Value.Id);
+            ShowSuccess($"Account created for {created}.");
         }
         catch (HttpRequestException)
         {
@@ -913,6 +1440,9 @@ else
         createApprovalTier = 0;
         createRoles.Clear();
         createLocations.Clear();
+        userNameTouched = false;
+        tierTouched = false;
+        showCreatePassword = false;
     }
 
     private async Task OpenUserAsync(Guid userId)
@@ -922,9 +1452,15 @@ else
             return;
         }
 
+        if (selectedUserId != userId)
+        {
+            detailTab = "access";
+            selectedUser = null;
+            focusDialog = true;
+        }
+
+        showCreate = false;
         selectedUserId = userId;
-        selectedUser = null;
-        message = null;
         revokeTargetId = null;
         revokeReason = string.Empty;
         newOverrideCode = string.Empty;
@@ -933,6 +1469,7 @@ else
         newOverrideLocationId = null;
         resetPassword = string.Empty;
         resetPasswordConfirm = string.Empty;
+        showResetPassword = false;
         pinText = string.Empty;
         twoFactorReason = string.Empty;
         disableReason = string.Empty;
@@ -949,33 +1486,51 @@ else
             }
 
             selectedUser = response.Value;
-            userDetailRoles.Clear();
-            foreach (string roleName in selectedUser.User.Roles)
-            {
-                userDetailRoles.Add(roleName);
-            }
-
-            userDetailLocations.Clear();
-            userDetailPrimaryId = null;
-            foreach (PosUserLocationSpec spec in selectedUser.Locations)
-            {
-                userDetailLocations.Add(spec.LocationId);
-                if (spec.IsPrimary)
-                {
-                    userDetailPrimaryId = spec.LocationId;
-                }
-            }
-
-            editDisplayName = selectedUser.User.DisplayName;
-            editEmail = selectedUser.User.Email ?? string.Empty;
-            editEmployeeCode = selectedUser.User.EmployeeCode ?? string.Empty;
-            editApprovalTier = selectedUser.User.ApprovalTier;
+            UndoRoles();
+            UndoLocations();
+            UndoProfile();
         }
         catch (HttpRequestException)
         {
             message = "The administration service is unavailable. Try again shortly.";
             selectedUserId = null;
         }
+    }
+
+    private void UndoRoles()
+    {
+        userDetailRoles.Clear();
+        foreach (string roleName in selectedUser?.User.Roles ?? [])
+        {
+            userDetailRoles.Add(roleName);
+        }
+    }
+
+    private void UndoLocations()
+    {
+        userDetailLocations.Clear();
+        userDetailPrimaryId = null;
+        foreach (PosUserLocationSpec spec in selectedUser?.Locations ?? [])
+        {
+            userDetailLocations.Add(spec.LocationId);
+            if (spec.IsPrimary)
+            {
+                userDetailPrimaryId = spec.LocationId;
+            }
+        }
+    }
+
+    private void UndoProfile()
+    {
+        if (selectedUser is not { } detail)
+        {
+            return;
+        }
+
+        editDisplayName = detail.User.DisplayName;
+        editEmail = detail.User.Email ?? string.Empty;
+        editEmployeeCode = detail.User.EmployeeCode ?? string.Empty;
+        editApprovalTier = detail.User.ApprovalTier;
     }
 
     private void ToggleUserRole(string roleName)
@@ -1006,14 +1561,12 @@ else
         }
 
         savingRoles = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.SetUserRolesAsync(
                 detail.User.Id, userDetailRoles.ToArray(), CancellationToken.None);
-            message = response.IsSuccess
-                ? "Roles saved."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Roles saved.", response.Error);
             if (response.IsSuccess)
             {
                 await OpenUserAsync(detail.User.Id);
@@ -1038,7 +1591,7 @@ else
         }
 
         savingLocations = true;
-        message = null;
+        ClearMessage();
         try
         {
             List<PosUserLocationSpec> specs = userDetailLocations
@@ -1047,9 +1600,7 @@ else
                 .ToList();
             ApiResult<string> response = await Api.SetUserLocationsAsync(
                 detail.User.Id, specs, CancellationToken.None);
-            message = response.IsSuccess
-                ? "Locations saved."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Locations saved.", response.Error);
             if (response.IsSuccess)
             {
                 await OpenUserAsync(detail.User.Id);
@@ -1074,7 +1625,7 @@ else
         }
 
         grantingOverride = true;
-        message = null;
+        ClearMessage();
         try
         {
             PosOverrideRequest request = new(
@@ -1094,8 +1645,8 @@ else
             newOverrideReason = string.Empty;
             newOverrideExpires = null;
             newOverrideLocationId = null;
-            message = "Override granted.";
             await OpenUserAsync(detail.User.Id);
+            ShowSuccess("Override added.");
         }
         catch (HttpRequestException)
         {
@@ -1115,14 +1666,12 @@ else
         }
 
         revokingOverride = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.RemoveOverrideAsync(
                 detail.User.Id, overrideId, revokeReason.Trim(), CancellationToken.None);
-            message = response.IsSuccess
-                ? "Override revoked."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Override revoked.", response.Error);
             if (response.IsSuccess)
             {
                 revokeTargetId = null;
@@ -1148,7 +1697,7 @@ else
         }
 
         savingDetails = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.UpdateUserAsync(
@@ -1159,9 +1708,7 @@ else
                     string.IsNullOrWhiteSpace(editEmployeeCode) ? null : editEmployeeCode.Trim(),
                     editApprovalTier),
                 CancellationToken.None);
-            message = response.IsSuccess
-                ? "Details saved."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Details saved.", response.Error);
             if (response.IsSuccess)
             {
                 await OpenUserAsync(detail.User.Id);
@@ -1186,14 +1733,12 @@ else
         }
 
         resettingPassword = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.ResetPasswordAsync(
                 detail.User.Id, resetPassword, CancellationToken.None);
-            message = response.IsSuccess
-                ? "Password reset."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Password reset.", response.Error);
             if (response.IsSuccess)
             {
                 resetPassword = string.Empty;
@@ -1218,14 +1763,12 @@ else
         }
 
         settingPin = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.SetUserPinAsync(
                 detail.User.Id, pinText, CancellationToken.None);
-            message = response.IsSuccess
-                ? "PIN set."
-                : response.Error;
+            ShowResult(response.IsSuccess, "PIN set.", response.Error);
             if (response.IsSuccess)
             {
                 pinText = string.Empty;
@@ -1250,14 +1793,12 @@ else
         }
 
         resettingTwoFactor = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.ResetUserTwoFactorAsync(
                 detail.User.Id, twoFactorReason.Trim(), CancellationToken.None);
-            message = response.IsSuccess
-                ? "Two-factor authentication reset; the account must enrol again."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Two-factor authentication reset; the account must enrol again.", response.Error);
             if (response.IsSuccess)
             {
                 twoFactorReason = string.Empty;
@@ -1282,14 +1823,12 @@ else
         }
 
         disablingUser = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.DisableUserAsync(
                 detail.User.Id, disableReason.Trim(), CancellationToken.None);
-            message = response.IsSuccess
-                ? "The account was disabled."
-                : response.Error;
+            ShowResult(response.IsSuccess, "The account was disabled.", response.Error);
             if (response.IsSuccess)
             {
                 disableReason = string.Empty;
@@ -1315,13 +1854,11 @@ else
         }
 
         enablingUser = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.EnableUserAsync(detail.User.Id, CancellationToken.None);
-            message = response.IsSuccess
-                ? "The account was re-enabled."
-                : response.Error;
+            ShowResult(response.IsSuccess, "The account was re-enabled.", response.Error);
             if (response.IsSuccess)
             {
                 await OpenUserAsync(detail.User.Id);
@@ -1338,11 +1875,18 @@ else
         }
     }
 
-    private async Task SelectRoleAsync(Guid roleId)
+    private async Task SelectRoleAsync(Guid roleId, bool keepMessage = false)
     {
         selectedRoleId = roleId;
         selectedRole = roles.FirstOrDefault(role => role.Id == roleId);
-        message = null;
+        if (!keepMessage)
+        {
+            ClearMessage();
+            focusDialog = true;
+            pendingRoleClose = false;
+            permissionFilter = string.Empty;
+        }
+
         roleChangeReason = string.Empty;
         rolePermissionCodes.Clear();
         if (selectedRole is { } role)
@@ -1352,6 +1896,37 @@ else
                 rolePermissionCodes.Add(code);
             }
         }
+    }
+
+    private void UndoRolePermissions()
+    {
+        rolePermissionCodes.Clear();
+        foreach (string code in selectedRole?.Permissions ?? [])
+        {
+            rolePermissionCodes.Add(code);
+        }
+    }
+
+    private void SetModule(IEnumerable<PosPermissionView> module, bool granted)
+    {
+        foreach (PosPermissionView permission in module)
+        {
+            if (granted)
+            {
+                rolePermissionCodes.Add(permission.Code);
+            }
+            else
+            {
+                rolePermissionCodes.Remove(permission.Code);
+            }
+        }
+    }
+
+    private void CloseRole()
+    {
+        ClearMessage();
+        selectedRoleId = null;
+        selectedRole = null;
     }
 
     private void ToggleRolePermission(string code)
@@ -1370,19 +1945,17 @@ else
         }
 
         savingRolePermissions = true;
-        message = null;
+        ClearMessage();
         try
         {
             ApiResult<string> response = await Api.SetRolePermissionsAsync(
                 role.Id, rolePermissionCodes.ToArray(), roleChangeReason.Trim(), CancellationToken.None);
-            message = response.IsSuccess
-                ? "Role permissions saved."
-                : response.Error;
+            ShowResult(response.IsSuccess, "Role permissions saved.", response.Error);
             if (response.IsSuccess)
             {
                 roleChangeReason = string.Empty;
                 await LoadRolesAsync();
-                await SelectRoleAsync(role.Id);
+                await SelectRoleAsync(role.Id, keepMessage: true);
             }
         }
         catch (HttpRequestException)
@@ -1407,7 +1980,7 @@ else
         }
 
         activeTab = tab;
-        message = null;
+        ClearMessage();
         if (tab == "users" && !hasSearched)
         {
             await FindUsersAsync();
@@ -1446,6 +2019,41 @@ else
         => locations.FirstOrDefault(location => location.Id == id) is { } location
             ? $"{location.Code} · {location.Name}"
             : id.ToString();
+
+    private static string Initials(string name)
+    {
+        string[] words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length switch
+        {
+            0 => "?",
+            1 => words[0][..1].ToUpperInvariant(),
+            _ => string.Concat(words[0][..1], words[^1][..1]).ToUpperInvariant(),
+        };
+    }
+
+    private string LocationSummary(IReadOnlyList<Guid> ids) => ids.Count switch
+    {
+        0 => "All locations",
+        1 => LocationLabel(ids[0]),
+        _ => string.Join(" · ", LocationLabels(ids)),
+    };
+
+    private static string KindName(int kind) => kind switch
+    {
+        0 => "Warehouse",
+        1 => "Store",
+        _ => "System",
+    };
+
+    // The organization can move these ceilings; these are the defaults.
+    private static string TierHint(int tier) => tier switch
+    {
+        1 => "Approves up to ₱5,000 by default.",
+        2 => "Approves up to ₱50,000 by default.",
+        3 => "Approves up to ₱250,000 by default.",
+        4 => "No approval limit. Only the Owner can give this.",
+        _ => "Cannot approve purchases, adjustments or counts.",
+    };
 
     private sealed record TierOption(int Value, string Label);
 }

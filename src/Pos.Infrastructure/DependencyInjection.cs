@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
@@ -280,6 +282,10 @@ public static class DependencyInjection
         }
 
         services.AddSingleton<AppendOnlyInterceptor>();
+        services.TryAddSingleton<IInventoryChangePublisher, NoInventoryChangePublisher>();
+        services.AddSingleton(sp => new InventoryChangeInterceptor(
+            sp.GetRequiredService<IInventoryChangePublisher>(),
+            sp.GetService<ILogger<InventoryChangeInterceptor>>() ?? NullLogger<InventoryChangeInterceptor>.Instance));
 
         services.AddDbContext<PosDbContext>((sp, options) =>
         {
@@ -299,7 +305,9 @@ public static class DependencyInjection
                     sqlite.MigrationsHistoryTable("__migrations_history"));
             }
 
-            options.AddInterceptors(sp.GetRequiredService<AppendOnlyInterceptor>());
+            options.AddInterceptors(
+                sp.GetRequiredService<AppendOnlyInterceptor>(),
+                sp.GetRequiredService<InventoryChangeInterceptor>());
 
             // Tracked entities are the exception, not the rule: reads are
             // projections and should never accidentally write back.

@@ -42,7 +42,7 @@ public sealed record SignInResponse(
 
 /// <summary>The signed-in user's client-safe authorization snapshot.</summary>
 public sealed record SignedInUser(
-    Guid Id,
+    [property: System.Text.Json.Serialization.JsonPropertyName("userId")] Guid Id,
     string DisplayName,
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> Permissions,

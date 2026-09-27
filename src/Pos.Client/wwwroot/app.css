@@ -1328,3 +1328,78 @@ kbd {
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
 @keyframes receipt-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Password with its own Show/Hide switch; the engine's own reveal eye comes and goes, so it is hidden. */
+.password-field { position: relative; display: flex; }
+.password-field input { flex: 1; min-width: 0; padding-right: 3.1rem; }
+.password-field input::-ms-reveal, .password-field input::-ms-clear { display: none; }
+.password-field .password-toggle {
+    position: absolute; top: 50%; right: 0.45rem; transform: translateY(-50%);
+    width: 2.25rem; height: 2.25rem; padding: 0;
+    display: grid; place-items: center;
+    border: 0; border-radius: 0.5rem; background: transparent;
+    color: #9fb0ae; cursor: pointer;
+    transition: color .15s, background-color .15s;
+}
+.password-field .password-toggle:hover { background: rgba(230, 224, 209, 0.08); color: #f0c982; }
+.password-field .password-toggle.is-visible { color: #f0c982; }
+.password-field .password-toggle:focus-visible { outline: 2px solid #e3a84f; outline-offset: 1px; }
+.password-field .password-toggle .eye { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.password-field .password-toggle .eye-pupil { transform-origin: 12px 12px; transition: transform .22s cubic-bezier(.2,.7,.2,1); }
+.password-field .password-toggle .eye-slash { stroke-dasharray: 22; stroke-dashoffset: 22; transition: stroke-dashoffset .24s cubic-bezier(.2,.7,.2,1); }
+.password-field .password-toggle.is-visible .eye-slash { stroke-dashoffset: 0; }
+.password-field .password-toggle.is-visible .eye-pupil { transform: scale(.55); }
+.password-field .password-toggle:active:not(:disabled) { transform: translateY(-50%); }
+.password-field .password-toggle:active .eye { transform: scale(.9); }
+@media (prefers-reduced-motion: reduce) { .password-toggle .eye-pupil, .password-toggle .eye-slash { transition: none; } }
+
+
+/* Barcode scanning: the on-screen trigger (handhelds), the "scan here" strip, and the row a scan just counted. */
+.scan-trigger {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    min-height: 2.6rem; padding: 0 1rem;
+    border: 1px solid var(--signal-line, rgba(227, 168, 79, 0.45)); border-radius: 0.6rem;
+    background: var(--signal-soft, rgba(227, 168, 79, 0.1)); color: var(--signal-bright, #f0c982);
+    font-weight: 700; cursor: pointer;
+}
+.scan-trigger:active { transform: scale(0.97); }
+.scan-trigger:focus-visible { outline: 2px solid var(--signal, #e3a84f); outline-offset: 2px; }
+.scan-strip {
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    margin: 0 0 0.9rem; padding: 0.6rem 0.9rem;
+    border: 1px dashed rgba(134, 197, 193, 0.4); border-radius: 0.7rem;
+    background: rgba(57, 105, 103, 0.12); color: var(--text, #e6e0d1); font-size: 0.86rem;
+}
+.scan-strip > span:nth-child(2) { flex: 1; min-width: 12rem; }
+.scan-strip-mark { color: var(--cyan, #86c5c1); font-size: 1.1rem; }
+.scan-hit { animation: scan-hit 1.4s ease-out; }
+@keyframes scan-hit { 0% { background: rgba(227, 168, 79, 0.28); } 100% { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .scan-hit { animation: none; outline: 1px solid rgba(227, 168, 79, 0.5); } }
+
+/* Scanner test page */
+.panel-footnote { margin: 1rem 0 0; font-size: 0.82rem; }
+.panel-footnote a { color: #a8b6b4; }
+.panel-footnote a:hover { color: var(--signal-bright, #f0c982); }
+.scanner-test { width: min(52rem, 100%); margin: 0 auto; padding: 2rem 1.25rem 3rem; color: var(--text, #e6e0d1); display: grid; gap: 1.1rem; }
+.scanner-test header h1 { margin: 0.6rem 0 0.3rem; font-size: 1.8rem; }
+.scanner-test header p { margin: 0; color: var(--muted, #a8b6b4); }
+.scanner-back { padding: 0.45rem 0.8rem; border: 1px solid rgba(230, 224, 209, 0.2); border-radius: 0.5rem; background: transparent; color: inherit; cursor: pointer; }
+.scanner-card { padding: 1.1rem 1.2rem; border: 1px solid rgba(230, 224, 209, 0.12); border-radius: 0.9rem; background: rgba(27, 40, 46, 0.7); }
+.scanner-card h2 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+.scanner-empty { margin: 0; color: var(--muted, #a8b6b4); }
+.scanner-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; }
+.scanner-list li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) auto; gap: 0.3rem 1rem; align-items: baseline; padding: 0.55rem 0.7rem; border-radius: 0.55rem; background: rgba(6, 11, 13, 0.35); }
+.scanner-list strong { font-family: ui-monospace, Consolas, monospace; font-size: 1rem; letter-spacing: 0.03em; overflow-wrap: anywhere; }
+.scanner-list span { color: var(--muted, #a8b6b4); font-size: 0.8rem; }
+.scanner-list span.ok { color: #8fd6a6; }
+.scanner-list time { grid-column: 3; grid-row: 1; color: var(--muted, #a8b6b4); font-size: 0.78rem; }
+.scanner-actions { margin-top: 0.8rem; }
+.scanner-simulate { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.scanner-simulate input { flex: 1 1 14rem; min-height: 2.6rem; padding: 0 0.8rem; border: 1px solid rgba(230, 224, 209, 0.2); border-radius: 0.55rem; background: rgba(6, 11, 13, 0.5); color: inherit; font-family: ui-monospace, Consolas, monospace; }
+.scanner-simulate button { min-height: 2.6rem; padding: 0 1rem; border: 0; border-radius: 0.55rem; background: var(--signal, #e3a84f); color: #1d170d; font-weight: 700; cursor: pointer; }
+.scanner-simulate button:disabled { opacity: 0.5; cursor: default; }
+.scanner-help dl { margin: 0; display: grid; gap: 0.35rem; }
+.scanner-help dt { font-weight: 700; margin-top: 0.4rem; }
+.scanner-help dd { margin: 0; color: var(--muted, #a8b6b4); font-size: 0.86rem; line-height: 1.5; }
+.scanner-help code { color: var(--signal-bright, #f0c982); }
+@media (max-width: 36rem) { .scanner-list li { grid-template-columns: 1fr auto; } .scanner-list li > span { grid-column: 1 / -1; } }

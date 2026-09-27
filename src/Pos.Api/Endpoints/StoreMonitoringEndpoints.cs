@@ -205,7 +205,7 @@ public static class StoreMonitoringEndpoints
     /// Runs a grouping over <paramref name="rows"/> in the database, or, on
     /// SQLite (which stores money and instants as text), over the loaded rows.
     /// </summary>
-    private static async Task<List<TResult>> AggregateAsync<TRow, TResult>(
+    internal static async Task<List<TResult>> AggregateAsync<TRow, TResult>(
         PosDbContext context,
         IQueryable<TRow> rows,
         Func<IQueryable<TRow>, IQueryable<TResult>> aggregate,
@@ -291,6 +291,20 @@ public static class StoreMonitoringEndpoints
             .ToDictionaryAsync(x => x.ProductId, x => x.Quantity, cancellationToken)
             .ConfigureAwait(false);
 
+        // When each product last sold here, however long ago, so stock that has
+        // stopped moving can be told apart from stock that is merely slow.
+        Dictionary<ProductId, DateOnly> lastSold = await context.SaleItems
+            .AsNoTracking()
+            .Join(
+                context.Sales.Where(s => s.LocationId == scope && s.Status == SaleStatus.Completed),
+                item => item.SaleId,
+                sale => sale.Id,
+                (item, sale) => new { item.ProductId, sale.BusinessDate })
+            .GroupBy(x => x.ProductId)
+            .Select(g => new { ProductId = g.Key, Last = g.Max(x => x.BusinessDate) })
+            .ToDictionaryAsync(x => x.ProductId, x => x.Last, cancellationToken)
+            .ConfigureAwait(false);
+
         List<StockLevelRow> rows = [];
         foreach (Product product in products)
         {
@@ -329,7 +343,8 @@ public static class StoreMonitoringEndpoints
                 setting?.MaximumStock,
                 dailyRate,
                 daysOfCover,
-                Classify(available, setting)));
+                Classify(available, setting),
+                lastSold.TryGetValue(product.Id, out DateOnly sold) ? sold : null));
         }
 
         return TypedResults.Ok(new StockLevelReport(
@@ -436,4 +451,5 @@ public sealed record StockLevelRow(
     decimal? MaximumStock,
     decimal DailySales,
     decimal? DaysOfCover,
-    string Status);
+    string Status,
+    DateOnly? LastSoldOn = null);

@@ -46,7 +46,7 @@
                 </label>
                 <label>
                     <span>Password</span>
-                    <input type="password" @bind="_managerPassword" autocomplete="current-password" />
+                    <PasswordInput @bind-Value="_managerPassword" />
                 </label>
                 <div class="form-actions">
                     <button type="submit" class="button-secondary" disabled="@_busy">@(_busy && _step == Step.Manager ? "Signing in…" : "Continue")</button>

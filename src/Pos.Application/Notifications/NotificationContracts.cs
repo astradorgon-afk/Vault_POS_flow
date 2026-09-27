@@ -60,3 +60,13 @@ public interface INotificationPublisher
     /// <summary>Delivers the notification as a real-time hint; durable storage remains authoritative.</summary>
     Task PublishAsync(Notification notification, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Tells connected clients that stock moved at some locations, once the change
+/// is committed. It carries no quantities: clients reload what they show.
+/// </summary>
+public interface IInventoryChangePublisher
+{
+    /// <summary>Announces that stock at these locations has changed.</summary>
+    Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken);
+}

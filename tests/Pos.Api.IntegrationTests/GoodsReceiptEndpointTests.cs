@@ -460,6 +460,57 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task DamagedUnits_LeaveTheOrderIncomplete_UntilReplacementsArrive()
+    {
+        Seed seed = await SeedAsync("grndmg");
+        await factory.CreateUserAsync("grndmg-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("grndmg-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, "grndmg-rec");
+        string approver = await SignInAsync(client, "grndmg-app");
+
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        // All ten counted, three of them refused as damaged.
+        using HttpResponseMessage delivered = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            new
+            {
+                lines = new object[]
+                {
+                    new { purchaseOrderLineId = lineId, quantityReceived = 10m, quantityDamaged = 3m, quantityWrongItem = 0m, quantityExpired = 0m, unitCost = 100m },
+                },
+            },
+            receiver);
+        delivered.StatusCode.Should().Be(HttpStatusCode.OK, await delivered.Content.ReadAsStringAsync());
+
+        (HttpStatusCode _, JsonElement afterDamage) = await GetOrderAsync(client, receiver, orderId);
+        afterDamage.GetProperty("status").GetString().Should().Be("PartiallyReceived", "refused units do not fill the order");
+        afterDamage.GetProperty("lines")[0].GetProperty("productName").GetString().Should().NotBeNullOrWhiteSpace();
+
+        using HttpResponseMessage listed = await GetAsync(client, "/api/v1/purchasing/orders?limit=200", receiver);
+        using JsonDocument list = JsonDocument.Parse(await listed.Content.ReadAsStringAsync());
+        list.RootElement.EnumerateArray()
+            .Single(o => o.GetProperty("id").GetGuid() == orderId)
+            .GetProperty("outstandingQuantity").GetDecimal().Should().Be(3m);
+
+        // The replacements complete it.
+        using HttpResponseMessage replacement = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            ReceiptBody(lineId, received: 3m, unitCost: 100m),
+            receiver);
+        replacement.StatusCode.Should().Be(HttpStatusCode.OK, await replacement.Content.ReadAsStringAsync());
+
+        (HttpStatusCode _, JsonElement completed) = await GetOrderAsync(client, receiver, orderId);
+        completed.GetProperty("status").GetString().Should().Be("FullyReceived");
+    }
+
+    [Fact]
     public async Task StoreManager_ReceivesAtTheirOwnStore_ThroughTheScopedPath()
     {
         Seed seed = await SeedAsync("grnscope");

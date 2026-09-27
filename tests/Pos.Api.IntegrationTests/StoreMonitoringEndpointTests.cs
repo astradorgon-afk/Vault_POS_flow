@@ -64,8 +64,9 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
         healthyRow.GetProperty("available").GetDecimal().Should().Be(12m);
         healthyRow.GetProperty("stockValue").GetDecimal().Should().Be(120m);
 
-        // Nothing has sold, so no product has a days-of-cover estimate.
+        // Nothing has sold, so no product has a days-of-cover estimate or a last sale.
         rows.Should().OnlyContain(r => r.GetProperty("daysOfCover").ValueKind == JsonValueKind.Null);
+        rows.Should().OnlyContain(r => r.GetProperty("lastSoldOn").ValueKind == JsonValueKind.Null);
     }
 
     [Fact]
@@ -83,6 +84,35 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
 
         using HttpResponseMessage foreign = await GetAsync(
             client, FormattableString.Invariant($"/api/v1/inventory/stock-levels?locationId={other.Value:D}"), manager);
+        foreign.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task InventoryOverview_ForAStore_CountsOnlyThatStore_AndRefusesAStoreNotAssigned()
+    {
+        LocationId store = await factory.CreateLocationAsync("SM-OV1", "Overview Store");
+        LocationId warehouse = await factory.CreateLocationAsync("SM-OV2", "Overview Warehouse");
+        ProductId product = await ProductAsync("SM-OV-P");
+        await SettingAsync(store, product, minimum: 2m, reorder: 5m, target: 10m, maximum: 20m);
+        await SettingAsync(warehouse, product, minimum: 2m, reorder: 5m, target: 10m, maximum: 20m);
+        await AvailableAsync(store, product, 3m, 10m);
+        await AvailableAsync(warehouse, product, 12m, 10m);
+
+        await factory.CreateUserAsync("sm-ov-owner", Roles.Owner, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("sm-ov-manager", Roles.StoreManager, locations: [warehouse], tier: ApprovalTier.Tier1);
+        using HttpClient client = factory.CreateClient();
+        string owner = await SignInAsync(client, "sm-ov-owner");
+        string manager = await SignInAsync(client, "sm-ov-manager");
+
+        using HttpResponseMessage response = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/dashboard/inventory-overview?locationId={store.Value:D}"), owner);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using JsonDocument overview = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        overview.RootElement.GetProperty("availableQuantity").GetDecimal().Should().Be(3m);
+        overview.RootElement.GetProperty("lowStockItems").GetInt32().Should().Be(1);
+
+        using HttpResponseMessage foreign = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/dashboard/inventory-overview?locationId={store.Value:D}"), manager);
         foreign.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 

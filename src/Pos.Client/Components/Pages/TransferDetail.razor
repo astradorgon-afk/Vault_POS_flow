@@ -154,11 +154,13 @@ else
     @if (ShowPick)
     {
         <section class="action-panel">
-            <div class="action-title"><strong>Pick the stock</strong><span>Confirm what the source is sending. Quantities default to the full request.</span></div>
+            <div class="action-title"><strong>Pick the stock</strong><span>Confirm what the source is sending. Quantities default to the full request; scanning a product counts it from one.</span></div>
+            <ScanTarget OnScan="OnScannedAsync" />
+            <ScanButton />
             <div class="pick-rows">
                 @foreach (PickRow row in pickRows)
                 {
-                    <div class="pick-row" @key="row.LineNo">
+                    <div class="pick-row @(scanned.ContainsKey(row.LineNo) ? "scan-hit" : null)" @key="row.LineNo">
                         <span class="pick-name">@row.ProductName</span>
                         <span class="pick-requested">requested @Quantity(row.Requested) · already picked @Quantity(row.Picked)</span>
                         <input type="number" min="0" step="1" value="@row.Quantity"
@@ -206,11 +208,13 @@ else
     @if (ShowReceive)
     {
         <section class="action-panel receive-panel">
-            <div class="action-title"><strong>Receive and count</strong><span>Enter what actually arrived. Shortfalls are kept on the books as a discrepancy for review.</span></div>
+            <div class="action-title"><strong>Receive and count</strong><span>Enter what actually arrived, or scan each item: scanning a product counts it from one. Shortfalls are kept on the books as a discrepancy for review.</span></div>
+            <ScanTarget OnScan="OnScannedAsync" Enabled="@(!ShowPick)" />
+            <ScanButton />
             <div class="receive-rows">
                 @foreach (ReceiveRow row in receiveRows)
                 {
-                    <div class="receive-row" @key="(row.LineNo, row.BatchId)">
+                    <div class="receive-row @(scanned.ContainsKey(row.LineNo) ? "scan-hit" : null)" @key="(row.LineNo, row.BatchId)">
                         <span class="receive-name">@row.ProductName</span>
                         <span class="receive-batch">@(row.BatchId is null ? "any lot" : $"lot {row.BatchId.Value.ToString("D", CultureInfo.InvariantCulture)[..8]}")</span>
                         <span class="receive-awaiting">awaiting @Quantity(row.Remaining)</span>
@@ -293,6 +297,68 @@ else
     private readonly List<PosTransferCustodyEventSummary> custody = [];
     private readonly List<PickRow> pickRows = [];
     private readonly List<ReceiveRow> receiveRows = [];
+
+    // Lines counted by scanning in this visit: the first scan replaces the
+    // default full quantity with one, and each scan after adds one.
+    private readonly Dictionary<int, decimal> scanned = [];
+    private ScanLine? scanQueue;
+
+    private Task OnScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    {
+        scanQueue ??= new ScanLine(CountScannedAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task CountScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    {
+        if (detail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } product })
+            {
+                message = $"{scan.Code}: {found.Error ?? "not a known product."}";
+                return;
+            }
+
+            PosTransferLineView? line = detail.Lines.FirstOrDefault(l => l.ProductId == product.Id);
+            if (line is null)
+            {
+                message = $"{product.Name} is not on this transfer.";
+                return;
+            }
+
+            decimal count = scanned.GetValueOrDefault(line.LineNo) + 1m;
+            scanned[line.LineNo] = count;
+            if (ShowPick && pickRows.FindIndex(r => r.LineNo == line.LineNo) is var pick and >= 0)
+            {
+                pickRows[pick] = pickRows[pick] with { Quantity = count };
+                message = $"{product.Name}: {Quantity(count)} picked by scan (requested {Quantity(pickRows[pick].Requested)}).";
+            }
+            else if (ShowReceive && receiveRows.FindIndex(r => r.LineNo == line.LineNo) is var receive and >= 0)
+            {
+                receiveRows[receive] = receiveRows[receive] with { Received = count };
+                message = $"{product.Name}: {Quantity(count)} received by scan (awaiting {Quantity(receiveRows[receive].Remaining)}).";
+            }
+            else
+            {
+                scanned.Remove(line.LineNo);
+                message = $"{product.Name} has nothing left to pick or receive.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "Head office could not be reached to look that barcode up.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
 
     private PosTransferDetail? detail;
     private string? message;

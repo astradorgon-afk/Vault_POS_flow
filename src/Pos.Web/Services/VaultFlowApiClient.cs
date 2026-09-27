@@ -1,7 +1,7 @@
 namespace Pos.Web.Services;
 
 /// <summary>Calls the VaultFlow HTTP API for the interactive web application.</summary>
-public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
+public sealed partial class VaultFlowApiClient(HttpClient http, UserSession session)
 {
     /// <summary>Signs in with a username, password and optional two-factor code.</summary>
     public async Task<ApiResult<SignInResponse>> SignInAsync(

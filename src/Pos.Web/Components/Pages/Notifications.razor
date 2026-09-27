@@ -35,7 +35,7 @@
     <div class="nt-tabs" role="tablist">
         @foreach (ReadFilter tab in Enum.GetValues<ReadFilter>())
         {
-            <button class="@(readFilter == tab ? "active" : string.Empty)" type="button" role="tab" aria-selected="@(readFilter == tab)" @onclick="() => readFilter = tab">
+            <button class="@(readFilter == tab ? "active" : string.Empty)" type="button" role="tab" aria-selected="@((readFilter == tab) ? "true" : "false")" @onclick="() => readFilter = tab">
                 @tab <span>@Count(tab)</span>
             </button>
         }
@@ -128,7 +128,7 @@
         <div class="nt-side-list">
             @foreach (string category in Categories)
             {
-                <button class="@(categoryFilter == category ? "active" : string.Empty)" type="button" aria-pressed="@(categoryFilter == category)"
+                <button class="@(categoryFilter == category ? "active" : string.Empty)" type="button" aria-pressed="@((categoryFilter == category) ? "true" : "false")"
                         @onclick="() => categoryFilter = categoryFilter == category ? null : category">
                     <AppIcon Name="@CategoryIcon(category)" />
                     <span>@category</span>

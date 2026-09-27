@@ -351,6 +351,7 @@ else
         {
             List<DashboardAction> actions = [];
             if (CanViewSales) actions.Add(new("coins", "Store performance", "See what each store sold and took in, and its best sellers.", "/stores"));
+            if (CanViewSales) actions.Add(new("trend-up", "Best & worst sellers", "Which products sell best, and which are not selling, in each store.", "/analytics/products"));
             if (CanViewInventory) actions.Add(new("box", "Store inventory", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
             if (CanViewSales) actions.Add(new("ledger", "Review sales", "Browse each store's transactions, returns and receipts.", "/sales"));
             if (CanViewReports) actions.Add(new("report", "Open daily reports", "Reconcile trade, payment methods and drawer shifts.", "/reports"));
@@ -407,9 +408,17 @@ else
         }
     }
 
+    private RefreshThrottle? liveRefresh;
+
     protected override async Task OnInitializedAsync()
     {
         Notifications.Changed += OnNotificationsChanged;
+        if (CanViewInventory)
+        {
+            liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadInventoryOverviewAsync));
+            Notifications.InventoryChanged += OnInventoryChanged;
+        }
+
         try
         {
             List<Task> tasks = [];
@@ -521,7 +530,32 @@ else
 
     private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Notifications.Changed -= OnNotificationsChanged;
+    // The stock tiles follow the registers live; the scope check is the API's.
+    private void OnInventoryChanged(IReadOnlyList<Guid> changed) => liveRefresh?.Request();
+
+    private async Task ReloadInventoryOverviewAsync()
+    {
+        try
+        {
+            ApiResult<PosInventoryOverview> result = await Api.GetInventoryOverviewAsync(CancellationToken.None);
+            if (result is { IsSuccess: true, Value: { } fresh })
+            {
+                inventoryOverview = fresh;
+                StateHasChanged();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the tiles on screen; the next change tries again.
+        }
+    }
+
+    public void Dispose()
+    {
+        Notifications.Changed -= OnNotificationsChanged;
+        Notifications.InventoryChanged -= OnInventoryChanged;
+        liveRefresh?.Dispose();
+    }
 
     // Chart geometry ---------------------------------------------------------
 

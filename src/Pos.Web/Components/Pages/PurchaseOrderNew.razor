@@ -1,0 +1,402 @@
+@page "/purchasing/new"
+@attribute [Authorize(Policy = "purchase.create")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>New purchase order · VaultFlow</PageTitle>
+
+<header class="qr-head po-head">
+    <div>
+        <h1>New purchase order</h1>
+        <p>Pick the supplier, add what you need, then send it for approval.</p>
+    </div>
+</header>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="po-alert" role="alert">@message</div>
+}
+
+@if (loading)
+{
+    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading suppliers and products…</p></div></section>
+}
+else
+{
+    <div class="po-compose">
+        <div class="po-compose-main">
+            <section class="qr-card po-card">
+                <h2><span class="po-step">1</span> Supplier and delivery</h2>
+                <div class="po-fields">
+                    <label class="po-field">
+                        <span>Supplier</span>
+                        <select @bind="supplierId" @bind:after="OnSupplierChanged">
+                            <option value="">Choose a supplier…</option>
+                            @foreach (PosSupplier supplier in suppliers.Where(s => s.IsActive).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <option value="@supplier.Id">@supplier.Name</option>
+                            }
+                        </select>
+                        @if (Supplier is { } chosen)
+                        {
+                            <small>Usually delivers in @chosen.LeadTimeDays day@(chosen.LeadTimeDays == 1 ? "" : "s") · pays in @chosen.PaymentTermsDays days</small>
+                        }
+                    </label>
+                    <label class="po-field">
+                        <span>Deliver to</span>
+                        <select @bind="destinationId">
+                            @foreach (PosLocation location in destinations)
+                            {
+                                <option value="@location.Id">@location.Code · @location.Name</option>
+                            }
+                        </select>
+                        <small>@(IsStoreDelivery ? "Direct to a store: the store receives it at its register." : "The warehouse receives it and restocks the stores.")</small>
+                    </label>
+                    <label class="po-field">
+                        <span>Expected delivery</span>
+                        <input type="date" @bind="expectedOn" />
+                    </label>
+                </div>
+            </section>
+
+            <section class="qr-card po-card">
+                <h2><span class="po-step">2</span> Products <small>@lines.Count added</small></h2>
+                <ScanTarget OnScan="OnScanned" Enabled="@(!saving)" />
+                <p class="po-scan-hint">▥ @(scanNote ?? "Scan a product's barcode to add it; each scan adds one.")</p>
+                <div class="po-finder">
+                    <input type="search" placeholder="Search products by name or SKU" aria-label="Search products"
+                           @bind="productSearch" @bind:event="oninput" @onkeydown="OnFinderKey" />
+                    @if (Supplier is { } forSupplier)
+                    {
+                        <label class="switch-label">
+                            <input type="checkbox" @bind="onlySupplierProducts" />
+                            <span>Only @forSupplier.Name's products</span>
+                        </label>
+                    }
+                </div>
+
+                @if (Matches.Count > 0)
+                {
+                    <ul class="po-matches" aria-label="Matching products">
+                        @foreach (PosOrderableProduct product in Matches)
+                        {
+                            DraftLine? existing = lines.FirstOrDefault(l => l.Product.Id == product.Id);
+                            <li>
+                                <div>
+                                    <strong>@product.Name</strong>
+                                    <small>@product.Sku · @UnitName(product.BaseUnitOfMeasureId)@(product.DefaultPurchaseCost is { } cost ? " · " + PurchasingText.Money(cost) : "")</small>
+                                </div>
+                                @if (existing is null)
+                                {
+                                    <button type="button" class="po-btn" @onclick="() => AddLine(product)">+ Add</button>
+                                }
+                                else
+                                {
+                                    <span class="po-added">✓ @PurchasingText.Quantity(existing.Quantity) on order</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @if (MatchTotal > Matches.Count)
+                    {
+                        <p class="po-hint">Showing @Matches.Count of @MatchTotal. Type more of the name to narrow it down.</p>
+                    }
+                }
+                else if (productSearch.Trim().Length > 0 || onlySupplierProducts)
+                {
+                    <p class="po-hint">No products match@(onlySupplierProducts && Supplier is { } s ? " among " + s.Name + "'s products — untick the box to search everything" : "").</p>
+                }
+
+                @if (lines.Count == 0)
+                {
+                    <div class="po-empty-lines">Nothing on this order yet. Search above and press <strong>+ Add</strong>.</div>
+                }
+                else
+                {
+                    <div class="qr-table-wrap">
+                        <table class="qr-table po-lines">
+                            <thead>
+                                <tr><th>Product</th><th class="num">Quantity</th><th class="num">Unit cost</th><th class="num">Line total</th><th><span class="po-sr">Remove</span></th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (DraftLine line in lines)
+                                {
+                                    <tr class="static @(line.IsValid ? null : "po-invalid")">
+                                        <td><strong>@line.Product.Name</strong><small>@line.Product.Sku · per @UnitName(line.Product.BaseUnitOfMeasureId)</small></td>
+                                        <td class="num">
+                                            <div class="po-stepper">
+                                                <button type="button" aria-label="One less" @onclick="() => Step(line, -1)" disabled="@(line.Quantity <= 1)">−</button>
+                                                <input type="number" min="1" step="1" aria-label="Quantity of @line.Product.Name" @bind="line.Quantity" @bind:event="oninput" />
+                                                <button type="button" aria-label="One more" @onclick="() => Step(line, 1)">+</button>
+                                            </div>
+                                        </td>
+                                        <td class="num"><input class="po-money" type="number" min="0" step="0.01" aria-label="Unit cost of @line.Product.Name" @bind="line.UnitCost" @bind:event="oninput" /></td>
+                                        <td class="num"><strong>@PurchasingText.Money(line.Total)</strong></td>
+                                        <td class="num"><button type="button" class="po-remove" aria-label="Remove @line.Product.Name" @onclick="() => lines.Remove(line)">×</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        </div>
+
+        <aside class="po-summary qr-card" aria-label="Order summary">
+            <h2>Summary</h2>
+            <dl>
+                <div><dt>Supplier</dt><dd>@(Supplier?.Name ?? "—")</dd></div>
+                <div><dt>Deliver to</dt><dd>@(destinations.FirstOrDefault(d => d.Id == destinationId)?.Name ?? "—")</dd></div>
+                <div><dt>Expected</dt><dd>@(expectedOn?.ToString("d MMM yyyy", CultureInfo.InvariantCulture) ?? "—")</dd></div>
+                <div><dt>Lines</dt><dd>@lines.Count · @PurchasingText.Quantity(lines.Sum(l => l.Quantity)) units</dd></div>
+            </dl>
+            <div class="po-total"><span>Order total</span><strong>@PurchasingText.Money(lines.Where(l => l.IsValid).Sum(l => l.Total))</strong></div>
+
+            @if (Missing.Count > 0)
+            {
+                <ul class="po-missing">
+                    @foreach (string item in Missing) { <li>@item</li> }
+                </ul>
+            }
+
+            <button type="button" class="po-btn primary block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: true)">
+                @(saving ? "Saving…" : "Send for approval")
+            </button>
+            <button type="button" class="po-btn block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: false)">Save as draft</button>
+            <p class="po-hint">Someone other than you approves it before it goes to the supplier.</p>
+        </aside>
+    </div>
+}
+
+@code {
+    private const int MaxMatches = 12;
+
+    private readonly List<PosSupplier> suppliers = [];
+    private readonly List<PosLocation> destinations = [];
+    private readonly List<PosOrderableProduct> catalogue = [];
+    private readonly Dictionary<Guid, PosUnitOfMeasure> units = [];
+    private readonly List<DraftLine> lines = [];
+
+    private bool loading = true;
+    private bool saving;
+    private string? message;
+    private Guid? supplierId;
+    private Guid destinationId;
+    private DateOnly? expectedOn;
+    private string productSearch = string.Empty;
+    private bool onlySupplierProducts;
+
+    private PosSupplier? Supplier => suppliers.FirstOrDefault(s => s.Id == supplierId);
+
+    private bool IsStoreDelivery => destinations.FirstOrDefault(d => d.Id == destinationId)?.Kind == 1;
+
+    private IEnumerable<PosOrderableProduct> Candidates
+    {
+        get
+        {
+            string term = productSearch.Trim();
+            return catalogue
+                .Where(p => p.IsActive)
+                .Where(p => !onlySupplierProducts || p.PrimarySupplierId == supplierId)
+                .Where(p => term.Length == 0
+                    || p.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || p.Sku.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    // Nothing is listed until there is something to narrow by.
+    private List<PosOrderableProduct> Matches => productSearch.Trim().Length == 0 && !onlySupplierProducts
+        ? []
+        : [.. Candidates.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).Take(MaxMatches)];
+
+    private int MatchTotal => Candidates.Count();
+
+    private List<string> Missing
+    {
+        get
+        {
+            List<string> missing = [];
+            if (supplierId is null) missing.Add("Choose a supplier");
+            if (destinationId == Guid.Empty) missing.Add("Choose where it is delivered");
+            if (lines.Count == 0) missing.Add("Add at least one product");
+            if (lines.Any(l => !l.IsValid)) missing.Add("Every line needs a quantity above 0 and a cost");
+            return missing;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Task<ApiResult<List<PosSupplier>>> suppliersTask = Api.GetSuppliersAsync(CancellationToken.None);
+            Task<ApiResult<List<PosLocation>>> locationsTask = Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+            Task<ApiResult<List<PosUnitOfMeasure>>> unitsTask = Api.GetUnitsAsync(CancellationToken.None);
+            Task catalogueTask = LoadCatalogueAsync();
+            await Task.WhenAll(suppliersTask, locationsTask, unitsTask, catalogueTask);
+
+            suppliers.AddRange(suppliersTask.Result.Value ?? []);
+            destinations.AddRange((locationsTask.Result.Value ?? [])
+                .Where(l => l.Kind is 0 or 1)
+                .OrderBy(l => l.Kind)
+                .ThenBy(l => l.Code, StringComparer.Ordinal));
+            foreach (PosUnitOfMeasure unit in unitsTask.Result.Value ?? []) units[unit.Id] = unit;
+
+            destinationId = destinations.FirstOrDefault()?.Id ?? Guid.Empty;
+            if (suppliersTask.Result is { IsSuccess: false })
+            {
+                message = suppliersTask.Result.Error;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "Purchasing is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    // The whole catalogue in pages of 200, so searching is instant afterwards.
+    private async Task LoadCatalogueAsync()
+    {
+        const int pageSize = 200;
+        for (int offset = 0; offset < 10_000; offset += pageSize)
+        {
+            ApiResult<List<PosOrderableProduct>> page = await Api.GetOrderableProductsAsync(null, offset, pageSize, CancellationToken.None);
+            if (page is not { IsSuccess: true, Value: { } products })
+            {
+                message = page.Error;
+                return;
+            }
+
+            catalogue.AddRange(products);
+            if (products.Count < pageSize)
+            {
+                return;
+            }
+        }
+    }
+
+    private void OnSupplierChanged()
+    {
+        onlySupplierProducts = supplierId is not null && catalogue.Any(p => p.PrimarySupplierId == supplierId);
+        if (Supplier is { } supplier)
+        {
+            expectedOn = StoreClock.Today.AddDays(Math.Max(1, supplier.LeadTimeDays));
+        }
+    }
+
+    private void OnFinderKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && Matches.Count == 1 && lines.All(l => l.Product.Id != Matches[0].Id))
+        {
+            AddLine(Matches[0]);
+            productSearch = string.Empty;
+        }
+        else if (e.Key == "Escape")
+        {
+            productSearch = string.Empty;
+        }
+    }
+
+    private string? scanNote;
+
+    // The catalogue on the page already holds every barcode, so a scan needs no lookup.
+    private void OnScanned(BarcodeScan scan)
+    {
+        IReadOnlyList<string> codes = BarcodeText.LookupVariants(scan.Code);
+        PosOrderableProduct? product = catalogue.FirstOrDefault(p => p.IsActive && (p.Barcodes ?? []).Any(codes.Contains))
+            ?? catalogue.FirstOrDefault(p => p.IsActive && string.Equals(p.Sku, scan.Code, StringComparison.OrdinalIgnoreCase));
+        if (product is null)
+        {
+            scanNote = $"No product has the barcode {scan.Code}.";
+            return;
+        }
+
+        DraftLine? line = lines.FirstOrDefault(l => l.Product.Id == product.Id);
+        if (line is null)
+        {
+            AddLine(product);
+            line = lines[^1];
+        }
+        else
+        {
+            line.Quantity += 1;
+        }
+
+        if (supplierId is not null && product.PrimarySupplierId is { } usual && usual != supplierId)
+        {
+            scanNote = $"{product.Name}: {PurchasingText.Quantity(line.Quantity)} on this order. It usually comes from another supplier.";
+        }
+        else
+        {
+            scanNote = $"{product.Name}: {PurchasingText.Quantity(line.Quantity)} on this order.";
+        }
+    }
+
+    private void AddLine(PosOrderableProduct product)
+        => lines.Add(new DraftLine(product) { Quantity = 1, UnitCost = product.DefaultPurchaseCost ?? 0m });
+
+    private static void Step(DraftLine line, int delta) => line.Quantity = Math.Max(1, line.Quantity + delta);
+
+    private string UnitName(Guid id) => units.TryGetValue(id, out PosUnitOfMeasure? unit) ? unit.Name.ToLowerInvariant() : "unit";
+
+    private async Task SaveAsync(bool submit)
+    {
+        if (Missing.Count > 0 || supplierId is not { } supplier)
+        {
+            return;
+        }
+
+        saving = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> created = await Api.CreatePurchaseOrderAsync(
+                new PosCreatePurchaseOrder(
+                    supplier,
+                    destinationId,
+                    [.. lines.Select(l => new PosCreatePurchaseOrderLine(l.Product.Id, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
+                    ExpectedAtUtc: expectedOn is { } day ? new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(8)) : null),
+                CancellationToken.None);
+            if (created is not { IsSuccess: true, Value: { } reference })
+            {
+                message = created.Error;
+                return;
+            }
+
+            string query = string.Empty;
+            if (submit)
+            {
+                ApiResult<PosReference> submitted = await Api.SubmitPurchaseOrderAsync(reference.Id, CancellationToken.None);
+                query = submitted.IsSuccess ? "?done=submitted" : "?done=saved-not-submitted";
+            }
+
+            Navigation.NavigateTo(FormattableString.Invariant($"purchasing/{reference.Id:D}{query}"));
+        }
+        catch (HttpRequestException)
+        {
+            message = "The order could not be saved. Check the connection and try again.";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private sealed class DraftLine(PosOrderableProduct product)
+    {
+        public PosOrderableProduct Product { get; } = product;
+
+        public decimal Quantity { get; set; }
+
+        public decimal UnitCost { get; set; }
+
+        public decimal Total => Math.Round(Quantity * UnitCost, 2);
+
+        public bool IsValid => Quantity > 0 && UnitCost >= 0;
+    }
+}

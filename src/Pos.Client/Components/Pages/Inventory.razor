@@ -1,0 +1,318 @@
+@page "/inventory"
+@layout Layout.OfficeLayout
+@using System.Globalization
+@inject BackOfficeService Api
+
+<PageTitle>Inventory · VaultFlow</PageTitle>
+
+<div class="office-page inv-page">
+    <header class="inv-head">
+        <div>
+            <p class="vf-eyebrow">Stock</p>
+            <h1>Inventory</h1>
+            <p class="inv-sub">
+                @(report?.Name ?? "This store")
+                @if (report is not null)
+                {
+                    <text> · @report.Products.Count products · updated @loadedAt.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture)</text>
+                }
+            </p>
+        </div>
+        <button type="button" class="office-button ghost" @onclick="LoadAsync" disabled="@loading">@(loading ? "Loading…" : "↻ Refresh")</button>
+    </header>
+
+    @if (!Api.HasPermission("inventory.view"))
+    {
+        <div class="office-blocked" role="alert">
+            <div class="office-blocked-glyph" aria-hidden="true">▦</div>
+            <h2>Access required</h2>
+            <p>Your account cannot see stock. Ask an administrator for the <code>inventory.view</code> permission.</p>
+        </div>
+    }
+    else if (error is not null)
+    {
+        <div class="office-error" role="alert">@error</div>
+    }
+    else if (report is null)
+    {
+        <div class="office-loading">Loading the store's stock…</div>
+    }
+    else
+    {
+        <ScanTarget OnScan="OnScannedAsync" />
+
+        <section class="inv-status" role="group" aria-label="Filter by stock status">
+            <button type="button" class="@(status is null ? "on" : null)" aria-pressed="@(status is null ? "true" : "false")" @onclick="() => SetStatus(null)">
+                All <span>@report.Products.Count</span>
+            </button>
+            @foreach (string s in StockText.Statuses)
+            {
+                string key = s;
+                int count = report.Products.Count(p => p.Status == key);
+                <button type="button" class="tone-@StockText.Tone(key) @(status == key ? "on" : null)" aria-pressed="@(status == key ? "true" : "false")" @onclick="() => SetStatus(key)">
+                    <i aria-hidden="true"></i>@StockText.Label(key) <span>@count</span>
+                </button>
+            }
+            <button type="button" class="tone-info inv-idle @(status == "idle" ? "on" : null)" aria-pressed="@(status == "idle" ? "true" : "false")" @onclick='() => SetStatus("idle")' title="Plenty on hand, no sale in @StockText.IdleDays+ days">
+                <i aria-hidden="true"></i>Not selling <span>@report.Products.Count(p => StockText.IsIdle(p, today))</span>
+            </button>
+        </section>
+
+        <div class="inv-toolbar">
+            <label class="inv-search">
+                <span aria-hidden="true">⌕</span>
+                <input type="search" placeholder="Search name or SKU, or scan a barcode" aria-label="Search products"
+                       @bind="search" @bind:event="oninput" @onkeydown="OnSearchKey" autocomplete="off" spellcheck="false" />
+                @if (search.Length > 0)
+                {
+                    <button type="button" aria-label="Clear search" @onclick="() => search = string.Empty">×</button>
+                }
+            </label>
+            <label class="inv-sort">
+                <span>Sort</span>
+                <select @bind="sort">
+                    <option value="name">Name A–Z</option>
+                    <option value="scarce">Running out first</option>
+                    <option value="stock">Most on hand</option>
+                    @if (CanSeeCost)
+                    {
+                        <option value="value">Highest value</option>
+                    }
+                </select>
+            </label>
+            <ScanButton />
+        </div>
+
+        <nav class="inv-cats" aria-label="Filter by category">
+            <button type="button" class="@(category is null ? "on" : null)" @onclick="() => category = null">All categories</button>
+            @foreach (var group in report.Products.GroupBy(p => p.Category).OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
+            {
+                string name = group.Key;
+                bool attention = group.Any(p => p.Status is "Out" or "Low");
+                <button type="button" class="@(category == name ? "on" : null)" @onclick="() => category = category == name ? null : name">
+                    @name <span>@group.Count()</span>@if (attention) { <i class="inv-dot" title="Some products are low or out" aria-label="needs attention"></i> }
+                </button>
+            }
+        </nav>
+
+        List<PosStockLevel> visible = Visible;
+        <p class="inv-count">
+            @if (visible.Count == report.Products.Count)
+            {
+                <text>All @visible.Count products</text>
+            }
+            else
+            {
+                <text>Showing @visible.Count of @report.Products.Count</text>
+                <button type="button" class="inv-link" @onclick="ClearFilters">Clear filters</button>
+            }
+        </p>
+
+        @if (visible.Count == 0)
+        {
+            <div class="inv-empty">
+                <strong>No products match.</strong>
+                <span>Try another word, category or status.</span>
+                <button type="button" class="office-button ghost" @onclick="ClearFilters">Clear filters</button>
+            </div>
+        }
+
+        @foreach (var group in visible.GroupBy(p => p.Category).OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
+        {
+            string name = group.Key;
+            List<PosStockLevel> items = [.. Sorted(group)];
+            bool showAll = expanded.Contains(name) || items.Count <= PerCategory || search.Length > 0;
+            int low = items.Count(p => p.Status == "Low");
+            int out_ = items.Count(p => p.Status == "Out");
+
+            <section class="inv-group" aria-labelledby="@GroupId(name)">
+                <header>
+                    <h2 id="@GroupId(name)">@name</h2>
+                    <span>@items.Count product@(items.Count == 1 ? "" : "s")</span>
+                    @if (out_ > 0) { <span class="inv-pill tone-bad">@out_ out</span> }
+                    @if (low > 0) { <span class="inv-pill tone-warn">@low low</span> }
+                </header>
+
+                <div class="inv-grid">
+                    @foreach (PosStockLevel p in showAll ? items : items.Take(PerCategory))
+                    {
+                        decimal scale = Math.Max(Math.Max(p.TargetStock ?? 0, p.MaximumStock ?? 0), Math.Max(p.Available, 1));
+                        <article class="inv-card tone-@StockText.Tone(p.Status) @(p.ProductId == highlighted ? "is-found" : null)" @key="p.ProductId">
+                            <div class="inv-card-top">
+                                <span class="inv-pill tone-@StockText.Tone(p.Status)">@StockText.Label(p.Status)</span>
+                                <span class="inv-sku">@p.Sku</span>
+                            </div>
+                            <h3 title="@p.Name">@p.Name</h3>
+                            <div class="inv-qty">
+                                <strong>@StockText.Quantity(p.Available)</strong>
+                                <span>on hand</span>
+                            </div>
+                            <div class="inv-bar" role="img" aria-label="@($"{StockText.Quantity(p.Available)} on hand; reorder at {(p.ReorderPoint is { } r ? StockText.Quantity(r) : "not set")}")">
+                                <i style="width:@Pct(p.Available, scale)%"></i>
+                                @if (p.ReorderPoint is { } reorder)
+                                {
+                                    <b style="left:@Pct(reorder, scale)%" title="Reorder at @StockText.Quantity(reorder)"></b>
+                                }
+                            </div>
+                            <dl class="inv-facts">
+                                <div><dt>Lasts</dt><dd>@StockText.Cover(p)</dd></div>
+                                <div><dt>Sells / day</dt><dd>@p.DailySales.ToString("0.#", CultureInfo.InvariantCulture)</dd></div>
+                                <div><dt>Reorder at</dt><dd>@(p.ReorderPoint is { } r2 ? StockText.Quantity(r2) : "—")</dd></div>
+                            </dl>
+                            @if (p.InTransit > 0 || p.OnHold > 0 || CanSeeCost || StockText.IsIdle(p, today))
+                            {
+                                <p class="inv-notes">
+                                    @if (p.InTransit > 0) { <span>+@StockText.Quantity(p.InTransit) on the way</span> }
+                                    @if (p.OnHold > 0) { <span>@StockText.Quantity(p.OnHold) on hold</span> }
+                                    @if (CanSeeCost) { <span>@StockText.Money(p.StockValue)</span> }
+                                    @if (StockText.IsIdle(p, today)) { <span class="inv-idle-note">@StockText.LastSold(p, today)</span> }
+                                </p>
+                            }
+                        </article>
+                    }
+                </div>
+
+                @if (!showAll)
+                {
+                    <button type="button" class="inv-more" @onclick="() => expanded.Add(name)">Show all @items.Count in @name</button>
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private const int PerCategory = 12;
+
+    private readonly HashSet<string> expanded = [];
+    private PosStockLevelReport? report;
+    private DateTimeOffset loadedAt;
+    private bool loading;
+    private string? error;
+    private string search = string.Empty;
+    private string? category;
+    private string sort = "name";
+    private Guid? highlighted;
+
+    /// <summary>Gets or sets a status to open on, e.g. from the overview ("Out", "Low" or "attention").</summary>
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    /// <summary>Gets or sets a search to open on.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
+    private string? status;
+
+    private bool CanSeeCost => Api.HasPermission("product.cost.view");
+
+    private readonly DateOnly today = StockText.Today;
+
+    private List<PosStockLevel> Visible
+    {
+        get
+        {
+            string term = search.Trim();
+            return [.. (report?.Products ?? [])
+                .Where(p => status switch
+                {
+                    null => true,
+                    "attention" => p.Status is "Out" or "Low",
+                    "idle" => StockText.IsIdle(p, today),
+                    _ => p.Status == status,
+                })
+                .Where(p => category is null || p.Category == category)
+                .Where(p => term.Length == 0
+                    || p.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || p.Sku.Contains(term, StringComparison.OrdinalIgnoreCase))];
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        status = Status is "Out" or "Low" or "Healthy" or "Over" or "attention" or "idle" ? Status : null;
+        search = Query ?? string.Empty;
+        if (Api.HasPermission("inventory.view"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        try
+        {
+            ApiResult<PosStockLevelReport> result = await Api.GetStoreStockLevelsAsync(CancellationToken.None);
+            if (result is { IsSuccess: true, Value: { } value })
+            {
+                report = value;
+                loadedAt = DateTimeOffset.UtcNow;
+                error = null;
+            }
+            else
+            {
+                error = result.Error ?? "The store's stock could not be loaded.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            error = "Head office could not be reached. Stock levels need a connection.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private IEnumerable<PosStockLevel> Sorted(IEnumerable<PosStockLevel> items) => sort switch
+    {
+        "scarce" => items.OrderBy(p => StockText.Rank(p.Status)).ThenBy(p => p.DaysOfCover ?? decimal.MaxValue).ThenBy(p => p.Name),
+        "stock" => items.OrderByDescending(p => p.Available).ThenBy(p => p.Name),
+        "value" => items.OrderByDescending(p => p.StockValue).ThenBy(p => p.Name),
+        _ => items.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
+    };
+
+    private void SetStatus(string? value) => status = status == value ? null : value;
+
+    private void ClearFilters()
+    {
+        search = string.Empty;
+        category = null;
+        status = null;
+        highlighted = null;
+    }
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            search = string.Empty;
+        }
+    }
+
+    // A scan finds the product at head office and narrows the page to it.
+    private async Task OnScannedAsync(BarcodeScan scan)
+    {
+        ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+        if (found is { IsSuccess: true, Value: { } product })
+        {
+            search = product.Sku;
+            highlighted = product.Id;
+        }
+        else
+        {
+            search = scan.Code;
+            highlighted = null;
+        }
+
+        category = null;
+        status = null;
+        StateHasChanged();
+    }
+
+    private static string Pct(decimal value, decimal scale)
+        => Math.Clamp(scale <= 0 ? 0 : value / scale * 100m, 0, 100).ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string GroupId(string name) => "cat-" + string.Concat(name.Where(char.IsLetterOrDigit));
+}

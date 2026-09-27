@@ -25,9 +25,6 @@
                 <h1>New Purchase Order</h1>
                 <p class="vf-subtitle">Add products, review the total, then save as a draft.</p>
             </div>
-            <div class="vf-hero-actions">
-                <button type="button" class="office-button ghost" @onclick="GoBack">← All purchase orders</button>
-            </div>
         </div>
 
         @if (!string.IsNullOrWhiteSpace(_error))
@@ -106,6 +103,12 @@
                         </button>
                     </div>
 
+                    <ScanTarget OnScan="OnScannedAsync" Enabled="@(!_submitting)" />
+                    <div class="scan-strip" role="status">
+                        <span class="scan-strip-mark" aria-hidden="true">▥</span>
+                        <span>@(_scanNote ?? "Scan products to add them; each scan adds one.")</span>
+                        <ScanButton />
+                    </div>
                     @if (_lines.Count == 0)
                     {
                         <div class="office-empty">Search a product above, then add it to start the order.</div>
@@ -376,6 +379,72 @@
         _lines.Remove(line);
     }
 
+    private string? _scanNote;
+    private ScanLine? _scanQueue;
+
+    private Task OnScannedAsync(BarcodeScan scan)
+    {
+        _scanQueue ??= new ScanLine(AddScannedAsync);
+        return _scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task AddScannedAsync(BarcodeScan scan)
+    {
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } scanned })
+            {
+                _scanNote = $"{scan.Code}: {found.Error ?? "not a known product."}";
+                return;
+            }
+
+            // The composer lists only the first page of the catalogue; fetch the
+            // product's ordering details when the scan finds one beyond it.
+            PosOrderableProduct? product = _products.FirstOrDefault(p => p.Id == scanned.Id);
+            if (product is null)
+            {
+                ApiResult<List<PosOrderableProduct>> search = await Api.GetOrderableProductsAsync(scanned.Sku, 0, 20, CancellationToken.None);
+                product = search.Value?.FirstOrDefault(p => p.Id == scanned.Id);
+                if (product is null)
+                {
+                    _scanNote = $"{scanned.Name} cannot be ordered.";
+                    return;
+                }
+
+                _products.Add(product);
+            }
+
+            OrderLine? line = _lines.FirstOrDefault(l => l.ProductId == product.Id);
+            if (line is not null)
+            {
+                line.Quantity += 1m;
+            }
+            else
+            {
+                line = _lines.FirstOrDefault(l => l.ProductId is null) ?? new OrderLine();
+                if (!_lines.Contains(line))
+                {
+                    _lines.Add(line);
+                }
+
+                ApplyProduct(line, product);
+                line.Quantity = 1m;
+            }
+
+            _validationError = null;
+            _scanNote = $"{product.Name}: {line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)} on this order.";
+        }
+        catch (HttpRequestException)
+        {
+            _scanNote = "Head office could not be reached to look that barcode up.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
     private void OnLineProductChanged(OrderLine line, ChangeEventArgs e)
     {
         if (!Guid.TryParse(e.Value?.ToString(), out Guid productId))
@@ -393,6 +462,11 @@
             return;
         }
 
+        ApplyProduct(line, product);
+    }
+
+    private void ApplyProduct(OrderLine line, PosOrderableProduct product)
+    {
         line.ProductId = product.Id;
         line.UnitOfMeasureId = product.BaseUnitOfMeasureId;
         line.UnitCode = _units.TryGetValue(product.BaseUnitOfMeasureId, out PosUnitOfMeasure? unit)

@@ -16,6 +16,7 @@
                     receipt number to find the one the customer is returning from.
                 </p>
 
+                <ScanTarget OnScan="OnReceiptScannedAsync" />
                 <label class="dialog-field">
                     <span>Receipt number</span>
                     <input value="@_number" @oninput="e => _number = e.Value?.ToString() ?? string.Empty" @onkeydown="OnNumberKeyDown"
@@ -160,6 +161,13 @@
 }
 
 @code {
+    // A scanned receipt fills the number and looks the sale up straight away.
+    private async Task OnReceiptScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    {
+        _number = scan.Code;
+        await ReloadAsync();
+    }
+
     private enum ReturnStep
     {
         Pick,

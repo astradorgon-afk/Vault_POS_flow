@@ -40,6 +40,13 @@
                 }
                 @if (Api.HasPermission(PermissionsInventoryView))
                 {
+                    <button type="button" class="office-nav-link @InventoryNavClass" aria-current="@(InventoryNavClass.Length > 0 ? "page" : null)" @onclick="GoInventory">
+                        <span class="office-nav-glyph" aria-hidden="true">▦</span>
+                        Inventory
+                    </button>
+                }
+                @if (Api.HasPermission(PermissionsInventoryView))
+                {
                     <button type="button" class="office-nav-link @NavClass("/inventory/counts")" aria-current="@Current("/inventory/counts")" @onclick="GoCounts">
                         <span class="office-nav-glyph" aria-hidden="true">≡</span>
                         Stock counts
@@ -59,6 +66,12 @@
                         Goods receiving
                     </button>
                 }
+                <span class="office-nav-label">Devices</span>
+                <button type="button" class="office-nav-link @NavClass("/scanner")" aria-current="@Current("/scanner")" @onclick="GoScanner">
+                    <span class="office-nav-glyph" aria-hidden="true">▥</span>
+                    Scanner test
+                </button>
+
                 @if (Api.HasPermission(PermissionsReportsView))
                 {
                     <span class="office-nav-label">Sales</span>
@@ -70,6 +83,22 @@
             </nav>
 
             <main class="office-main">
+                @if (Place is { } place)
+                {
+                    <nav class="office-trail" aria-label="Breadcrumb">
+                        <a class="office-trail-back" href="@place.ParentHref" aria-label="Back to @place.ParentLabel">
+                            <span aria-hidden="true">←</span> Back
+                        </a>
+                        <ol>
+                            <li><a href="/office">Office</a></li>
+                            @if (place.ParentHref != "/office")
+                            {
+                                <li><a href="@place.ParentHref">@place.ParentLabel</a></li>
+                            }
+                            <li aria-current="page">@place.Title</li>
+                        </ol>
+                    </nav>
+                }
                 @Body
             </main>
         </div>
@@ -120,6 +149,27 @@ else if (!_booted)
 
     private string? Current(string path) => NavClass(path).Length > 0 ? "page" : null;
 
+    // Every page below a sidebar entry gets Back to that entry, in one place.
+    // Sidebar pages themselves need none: the sidebar is how you reach them.
+    private OfficePlace? Place
+    {
+        get
+        {
+            string path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+            return path switch
+            {
+                "purchasing/orders/new" => new("Goods receiving", "/purchasing/orders", "New purchase order"),
+                _ when path.StartsWith("purchasing/orders/", StringComparison.Ordinal) => new("Goods receiving", "/purchasing/orders", "Purchase order"),
+                _ when path.StartsWith("inventory/counts/", StringComparison.Ordinal) => new("Stock counts", "/inventory/counts", "Count"),
+                _ when path.StartsWith("transfers/", StringComparison.Ordinal) => new("Transfers", "/transfers", "Transfer"),
+                _ when path.StartsWith("inventory/timeline/", StringComparison.Ordinal) => new("Overview", "/office", "Movement chain"),
+                _ => null,
+            };
+        }
+    }
+
+    private sealed record OfficePlace(string ParentLabel, string ParentHref, string Title);
+
     private void Go(string path) => Navigation.NavigateTo(path);
 
     private async Task GoOffice() => Go("/office");
@@ -128,6 +178,12 @@ else if (!_booted)
     private async Task GoTransfers() => Go("/transfers");
     private async Task GoReceiving() => Go("/purchasing/orders");
     private async Task GoReports() => Go("/reports");
+    private void GoScanner() => Go("/scanner");
+    private void GoInventory() => Go("/inventory");
+
+    // "/inventory" is a prefix of "/inventory/counts", so match it exactly.
+    private string InventoryNavClass
+        => ("/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0]).TrimEnd('/') == "/inventory" ? "active" : string.Empty;
 
     private async Task SignOutAsync()
     {

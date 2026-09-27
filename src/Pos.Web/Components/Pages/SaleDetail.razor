@@ -5,6 +5,7 @@
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 @inject IJSRuntime Js
+@inject PageTrail Trail
 
 <PageTitle>Sale @sale?.Number · VaultFlow</PageTitle>
 
@@ -163,6 +164,7 @@ else if (sale is not null)
             ApiResult<PosSaleDetail> response = await Api.GetSaleAsync(Id, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
             sale = response.Value;
+            Trail.Name($"Sale {sale.Number}");
 
             ApiResult<List<PosLocation>> locations = await Api.GetAsync<List<PosLocation>>(
                 "/api/v1/locations", CancellationToken.None);

@@ -38,6 +38,7 @@ public sealed record ManagerSetupSession(Uri Server, HeadOfficeSession Session, 
 /// <param name="Price">The price in force at this store now, if any.</param>
 /// <param name="Currency">The price's currency.</param>
 /// <param name="Category">The category the till files the product under, when head office sent one.</param>
+/// <param name="Barcodes">Every active barcode the product carries, primary first.</param>
 public sealed record CatalogueItem(
     Guid ProductId,
     Guid? BaseUnitOfMeasureId,
@@ -46,7 +47,41 @@ public sealed record CatalogueItem(
     string? Barcode,
     decimal? Price,
     string? Currency,
-    string? Category = null);
+    string? Category = null,
+    IReadOnlyList<string>? Barcodes = null)
+{
+    /// <summary>
+    /// Finds the product a scanned or typed code belongs to: any of its
+    /// barcodes, in any equivalent retail form (UPC-A or EAN-13), and failing
+    /// that its SKU, for shops that print their own SKU labels.
+    /// </summary>
+    /// <param name="items">The products to look through.</param>
+    /// <param name="raw">What was scanned or typed.</param>
+    /// <returns>The product, or null.</returns>
+    public static CatalogueItem? FindByCode(IEnumerable<CatalogueItem> items, string? raw)
+    {
+        string code = Pos.Shared.Scanning.BarcodeText.Clean(raw);
+        if (code.Length == 0)
+        {
+            return null;
+        }
+
+        IReadOnlyList<string> variants = Pos.Shared.Scanning.BarcodeText.LookupVariants(code);
+        List<CatalogueItem> all = [.. items];
+        foreach (string variant in variants)
+        {
+            CatalogueItem? match = all.FirstOrDefault(item =>
+                string.Equals(item.Barcode, variant, StringComparison.Ordinal)
+                || (item.Barcodes?.Contains(variant, StringComparer.Ordinal) ?? false));
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        return all.FirstOrDefault(item => string.Equals(item.Sku, code, StringComparison.OrdinalIgnoreCase));
+    }
+}
 
 /// <summary>
 /// Sets the register up and signs people in at it: enrolment writes the local
@@ -412,10 +447,10 @@ public sealed class RegisterService(
                     .OrderBy(x => x.LocationId is null ? 1 : 0)
                     .ThenByDescending(x => x.EffectiveFromUtc)
                     .FirstOrDefault();
-                string? barcode = barcodesByProduct[p.Id]
+                List<string> codes = [.. barcodesByProduct[p.Id]
                     .OrderBy(b => b.IsPrimary ? 0 : 1)
-                    .Select(b => b.Barcode)
-                    .FirstOrDefault();
+                    .Select(b => b.Barcode)];
+                string? barcode = codes.FirstOrDefault();
 
                 productReferences.TryGetValue(p.Id.Value, out ProductSaleReference? reference);
                 return new CatalogueItem(
@@ -426,7 +461,8 @@ public sealed class RegisterService(
                     barcode,
                     price?.Amount,
                     price?.Currency,
-                    p.Category);
+                    p.Category,
+                    codes);
             })];
     }
 

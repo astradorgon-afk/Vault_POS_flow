@@ -35,7 +35,6 @@
                 <p class="office-lead">@SupplierName(_order.SupplierId) · @LocationLabel(_order.DestinationLocationId)</p>
             </div>
             <div class="office-actions">
-                <button type="button" class="office-back" @onclick="GoBack">← All purchase orders</button>
                 <span class="@StatusChipClass(_order.Status)">@SplitWords(_order.Status)</span>
             </div>
         </div>
@@ -227,6 +226,7 @@
                     </div>
                 </div>
                 <div class="office-panel-body">
+                    <ScanTarget OnScan="OnScannedAsync" />
                     <form class="receiving-scan" @onsubmit="ScanAsync" @onsubmit:preventDefault="true">
                         <span class="receiving-scan-icon" aria-hidden="true">▤</span>
                         <label class="scan-field">
@@ -245,6 +245,7 @@
                         <button type="submit" class="office-button" disabled="@_scanning">
                             @(_scanning ? "Looking up…" : "Scan")
                         </button>
+                        <ScanButton />
                     </form>
 
                     @if (!string.IsNullOrWhiteSpace(_scanMessage))
@@ -934,7 +935,7 @@
         _scanning = true;
         try
         {
-            ApiResult<PosScannedProduct> lookup = await Api.GetProductByBarcodeAsync(barcode, CancellationToken.None);
+            ApiResult<PosScannedProduct> lookup = await Api.FindProductByScanAsync(barcode, CancellationToken.None);
             if (lookup.IsSuccess && lookup.Value is { } product)
             {
                 int index = _receivingLines.FindIndex(line => line.Line.ProductId == product.Id);
@@ -968,6 +969,20 @@
             _scanning = false;
             await RefocusScanAsync();
         }
+    }
+
+    private ScanLine? _scanQueue;
+
+    // Scans from any scanner go through the same path as the Scan box, one at a time.
+    private Task OnScannedAsync(BarcodeScan scan)
+    {
+        _scanQueue ??= new ScanLine(async next =>
+        {
+            _scanValue = next.Code;
+            await ScanAsync();
+            StateHasChanged();
+        });
+        return _scanQueue.EnqueueAsync(scan);
     }
 
     private void AddQuarantineLine(string barcode, string? productName)
@@ -1130,7 +1145,6 @@
         }
     }
 
-    private void GoBack() => Navigation.NavigateTo("/purchasing/orders");
 
     private static decimal AcceptedTotal(GoodsReceiptDetail receipt) => receipt.Lines.Sum(line => line.QuantityAccepted);
     private static decimal ExpectedTotal(GoodsReceiptDetail receipt) => receipt.Lines.Sum(line => line.QuantityExpected);

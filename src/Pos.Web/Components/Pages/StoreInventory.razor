@@ -2,16 +2,22 @@
 @using System.Globalization
 @attribute [Authorize(Policy = "inventory.view")]
 @rendermode InteractiveServer
+@implements IDisposable
 @inject VaultFlowApiClient Api
+@inject NotificationStore Notifications
 @inject UserSession Session
 @inject NavigationManager Navigation
 
 <PageTitle>Store inventory · VaultFlow</PageTitle>
 
-<header class="qr-head">
+<header class="qr-head sk-head">
     <span class="eyebrow">Monitoring</span>
     <h1>Store inventory</h1>
     <p>What each location holds, from the items running out to the ones piling up.</p>
+    @if (Notifications.IsLive)
+    {
+        <p class="sk-live"><span aria-hidden="true">●</span> Live: updates as registers sell and stock moves</p>
+    }
 </header>
 
 @if (!string.IsNullOrWhiteSpace(message))
@@ -42,7 +48,7 @@ else if (report is not null)
         <button type="button" class="low @(filter == "Low" ? "active" : null)" @onclick='() => ToggleFilter("Low")'><strong>@Count("Low")</strong><span>Low</span></button>
         <button type="button" class="ok @(filter == "Healthy" ? "active" : null)" @onclick='() => ToggleFilter("Healthy")'><strong>@Count("Healthy")</strong><span>Healthy</span></button>
         <button type="button" class="over @(filter == "Over" ? "active" : null)" @onclick='() => ToggleFilter("Over")'><strong>@Count("Over")</strong><span>Overstocked</span></button>
-        <article><strong>@Money(report.Products.Sum(p => p.StockValue))</strong><span>Stock value at cost</span></article>
+        <article class="sk-value"><strong><span class="sk-full">@Money(report.Products.Sum(p => p.StockValue))</span><span class="sk-short">@MoneyShort(report.Products.Sum(p => p.StockValue))</span></strong><span>Stock value at cost</span></article>
     </section>
 
     <div class="sk-extremes">
@@ -74,21 +80,74 @@ else if (report is not null)
         </section>
     </div>
 
-    <section class="qr-card qr-results">
+    List<PosStockLevel> visible = Visible;
+    int pageCount = Math.Max(1, (visible.Count + pageSize - 1) / pageSize);
+    int currentPage = Math.Clamp(page, 1, pageCount);
+    int firstShown = visible.Count == 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    int lastShown = Math.Min(currentPage * pageSize, visible.Count);
+
+    <section class="qr-card qr-results" id="all-products">
         <header class="qr-results-head sk-table-head">
-            <h2>All products <small>@Visible.Count of @report.Products.Count</small></h2>
-            <input class="qr-field sk-search" type="search" placeholder="Search name, SKU or category" @bind="search" @bind:event="oninput" aria-label="Search products" />
+            <h2 tabindex="-1" @ref="tableHeading">All products <small>@visible.Count of @report.Products.Count</small></h2>
         </header>
+
+        <ScanTarget OnScan="OnScannedAsync" />
+        <div class="sk-toolbar" role="search" aria-label="Find products">
+            <input class="sk-search" type="search" placeholder="Search name, SKU or category" aria-label="Search products"
+                   @bind="search" @bind:event="oninput" @bind:after="FirstPage" @onkeydown="OnSearchKey" />
+            <select aria-label="Category" @bind="category" @bind:after="FirstPage">
+                <option value="">All categories</option>
+                @foreach (string name in Categories)
+                {
+                    <option value="@name">@name</option>
+                }
+            </select>
+            <select aria-label="Status" @bind="filter" @bind:after="FirstPage">
+                <option value="">Any status</option>
+                <option value="Out">Out of stock</option>
+                <option value="Low">Low</option>
+                <option value="Healthy">Healthy</option>
+                <option value="Over">Overstocked</option>
+            </select>
+            <select class="sk-sort-menu" aria-label="Sort" @bind="sortKey" @bind:after="OnSortPicked">
+                <option value="status">Running out first</option>
+                <option value="name">Name A–Z</option>
+                <option value="available">Most on hand</option>
+                <option value="days">Fewest days left</option>
+                <option value="sold">Best selling</option>
+                <option value="value">Highest value</option>
+            </select>
+            @if (HasFilters)
+            {
+                <button type="button" class="sk-clear" @onclick="ClearFilters">Clear filters</button>
+            }
+        </div>
+
         <div class="qr-table-wrap">
             <table class="qr-table sk-table">
                 <thead>
                     <tr>
-                        <th>Product</th><th>Category</th><th class="num">Available</th><th class="num">Reorder at</th><th class="num">Target</th>
-                        <th class="num">Sold / day</th><th class="num">Days left</th><th class="num">Value</th><th>Status</th>
+                        @SortHeader("name", "Product", false)
+                        @SortHeader("category", "Category", false)
+                        @SortHeader("available", "Available", true)
+                        <th class="num">Reorder at</th>
+                        <th class="num">Target</th>
+                        @SortHeader("sold", "Sold / day", true)
+                        @SortHeader("days", "Days left", true)
+                        @SortHeader("value", "Value", true)
+                        @SortHeader("status", "Status", false)
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (PosStockLevel row in Visible)
+                    @if (visible.Count == 0)
+                    {
+                        <tr class="static">
+                            <td colspan="9" class="sk-none">
+                                No products match. <button type="button" class="sk-clear" @onclick="ClearFilters">Clear filters</button>
+                            </td>
+                        </tr>
+                    }
+                    @foreach (PosStockLevel row in visible.Skip((currentPage - 1) * pageSize).Take(pageSize))
                     {
                         <tr @key="row.ProductId" class="static">
                             <td><strong>@row.Name</strong><small>@row.Sku</small></td>
@@ -105,6 +164,55 @@ else if (report is not null)
                 </tbody>
             </table>
         </div>
+
+        <ul class="sk-list" aria-label="Products">
+            @if (visible.Count == 0)
+            {
+                <li class="sk-list-none">No products match. <button type="button" class="sk-clear" @onclick="ClearFilters">Clear filters</button></li>
+            }
+            @foreach (PosStockLevel row in visible.Skip((currentPage - 1) * pageSize).Take(pageSize))
+            {
+                <li @key="row.ProductId" class="tone-@Tone(row.Status)">
+                    <div class="sk-list-main"><strong>@row.Name</strong><small>@row.Sku · @row.Category</small></div>
+                    <div class="sk-list-qty"><strong>@Qty(row.Available)</strong><small>on hand</small></div>
+                    <div class="sk-list-meta">
+                        <span class="ov-pill tone-@Tone(row.Status)">@StatusLabel(row.Status)</span>
+                        <span>@CoverLabel(row)</span>
+                        @if (row.DailySales > 0) { <span>@row.DailySales.ToString("0.#", CultureInfo.InvariantCulture)/day</span> }
+                        @if (row.InTransit > 0m) { <span>+@Qty(row.InTransit) coming</span> }
+                    </div>
+                </li>
+            }
+        </ul>
+
+        <nav class="sk-pager" aria-label="Product pages">
+            <span class="sk-pager-range">@(visible.Count == 0 ? "No products" : $"Showing {firstShown:N0}–{lastShown:N0} of {visible.Count:N0}")</span>
+            <label class="sk-pager-size">
+                <span>Rows</span>
+                <select @bind="pageSize" @bind:after="FirstPage">
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </label>
+            <div class="sk-pages">
+                <button type="button" aria-label="First page" disabled="@(currentPage == 1)" @onclick="() => GoTo(1)">«</button>
+                <button type="button" aria-label="Previous page" disabled="@(currentPage == 1)" @onclick="() => GoTo(currentPage - 1)">‹</button>
+                @foreach (int? number in PageNumbers(currentPage, pageCount))
+                {
+                    if (number is { } n)
+                    {
+                        <button type="button" class="@(n == currentPage ? "on" : null)" aria-current="@(n == currentPage ? "page" : null)" @onclick="() => GoTo(n)">@n</button>
+                    }
+                    else
+                    {
+                        <span class="sk-gap" aria-hidden="true">…</span>
+                    }
+                }
+                <button type="button" aria-label="Next page" disabled="@(currentPage == pageCount)" @onclick="() => GoTo(currentPage + 1)">›</button>
+                <button type="button" aria-label="Last page" disabled="@(currentPage == pageCount)" @onclick="() => GoTo(pageCount)">»</button>
+            </div>
+        </nav>
         <p class="sk-note">Sold / day averages the last @report.SalesRateDays days; days left is available stock at that rate.</p>
     </section>
 }
@@ -137,15 +245,185 @@ else if (report is not null)
         .ThenByDescending(r => r.Available)
         .Take(8);
 
-    private List<PosStockLevel> Visible => [.. (report?.Products ?? [])
-        .Where(r => filter is null || r.Status == filter)
-        .Where(r => string.IsNullOrWhiteSpace(search)
-            || r.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)
-            || r.Sku.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)
-            || r.Category.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))];
+    private string? category;
+    private string sortKey = "status";
+    private bool sortDescending;
+    private int pageSize = 25;
+    private int page = 1;
+    private bool focusTable;
+    private ElementReference tableHeading;
+
+    private List<PosStockLevel> Visible
+    {
+        get
+        {
+            string term = search.Trim();
+            IEnumerable<PosStockLevel> rows = (report?.Products ?? [])
+                .Where(r => string.IsNullOrEmpty(filter) || r.Status == filter)
+                .Where(r => string.IsNullOrEmpty(category) || r.Category == category)
+                .Where(r => term.Length == 0
+                    || r.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || r.Sku.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || r.Category.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+            IOrderedEnumerable<PosStockLevel> ordered = sortKey switch
+            {
+                "name" => OrderRows(rows, r => r.Name),
+                "category" => OrderRows(rows, r => r.Category),
+                "available" => OrderRows(rows, r => r.Available),
+                "sold" => OrderRows(rows, r => r.DailySales),
+                // Products that are not selling have no estimate and go last.
+                "days" => OrderRows(rows, r => r.DaysOfCover ?? decimal.MaxValue),
+                "value" => OrderRows(rows, r => r.StockValue),
+                _ => OrderRows(rows, r => StatusRank(r.Status)),
+            };
+
+            return [.. ordered.ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)];
+        }
+    }
+
+    private IEnumerable<string> Categories => (report?.Products ?? [])
+        .Select(r => r.Category)
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Distinct(StringComparer.Ordinal)
+        .Order(StringComparer.OrdinalIgnoreCase);
+
+    private bool HasFilters => !string.IsNullOrWhiteSpace(search) || !string.IsNullOrEmpty(category) || !string.IsNullOrEmpty(filter);
+
+    private IOrderedEnumerable<PosStockLevel> OrderRows<TKey>(IEnumerable<PosStockLevel> rows, Func<PosStockLevel, TKey> key)
+        => sortDescending ? rows.OrderByDescending(key) : rows.OrderBy(key);
+
+    // Scarcest first, the order a buyer works through.
+    private static int StatusRank(string status) => status switch
+    {
+        "Out" => 0,
+        "Low" => 1,
+        "Healthy" => 2,
+        _ => 3,
+    };
+
+    private RenderFragment SortHeader(string key, string label, bool numeric) => __builder =>
+    {
+        bool active = sortKey == key;
+        <th class="@(numeric ? "num" : null)" aria-sort="@(active ? (sortDescending ? "descending" : "ascending") : "none")">
+            <button type="button" class="sk-sort @(active ? "on" : null)" @onclick="() => SortBy(key, numeric)" title="Sort by @label.ToLowerInvariant()">
+                @label <span aria-hidden="true">@(active ? (sortDescending ? "↓" : "↑") : "↕")</span>
+            </button>
+        </th>
+    };
+
+    // Quantities start largest first; days left starts with what runs out soonest.
+    private void SortBy(string key, bool numeric)
+    {
+        if (sortKey == key)
+        {
+            sortDescending = !sortDescending;
+        }
+        else
+        {
+            sortKey = key;
+            sortDescending = numeric && key != "days";
+        }
+
+        page = 1;
+    }
+
+    private void FirstPage() => page = 1;
+
+    // The phone's sort menu picks a column; quantities start largest first.
+    private void OnSortPicked()
+    {
+        sortDescending = sortKey is "available" or "sold" or "value";
+        page = 1;
+    }
+
+    private static string MoneyShort(decimal value) => value switch
+    {
+        >= 1_000_000m => "₱" + (value / 1_000_000m).ToString("0.#", CultureInfo.InvariantCulture) + "M",
+        >= 10_000m => "₱" + (value / 1_000m).ToString("0", CultureInfo.InvariantCulture) + "k",
+        _ => value.ToString("₱#,0", CultureInfo.InvariantCulture),
+    };
+
+    // A scanned product is found at head office, then the table narrows to it.
+    private async Task OnScannedAsync(BarcodeScan scan)
+    {
+        ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+        search = found is { IsSuccess: true, Value: { } product } ? product.Sku : scan.Code;
+        category = null;
+        filter = null;
+        page = 1;
+    }
+
+    private void GoTo(int number)
+    {
+        page = number;
+        focusTable = true;
+    }
+
+    private void ClearFilters()
+    {
+        search = string.Empty;
+        category = null;
+        filter = null;
+        page = 1;
+    }
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            search = string.Empty;
+            page = 1;
+        }
+    }
+
+    // First, last and the pages either side of the current one, with gaps.
+    private static IEnumerable<int?> PageNumbers(int current, int count)
+    {
+        int? previous = null;
+        for (int n = 1; n <= count; n++)
+        {
+            if (n == 1 || n == count || Math.Abs(n - current) <= 1)
+            {
+                if (previous is { } last && n - last > 1)
+                {
+                    yield return null;
+                }
+
+                yield return n;
+                previous = n;
+            }
+        }
+    }
+
+    // Changing page from the pager under the table brings the reader back to
+    // the table's first row instead of leaving them at the bottom.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusTable)
+        {
+            return;
+        }
+
+        focusTable = false;
+        try
+        {
+            await tableHeading.FocusAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The table is not on screen.
+        }
+    }
+
+    private RefreshThrottle? liveRefresh;
 
     protected override async Task OnInitializedAsync()
     {
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadQuietlyAsync));
+        Notifications.InventoryChanged += OnInventoryChanged;
+        Notifications.Changed += OnNotificationsChanged;
+
         ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
         if (!response.IsSuccess || response.Value is null)
         {
@@ -174,6 +452,7 @@ else if (report is not null)
     private async Task SelectAsync(Guid locationId)
     {
         selectedId = locationId;
+        page = 1;
         filter = null;
         loading = true;
         message = null;
@@ -202,7 +481,55 @@ else if (report is not null)
         }
     }
 
-    private void ToggleFilter(string status) => filter = filter == status ? null : status;
+    // A register sale, transfer, count or receipt moved stock somewhere.
+    private void OnInventoryChanged(IReadOnlyList<Guid> changed)
+    {
+        if (selectedId is { } shown && (changed.Count == 0 || changed.Contains(shown)))
+        {
+            liveRefresh?.Request();
+        }
+    }
+
+    private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    // Swaps in fresh figures without the loading state, so the filter, search
+    // and scroll position stay where the reader left them.
+    private async Task ReloadQuietlyAsync()
+    {
+        if (loading || selectedId is not { } locationId)
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<PosStockLevelReport> response = await Api.GetAsync<PosStockLevelReport>(
+                FormattableString.Invariant($"/api/v1/inventory/stock-levels?locationId={locationId:D}"),
+                CancellationToken.None);
+            if (response is { IsSuccess: true, Value: { } fresh } && selectedId == locationId)
+            {
+                report = fresh;
+                StateHasChanged();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the figures on screen; the next change tries again.
+        }
+    }
+
+    public void Dispose()
+    {
+        Notifications.InventoryChanged -= OnInventoryChanged;
+        Notifications.Changed -= OnNotificationsChanged;
+        liveRefresh?.Dispose();
+    }
+
+    private void ToggleFilter(string status)
+    {
+        filter = filter == status ? null : status;
+        page = 1;
+    }
 
     private int Count(string status) => report?.Products.Count(p => p.Status == status) ?? 0;
 

@@ -1,0 +1,64 @@
+@* Starts barcode scanning once for the whole app: keyboard-wedge scanners
+   through the page, handheld triggers through the Android receiver. *@
+@using Pos.Shared.Scanning
+@using Microsoft.Extensions.Logging
+@using Pos.SharedUI.Scanning
+@implements IDisposable
+@inject KeyboardScanListener Keyboard
+@inject ScanRouter Router
+@inject ILogger<ScannerHost> Logger
+
+<ScanFeedback Hint="Open the till, a stock count, a transfer or a delivery to use it." />
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        Router.Scanned += Record;
+        Keyboard.BurstRejected += RecordRejected;
+        try
+        {
+            await Keyboard.StartAsync();
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Keyboard scanners could not be started.");
+        }
+    }
+
+    // Every scan leaves a line in the log, and in development builds in a file
+    // beside the device database, so a scan can be checked without a screen.
+    private void Record(BarcodeScan scan)
+    {
+        Logger.LogInformation("Scan {Code} from {Source} {Vendor}", scan.Code, scan.Source, scan.Vendor);
+        Append($"{scan.ReceivedAtUtc:O}\t{scan.Source}\t{scan.Vendor}\t{scan.Symbology}\t{scan.Code}");
+    }
+
+    // Typing judged to be a person, with its pace, so the thresholds can be checked.
+    private void RecordRejected(string text, double[] times)
+        => Append($"rejected\t{text}\tgaps {string.Join(",", times.Skip(1).Select((t, i) => Math.Round(t - times[i], 1)))}");
+
+    private static void Append(string line)
+    {
+#if DEBUG
+        try
+        {
+            File.AppendAllText(Path.Combine(FileSystem.AppDataDirectory, "scanner.log"), line + Environment.NewLine);
+        }
+        catch (IOException)
+        {
+            // Logging must never get in the way of a sale.
+        }
+#endif
+    }
+
+    public void Dispose()
+    {
+        Router.Scanned -= Record;
+        Keyboard.BurstRejected -= RecordRejected;
+    }
+}

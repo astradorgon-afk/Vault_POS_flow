@@ -4,6 +4,7 @@
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
+@inject PageTrail Trail
 
 <PageTitle>Return @salesReturn?.Number · VaultFlow</PageTitle>
 
@@ -230,6 +231,9 @@ else if (salesReturn is not null)
             ApiResult<PosReturnDetail> response = await Api.GetReturnAsync(Id, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
             salesReturn = response.Value;
+            Trail.Name(
+                $"Return {salesReturn.Number}",
+                salesReturn.SaleId is { } saleId ? new NavCrumb("Original sale", FormattableString.Invariant($"sales/{saleId:D}")) : null);
         }
         catch (HttpRequestException) { message = "The returns service is unavailable. Try again shortly."; }
     }

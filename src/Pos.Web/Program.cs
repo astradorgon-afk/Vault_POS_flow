@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Pos.Application.Identity;
+using Pos.SharedUI.Scanning;
 using Pos.Web.Components;
 using Pos.Web.Security;
 using Pos.Web.Services;
@@ -29,6 +30,8 @@ builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<UserSession>();
 builder.Services.AddScoped<NotificationStore>();
+builder.Services.AddScoped<PageTrail>();
+builder.Services.AddBarcodeScanning(perSession: true);
 builder.Services.AddScoped<VaultFlowAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(services =>
     services.GetRequiredService<VaultFlowAuthenticationStateProvider>());

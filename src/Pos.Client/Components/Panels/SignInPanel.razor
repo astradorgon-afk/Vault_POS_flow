@@ -12,7 +12,7 @@
         </label>
         <label>
             <span>Password</span>
-            <input type="password" @bind="_password" autocomplete="current-password" />
+            <PasswordInput @bind-Value="_password" />
         </label>
         <div class="form-actions">
             <button type="submit" class="button-primary" disabled="@_busy">@(_busy ? "Signing in…" : "Sign in")</button>
@@ -23,6 +23,8 @@
     {
         <p class="form-error" role="alert">@_error</p>
     }
+
+    <p class="panel-footnote"><a href="/scanner">Test a barcode scanner</a></p>
 </div>
 
 @code {

@@ -1,0 +1,256 @@
+@page "/analytics/products"
+@attribute [Authorize(Policy = "sale.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+
+<PageTitle>Product analytics · VaultFlow</PageTitle>
+
+<div class="pa">
+    <header class="pa-head">
+        <h1>Best &amp; worst sellers</h1>
+        <p>@PeriodLabel@(report is null ? "" : $" · {report.From:d MMM} – {report.To:d MMM}")</p>
+    </header>
+
+    <div class="pa-controls">
+        <div class="pa-seg" role="radiogroup" aria-label="Period">
+            @foreach (int days in Periods)
+            {
+                int d = days;
+                <button type="button" role="radio" aria-checked="@(period == d ? "true" : "false")" class="@(period == d ? "on" : null)" @onclick="() => SetPeriodAsync(d)">@d days</button>
+            }
+        </div>
+        <div class="pa-seg" role="radiogroup" aria-label="Rank by">
+            <button type="button" role="radio" aria-checked="@(!byUnits ? "true" : "false")" class="@(!byUnits ? "on" : null)" @onclick="() => SetRankAsync(false)">Revenue</button>
+            <button type="button" role="radio" aria-checked="@(byUnits ? "true" : "false")" class="@(byUnits ? "on" : null)" @onclick="() => SetRankAsync(true)">Units</button>
+        </div>
+    </div>
+
+    @if (report is not null)
+    {
+        <nav class="pa-stores" aria-label="Store">
+            @foreach (PosStoreProductPerformance store in Choices)
+            {
+                PosStoreProductPerformance s = store;
+                <button type="button" class="@(Selected?.Code == s.Code ? "on" : null)" aria-pressed="@(Selected?.Code == s.Code ? "true" : "false")" @onclick="() => selectedCode = s.Code">
+                    @(s.Code == "ALL" ? "All stores" : s.Name)
+                </button>
+            }
+        </nav>
+    }
+
+    @if (error is not null)
+    {
+        <div class="pa-error" role="alert">@error</div>
+    }
+    else if (loading && report is null)
+    {
+        <div class="pa-skeleton" aria-label="Loading"><i></i><i></i><i></i></div>
+    }
+    else if (Selected is { } store)
+    {
+        <section class="pa-summary @(loading ? "is-loading" : null)" aria-label="Summary">
+            <div><span>Net sales</span><strong>@Money(store.NetSales)</strong></div>
+            <div><span>Units sold</span><strong>@Qty(store.UnitsSold)</strong></div>
+            <div><span>Products selling</span><strong>@store.ProductsSold</strong></div>
+            <div class="@(store.ProductsNotSold > 0 ? "warn" : null)"><span>Not sold at all</span><strong>@store.ProductsNotSold</strong></div>
+        </section>
+
+        <div class="pa-lists @(loading ? "is-loading" : null)">
+            <section class="pa-card best" aria-labelledby="pa-best">
+                <header>
+                    <h2 id="pa-best"><span aria-hidden="true">▲</span> Best sellers</h2>
+                    <small>by @(byUnits ? "units" : "revenue")</small>
+                </header>
+                @if (store.Best.Count == 0)
+                {
+                    <p class="pa-empty">Nothing sold in this period.</p>
+                }
+                else
+                {
+                    <ol>
+                        @foreach (PosProductRank p in store.Best)
+                        {
+                            PosProductRank row = p;
+                            <li>
+                                <button type="button" @onclick="() => Open(row, best: true)">
+                                    <span class="pa-rank @(row.Rank == 1 ? "gold" : null)">@row.Rank</span>
+                                    <span class="pa-name"><strong>@row.Name</strong><small>@row.Category</small></span>
+                                    <span class="pa-figure">
+                                        <strong>@(byUnits ? Qty(row.Quantity) : Money(row.NetSales))</strong>
+                                        <small>@row.Share.ToString("0.#", CultureInfo.InvariantCulture)% of sales</small>
+                                    </span>
+                                    <span class="pa-bar" aria-hidden="true"><i style="width:@BarWidth(row, store.Best)%"></i></span>
+                                </button>
+                            </li>
+                        }
+                    </ol>
+                }
+            </section>
+
+            <section class="pa-card worst" aria-labelledby="pa-worst">
+                <header>
+                    <h2 id="pa-worst"><span aria-hidden="true">▼</span> Worst sellers</h2>
+                    <small>unsold stock first</small>
+                </header>
+                @if (store.Worst.Count == 0)
+                {
+                    <p class="pa-empty">No stocked products yet.</p>
+                }
+                else
+                {
+                    <ol>
+                        @foreach (PosProductRank p in store.Worst)
+                        {
+                            PosProductRank row = p;
+                            <li>
+                                <button type="button" @onclick="() => Open(row, best: false)">
+                                    <span class="pa-rank">@row.Rank</span>
+                                    <span class="pa-name"><strong>@row.Name</strong><small>@row.Category</small></span>
+                                    <span class="pa-figure">
+                                        @if (row.Quantity == 0)
+                                        {
+                                            <span class="pa-chip">0 sold</span>
+                                        }
+                                        else
+                                        {
+                                            <strong>@(byUnits ? Qty(row.Quantity) : Money(row.NetSales))</strong>
+                                        }
+                                        <small>@Qty(row.OnHand) on hand</small>
+                                    </span>
+                                </button>
+                            </li>
+                        }
+                    </ol>
+                }
+            </section>
+        </div>
+    }
+</div>
+
+@if (sheet is { } open)
+{
+    <div class="pa-scrim" @onclick="Close"></div>
+    <section class="pa-sheet" role="dialog" aria-modal="true" aria-labelledby="pa-sheet-title">
+        <span class="pa-grip" aria-hidden="true"></span>
+        <header>
+            <span class="pa-rank @(sheetIsBest && open.Rank == 1 ? "gold" : null)">@open.Rank</span>
+            <div>
+                <h2 id="pa-sheet-title">@open.Name</h2>
+                <p>@open.Category · @open.Sku</p>
+            </div>
+            <button type="button" class="pa-sheet-close" aria-label="Close" @onclick="Close">×</button>
+        </header>
+        <p class="pa-sheet-verdict @(sheetIsBest ? "good" : "bad")">
+            @(sheetIsBest
+                ? $"#{open.Rank} best seller at {Selected?.Name}"
+                : open.Quantity == 0 ? $"Did not sell once at {Selected?.Name} in {PeriodLabel.ToLowerInvariant()}" : $"#{open.Rank} slowest seller at {Selected?.Name}")
+        </p>
+        <dl>
+            <div><dt>Units sold</dt><dd>@Qty(open.Quantity)</dd></div>
+            <div><dt>Net sales</dt><dd>@Money(open.NetSales)</dd></div>
+            <div><dt>Share of sales</dt><dd>@open.Share.ToString("0.#", CultureInfo.InvariantCulture)%</dd></div>
+            <div><dt>On hand now</dt><dd>@Qty(open.OnHand)</dd></div>
+        </dl>
+        @if (!sheetIsBest && open.OnHand > 0)
+        {
+            <p class="pa-sheet-tip">Consider a promotion, a transfer to a store where it sells, or not reordering it.</p>
+        }
+        @if (Selected is { Code: not "ALL" } storeForLink)
+        {
+            <a class="pa-sheet-action" href="@($"inventory/stock?store={storeForLink.LocationId:D}")">See @storeForLink.Name's stock</a>
+        }
+    </section>
+}
+
+@code {
+    private static readonly int[] Periods = [7, 30, 90];
+
+    private PosProductPerformanceReport? report;
+    private string? error;
+    private bool loading;
+    private int period = 30;
+    private bool byUnits;
+    private string selectedCode = "ALL";
+    private PosProductRank? sheet;
+    private bool sheetIsBest;
+
+    private string PeriodLabel => $"Last {period} days";
+
+    private IEnumerable<PosStoreProductPerformance> Choices
+        => report is null ? [] : report.Stores.Count > 1 ? [report.Business, .. report.Stores] : report.Stores;
+
+    private PosStoreProductPerformance? Selected
+        => Choices.FirstOrDefault(s => s.Code == selectedCode) ?? Choices.FirstOrDefault();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            DateOnly to = StoreClock.Today;
+            ApiResult<PosProductPerformanceReport> result = await Api.GetProductPerformanceAsync(
+                to.AddDays(-(period - 1)), to, byUnits, CancellationToken.None);
+            if (result is { IsSuccess: true, Value: { } value })
+            {
+                report = value;
+            }
+            else
+            {
+                error = result.Error ?? "The analytics could not be loaded.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            error = "Head office could not be reached. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private Task SetPeriodAsync(int days)
+    {
+        if (period == days)
+        {
+            return Task.CompletedTask;
+        }
+
+        period = days;
+        return LoadAsync();
+    }
+
+    private Task SetRankAsync(bool units)
+    {
+        if (byUnits == units)
+        {
+            return Task.CompletedTask;
+        }
+
+        byUnits = units;
+        return LoadAsync();
+    }
+
+    private void Open(PosProductRank row, bool best)
+    {
+        sheet = row;
+        sheetIsBest = best;
+    }
+
+    private void Close() => sheet = null;
+
+    private string BarWidth(PosProductRank row, IReadOnlyList<PosProductRank> all)
+    {
+        decimal top = all.Max(p => byUnits ? p.Quantity : p.NetSales);
+        decimal value = byUnits ? row.Quantity : row.NetSales;
+        return (top <= 0 ? 0 : value / top * 100m).ToString("0.#", CultureInfo.InvariantCulture);
+    }
+
+    private static string Money(decimal amount) => amount.ToString("₱#,0", CultureInfo.InvariantCulture);
+
+    private static string Qty(decimal value) => value.ToString("#,0.##", CultureInfo.InvariantCulture);
+}

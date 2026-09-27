@@ -1,0 +1,97 @@
+@page "/scanner"
+@inject ScanRouter Router
+@inject NavigationManager Navigation
+
+<PageTitle>Scanner test · VaultFlow</PageTitle>
+
+<main class="scanner-test">
+    <header>
+        <button type="button" class="scanner-back" @onclick="GoBack">← Back</button>
+        <h1>Scanner test</h1>
+        <p>Scan anything. Every read appears below, so you can check a scanner works before a shift.</p>
+    </header>
+
+    <ScanTarget OnScan="OnScanned" />
+
+    <section class="scanner-card">
+        <h2>Last scans</h2>
+        @if (_scans.Count == 0)
+        {
+            <p class="scanner-empty">Nothing yet. Scan a barcode@(ScannerTrigger.IsAvailable ? " with the trigger or the Scan button" : "").</p>
+        }
+        else
+        {
+            <ol class="scanner-list">
+                @foreach (BarcodeScan scan in _scans)
+                {
+                    <li>
+                        <strong>@scan.Code</strong>
+                        <span>@SourceLabel(scan)@(scan.Symbology is { } type ? " · " + type : "")</span>
+                        <span class="@(BarcodeText.IsValidGtin(scan.Code) ? "ok" : "plain")">@(BarcodeText.IsValidGtin(scan.Code) ? "✓ valid retail barcode" : IsDigits(scan.Code) && scan.Code.Length is 8 or 12 or 13 or 14 ? "check digit wrong: likely a misread" : "not a retail (EAN/UPC) barcode")</span>
+                        <time>@scan.ReceivedAtUtc.ToLocalTime().ToString("HH:mm:ss")</time>
+                    </li>
+                }
+            </ol>
+        }
+        <div class="scanner-actions">
+            <ScanButton />
+        </div>
+    </section>
+
+    <section class="scanner-card">
+        <h2>No scanner? Try a pretend scan</h2>
+        <form class="scanner-simulate" @onsubmit="SimulateAsync" @onsubmit:preventDefault="true">
+            <input @bind="_simulated" placeholder="e.g. 4800016123456" aria-label="Barcode to pretend-scan" autocomplete="off" spellcheck="false" />
+            <button type="submit" disabled="@string.IsNullOrWhiteSpace(_simulated)">Send as a scan</button>
+        </form>
+    </section>
+
+    <section class="scanner-card scanner-help">
+        <h2>Setting a scanner up</h2>
+        <dl>
+            <dt>USB scanner (Windows)</dt>
+            <dd>Plug it in. Most work straight away in keyboard mode. If a scan types into boxes instead of appearing here, set the scanner to add <em>Enter</em> after each code (see its manual's setup barcodes).</dd>
+            <dt>Bluetooth scanner</dt>
+            <dd>Pair it in keyboard (HID) mode from the device's Bluetooth settings.</dd>
+            <dt>Android handheld with a trigger</dt>
+            <dd>Sunmi, Urovo, Newland, iData, Datalogic and Seuic handhelds work with their standard settings. For Zebra (DataWedge), Honeywell and others, set the scanner's output to <strong>Intent / broadcast</strong> with the action <code>@ScanIntentProfiles.VaultFlowAction</code>. Keyboard mode also works.</dd>
+        </dl>
+    </section>
+</main>
+
+@code {
+    private readonly List<BarcodeScan> _scans = [];
+    private string _simulated = string.Empty;
+
+    protected override void OnInitialized() => _scans.AddRange(Router.Recent.Take(10));
+
+    private void OnScanned(BarcodeScan scan)
+    {
+        _scans.Insert(0, scan);
+        if (_scans.Count > 10)
+        {
+            _scans.RemoveAt(_scans.Count - 1);
+        }
+    }
+
+    private async Task SimulateAsync()
+    {
+        string code = BarcodeText.Clean(_simulated);
+        _simulated = string.Empty;
+        if (code.Length > 0)
+        {
+            await Router.DispatchAsync(new BarcodeScan(code, ScanSource.Simulated, DateTimeOffset.UtcNow));
+        }
+    }
+
+    private static string SourceLabel(BarcodeScan scan) => scan.Source switch
+    {
+        ScanSource.Keyboard => "USB / Bluetooth / keyboard-mode scanner",
+        ScanSource.AndroidIntent => $"Handheld trigger ({scan.Vendor})",
+        _ => "Pretend scan",
+    };
+
+    private static bool IsDigits(string code) => code.All(char.IsAsciiDigit);
+
+    private void GoBack() => Navigation.NavigateTo("/");
+}

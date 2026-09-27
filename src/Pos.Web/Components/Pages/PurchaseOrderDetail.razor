@@ -1,0 +1,313 @@
+@page "/purchasing/{OrderId:guid}"
+@attribute [Authorize(Policy = "purchase.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+@inject PageTrail Trail
+
+<PageTitle>@PurchasingText.OrderName(order?.Number) · VaultFlow</PageTitle>
+
+<header class="qr-head po-head">
+    <div>
+        @if (order is not null)
+        {
+            <h1>@PurchasingText.OrderName(order.Number) <span class="ov-pill tone-@PurchasingText.Tone(order.Status, Outstanding)">@PurchasingText.Label(order.Status, Outstanding)</span></h1>
+            <p>@SupplierName · to @LocationName(order.DestinationLocationId) · raised by @PersonName(order.CreatedByUserId) on @order.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</p>
+        }
+    </div>
+    @if (order is not null)
+    {
+        <div class="po-head-total"><span>Order total</span><strong>@PurchasingText.Money(order.GrandTotal)</strong></div>
+    }
+</header>
+
+@if (!string.IsNullOrWhiteSpace(notice))
+{
+    <div class="po-flash @(noticeOk ? "ok" : "bad")" role="status"><span>@notice</span><button type="button" aria-label="Dismiss" @onclick="() => notice = null">×</button></div>
+}
+
+@if (loading)
+{
+    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading the order…</p></div></section>
+}
+else if (order is { } o)
+{
+    int stageIndex = PurchasingText.StageIndex(o.Status);
+    @if (stageIndex >= 0)
+    {
+        <ol class="po-progress" aria-label="Order progress">
+            @for (int i = 0; i < PurchasingText.Stages.Length; i++)
+            {
+                string state = i < stageIndex ? "done" : i == stageIndex ? "now" : "";
+                <li class="@state" aria-current="@(i == stageIndex ? "step" : null)">@PurchasingText.Label(PurchasingText.Stages[i])</li>
+            }
+        </ol>
+    }
+    else
+    {
+        <div class="po-alert">This order was @PurchasingText.Label(o.Status).ToLowerInvariant()@(string.IsNullOrWhiteSpace(o.CancelledReason) ? "." : ": " + o.CancelledReason)</div>
+    }
+
+    @if (PurchasingText.IsIncomplete(o.Status, Outstanding))
+    {
+        List<PosPurchaseOrderLine> shortLines = [.. o.Lines.Where(line => Due(line) > 0)];
+        <section class="po-incomplete" role="status">
+            <div>
+                <strong>@(o.Status == "Closed" ? "Closed incomplete" : "Incomplete delivery") — @shortLines.Count of @o.Lines.Count line@(o.Lines.Count == 1 ? "" : "s") not fully delivered</strong>
+                <span>@PurchasingText.Quantity(Outstanding) unit@(Outstanding == 1 ? "" : "s") still owed by @SupplierName@(o.Status == "Closed" && !string.IsNullOrWhiteSpace(o.ClosedReason) ? " · closed because: " + o.ClosedReason : "")</span>
+            </div>
+            <ul>
+                @foreach (PosPurchaseOrderLine line in shortLines)
+                {
+                    decimal refused = RefusedFor(line.Id);
+                    <li>
+                        <span>@line.LineNo. @(line.ProductName ?? "Product")</span>
+                        <span><b>@PurchasingText.Quantity(Due(line)) short</b> of @PurchasingText.Quantity(line.OrderedQuantity)@(refused > 0 ? $" · {PurchasingText.Quantity(refused)} refused (damaged, wrong or expired)" : "")</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @switch (o.Status)
+    {
+        case "Draft":
+            <section class="qr-card po-card po-action">
+                <div><h2>This order is a draft</h2><p>Nothing happens until it is sent for approval.</p></div>
+                <div class="po-buttons">
+                    @if (confirmDiscard)
+                    {
+                        <span class="po-hint">Discard this draft for good?</span>
+                        <button type="button" class="po-btn" @onclick="() => confirmDiscard = false">Keep it</button>
+                        <button type="button" class="po-btn danger" disabled="@busy" @onclick="DiscardAsync">Discard</button>
+                    }
+                    else if (Can("purchase.create"))
+                    {
+                        <button type="button" class="po-btn" @onclick="() => confirmDiscard = true">Discard draft</button>
+                        <button type="button" class="po-btn primary" disabled="@busy" @onclick="SubmitAsync">Send for approval</button>
+                    }
+                </div>
+            </section>
+            break;
+
+        case "PendingApproval" when Can("purchase.approve"):
+            <section class="qr-card po-card">
+                <div class="po-card-head">
+                    <div>
+                        <h2>Approve line by line</h2>
+                        <p>Tick each line once you have checked the product, quantity and cost. Approve unlocks when every line is ticked.</p>
+                    </div>
+                    <div class="po-meter" role="progressbar" aria-valuemin="0" aria-valuemax="@o.Lines.Count" aria-valuenow="@reviewed.Count">
+                        <strong>@reviewed.Count of @o.Lines.Count</strong><span>lines checked</span>
+                        <i style="width:@(o.Lines.Count == 0 ? 0 : reviewed.Count * 100 / o.Lines.Count)%"></i>
+                    </div>
+                </div>
+                @if (o.CreatedByUserId == MyId)
+                {
+                    <div class="po-alert">You raised this order. Unless it is within your self-approval limit, someone else has to approve it.</div>
+                }
+                <div class="qr-table-wrap">
+                    <table class="qr-table po-lines">
+                        <thead><tr><th>Checked</th><th>#</th><th>Product</th><th class="num">Quantity</th><th class="num">Unit cost</th><th class="num">Line total</th></tr></thead>
+                        <tbody>
+                            @foreach (PosPurchaseOrderLine line in o.Lines)
+                            {
+                                bool ok = reviewed.Contains(line.Id);
+                                <tr class="@(ok ? "po-ok" : null)" @onclick="() => ToggleReviewed(line.Id)">
+                                    <td><input type="checkbox" checked="@ok" aria-label="Checked line @line.LineNo" @onclick:stopPropagation="true" @onchange="() => ToggleReviewed(line.Id)" /></td>
+                                    <td>@line.LineNo</td>
+                                    <td><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
+                                    <td class="num">@PurchasingText.Quantity(line.OrderedQuantity) @UnitName(line.UnitOfMeasureId)</td>
+                                    <td class="num">@PurchasingText.Money(line.UnitCost)</td>
+                                    <td class="num"><strong>@PurchasingText.Money(line.LineTotal)</strong></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot><tr><td colspan="5" class="num">Total</td><td class="num"><strong>@PurchasingText.Money(o.GrandTotal)</strong></td></tr></tfoot>
+                    </table>
+                </div>
+                <label class="po-field wide"><span>Notes <em>required to reject</em></span><textarea rows="2" @bind="decisionNotes" @bind:event="oninput" placeholder="Anything the buyer should know"></textarea></label>
+                <div class="po-buttons">
+                    <button type="button" class="po-btn danger-ghost" disabled="@(busy || decisionNotes.Trim().Length < 5)" @onclick="RejectAsync">Reject</button>
+                    <button type="button" class="po-btn primary" disabled="@(busy || reviewed.Count < o.Lines.Count)" @onclick="ApproveAsync">
+                        @(reviewed.Count < o.Lines.Count ? $"Check {o.Lines.Count - reviewed.Count} more to approve" : "Approve order")
+                    </button>
+                </div>
+            </section>
+            break;
+
+        case "PendingApproval":
+            <div class="po-alert">Waiting for someone with approval rights to review it.</div>
+            break;
+
+        case "Approved" when Can("purchase.approve"):
+            <section class="qr-card po-card po-action">
+                <div><h2>Approved — send it to the supplier</h2><p>Send the order to @SupplierName by e-mail or phone, then mark it as sent so the warehouse can receive it.</p></div>
+                <div class="po-buttons">
+                    <button type="button" class="po-btn primary" disabled="@busy" @onclick="SendAsync">Mark as sent to supplier</button>
+                </div>
+            </section>
+            break;
+
+        case "Ordered" or "PartiallyReceived" when Can("purchase.receive"):
+            @ReceivePanel(o)
+            break;
+    }
+
+    @if (o.Status is "Approved" or "Ordered" or "PartiallyReceived" or "FullyReceived" && Can("purchase.approve"))
+    {
+        <details class="po-more">
+            <summary>More actions</summary>
+            <div class="po-more-body">
+                <label class="po-field wide"><span>Reason</span><input type="text" @bind="endReason" @bind:event="oninput" placeholder="Why are you closing or cancelling it? (5+ characters)" /></label>
+                <div class="po-buttons">
+                    @if (o.Status is "PartiallyReceived" or "FullyReceived")
+                    {
+                        <button type="button" class="po-btn" disabled="@(busy || (o.Status != "FullyReceived" && endReason.Trim().Length < 5))" @onclick="CloseAsync">Close order</button>
+                    }
+                    @if (o.Status != "FullyReceived")
+                    {
+                        <button type="button" class="po-btn danger" disabled="@(busy || endReason.Trim().Length < 5)" @onclick="CancelAsync">Cancel order</button>
+                    }
+                </div>
+            </div>
+        </details>
+    }
+
+    @if (o.Status is not "PendingApproval")
+    {
+        <section class="qr-card qr-results">
+            <header class="qr-results-head"><h2>Lines <small>@o.Lines.Count</small></h2></header>
+            <div class="qr-table-wrap">
+                <table class="qr-table po-lines">
+                    <thead><tr><th>#</th><th>Product</th><th class="num">Ordered</th><th class="num">Received good</th><th class="num">Still due</th><th class="num">Unit cost</th><th class="num">Line total</th></tr></thead>
+                    <tbody>
+                        @foreach (PosPurchaseOrderLine line in o.Lines)
+                        {
+                            decimal got = ReceivedFor(line.Id);
+                            bool isShort = Due(line) > 0 && o.Status is "PartiallyReceived" or "Closed";
+                            <tr class="static @(isShort ? "po-short-row" : null)">
+                                <td>@line.LineNo</td>
+                                <td><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
+                                <td class="num">@PurchasingText.Quantity(line.OrderedQuantity)</td>
+                                <td class="num">@PurchasingText.Quantity(got)</td>
+                                <td class="num">@(Due(line) > 0 ? PurchasingText.Quantity(Due(line)) : "✓")@if (isShort) { <small>short</small> }</td>
+                                <td class="num">@PurchasingText.Money(line.UnitCost)</td>
+                                <td class="num">@PurchasingText.Money(line.LineTotal)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    @if (receipts.Count > 0)
+    {
+        <section class="qr-card po-card">
+            <h2>Deliveries <small>@receipts.Count</small></h2>
+            @foreach (PosGoodsReceipt receipt in receipts.OrderByDescending(r => r.ReceivedAtUtc))
+            {
+                <div class="po-delivery">
+                    <div class="po-delivery-head">
+                        <strong>@receipt.Number</strong>
+                        <span>@receipt.ReceivedAtUtc.InStoreTime().ToString("d MMM yyyy, h:mm tt", CultureInfo.InvariantCulture) · by @PersonName(receipt.ReceivedByUserId)</span>
+                        @if (receipt.DocumentsMissing) { <span class="ov-pill tone-warn">Documents missing</span> }
+                        @if (receipt.CostVariancePendingApproval) { <span class="ov-pill tone-warn">Cost change awaiting approval</span> }
+                    </div>
+                    <ul>
+                        @foreach (PosGoodsReceiptLine line in receipt.Lines)
+                        {
+                            <li>
+                                <span>@LineName(line.PurchaseOrderLineId)</span>
+                                <span>@PurchasingText.Quantity(line.QuantityReceived) received · @PurchasingText.Quantity(line.QuantityAccepted) accepted@(line.QuantityDamaged + line.QuantityWrongItem + line.QuantityExpired > 0 ? $" · {PurchasingText.Quantity(line.QuantityDamaged + line.QuantityWrongItem + line.QuantityExpired)} with problems" : "")</span>
+                            </li>
+                        }
+                    </ul>
+                    @foreach (PosReceivingDiscrepancy issue in receipt.Discrepancies)
+                    {
+                        <p class="po-issue">⚠ Line @issue.LineNo: @SplitWords(issue.Kind).ToLowerInvariant() × @PurchasingText.Quantity(issue.Quantity) (@PurchasingText.Money(issue.ValueImpact))@(issue.ResolutionOutcome is { } outcome ? " — resolved: " + SplitWords(outcome).ToLowerInvariant() : " — open")</p>
+                    }
+                </div>
+            }
+        </section>
+    }
+
+    @if (o.Approvals.Count > 0)
+    {
+        <section class="qr-card po-card">
+            <h2>Decisions</h2>
+            <ul class="po-timeline">
+                @foreach (PosPurchaseApproval decision in o.Approvals.OrderBy(a => a.DecidedAtUtc))
+                {
+                    <li><strong>@decision.Decision</strong> by @PersonName(decision.ApproverUserId) · @decision.DecidedAtUtc.InStoreTime().ToString("d MMM yyyy, h:mm tt", CultureInfo.InvariantCulture)@(string.IsNullOrWhiteSpace(decision.Notes) ? "" : " — " + decision.Notes)</li>
+                }
+            </ul>
+        </section>
+    }
+}
+
+@code {
+    // One delivery, checked line by line: every line is either counted or
+    // marked as not in this delivery before it can be recorded.
+    private RenderFragment ReceivePanel(PosPurchaseOrder o) => __builder =>
+    {
+        <section class="qr-card po-card">
+            <div class="po-card-head">
+                <div>
+                    <h2>Record a delivery</h2>
+                    <p>Go through the delivery line by line. Mark each line as arrived in full, enter what you counted, or mark it as not in this delivery.</p>
+                </div>
+                <div class="po-meter" role="progressbar" aria-valuemin="0" aria-valuemax="@receiving.Count" aria-valuenow="@AccountedCount">
+                    <strong>@AccountedCount of @receiving.Count</strong><span>lines accounted for</span>
+                    <i style="width:@(receiving.Count == 0 ? 0 : AccountedCount * 100 / receiving.Count)%"></i>
+                </div>
+            </div>
+
+            <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
+            <p class="po-scan-hint">▥ @(scanNote ?? "Scan items as you unpack: each scan counts one more of that product.")</p>
+            <div class="po-receive">
+                @foreach (ReceiveLine line in receiving)
+                {
+                    <div class="po-receive-line @(line.Mode == ReceiveMode.None ? "" : "done") @(line.Problem is null ? "" : "bad")">
+                        <div class="po-receive-what">
+                            <strong>@line.Line.LineNo. @(line.Line.ProductName ?? "Product")</strong>
+                            <small>@line.Line.ProductSku · ordered @PurchasingText.Quantity(line.Line.OrderedQuantity) · <b>@PurchasingText.Quantity(line.Due) still due</b></small>
+                        </div>
+                        <div class="po-choice" role="radiogroup" aria-label="Line @line.Line.LineNo">
+                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.All) ? "true" : "false")" class="@(line.Mode == ReceiveMode.All ? "on" : null)" disabled="@(line.Due <= 0)" @onclick="() => SetMode(line, ReceiveMode.All)">✓ All @PurchasingText.Quantity(line.Due) arrived</button>
+                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.Counted) ? "true" : "false")" class="@(line.Mode == ReceiveMode.Counted ? "on" : null)" @onclick="() => SetMode(line, ReceiveMode.Counted)">Enter counts</button>
+                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.Missing) ? "true" : "false")" class="@(line.Mode == ReceiveMode.Missing ? "on missing" : null)" @onclick="() => SetMode(line, ReceiveMode.Missing)">Not in this delivery</button>
+                        </div>
+                        @if (line.Mode == ReceiveMode.Counted)
+                        {
+                            <div class="po-counts">
+                                <label><span>Received</span><input type="number" min="0" @bind="line.Received" @bind:event="oninput" /></label>
+                                <label><span>of which damaged</span><input type="number" min="0" @bind="line.Damaged" @bind:event="oninput" /></label>
+                                <label><span>wrong item</span><input type="number" min="0" @bind="line.WrongItem" @bind:event="oninput" /></label>
+                                <label><span>expired</span><input type="number" min="0" @bind="line.Expired" @bind:event="oninput" /></label>
+                                <label><span>Unit cost on invoice</span><input type="number" min="0" step="0.01" @bind="line.UnitCost" @bind:event="oninput" /></label>
+                                <label><span>Lot <em>optional</em></span><input type="text" @bind="line.Lot" /></label>
+                                <label><span>Expires <em>optional</em></span><input type="date" @bind="line.ExpiresOn" /></label>
+                            </div>
+                            @if (line.Problem is { } problem)
+                            {
+                                <small class="po-problem">@problem</small>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+
+            <label class="switch-label"><input type="checkbox" @bind="documentsMissing" /><span>The delivery note or invoice is missing</span></label>
+            <div class="po-buttons">
+                <span class="po-hint">@ReceiveSummary</span>
+                <button type="button" class="po-btn primary" disabled="@(busy || !CanRecord)" @onclick="RecordDeliveryAsync">
+                    @(AccountedCount < receiving.Count ? $"Account for {receiving.Count - AccountedCount} more line{(receiving.Count - AccountedCount == 1 ? "" : "s")}" : "Record delivery")
+                </button>
+            </div>
+        </section>
+    };
+}

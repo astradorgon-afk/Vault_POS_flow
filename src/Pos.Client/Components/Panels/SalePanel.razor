@@ -67,6 +67,7 @@
             <section class="till-pane till-pane-left @(PaymentShown ? "pane-dimmed" : string.Empty)">
                 @if (_screen is SaleScreen.Selling or SaleScreen.NeedsShift or SaleScreen.OtherShift)
                 {
+                    <ScanTarget OnScan="OnScannedAsync" Enabled="@(!_busy && !PaymentShown)" />
                     <BarcodeEntry
                         Value="@_barcode"
                         ValueChanged="OnBarcodeChanged"
@@ -74,6 +75,7 @@
                         OnSubmit="AddFromBarcodeAsync"
                         Disabled="_busy"
                         FocusTicket="_scanTicket" />
+                    <ScanButton />
 
                     <ProductBrowser
                         Items="_items"
@@ -724,10 +726,10 @@
             return;
         }
 
-        CatalogueItem? match = _items.FirstOrDefault(item => string.Equals(item.Barcode, code, StringComparison.Ordinal));
+        CatalogueItem? match = CatalogueItem.FindByCode(_items, code);
         if (match is null)
         {
-            BarcodeError = "No active product matches that barcode.";
+            BarcodeError = $"No product on this till has the barcode {BarcodeText.Clean(code)}.";
         }
         else
         {
@@ -741,6 +743,14 @@
     }
 
     private void OnBarcodeChanged(string value) => _barcode = value;
+
+    // A scan from any scanner rings the item up as if it had been typed in the box.
+    private async Task OnScannedAsync(BarcodeScan scan)
+    {
+        _barcode = scan.Code;
+        await AddFromBarcodeAsync();
+        StateHasChanged();
+    }
 
     private int InSaleQuantity(Guid productId) => _cart.Sum(line => line.Item.ProductId == productId ? line.Quantity : 0);
 

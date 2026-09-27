@@ -63,7 +63,8 @@ public sealed record PurchaseOrderSummary(
     decimal GrandTotal,
     Guid CreatedByUserId,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? OrderedAtUtc);
+    DateTimeOffset? OrderedAtUtc,
+    decimal OutstandingQuantity = 0m);
 
 /// <summary>A purchase order line.</summary>
 public sealed record PurchaseOrderLineSummary(
@@ -73,7 +74,9 @@ public sealed record PurchaseOrderLineSummary(
     Guid UnitOfMeasureId,
     decimal OrderedQuantity,
     decimal UnitCost,
-    decimal LineTotal);
+    decimal LineTotal,
+    string? ProductSku = null,
+    string? ProductName = null);
 
 /// <summary>An approval decision recorded against a purchase order.</summary>
 public sealed record PurchaseApprovalSummary(
@@ -358,7 +361,48 @@ public static class PurchaseEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return TypedResults.Ok(orders);
+        return TypedResults.Ok(await WithOutstandingAsync(context, orders, cancellationToken).ConfigureAwait(false));
+    }
+
+    // What the supplier still owes on orders that stopped short: partly
+    // received, or closed before everything good arrived. Refused units
+    // (damaged, wrong item, expired) do not count as delivered.
+    private static async Task<List<PurchaseOrderSummary>> WithOutstandingAsync(
+        PosDbContext context,
+        List<PurchaseOrderSummary> orders,
+        CancellationToken cancellationToken)
+    {
+        PurchaseOrderId[] ids = [.. orders
+            .Where(o => o.Status is nameof(PurchaseOrderStatus.PartiallyReceived) or nameof(PurchaseOrderStatus.Closed))
+            .Select(o => new PurchaseOrderId(o.Id))];
+        if (ids.Length == 0)
+        {
+            return orders;
+        }
+
+        // SQLite stores decimals as text, so the sums are taken in memory.
+        List<PurchaseOrderLine> lines = await context.PurchaseOrderLines
+            .AsNoTracking()
+            .Where(l => ids.Contains(l.PurchaseOrderId))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        List<GoodsReceiptLine> received = await context.GoodsReceipts
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.PurchaseOrderId) && r.Status == GoodsReceiptStatus.Posted)
+            .SelectMany(r => r.Lines)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        Dictionary<PurchaseOrderLineId, decimal> goodByLine = received
+            .GroupBy(l => l.PurchaseOrderLineId)
+            .ToDictionary(g => g.Key, g => g.Sum(l => l.QuantityReceived - l.QuantityRejected));
+        Dictionary<Guid, decimal> outstanding = lines
+            .GroupBy(l => l.PurchaseOrderId.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Sum(l => Math.Max(0m, l.OrderedQuantity - goodByLine.GetValueOrDefault(l.Id))));
+
+        return [.. orders.Select(o => outstanding.TryGetValue(o.Id, out decimal due) ? o with { OutstandingQuantity = due } : o)];
     }
 
     private static async Task<IResult> CreatePurchaseOrderAsync(
@@ -436,12 +480,31 @@ public static class PurchaseEndpoints
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return detail is null
-            ? ProblemDetailsMapping.ToProblem(
+        if (detail is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
                 Result.Failure(PurchasingErrors.OrderUnknown(new PurchaseOrderId(id))),
-                currentUser.CorrelationId.Value)
-            : TypedResults.Ok(detail);
+                currentUser.CorrelationId.Value);
+        }
+
+        // Name each line, so a reviewer checks products rather than identifiers.
+        ProductId[] productIds = [.. detail.Lines.Select(l => new ProductId(l.ProductId)).Distinct()];
+        Dictionary<Guid, LineProduct> names = await context.Products
+            .AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .Select(p => new LineProduct(p.Id.Value, p.Sku.Value, p.Name))
+            .ToDictionaryAsync(p => p.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(detail with
+        {
+            Lines = [.. detail.Lines.Select(line => names.TryGetValue(line.ProductId, out LineProduct? product)
+                ? line with { ProductSku = product.Sku, ProductName = product.Name }
+                : line)],
+        });
     }
+
+    private sealed record LineProduct(Guid Id, string Sku, string Name);
 
     private static async Task<IResult> SubmitPurchaseOrderAsync(
         Guid id,

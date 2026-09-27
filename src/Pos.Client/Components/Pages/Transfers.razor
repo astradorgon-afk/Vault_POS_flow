@@ -81,6 +81,12 @@ else
                            @onchange="OnTokenChangedAsync" />
                 </label>
             </div>
+            <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanCreateTransfer && !creating)" />
+            <div class="scan-strip" role="status">
+                <span class="scan-strip-mark" aria-hidden="true">▥</span>
+                <span>Scan products to add them; each scan adds one.</span>
+                <ScanButton />
+            </div>
             <div class="transfer-lines">
                 @for (int index = 0; index < draftLines.Count; index++)
                 {
@@ -329,6 +335,57 @@ else
     }
 
     private void AddLine() => draftLines.Add(new DraftLine(nextMarker++, null, 0m));
+
+    private ScanLine? scanQueue;
+
+    private Task OnScannedAsync(BarcodeScan scan)
+    {
+        scanQueue ??= new ScanLine(AddScannedAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task AddScannedAsync(BarcodeScan scan)
+    {
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } product })
+            {
+                message = $"{scan.Code}: {found.Error ?? "not a known product."}";
+                return;
+            }
+
+            if (products.All(p => p.Id != product.Id))
+            {
+                products.Add(new PosProductSummary(product.Id, product.Sku, product.Name, product.IsActive));
+            }
+
+            int index = draftLines.FindIndex(line => line.ProductId == product.Id);
+            if (index < 0)
+            {
+                index = draftLines.FindIndex(line => line.ProductId is null);
+            }
+
+            if (index < 0)
+            {
+                AddLine();
+                index = draftLines.Count - 1;
+            }
+
+            DraftLine current = draftLines[index];
+            decimal quantity = current.ProductId == product.Id ? current.Quantity + 1m : 1m;
+            draftLines[index] = current with { ProductId = product.Id, Quantity = quantity };
+            message = $"{product.Name}: {quantity.ToString("0.###", CultureInfo.InvariantCulture)} on this transfer.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "Head office could not be reached to look that barcode up.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
 
     private void RemoveLine(int index) => draftLines.RemoveAt(index);
 

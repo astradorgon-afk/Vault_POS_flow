@@ -21,7 +21,10 @@
             <label for="username">Username or email</label>
             <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" disabled="@busy" />
             <label for="password">Password</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required @bind="password" disabled="@busy" />
+            <div class="password-field">
+                <input id="password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" autocapitalize="off" spellcheck="false" required @bind="password" disabled="@busy" />
+                <button type="button" class="password-toggle @(showPassword ? "is-visible" : null)" title="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@(showPassword ? "true" : "false")" aria-label="@(showPassword ? "Hide password" : "Show password")" @onclick="() => showPassword = !showPassword"><svg class="eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="eye-lid" d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><circle class="eye-pupil" cx="12" cy="12" r="2.8" /><line class="eye-slash" x1="4.5" y1="4.5" x2="19.5" y2="19.5" /></svg></button>
+            </div>
             <label for="two-factor">Two-factor code <span>if required</span></label>
             <input id="two-factor" name="two-factor" inputmode="numeric" autocomplete="one-time-code" @bind="twoFactorCode" disabled="@busy" />
             <button type="submit" disabled="@busy">@(busy ? "Signing in…" : "Open workspace")</button>
@@ -30,6 +33,8 @@
 </main>
 
 @code {
+    private bool showPassword;
+
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
     private string userName = string.Empty;
     private string password = string.Empty;

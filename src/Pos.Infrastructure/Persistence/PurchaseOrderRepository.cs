@@ -148,7 +148,9 @@ public sealed class PurchaseOrderRepository(PosDbContext context) : IPurchaseOrd
         }
 
         // SQLite stores decimals as text, so the cumulative total is computed
-        // in memory rather than translated to an SQL SUM.
+        // in memory rather than translated to an SQL SUM. Refused units
+        // (damaged, wrong item, expired) never fill the order: the supplier
+        // still owes them, so the line stays due until good stock arrives.
         List<GoodsReceiptLine> postedLines = await context.GoodsReceipts
             .AsNoTracking()
             .Where(r => r.PurchaseOrderId == orderId && r.Status == GoodsReceiptStatus.Posted)
@@ -158,7 +160,7 @@ public sealed class PurchaseOrderRepository(PosDbContext context) : IPurchaseOrd
 
         Dictionary<PurchaseOrderLineId, decimal> receivedByLine = postedLines
             .GroupBy(l => l.PurchaseOrderLineId)
-            .ToDictionary(g => g.Key, g => g.Sum(l => l.QuantityReceived));
+            .ToDictionary(g => g.Key, g => g.Sum(l => l.QuantityReceived - l.QuantityRejected));
 
         return new PurchaseReceivingContext(
             order,

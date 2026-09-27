@@ -1,3 +1,4 @@
+using Pos.SharedUI.Scanning;
 #if DEBUG
 using Microsoft.Extensions.Logging;
 #endif
@@ -77,6 +78,7 @@ public static class MauiProgram
         // The office console: the same signed-in session drives the head-office
         // HTTP calls, but with a method surface shaped for the back-office pages.
         builder.Services.AddSingleton<BackOfficeService>();
+        builder.Services.AddBarcodeScanning(perSession: false);
 
         // What a whitelisted use case executes inside: one session per register,
         // the device's own unit of work, its append-only local audit, and the

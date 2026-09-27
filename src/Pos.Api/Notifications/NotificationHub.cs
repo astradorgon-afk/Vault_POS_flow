@@ -19,6 +19,9 @@ public sealed class NotificationHub(
     public const string Route = "/hubs/notifications";
     public const string ClientEvent = "notificationReceived";
 
+    /// <summary>Carries the locations whose stock just changed; clients reload what they show.</summary>
+    public const string InventoryChangedEvent = "inventoryChanged";
+
     public override async Task OnConnectedAsync()
     {
         if (!Guid.TryParse(Context.User?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out Guid rawUserId))
@@ -105,5 +108,36 @@ public sealed class SignalRNotificationPublisher(
         await hub.Clients.Group(NotificationGroups.Global)
             .SendAsync(NotificationHub.ClientEvent, item, cancellationToken)
             .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Tells people watching a location that its stock moved. Sent to the same
+/// groups as that location's notifications, so nobody hears about a store
+/// they cannot see.
+/// </summary>
+public sealed class SignalRInventoryChangePublisher(
+    IHubContext<NotificationHub> hub) : IInventoryChangePublisher
+{
+    public async Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(locations);
+
+        Guid[] ids = [.. locations.Select(location => location.Value)];
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        await hub.Clients.Group(NotificationGroups.AllLocations)
+            .SendAsync(NotificationHub.InventoryChangedEvent, ids, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (LocationId location in locations)
+        {
+            await hub.Clients.Group(NotificationGroups.Location(location))
+                .SendAsync(NotificationHub.InventoryChangedEvent, new[] { location.Value }, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 }
