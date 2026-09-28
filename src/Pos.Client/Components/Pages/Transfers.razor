@@ -51,24 +51,38 @@ else
         <section class="open-count">
             <div class="open-count-title">
                 <strong>Request a transfer</strong>
-                <span>Choose the route, then add the lines. The transfer is created as a draft for someone to review.</span>
+                <span>
+                    @(SourceKnown
+                        ? $"Shipping from {SourceLabel} — pick a destination, then search what's in stock here to add it."
+                        : "Choose the route, then add the lines.") The transfer is created as a draft for someone to review.
+                </span>
             </div>
             <div class="open-count-fields">
-                <label class="location-picker">
-                    <span>Source</span>
-                    <select value="@(sourceLocationId?.ToString() ?? string.Empty)" @onchange="OnSourceLocationChangedAsync" disabled="@locationsLoading">
-                        <option value="">Select a source</option>
-                        @foreach (PosLocation location in externalLocations)
-                        {
-                            <option value="@location.Id">@location.Code · @location.Name</option>
-                        }
-                    </select>
-                </label>
+                @if (SourceKnown)
+                {
+                    <div class="location-picker">
+                        <span>Source</span>
+                        <div class="source-fixed" title="This register's own location — every transfer here ships from it.">@SourceLabel</div>
+                    </div>
+                }
+                else
+                {
+                    <label class="location-picker">
+                        <span>Source</span>
+                        <select value="@(sourceLocationId?.ToString() ?? string.Empty)" @onchange="OnSourceLocationChangedAsync" disabled="@locationsLoading">
+                            <option value="">Select a source</option>
+                            @foreach (PosLocation location in externalLocations)
+                            {
+                                <option value="@location.Id">@location.Code · @location.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
                 <label class="location-picker">
                     <span>Destination</span>
                     <select value="@(destinationLocationId?.ToString() ?? string.Empty)" @onchange="OnDestinationLocationChangedAsync" disabled="@locationsLoading">
                         <option value="">Select a destination</option>
-                        @foreach (PosLocation location in externalLocations)
+                        @foreach (PosLocation location in destinationChoices)
                         {
                             <option value="@location.Id">@location.Code · @location.Name</option>
                         }
@@ -94,15 +108,51 @@ else
                     // not the loop variable (which would equal draftLines.Count).
                     int lineIndex = index;
                     <div class="transfer-line" @key="draftLines[lineIndex].Marker">
-                        <select class="line-product"
-                                value="@(draftLines[lineIndex].ProductId?.ToString() ?? string.Empty)"
-                                @onchange="(e) => OnLineProductChangedAsync(lineIndex, e)">
-                            <option value="">Select a product</option>
-                            @foreach (PosProductSummary product in products)
+                        <div class="line-product-field">
+                            @if (draftLines[lineIndex].ProductId is { } pickedId)
                             {
-                                <option value="@product.Id">@product.Sku · @product.Name</option>
+                                PosStockLevel? picked = FindStock(pickedId);
+                                PosProductSummary? scanned = picked is null ? products.FirstOrDefault(p => p.Id == pickedId) : null;
+                                <div class="line-product-picked">
+                                    <span class="lpp-name">@(picked is not null ? $"{picked.Sku} · {picked.Name}" : scanned is not null ? $"{scanned.Sku} · {scanned.Name}" : "Scanned product")</span>
+                                    @if (picked is not null)
+                                    {
+                                        <span class="lpp-avail">@Qty(picked.Available) available</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="lpp-avail lpp-unlisted">not counted here yet</span>
+                                    }
+                                    <button type="button" class="lpp-change" @onclick="() => ClearLineProduct(lineIndex)">Change</button>
+                                </div>
                             }
-                        </select>
+                            else
+                            {
+                                <input type="text" class="line-product-search" placeholder="Search this location's stock by name or SKU…"
+                                       value="@draftLines[lineIndex].Search"
+                                       @oninput="(e) => OnLineSearchChanged(lineIndex, e)" />
+                                @if (draftLines[lineIndex].Search.Trim().Length > 0)
+                                {
+                                    List<PosStockLevel> matches = MatchingStock(draftLines[lineIndex].Search);
+                                    <div class="line-product-results">
+                                        @if (matches.Count == 0)
+                                        {
+                                            <div class="lpr-empty">Nothing in stock here matches "@draftLines[lineIndex].Search".</div>
+                                        }
+                                        else
+                                        {
+                                            @foreach (PosStockLevel match in matches)
+                                            {
+                                                <button type="button" class="line-product-result" @key="match.ProductId" @onclick="() => PickLineProduct(lineIndex, match)">
+                                                    <span class="lpr-name">@match.Sku · @match.Name</span>
+                                                    <span class="lpr-avail">@Qty(match.Available) available</span>
+                                                </button>
+                                            }
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
                         <input class="line-quantity" type="number" min="0" step="1" placeholder="Qty"
                                value="@draftLines[lineIndex].Quantity"
                                @onchange="(e) => OnLineQuantityChanged(lineIndex, e)" />
@@ -112,7 +162,7 @@ else
                         }
                     </div>
                 }
-                <button type="button" class="search-action line-add" @onclick="AddLine" disabled="@(products.Count == 0)">
+                <button type="button" class="search-action line-add" @onclick="AddLine" disabled="@(sourceStock.Count == 0)">
                     + Add line
                 </button>
             </div>
@@ -174,10 +224,11 @@ else
         "PendingCentralReview",
     ];
 
-    private sealed record DraftLine(long Marker, Guid? ProductId, decimal Quantity);
+    private sealed record DraftLine(long Marker, Guid? ProductId, decimal Quantity, string Search = "");
 
     private readonly List<PosLocation> locations = [];
     private readonly List<PosProductSummary> products = [];
+    private readonly List<PosStockLevel> sourceStock = [];
     private readonly List<PosTransferSummary> transfers = [];
     private readonly List<DraftLine> draftLines = [];
 
@@ -213,6 +264,28 @@ else
     private List<PosLocation> externalLocations =>
         locations.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code).ToList();
 
+    // Destination can be anywhere but the route's own source.
+    private List<PosLocation> destinationChoices =>
+        externalLocations.Where(l => l.Id != sourceLocationId).ToList();
+
+    // This register already knows what store or warehouse it belongs to, so
+    // the source is set from that identity rather than asked for again.
+    private bool SourceKnown => Api.DeviceLocationId is not null;
+
+    private string SourceLabel
+    {
+        get
+        {
+            if (sourceLocationId is not { } id)
+            {
+                return "—";
+            }
+
+            PosLocation? location = locations.FirstOrDefault(l => l.Id == id);
+            return location is null ? "This register's location" : $"{location.Code} · {location.Name}";
+        }
+    }
+
     private bool CanCreateTransfer =>
         sourceLocationId is { } source &&
         destinationLocationId is { } destination &&
@@ -231,11 +304,30 @@ else
         await LoadLocationsAsync();
         if (CanRequestTransfers)
         {
+            sourceLocationId = Api.DeviceLocationId;
             await LoadProductsAsync();
+            await LoadSourceStockAsync();
             AddLine();
         }
 
         await LoadTransfersAsync();
+    }
+
+    // The stock this register's own location holds, so a line can be picked by
+    // searching what is actually here to send, with how much of it there is.
+    private async Task LoadSourceStockAsync()
+    {
+        if (!SourceKnown)
+        {
+            return;
+        }
+
+        ApiResult<PosStockLevelReport> response = await Api.GetStoreStockLevelsAsync(CancellationToken.None);
+        if (response is { IsSuccess: true, Value: { } report })
+        {
+            sourceStock.Clear();
+            sourceStock.AddRange(report.Products.Where(p => p.Available > 0));
+        }
     }
 
     private async Task LoadLocationsAsync()
@@ -248,7 +340,10 @@ else
             return;
         }
 
-        locations.AddRange(response.Value.Where(location => location.Kind == 1 && location.IsActive));
+        // Kind 0 is the Main Warehouse, Kind 1 a store; both can be a transfer
+        // route's endpoint. Excluding the warehouse here (as this used to) left
+        // it unresolvable by LocationLabel, which falls back to a raw id prefix.
+        locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1 && location.IsActive));
     }
 
     private async Task LoadProductsAsync()
@@ -320,11 +415,45 @@ else
         preApprovalTokenId = e.Value?.ToString() ?? string.Empty;
     }
 
-    private void OnLineProductChangedAsync(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    // Products this register's location actually holds, matching the typed
+    // text by name or SKU, best match first.
+    private List<PosStockLevel> MatchingStock(string search)
     {
-        Guid? productId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
-        draftLines[index] = draftLines[index] with { ProductId = productId };
+        string query = (search ?? string.Empty).Trim();
+        if (query.Length == 0)
+        {
+            return [];
+        }
+
+        return [.. sourceStock
+            .Where(stock =>
+                stock.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || stock.Sku.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(stock => stock.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(stock => stock.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(8)];
     }
+
+    private PosStockLevel? FindStock(Guid productId) => sourceStock.FirstOrDefault(s => s.ProductId == productId);
+
+    private void OnLineSearchChanged(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        draftLines[index] = draftLines[index] with { Search = e.Value?.ToString() ?? string.Empty };
+    }
+
+    private void PickLineProduct(int index, PosStockLevel stock)
+    {
+        draftLines[index] = draftLines[index] with { ProductId = stock.ProductId, Search = string.Empty };
+        if (products.All(p => p.Id != stock.ProductId))
+        {
+            products.Add(new PosProductSummary(stock.ProductId, stock.Sku, stock.Name, IsActive: true));
+        }
+    }
+
+    private void ClearLineProduct(int index)
+        => draftLines[index] = draftLines[index] with { ProductId = null, Search = string.Empty };
+
+    private static string Qty(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 
     private void OnLineQuantityChanged(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {

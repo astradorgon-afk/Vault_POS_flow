@@ -16,6 +16,13 @@
        Development the API applies migrations and seeds data on startup.
     4. Runs the Web UI in the foreground on http://localhost:5215.
 
+    Both are bound to every network interface, not just localhost, so a phone
+    or another machine on the same Wi-Fi or LAN can reach them at this
+    computer's network address — useful for testing the phone-first web UI, or
+    pointing a register's head-office address at this laptop instead of
+    localhost. The console output prints that address. Pass -LocalOnly to keep
+    the old behaviour and bind to localhost only.
+
     An API that is already healthy, and a Web UI already listening on its port,
     are reused rather than started again. A reused Web UI is never rebuilt, so
     stop it first when the goal is to run the current source. Stopping the Web UI
@@ -26,14 +33,22 @@
 .PARAMETER DatabaseContainer
     The Docker container holding the development database.
 
+.PARAMETER LocalOnly
+    Bind the API and Web UI to localhost only, as before, instead of every
+    network interface. Use this on an untrusted network.
+
 .EXAMPLE
     ./scripts/dev-desktop.ps1
+
+.EXAMPLE
+    ./scripts/dev-desktop.ps1 -LocalOnly
 #>
 
 [CmdletBinding()]
 param(
     [string] $DatabaseContainer = 'vaultflow-dev-pg',
-    [int] $ApiStartupSeconds = 180
+    [int] $ApiStartupSeconds = 180,
+    [switch] $LocalOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,10 +62,15 @@ $webProject = Join-Path $repositoryRoot 'src/Pos.Web/Pos.Web.csproj'
 $apiHealthUrl = 'http://localhost:5177/health/live'
 $webUrl = 'http://localhost:5215'
 $webPort = ([uri] $webUrl).Port
+$apiPort = 5177
+$bindHost = if ($LocalOnly) { 'localhost' } else { '0.0.0.0' }
 
 function Test-ApiLive {
     try {
-        $response = Invoke-WebRequest $apiHealthUrl -UseBasicParsing -TimeoutSec 2
+        # Invoke-WebRequest itself carries real fixed overhead in Windows
+        # PowerShell 5.1 — well over a second on a healthy, fast-responding API —
+        # so a short timeout here reads as "not live" even when it is.
+        $response = Invoke-WebRequest $apiHealthUrl -UseBasicParsing -TimeoutSec 8
         return $response.StatusCode -eq 200
     }
     catch {
@@ -186,6 +206,54 @@ function Start-DevelopmentDatabase {
     throw "$DatabaseContainer did not accept connections within 30 seconds."
 }
 
+function Get-LanIPv4Address {
+    # The interface with a default gateway is the one actually carrying traffic
+    # to the rest of the network (Wi-Fi or Ethernet), as opposed to a virtual
+    # adapter (Hyper-V, WSL, a VPN) that happens to also hold an IPv4 address.
+    try {
+        $config = Get-NetIPConfiguration -ErrorAction Stop |
+            Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } |
+            Select-Object -First 1
+        if ($null -ne $config) { return $config.IPv4Address.IPAddress }
+    }
+    catch {
+    }
+
+    return $null
+}
+
+function Enable-LanFirewallRule {
+    param([string] $DisplayName, [int] $Port)
+
+    try {
+        if ($null -eq (Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName $DisplayName -Direction Inbound -Action Allow `
+                -Protocol TCP -LocalPort $Port -Profile Private -ErrorAction Stop | Out-Null
+        }
+    }
+    catch {
+        Write-Host "Could not open Windows Firewall for TCP $Port automatically (needs an elevated PowerShell)." -ForegroundColor Yellow
+        Write-Host "  A phone on the same network may not reach this until you run, once, as Administrator:" -ForegroundColor Yellow
+        Write-Host "  New-NetFirewallRule -DisplayName '$DisplayName' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Private" -ForegroundColor Yellow
+    }
+}
+
+function Show-LanAddress {
+    if ($LocalOnly) { return }
+
+    $lanAddress = Get-LanIPv4Address
+    if ($null -eq $lanAddress) {
+        Write-Host 'Could not detect this computer''s network address; the phone will need to find it manually (ipconfig).' -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ''
+    Write-Host "On a phone or laptop on the same network:" -ForegroundColor Cyan
+    Write-Host "  Web UI:      http://${lanAddress}:$webPort" -ForegroundColor Cyan
+    Write-Host "  Head office: http://${lanAddress}:$apiPort" -ForegroundColor Cyan
+    Write-Host ''
+}
+
 function Invoke-Build {
     param([string] $Project)
 
@@ -210,6 +278,11 @@ try {
             Write-Host 'The API on http://localhost:5177 is not answering, so the reused Web UI cannot load data until it runs.' -ForegroundColor Yellow
         }
 
+        if (-not $LocalOnly) {
+            Write-Host 'Reusing whatever this instance was already bound to — restart it to pick up LAN binding if it was started with -LocalOnly.' -ForegroundColor DarkGray
+        }
+        Show-LanAddress
+
         # Stay attached while it serves, so callers such as the Claude desktop
         # preview see the stack as running. Ctrl+C here leaves it untouched.
         while (Test-PortListening $webPort) { Start-Sleep -Seconds 5 }
@@ -217,17 +290,26 @@ try {
         return
     }
 
+    if (-not $LocalOnly) {
+        Enable-LanFirewallRule -DisplayName 'VaultFlow dev API' -Port $apiPort
+        Enable-LanFirewallRule -DisplayName 'VaultFlow dev Web UI' -Port $webPort
+    }
+
     if (Test-ApiLive) {
         Write-Host 'Reusing the API already running on http://localhost:5177' -ForegroundColor DarkGray
+        if (-not $LocalOnly) {
+            Write-Host 'If it was started with -LocalOnly, restart it to make it reachable from the network.' -ForegroundColor DarkGray
+        }
     }
     else {
         Start-DevelopmentDatabase
         Invoke-Build $apiProject
         Invoke-Build $webProject
 
-        Write-Host 'Starting the API on http://localhost:5177' -ForegroundColor Cyan
-        $api = Start-Process dotnet -NoNewWindow -PassThru -WorkingDirectory $repositoryRoot `
-            -ArgumentList @('run', '--project', "`"$apiProject`"", '--no-build', '--launch-profile', 'http')
+        Write-Host "Starting the API on http://${bindHost}:$apiPort" -ForegroundColor Cyan
+        $api = Start-Process dotnet -NoNewWindow -PassThru -WorkingDirectory $repositoryRoot -ArgumentList @(
+            'run', '--project', "`"$apiProject`"", '--no-build', '--launch-profile', 'http',
+            '--', '--urls', "http://${bindHost}:$apiPort")
 
         $deadline = (Get-Date).AddSeconds($ApiStartupSeconds)
         while (-not (Test-ApiLive)) {
@@ -239,8 +321,9 @@ try {
 
     if ($null -eq $api) { Invoke-Build $webProject }
 
-    Write-Host 'Starting the Web UI on http://localhost:5215' -ForegroundColor Green
-    & dotnet run --project $webProject --no-build --launch-profile http
+    Show-LanAddress
+    Write-Host "Starting the Web UI on http://${bindHost}:$webPort" -ForegroundColor Green
+    & dotnet run --project $webProject --no-build --launch-profile http -- --urls "http://${bindHost}:$webPort"
 }
 finally {
     if ($null -ne $api -and -not $api.HasExited) {

@@ -1,6 +1,12 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"></application>
+    <!-- A register's head-office address is typed in at setup and is plain
+         http:// by design (see RegisterService.DefaultServer, ParseServer):
+         it points at a server on the same local network, never the public
+         internet. Android refuses all cleartext traffic since API 28 unless
+         this is set, which otherwise surfaces to the register as head office
+         being unreachable even when it answers fine. -->
+    <application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true" android:usesCleartextTraffic="true"></application>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
 </manifest>

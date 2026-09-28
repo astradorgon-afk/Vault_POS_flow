@@ -283,6 +283,18 @@ public sealed class RegisterService(
                 .SignInAsync(Server, userName.Trim(), password, profile.DeviceId.Value, cancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (HeadOfficeException ex) when (ex.DeviceRevoked)
+        {
+            // Head office answered and refused this device specifically, not the
+            // password: it has been suspended or revoked and must not come back
+            // under its old identity. Unpair it locally so the register asks for
+            // a fresh one-time code instead of quietly offering offline sign-in.
+            await ClearEnrolmentAsync(cancellationToken).ConfigureAwait(false);
+            throw new HeadOfficeException(
+                "This register was revoked by an administrator and is no longer trusted. It has been unpaired — " +
+                "ask a manager to issue a new one-time code to set it up again.")
+            { ErrorCode = HeadOfficeException.DeviceNotOperationalErrorCode };
+        }
         catch (HeadOfficeException ex) when (ex.IsUnreachable)
         {
             // No answer at all is not a refusal: let someone who has signed in
@@ -918,6 +930,18 @@ public sealed class RegisterService(
             .ConfigureAwait(false);
     }
 
+    // Unpairs this register locally once head office has said its device
+    // identity is no longer trusted. The profile row is what DeviceStatusProvider
+    // reads to decide the register is enrolled, so removing it is what makes the
+    // next screen ask for a one-time code instead of offering sign-in again.
+    private async Task ClearEnrolmentAsync(CancellationToken cancellationToken)
+    {
+        await using PosDeviceDbContext context =
+            await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        await context.DeviceProfiles.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Tries to reach head office now: signs an offline session back in, then
     /// uploads whatever is queued. Never throws; a problem is kept in
@@ -1047,6 +1071,18 @@ public sealed class RegisterService(
         catch (HeadOfficeException ex) when (ex.IsUnreachable)
         {
             return;
+        }
+        catch (HeadOfficeException ex) when (ex.DeviceRevoked)
+        {
+            // This device has been suspended or revoked while it was working
+            // offline. It cannot reconnect under its old identity, and must not
+            // silently keep offering offline sign-in either: unpair it now so
+            // the next sign-in asks for a fresh one-time code.
+            pendingReconnect = null;
+            await ClearEnrolmentAsync(cancellationToken).ConfigureAwait(false);
+            throw new HeadOfficeException(
+                "This register was revoked by an administrator. Queued sales stay on this register, but it must " +
+                "be paired again with a new one-time code before anyone can sign in here again. Lock it now.");
         }
         catch (HeadOfficeException ex)
         {

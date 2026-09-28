@@ -439,7 +439,9 @@ else
         ApiResult<List<PosLocation>> response = await Api.GetLocationsAsync(CancellationToken.None);
         if (response.IsSuccess && response.Value is not null)
         {
-            locations.AddRange(response.Value.Where(location => location.Kind == 1 && location.IsActive));
+            // Kind 0 is the Main Warehouse, Kind 1 a store; a transfer's route
+            // can start or end at either, and this list resolves both to a name.
+            locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1 && location.IsActive));
         }
     }
 

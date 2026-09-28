@@ -212,6 +212,20 @@ public sealed class HeadOfficeException : Exception
 
     /// <summary>Gets the HTTP status head office answered with, when it answered.</summary>
     public int? StatusCode { get; init; }
+
+    /// <summary>Gets the stable error code head office answered with, when it answered with one.</summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether head office refused this call because the
+    /// device itself has been suspended or revoked, as opposed to the
+    /// credentials being wrong. A register that sees this is no longer trusted
+    /// under its current identity and must be paired again.
+    /// </summary>
+    public bool DeviceRevoked => ErrorCode == DeviceNotOperationalErrorCode;
+
+    /// <summary>The error code head office answers with when a device is suspended or revoked.</summary>
+    public const string DeviceNotOperationalErrorCode = "auth.device_not_operational";
 }
 
 /// <summary>
@@ -536,10 +550,13 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false))
+                (string message, string? errorCode) = await DescribeFailureAsync(response, cancellationToken)
+                    .ConfigureAwait(false);
+                throw new HeadOfficeException(message)
                 {
                     IsUnreachable = serverDown,
                     StatusCode = (int)response.StatusCode,
+                    ErrorCode = errorCode,
                 };
             }
 
@@ -823,7 +840,9 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
         using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+            (string message, string? errorCode) = await DescribeFailureAsync(response, cancellationToken)
+                .ConfigureAwait(false);
+            throw new HeadOfficeException(message) { StatusCode = (int)response.StatusCode, ErrorCode = errorCode };
         }
 
         return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -842,21 +861,24 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
         }
     }
 
-        private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<(string Message, string? ErrorCode)> DescribeFailureAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
         {
             Problem? problem = await response.Content
                 .ReadFromJsonAsync<Problem>(Json, cancellationToken)
                 .ConfigureAwait(false);
-            if (problem?.Detail is { Length: > 0 } detail)
-            {
-                return detail;
-            }
 
-            if (problem?.Title is { Length: > 0 } title)
+            string? message = problem?.Detail is { Length: > 0 } detail
+                ? detail
+                : problem?.Title is { Length: > 0 } title
+                    ? title
+                    : null;
+
+            if (message is not null)
             {
-                return title;
+                return (message, problem?.ErrorCode);
             }
         }
         catch (JsonException)
@@ -864,7 +886,9 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
             // Not a problem document; fall through to the status code.
         }
 
-        return FormattableString.Invariant($"Head office refused the request ({(int)response.StatusCode} {response.ReasonPhrase}).");
+        return (
+            FormattableString.Invariant($"Head office refused the request ({(int)response.StatusCode} {response.ReasonPhrase})."),
+            null);
     }
 
     private sealed record SignInResponse(string AccessToken, string RefreshToken, HeadOfficeUser User);
@@ -927,5 +951,5 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
 
     private sealed record IdResponse(Guid Id);
 
-    private sealed record Problem(string? Title, string? Detail);
+    private sealed record Problem(string? Title, string? Detail, string? ErrorCode);
 }

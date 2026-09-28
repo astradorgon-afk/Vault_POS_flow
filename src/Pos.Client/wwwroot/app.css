@@ -314,25 +314,37 @@ kbd {
 .login-classic .device-status-blocked .device-status-headline { color: var(--danger); }
 .login-classic .device-status-blocked .device-status-detail { color: #d8a9a3; }
 .login-classic .device-status-ready { border-color: rgba(134, 197, 193, 0.22); }
-@media (max-width: 850px) {
-    .login-classic .register-stage { grid-template-columns: 1fr; gap: 2.5rem; padding-top: 3.5rem; }
-    .login-classic .identity-rail { min-height: auto; gap: 2rem; }
-    .login-classic h1 { max-width: 11ch; font-size: clamp(3rem, 13vw, 5rem); }
-    .login-classic .rail-guide { grid-template-columns: repeat(3, 1fr); gap: 0.65rem; margin-top: 0; }
-    .login-classic .rail-guide-item { display: block; }
-    .login-classic .rail-guide-number { margin-bottom: 0.5rem; }
+/* A real phone's landscape width (often 800-900 CSS px) is wider than most
+   "mobile" breakpoints assume, so this triggers well above the usual 768px:
+   otherwise a rotated phone still gets the full two-column desktop stage. */
+@media (max-width: 980px) {
+    .login-classic.register-app { padding-top: 0.9rem; }
+    .login-classic .register-stage { grid-template-columns: 1fr; gap: 2rem; padding: 0.5rem 0 2rem; }
+
+    /* The task — sign in, or connect this register — comes first on a phone;
+       the pitch copy and step guide are context, not the reason to scroll. */
+    .login-classic .workspace { order: -1; width: 100%; }
+    .login-classic .identity-rail { order: 2; min-height: auto; gap: 1.1rem; }
+
+    .login-classic h1 { max-width: none; font-size: clamp(1.6rem, 6vw, 2.2rem); line-height: 1.05; }
+    .login-classic .rail-copy { display: none; }
+    .login-classic .rail-guide { grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin-top: 0; }
+    .login-classic .rail-guide-item { display: block; text-align: center; }
+    .login-classic .rail-guide-number { margin: 0 auto 0.5rem; }
+    .login-classic .rail-guide-item small { display: none; }
     .login-classic .rail-footer { display: none; }
+
+    .login-classic .workspace-heading { margin-bottom: 1.1rem; }
+    .login-classic .workspace-heading h2 { font-size: 1.7rem; }
+    .login-classic .workspace-index { display: none; }
+    .login-classic .panel { padding: 1.15rem; }
 }
 @media (max-width: 560px) {
     .login-classic.register-app { padding-inline: 1rem; }
     .login-classic .brand-context, .login-classic .topbar-status span:not(.topbar-lamp) { display: none; }
     .login-classic .topbar-status { gap: 0; }
     .login-classic .register-stage { padding-inline: 0; }
-    .login-classic .rail-guide { display: none; }
-    .login-classic .panel { padding: 1.15rem; }
-    .login-classic .workspace-heading { margin-bottom: 1.3rem; }
-    .login-classic .workspace-heading h2 { font-size: 2.25rem; }
-    .login-classic .workspace-index { display: none; }
+    .login-classic .rail-guide-item small { display: none; }
 }
 
 .auth-card { display: grid; gap: 1rem; width: 100%; }

@@ -84,11 +84,11 @@
 
                 @if (_status.Enrolment == DeviceEnrolmentState.NotEnrolled)
                 {
-                    <SetupPanel OnEnrolled="RefreshAsync" />
+                    <SetupPanel OnEnrolled="RefreshAsync" Notice="@_setupNotice" />
                 }
                 else if (Register.Current is null)
                 {
-                    <SignInPanel OnSignedIn="OpenRegisterAsync" />
+                    <SignInPanel OnSignedIn="OpenRegisterAsync" OnDeviceRevoked="OnDeviceRevokedAsync" />
                 }
             }
         </section>
@@ -98,6 +98,7 @@
 @code {
     private DeviceStatusView? _status;
     private string? _error;
+    private string? _setupNotice;
 
     private string StepLabel => _status is null
         ? "Register startup"
@@ -168,6 +169,15 @@
     {
         await RefreshAsync();
         Navigation.NavigateTo(BackOfficeAccessible(Register.Current) ? "/office" : "/register");
+    }
+
+    // The register was unpaired locally because head office refused this
+    // device's identity. Re-reading status now shows the setup panel, since
+    // SignInAsync already removed the local device profile.
+    private async Task OnDeviceRevokedAsync(string message)
+    {
+        _setupNotice = message;
+        await RefreshAsync();
     }
 
     // A sign-in lands on the office when the account holds any back-office

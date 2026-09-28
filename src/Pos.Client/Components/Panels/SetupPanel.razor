@@ -10,6 +10,11 @@
     <h2>Set up this register</h2>
     <p class="panel-lead">Enter the head-office address and the one-time enrolment code a manager issued for this register.</p>
 
+    @if (Notice is not null)
+    {
+        <p class="form-note" role="status">@Notice</p>
+    }
+
     <form class="form-grid" @onsubmit="EnrolAsync" @onsubmit:preventDefault>
         <label>
             <span>Head-office address</span>
@@ -101,6 +106,10 @@
     /// <summary>Raised once the register has enrolled.</summary>
     [Parameter]
     public EventCallback OnEnrolled { get; set; }
+
+    /// <summary>An explanation for why this register needs to be paired again, if there is one.</summary>
+    [Parameter]
+    public string? Notice { get; set; }
 
     protected override void OnInitialized() => _server = Register.Server.AbsoluteUri.TrimEnd('/');
 

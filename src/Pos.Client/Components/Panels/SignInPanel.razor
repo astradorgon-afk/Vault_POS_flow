@@ -37,6 +37,13 @@
     [Parameter]
     public EventCallback OnSignedIn { get; set; }
 
+    /// <summary>
+    /// Raised when head office refuses this device itself rather than the
+    /// credentials: it has been unpaired locally and needs a fresh one-time code.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnDeviceRevoked { get; set; }
+
     private async Task SignInAsync()
     {
         if (string.IsNullOrWhiteSpace(_userName) || string.IsNullOrEmpty(_password))
@@ -52,6 +59,11 @@
             await Register.SignInAsync(_userName, _password);
             _password = string.Empty;
             await OnSignedIn.InvokeAsync();
+        }
+        catch (HeadOfficeException ex) when (ex.DeviceRevoked)
+        {
+            _password = string.Empty;
+            await OnDeviceRevoked.InvokeAsync(ex.Message);
         }
         catch (HeadOfficeException ex)
         {
