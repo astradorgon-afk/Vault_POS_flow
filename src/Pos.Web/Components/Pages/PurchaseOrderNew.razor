@@ -7,13 +7,6 @@
 
 <PageTitle>New purchase order · VaultFlow</PageTitle>
 
-<header class="qr-head po-head">
-    <div>
-        <h1>New purchase order</h1>
-        <p>Pick the supplier, add what you need, then send it for approval.</p>
-    </div>
-</header>
-
 @if (!string.IsNullOrWhiteSpace(message))
 {
     <div class="po-alert" role="alert">@message</div>
@@ -25,10 +18,15 @@
 }
 else
 {
-    <div class="po-compose">
+    <div class="po-compose po-compose-new">
         <div class="po-compose-main">
-            <section class="qr-card po-card">
-                <h2><span class="po-step">1</span> Supplier and delivery</h2>
+            <section class="qr-card po-card po-card-details">
+                <div class="po-section-heading">
+                    <span class="po-step" aria-hidden="true">01</span>
+                    <div>
+                        <p class="po-section-label">Purchase order settings</p>
+                    </div>
+                </div>
                 <div class="po-fields">
                     <label class="po-field">
                         <span>Supplier</span>
@@ -39,10 +37,6 @@ else
                                 <option value="@supplier.Id">@supplier.Name</option>
                             }
                         </select>
-                        @if (Supplier is { } chosen)
-                        {
-                            <small>Usually delivers in @chosen.LeadTimeDays day@(chosen.LeadTimeDays == 1 ? "" : "s") · pays in @chosen.PaymentTermsDays days</small>
-                        }
                     </label>
                     <label class="po-field">
                         <span>Deliver to</span>
@@ -52,17 +46,28 @@ else
                                 <option value="@location.Id">@location.Code · @location.Name</option>
                             }
                         </select>
-                        <small>@(IsStoreDelivery ? "Direct to a store: the store receives it at its register." : "The warehouse receives it and restocks the stores.")</small>
                     </label>
                     <label class="po-field">
                         <span>Expected delivery</span>
                         <input type="date" @bind="expectedOn" />
                     </label>
+                    <div class="po-field po-delivery-note">
+                        <span>Delivery notes</span>
+                        <p>Estimated from the supplier's lead time. Adjust if the supplier confirms a different date; arrival is recorded separately.</p>
+                    </div>
                 </div>
             </section>
 
-            <section class="qr-card po-card">
-                <h2><span class="po-step">2</span> Products <small>@lines.Count added</small></h2>
+            <section class="qr-card po-card po-card-products">
+                <div class="po-section-heading">
+                    <span class="po-step" aria-hidden="true">02</span>
+                    <div>
+                        <p class="po-section-label">Order lines</p>
+                        <h2>Add products</h2>
+                        <p>Search by product name or SKU, or scan a barcode.</p>
+                    </div>
+                    <span class="po-line-count">@lines.Count @(lines.Count == 1 ? "line" : "lines")</span>
+                </div>
                 <ScanTarget OnScan="OnScanned" Enabled="@(!saving)" />
                 <p class="po-scan-hint">▥ @(scanNote ?? "Scan a product's barcode to add it; each scan adds one.")</p>
                 <div class="po-finder">
@@ -111,7 +116,15 @@ else
 
                 @if (lines.Count == 0)
                 {
-                    <div class="po-empty-lines">Nothing on this order yet. Search above and press <strong>+ Add</strong>.</div>
+                    <div class="po-empty-lines" aria-label="No products added yet">
+                        <svg viewBox="0 0 120 100" aria-hidden="true" focusable="false">
+                            <path d="m25 29 34-17 36 17-35 18-35-18Z" />
+                            <path d="M25 29v39l35 19V47M95 29v25M60 47v40" />
+                            <path d="m39 22 35 18M38 61l9 5" />
+                            <rect x="70" y="53" width="38" height="30" rx="5" />
+                            <path d="M78 61v14m4-14v14m4-14v14m4-14v14m5-14v14m4-14v14" />
+                        </svg>
+                    </div>
                 }
                 else
                 {
@@ -145,7 +158,11 @@ else
         </div>
 
         <aside class="po-summary qr-card" aria-label="Order summary">
-            <h2>Summary</h2>
+            <div class="po-summary-heading">
+                <span>Order check</span>
+                <h2>Ready for approval</h2>
+                <p>Complete the required details to send this order to a reviewer.</p>
+            </div>
             <dl>
                 <div><dt>Supplier</dt><dd>@(Supplier?.Name ?? "—")</dd></div>
                 <div><dt>Deliver to</dt><dd>@(destinations.FirstOrDefault(d => d.Id == destinationId)?.Name ?? "—")</dd></div>
@@ -161,11 +178,13 @@ else
                 </ul>
             }
 
-            <button type="button" class="po-btn primary block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: true)">
-                @(saving ? "Saving…" : "Send for approval")
-            </button>
-            <button type="button" class="po-btn block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: false)">Save as draft</button>
-            <p class="po-hint">Someone other than you approves it before it goes to the supplier.</p>
+            <div class="po-summary-actions">
+                <button type="button" class="po-btn primary block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: true)">
+                    @(saving ? "Saving…" : "Send for approval")
+                </button>
+                <button type="button" class="po-btn block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: false)">Save as draft</button>
+            </div>
+            <p class="po-summary-foot">A different team member approves it before it reaches the supplier.</p>
         </aside>
     </div>
 }
