@@ -569,8 +569,8 @@ else
     // The transaction line uses its own scale and tops out below the chart edge.
     private decimal LineHeight(DayPoint day) => MaxCount == 0 ? 0m : (decimal)day.Count / MaxCount * 88m;
 
-    private string TransactionPath => string.Join(' ', days.Select((day, index) =>
-        $"{(index == 0 ? 'M' : 'L')}{Css((index + .5m) * 100m)} {Css(100m - LineHeight(day))}"));
+    private string TransactionPath => SmoothPath([.. days.Select((day, index) =>
+        ((index + .5m) * 100m, 100m - LineHeight(day)))]);
 
     private static decimal NiceStep(decimal rough)
     {
@@ -581,8 +581,7 @@ else
         return (decimal)(nice * magnitude);
     }
 
-    private static string SparkLine(IReadOnlyList<decimal> series) => string.Join(' ', SparkPoints(series)
-        .Select((point, index) => $"{(index == 0 ? 'M' : 'L')}{Css(point.X)} {Css(point.Y)}"));
+    private static string SparkLine(IReadOnlyList<decimal> series) => SmoothPath(SparkPoints(series));
 
     private static string SparkArea(IReadOnlyList<decimal> series)
     {
@@ -597,6 +596,72 @@ else
         decimal max = series.Max();
         decimal step = series.Count == 1 ? 0m : 100m / (series.Count - 1);
         return [.. series.Select((value, index) => (index * step, max == min ? 20m : 32m - (value - min) / (max - min) * 26m))];
+    }
+
+    // Use monotone cubic Bézier segments: the trend is fluid but never draws a
+    // fake high or low between two recorded days. The dots remain on the raw data.
+    private static string SmoothPath(IReadOnlyList<(decimal X, decimal Y)> points)
+    {
+        if (points.Count == 0) return string.Empty;
+        if (points.Count == 1) return $"M{Css(points[0].X)} {Css(points[0].Y)}";
+
+        decimal[] slopes = new decimal[points.Count - 1];
+        decimal[] tangents = new decimal[points.Count];
+        for (int index = 0; index < slopes.Length; index++)
+        {
+            decimal width = points[index + 1].X - points[index].X;
+            slopes[index] = width == 0m ? 0m : (points[index + 1].Y - points[index].Y) / width;
+        }
+
+        tangents[0] = slopes[0];
+        tangents[^1] = slopes[^1];
+        for (int index = 1; index < tangents.Length - 1; index++)
+        {
+            tangents[index] = Math.Sign(slopes[index - 1]) == Math.Sign(slopes[index])
+                ? (slopes[index - 1] + slopes[index]) / 2m
+                : 0m;
+        }
+
+        // Fritsch-Carlson limiting keeps the smooth curve inside each segment's
+        // data range, including when a quiet day sits beside a busy one.
+        for (int index = 0; index < slopes.Length; index++)
+        {
+            decimal slope = slopes[index];
+            if (slope == 0m)
+            {
+                tangents[index] = 0m;
+                tangents[index + 1] = 0m;
+                continue;
+            }
+
+            double left = (double)(tangents[index] / slope);
+            double right = (double)(tangents[index + 1] / slope);
+            if (left < 0d) tangents[index] = 0m;
+            if (right < 0d) tangents[index + 1] = 0m;
+
+            left = (double)(tangents[index] / slope);
+            right = (double)(tangents[index + 1] / slope);
+            double magnitude = left * left + right * right;
+            if (magnitude > 9d)
+            {
+                decimal scale = (decimal)(3d / Math.Sqrt(magnitude));
+                tangents[index] = scale * (decimal)left * slope;
+                tangents[index + 1] = scale * (decimal)right * slope;
+            }
+        }
+
+        List<string> commands = [$"M{Css(points[0].X)} {Css(points[0].Y)}"];
+        for (int index = 0; index < points.Count - 1; index++)
+        {
+            decimal width = points[index + 1].X - points[index].X;
+            decimal firstControlX = points[index].X + width / 3m;
+            decimal firstControlY = points[index].Y + tangents[index] * width / 3m;
+            decimal secondControlX = points[index + 1].X - width / 3m;
+            decimal secondControlY = points[index + 1].Y - tangents[index + 1] * width / 3m;
+            commands.Add($"C{Css(firstControlX)} {Css(firstControlY)} {Css(secondControlX)} {Css(secondControlY)} {Css(points[index + 1].X)} {Css(points[index + 1].Y)}");
+        }
+
+        return string.Join(' ', commands);
     }
 
     // Formatting -------------------------------------------------------------

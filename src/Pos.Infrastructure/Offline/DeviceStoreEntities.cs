@@ -1,5 +1,6 @@
 using Pos.Domain.Common;
 using Pos.Domain.Locations;
+using System.Text.Json;
 
 namespace Pos.Infrastructure.Offline;
 
@@ -13,19 +14,62 @@ public sealed class DeviceStoreProfile
         DeviceId deviceId,
         LocationId locationId,
         string shortCode,
-        DateTimeOffset enrolledAtUtc)
+        DateTimeOffset enrolledAtUtc,
+        IEnumerable<LocationId>? allowedLocationIds = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shortCode);
         DeviceId = deviceId;
         LocationId = locationId;
         ShortCode = shortCode.Trim().ToUpperInvariant();
         EnrolledAtUtc = enrolledAtUtc;
+        AllowedLocationIdsJson = JsonSerializer.Serialize((allowedLocationIds ?? [locationId])
+            .Append(locationId).Select(x => x.Value).Distinct().ToArray());
     }
 
     public DeviceId DeviceId { get; private init; }
     public LocationId LocationId { get; private set; }
     public string ShortCode { get; private init; }
     public DateTimeOffset EnrolledAtUtc { get; private init; }
+    public string AllowedLocationIdsJson { get; private set; } = "[]";
+    public IReadOnlyList<LocationId> AllowedLocationIds
+    {
+        get
+        {
+            Guid[] ids = JsonSerializer.Deserialize<Guid[]>(AllowedLocationIdsJson) ?? [];
+            List<LocationId> locations = [.. ids.Where(x => x != Guid.Empty).Distinct().Select(x => new LocationId(x))];
+            if (!locations.Contains(LocationId))
+            {
+                locations.Insert(0, LocationId);
+            }
+
+            return locations;
+        }
+    }
+
+    public bool SelectLocation(LocationId locationId)
+    {
+        if (!AllowedLocationIds.Contains(locationId))
+        {
+            return false;
+        }
+        LocationId = locationId;
+        return true;
+    }
+
+    public void UpdateAllowedLocations(IEnumerable<LocationId> locationIds)
+    {
+        ArgumentNullException.ThrowIfNull(locationIds);
+        LocationId[] locations = [.. locationIds.Append(LocationId).Distinct()];
+        AllowedLocationIdsJson = JsonSerializer.Serialize(locations.Select(x => x.Value).ToArray());
+    }
+
+    public void RefreshAllowedLocations(LocationId defaultLocationId, IEnumerable<LocationId> locationIds)
+    {
+        ArgumentNullException.ThrowIfNull(locationIds);
+        LocationId[] locations = [.. locationIds.Append(defaultLocationId).Distinct()];
+        LocationId = defaultLocationId;
+        AllowedLocationIdsJson = JsonSerializer.Serialize(locations.Select(x => x.Value).ToArray());
+    }
 }
 
 /// <summary>

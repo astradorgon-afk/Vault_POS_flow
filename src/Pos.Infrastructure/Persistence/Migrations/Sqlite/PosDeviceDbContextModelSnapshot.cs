@@ -503,6 +503,12 @@ namespace Pos.Infrastructure.Persistence.Migrations.Sqlite
                         .HasColumnType("TEXT")
                         .HasColumnName("device_id");
 
+                    b.Property<string>("AllowedLocationIdsJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("allowed_location_ids_json");
+
                     b.Property<string>("EnrolledAtUtc")
                         .IsRequired()
                         .HasColumnType("TEXT")

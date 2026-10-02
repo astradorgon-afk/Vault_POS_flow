@@ -58,7 +58,9 @@ public sealed class OfflineCredentialStore(ISecureStorage storage)
             Convert.ToBase64String(salt),
             Convert.ToBase64String(hash),
             Iterations,
-            signedInAtUtc);
+            signedInAtUtc,
+            [.. (user.Locations ?? [])],
+            user.HasAllLocations);
 
         CryptographicOperations.ZeroMemory(hash);
         await storage.SetAsync(KeyFor(userName), JsonSerializer.Serialize(stored, Json)).ConfigureAwait(false);
@@ -116,7 +118,12 @@ public sealed class OfflineCredentialStore(ISecureStorage storage)
         CryptographicOperations.ZeroMemory(actual);
 
         return matches
-            ? OfflineSignInResult.Accepted(new HeadOfficeUser(stored.UserId, stored.DisplayName, stored.Permissions))
+            ? OfflineSignInResult.Accepted(new HeadOfficeUser(
+                stored.UserId,
+                stored.DisplayName,
+                stored.Permissions,
+                stored.Locations,
+                stored.HasAllLocations))
             : OfflineSignInResult.Refused("The username or password is incorrect.");
     }
 
@@ -137,7 +144,9 @@ public sealed class OfflineCredentialStore(ISecureStorage storage)
         string Salt,
         string Hash,
         int Iterations,
-        DateTimeOffset SignedInAtUtc);
+        DateTimeOffset SignedInAtUtc,
+        List<Guid>? Locations = null,
+        bool HasAllLocations = false);
 }
 
 /// <summary>The outcome of an offline sign-in.</summary>

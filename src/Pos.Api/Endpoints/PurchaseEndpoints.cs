@@ -104,7 +104,11 @@ public sealed record PurchaseOrderDetail(
     string? CancelledReason,
     string? ClosedReason,
     IReadOnlyList<PurchaseOrderLineSummary> Lines,
-    IReadOnlyList<PurchaseApprovalSummary> Approvals);
+    IReadOnlyList<PurchaseApprovalSummary> Approvals)
+{
+    /// <summary>The receiving location's calendar for date validation and display.</summary>
+    public string? ReceivingTimeZoneId { get; init; }
+}
 
 /// <summary>The body of a goods receipt creation.</summary>
 /// <param name="Lines">The received lines with their disposition plans.</param>
@@ -487,6 +491,12 @@ public static class PurchaseEndpoints
                 currentUser.CorrelationId.Value);
         }
 
+        string? receivingTimeZone = await context.Locations.AsNoTracking()
+            .Where(l => l.Id == new LocationId(detail.DestinationLocationId))
+            .Select(l => l.TimeZoneId)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
         // Name each line, so a reviewer checks products rather than identifiers.
         ProductId[] productIds = [.. detail.Lines.Select(l => new ProductId(l.ProductId)).Distinct()];
         Dictionary<Guid, LineProduct> names = await context.Products
@@ -498,6 +508,7 @@ public static class PurchaseEndpoints
 
         return TypedResults.Ok(detail with
         {
+            ReceivingTimeZoneId = receivingTimeZone,
             Lines = [.. detail.Lines.Select(line => names.TryGetValue(line.ProductId, out LineProduct? product)
                 ? line with { ProductSku = product.Sku, ProductName = product.Name }
                 : line)],

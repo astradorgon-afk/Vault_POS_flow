@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pos.Application.Common.Abstractions;
+using Pos.Application.Identity;
 using Pos.Domain.Common;
 using Pos.Domain.Identity;
 using Pos.Infrastructure.Configuration;
@@ -69,7 +70,11 @@ public sealed class ApprovalGate(
                 "The approver is not assigned to this location."));
         }
 
-        if (approver == documentCreator && absoluteValue > _organization.ApprovalLimits.SelfApprovalLimit)
+        bool isOwner = authorization.Roles.Contains(Roles.Owner, StringComparer.Ordinal);
+
+        if (approver == documentCreator
+            && !isOwner
+            && absoluteValue > _organization.ApprovalLimits.SelfApprovalLimit)
         {
             return Result.Failure(Error.ApprovalRequired(
                 "approval.self_approval_refused",

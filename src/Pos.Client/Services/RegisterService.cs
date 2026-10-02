@@ -139,7 +139,10 @@ public sealed class RegisterService(
     private (string UserName, string Password)? pendingReconnect;
 
     /// <summary>The address a development register points at until a manager changes it.</summary>
-    public static readonly Uri DefaultServer = new("http://localhost:5177/");
+    // The development API listens on IPv4 (0.0.0.0). On Windows, `localhost`
+    // may resolve to ::1 first, where that listener is not bound, so the POS
+    // can incorrectly treat a running head office as offline.
+    public static readonly Uri DefaultServer = new("http://127.0.0.1:5177/");
 
     /// <summary>
     /// Gets a value indicating whether <see cref="CompleteSaleAsync"/> can run while
@@ -172,10 +175,27 @@ public sealed class RegisterService(
     public string? LastSyncProblem { get; private set; }
 
     /// <summary>Gets the head-office address this register uses.</summary>
-    public Uri Server =>
-        Uri.TryCreate(preferences.Get(ServerPreference, string.Empty), UriKind.Absolute, out Uri? saved)
-            ? saved
-            : DefaultServer;
+    public Uri Server
+    {
+        get
+        {
+            if (!Uri.TryCreate(preferences.Get(ServerPreference, string.Empty), UriKind.Absolute, out Uri? saved))
+            {
+                return DefaultServer;
+            }
+
+            // A saved localhost URL has the same IPv6/IPv4 mismatch as the
+            // default. Only rewrite it on Windows desktop registers; Android
+            // devices need the explicitly configured LAN address.
+            if (OperatingSystem.IsWindows() && saved.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                UriBuilder local = new(saved) { Host = "127.0.0.1" };
+                return local.Uri;
+            }
+
+            return saved;
+        }
+    }
 
     /// <summary>Gets who is signed in, or null when the register is locked.</summary>
     public RegisterUser? Current { get; private set; }
@@ -260,7 +280,8 @@ public sealed class RegisterService(
                 new DeviceId(enrolled.DeviceId),
                 new LocationId(enrolled.LocationId),
                 enrolled.ShortCode,
-                clock.UtcNow));
+                clock.UtcNow,
+                (enrolled.AllowedLocationIds ?? [enrolled.LocationId]).Select(id => new LocationId(id))));
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -271,16 +292,59 @@ public sealed class RegisterService(
     /// Signs someone in at this register, then downloads the store's data and
     /// their offline authority before the session is opened.
     /// </summary>
-    public async Task SignInAsync(string userName, string password, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<StoreChoice>> GetAllowedLocationsAsync(CancellationToken cancellationToken = default)
+    {
+        DeviceStoreProfile? profile = await ReadProfileAsync(cancellationToken).ConfigureAwait(false);
+        if (profile is null)
+        {
+            return [];
+        }
+
+        DeviceLocationAssignment? assignment = await TryGetDeviceLocationsAsync(profile.DeviceId.Value, cancellationToken)
+            .ConfigureAwait(false);
+        if (assignment is not null)
+        {
+            profile.RefreshAllowedLocations(
+                new LocationId(assignment.DefaultLocationId),
+                assignment.Locations.Select(location => new LocationId(location.Id)));
+            await SaveProfileAsync(profile, cancellationToken).ConfigureAwait(false);
+            return assignment.Locations;
+        }
+
+        // If both the configured and local endpoints are unavailable, the encrypted
+        // local profile and location mirror support offline sign-in.
+        await using PosDeviceDbContext context = await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        HashSet<Guid> allowed = profile.AllowedLocationIds.Select(x => x.Value).ToHashSet();
+        List<DeviceCachedLocation> activeLocations = await context.Locations.AsNoTracking()
+            .Where(location => location.IsActive)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        return [.. activeLocations
+            .Where(location => allowed.Contains(location.Id.Value))
+            .OrderBy(location => location.Id == profile.LocationId ? 0 : 1)
+            .ThenBy(location => location.Code)
+            .Select(location => new StoreChoice(location.Id.Value, location.Code, location.Name))
+        ];
+    }
+
+    public async Task SignInAsync(
+        string userName,
+        string password,
+        Guid? selectedLocationId = null,
+        CancellationToken cancellationToken = default)
     {
         DeviceStoreProfile profile = await ReadProfileAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new HeadOfficeException("This register is not enrolled yet.");
+        LocationId selectedLocation = new(selectedLocationId ?? profile.LocationId.Value);
+        if (!profile.AllowedLocationIds.Contains(selectedLocation))
+        {
+            throw new HeadOfficeException("This device is not allowed to open that location.");
+        }
 
         HeadOfficeSession signedIn;
         try
         {
-            signedIn = await headOffice
-                .SignInAsync(Server, userName.Trim(), password, profile.DeviceId.Value, cancellationToken)
+            signedIn = await SignInOnlineWithLocalFallbackAsync(
+                    profile.DeviceId.Value, userName.Trim(), password, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (HeadOfficeException ex) when (ex.DeviceRevoked)
@@ -299,13 +363,36 @@ public sealed class RegisterService(
         {
             // No answer at all is not a refusal: let someone who has signed in
             // here before keep the shop open on what the device already holds.
-            await SignInOfflineAsync(profile, userName, password, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await SignInOfflineAsync(profile, userName, password, selectedLocation, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (HeadOfficeException offlineError)
+                when (offlineError.ErrorCode == HeadOfficeException.OfflineLocationAccessMissingErrorCode)
+            {
+                throw new HeadOfficeException(
+                    $"Head office could not be reached at {Server}. {offlineError.Message} " +
+                    "Check the head-office address and API, then sign in online once to refresh this account's saved access.",
+                    ex)
+                {
+                    ErrorCode = offlineError.ErrorCode,
+                };
+            }
             return;
         }
 
         RegisterUser user = new(new UserId(signedIn.User.UserId), signedIn.User.DisplayName, signedIn);
+        if (!signedIn.User.HasAllLocations && !(signedIn.User.Locations ?? []).Contains(selectedLocation.Value))
+        {
+            await headOffice.SignOutAsync(Server, signedIn.RefreshToken, profile.DeviceId.Value, CancellationToken.None)
+                .ConfigureAwait(false);
+            throw new HeadOfficeException("Your account does not have access to the selected location.");
+        }
         try
         {
+            profile.SelectLocation(selectedLocation);
+            await SaveProfileAsync(profile, cancellationToken).ConfigureAwait(false);
             await DownloadStoreDataAsync(profile, signedIn.AccessToken, cancellationToken).ConfigureAwait(false);
             productReferences = await headOffice
                 .GetProductSaleReferencesAsync(
@@ -322,7 +409,7 @@ public sealed class RegisterService(
             await headOffice.SignOutAsync(Server, signedIn.RefreshToken, profile.DeviceId.Value, CancellationToken.None)
                 .ConfigureAwait(false);
             await credentials.RememberAsync(userName, password, signedIn.User, clock.UtcNow).ConfigureAwait(false);
-            await SignInOfflineAsync(profile, userName, password, cancellationToken).ConfigureAwait(false);
+            await SignInOfflineAsync(profile, userName, password, selectedLocation, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch
@@ -335,7 +422,7 @@ public sealed class RegisterService(
         await credentials.RememberAsync(userName, password, signedIn.User, clock.UtcNow).ConfigureAwait(false);
         await cache.SaveReferencesAsync(productReferences, cancellationToken).ConfigureAwait(false);
 
-        session.SignIn(user.UserId, profile.DeviceId, profile.LocationId);
+        session.SignIn(user.UserId, profile.DeviceId, selectedLocation);
         Current = user;
         pendingReconnect = null;
 
@@ -349,6 +436,7 @@ public sealed class RegisterService(
         DeviceStoreProfile profile,
         string userName,
         string password,
+        LocationId selectedLocation,
         CancellationToken cancellationToken)
     {
         OfflineSignInResult verified = await credentials
@@ -359,6 +447,15 @@ public sealed class RegisterService(
             throw new HeadOfficeException(verified.Reason ?? "The username or password is incorrect.");
         }
 
+        if (!profile.AllowedLocationIds.Contains(selectedLocation) ||
+            (!offlineUser.HasAllLocations && !(offlineUser.Locations ?? []).Contains(selectedLocation.Value)))
+        {
+            throw new HeadOfficeException("This account has no saved offline access to the selected location.")
+            {
+                ErrorCode = HeadOfficeException.OfflineLocationAccessMissingErrorCode,
+            };
+        }
+
         productReferences = await cache.LoadReferencesAsync(cancellationToken).ConfigureAwait(false);
 
         RegisterUser user = new(
@@ -367,11 +464,72 @@ public sealed class RegisterService(
             new HeadOfficeSession(string.Empty, string.Empty, offlineUser),
             Offline: true);
 
-        session.SignIn(user.UserId, profile.DeviceId, profile.LocationId);
+        profile.SelectLocation(selectedLocation);
+        await SaveProfileAsync(profile, cancellationToken).ConfigureAwait(false);
+        session.SignIn(user.UserId, profile.DeviceId, selectedLocation);
         Current = user;
         pendingReconnect = (userName, password);
         StartSyncLoop();
     }
+
+    private async Task<DeviceLocationAssignment?> TryGetDeviceLocationsAsync(
+        Guid deviceId,
+        CancellationToken cancellationToken)
+    {
+        Uri configuredServer = Server;
+        try
+        {
+            return await headOffice
+                .GetDeviceLocationsAsync(configuredServer, deviceId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HeadOfficeException ex) when (ex.IsUnreachable)
+        {
+            if (!CanUseLocalFallback(configuredServer))
+            {
+                return null;
+            }
+        }
+
+        try
+        {
+            DeviceLocationAssignment assignment = await headOffice
+                .GetDeviceLocationsAsync(DefaultServer, deviceId, cancellationToken)
+                .ConfigureAwait(false);
+            preferences.Set(ServerPreference, DefaultServer.AbsoluteUri);
+            return assignment;
+        }
+        catch (HeadOfficeException ex) when (ex.IsUnreachable)
+        {
+            return null;
+        }
+    }
+
+    private async Task<HeadOfficeSession> SignInOnlineWithLocalFallbackAsync(
+        Guid deviceId,
+        string userName,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        Uri configuredServer = Server;
+        try
+        {
+            return await headOffice
+                .SignInAsync(configuredServer, userName, password, deviceId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HeadOfficeException ex) when (ex.IsUnreachable && CanUseLocalFallback(configuredServer))
+        {
+            HeadOfficeSession session = await headOffice
+                .SignInAsync(DefaultServer, userName, password, deviceId, cancellationToken)
+                .ConfigureAwait(false);
+            preferences.Set(ServerPreference, DefaultServer.AbsoluteUri);
+            return session;
+        }
+    }
+
+    private static bool CanUseLocalFallback(Uri configuredServer)
+        => OperatingSystem.IsWindows() && configuredServer != DefaultServer;
 
     /// <summary>Downloads the store's data again with the current session.</summary>
     public async Task RefreshStoreDataAsync(CancellationToken cancellationToken = default)
@@ -928,6 +1086,20 @@ public sealed class RegisterService(
         return await context.DeviceProfiles.AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private async Task SaveProfileAsync(DeviceStoreProfile profile, CancellationToken cancellationToken)
+    {
+        await using PosDeviceDbContext context = await database.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        DeviceStoreProfile? tracked = await context.DeviceProfiles
+            .SingleOrDefaultAsync(x => x.DeviceId == profile.DeviceId, cancellationToken).ConfigureAwait(false);
+        if (tracked is null)
+        {
+            return;
+        }
+        tracked.SelectLocation(profile.LocationId);
+        tracked.UpdateAllowedLocations(profile.AllowedLocationIds);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     // Unpairs this register locally once head office has said its device

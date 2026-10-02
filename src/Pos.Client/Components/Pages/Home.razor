@@ -63,8 +63,12 @@
                 <div class="status status-error">
                     <span class="status-dot"></span>
                     <div>
-                        <strong>Secure storage could not start</strong>
+                        <strong>Register startup needs attention</strong>
                         <p>@_error</p>
+                        @if (_status is null)
+                        {
+                            <button type="button" class="button-secondary" @onclick="RefreshAsync">Try again</button>
+                        }
                     </div>
                 </div>
             }
@@ -148,9 +152,9 @@
         {
             await Database.InitializeAsync();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            _error = "Restart the app. If the problem continues, re-enrol this device.";
+            _error = $"The encrypted register database could not start: {ex.GetBaseException().Message}";
             return;
         }
 
@@ -163,7 +167,18 @@
 
     // Read after the store is open and after every change of state, so the
     // banner reports the register as it is now rather than as it was.
-    private async Task RefreshAsync() => _status = await Status.GetAsync(Register.Current?.UserId);
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _status = await Status.GetAsync(Register.Current?.UserId);
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = $"The register status could not be loaded: {ex.GetBaseException().Message}";
+        }
+    }
 
     private async Task OpenRegisterAsync()
     {
@@ -180,13 +195,11 @@
         await RefreshAsync();
     }
 
-    // A sign-in lands on the office when the account holds any back-office
-    // permission, and on the till otherwise. A cashier should not bounce
-    // through an empty office hub.
-    // The office console reads everything from head office, so an offline
-    // sign-in always lands on the till, which keeps working for cash sales.
+    // Choose the landing page by authority, not by connection state. Sending
+    // an offline owner to the till only produces a sale.create denial; the
+    // office console can explain that its online tools need a fresh sign-in.
     private static bool BackOfficeAccessible(RegisterUser? user)
-        => user is { Offline: false }
+        => user is not null
             && user.Session.User.Permissions.Any(perm =>
                 perm == "inventory.view" || perm == "transfer.view"
                 || perm == "purchase.view" || perm == "report.view");

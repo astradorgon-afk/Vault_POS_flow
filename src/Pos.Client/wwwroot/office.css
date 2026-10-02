@@ -772,3 +772,218 @@
 .ov-panel-sub { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.8rem; }
 .inv-idle-note { color: var(--cyan); }
 .inv-status .inv-idle { border-style: dashed; }
+
+/* Mobile office shell ------------------------------------------------------
+   The desktop sidebar becomes a thumb-friendly bottom dock. Content keeps
+   the same information architecture, but cards become swipeable and panels
+   stack so nothing is squeezed into unreadable columns. */
+.office-mobile-nav,
+.office-mobile-more,
+.office-mobile-more-backdrop { display: none; }
+
+@media (max-width: 56rem) {
+    .office-app {
+        min-height: 100svh;
+        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    }
+
+    .office-topbar {
+        min-height: 4.25rem;
+        padding: calc(0.65rem + env(safe-area-inset-top)) 0.9rem 0.65rem;
+        background: rgba(18, 26, 30, 0.92);
+        -webkit-backdrop-filter: blur(16px);
+        backdrop-filter: blur(16px);
+    }
+
+    .office-brand-mark { width: 2.15rem; height: 2.15rem; }
+    .office-brand-context { display: none; }
+    .office-operator { gap: 0.4rem; }
+    .office-operator-who { display: grid; max-width: 8rem; margin-right: 0; text-align: right; }
+    .office-operator-name { display: none; }
+    .office-operator-store { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
+    .office-till-button { display: none; }
+    .office-operator .button-secondary { min-height: 2.15rem; padding-inline: 0.65rem; font-size: 0; }
+    .office-operator .button-secondary::after { content: "Exit"; font-size: 0.75rem; }
+
+    .office-body {
+        display: block;
+        width: 100%;
+        padding: 0.85rem 0.85rem 1.1rem;
+    }
+
+    .office-nav { display: none; }
+    .office-main { width: 100%; padding: 0; }
+    .office-page { width: 100%; max-width: none; }
+    .office-trail { margin-bottom: 0.8rem; }
+    .office-trail ol { display: none; }
+    .office-trail-back { min-height: 2.2rem; }
+
+    .office-mobile-nav {
+        position: fixed;
+        inset: auto 0 0;
+        z-index: 40;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(4.2rem, 1fr));
+        gap: 0.15rem;
+        padding: 0.45rem 0.5rem calc(0.45rem + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--line);
+        background: rgba(18, 26, 30, 0.94);
+        -webkit-backdrop-filter: blur(18px);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 -0.8rem 2rem rgba(0, 0, 0, 0.18);
+    }
+
+    .office-mobile-nav-link {
+        display: grid;
+        min-width: 0;
+        min-height: 3.35rem;
+        place-items: center;
+        gap: 0.1rem;
+        padding: 0.35rem 0.15rem;
+        border: 1px solid transparent;
+        border-radius: 0.65rem;
+        background: transparent;
+        color: var(--muted);
+        font-weight: 600;
+    }
+    .office-mobile-nav-link > span { color: var(--cyan); font-size: 1.2rem; line-height: 1; }
+    .office-mobile-nav-link small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.66rem; }
+    .office-mobile-nav-link.active { border-color: var(--signal-line); background: var(--signal-soft); color: var(--signal-bright); }
+    .office-mobile-nav-link.active > span { color: var(--signal-bright); }
+
+    .office-mobile-more-backdrop { position: fixed; inset: 0; z-index: 41; background: rgba(4, 8, 10, 0.4); }
+    .office-mobile-more {
+        position: fixed;
+        right: 0.75rem;
+        bottom: calc(4.65rem + env(safe-area-inset-bottom));
+        left: 0.75rem;
+        z-index: 42;
+        display: grid;
+        gap: 0.25rem;
+        padding: 0.65rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 1rem;
+        background: rgba(23, 33, 38, 0.98);
+        box-shadow: var(--shadow);
+    }
+    .office-mobile-more header { display: flex; align-items: center; justify-content: space-between; padding: 0.2rem 0.3rem 0.45rem; color: var(--text); }
+    .office-mobile-more header button { min-height: 2rem; padding: 0 0.45rem; background: transparent; color: var(--muted); font-size: 1.35rem; }
+    .office-mobile-more > button { display: flex; align-items: center; gap: 0.75rem; min-height: 2.75rem; padding: 0.55rem 0.7rem; border: 0; border-radius: 0.55rem; background: transparent; color: var(--text); text-align: left; }
+    .office-mobile-more > button:hover { background: var(--surface-3); }
+    .office-mobile-more > button > span { width: 1.4rem; color: var(--cyan); text-align: center; }
+    .office-mobile-more .office-mobile-more-danger { color: var(--danger); }
+    .office-mobile-more .office-mobile-more-danger > span { color: var(--danger); }
+}
+
+@media (max-width: 40rem) {
+    .ov-head { align-items: flex-start; margin-bottom: 0.85rem; }
+    .inv-head h1, .ov-head h1 { font-size: clamp(1.65rem, 8vw, 2rem); }
+    .ov-sub { display: none; }
+
+    .ov-kpis {
+        display: flex;
+        gap: 0.65rem;
+        overflow-x: auto;
+        margin-inline: -0.85rem;
+        padding: 0 0.85rem 0.35rem;
+        scrollbar-width: none;
+        scroll-snap-type: x proximity;
+    }
+    .ov-kpis::-webkit-scrollbar { display: none; }
+    .ov-kpi { flex: 0 0 13rem; min-height: 8.2rem; scroll-snap-align: start; padding: 0.95rem; }
+    .ov-kpi strong { font-size: 1.85rem; }
+    .ov-health, .ov-panel { padding: 0.9rem; border-radius: 1rem; }
+    .ov-health-head { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
+    .ov-legend { gap: 0.35rem 0.75rem; }
+    .ov-legend button { font-size: 0.78rem; }
+    .ov-columns { grid-template-columns: 1fr; gap: 0.8rem; }
+    .ov-urgent button { grid-template-columns: minmax(0, 1fr) auto; gap: 0.55rem; padding: 0.7rem 0.55rem; }
+    .ov-urgent-name strong { overflow: visible; white-space: normal; }
+    .ov-urgent-qty { font-size: 0.78rem; }
+    .ov-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem; }
+    .ov-actions button { display: flex; min-height: 5.25rem; flex-direction: column; align-items: flex-start; gap: 0.38rem; padding: 0.65rem; }
+    .ov-actions .ov-icon { width: 2rem; height: 2rem; flex: none; }
+    .ov-actions strong { font-size: 0.78rem; line-height: 1.15; }
+    .ov-actions small { display: none; }
+}
+
+/* Phone office pages --------------------------------------------------------
+   The office still carries operational detail, so dense records remain
+   horizontally scrollable instead of being silently cut off. Forms and
+   controls stack into thumb-sized targets; complex line-item sheets retain
+   their column relationships inside an explicit scroll region. */
+@media (max-width: 40rem) {
+    .office-body { padding-inline: 0.75rem; }
+    .office-main { padding-bottom: 0.4rem; }
+    .office-page { min-width: 0; }
+    .office-head, .inv-head { gap: 0.7rem; }
+    .office-title { font-size: 1.4rem; }
+    .office-lead, .inv-sub { font-size: 0.84rem; line-height: 1.5; }
+
+    .office-panel { border-radius: 0.8rem; }
+    .office-panel-head, .office-panel-body { padding: 0.8rem; }
+    .office-actions { width: 100%; gap: 0.45rem; }
+    .office-actions .office-button { flex: 1 1 9rem; min-height: 2.75rem; }
+    .office-card { min-height: 7.25rem; padding: 0.9rem; }
+    .office-summary-cell { padding: 0.8rem; }
+    .office-summary-value { font-size: 1.1rem; }
+
+    .office-page input:not([type="checkbox"]):not([type="radio"]),
+    .office-page select,
+    .office-page textarea,
+    .sheet-input { min-height: 2.75rem; }
+    .scan-strip { align-items: flex-start; gap: 0.55rem; padding: 0.65rem; }
+    .scan-strip > span:nth-child(2) { flex: 1 1 11rem; }
+    .scan-strip .scan-trigger { margin-left: auto; }
+
+    .vf-table-wrap,
+    .office-panel-body,
+    .results-panel,
+    .lines-panel,
+    .shift-table-wrap,
+    .composer-lines,
+    .receiving-form {
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-color: var(--line-strong) transparent;
+    }
+    /* These two components also set `overflow: hidden` in scoped page CSS.
+       Keep the rounding while allowing their wide record sheets to pan. */
+    .results-panel,
+    .lines-panel { overflow-x: auto !important; }
+    .office-panel-body,
+    .results-panel,
+    .lines-panel { padding-bottom: 0.4rem; }
+    .office-table,
+    .sales-table,
+    .sheet-table { min-width: 42rem; }
+    .composer-line { min-width: 43rem; }
+    .receiving-line { min-width: 48rem; }
+    .composer-line-head, .receiving-line-head { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+
+    .vf-hero { border-radius: 0.9rem; }
+    .vf-hero h1 { font-size: clamp(1.55rem, 8vw, 2rem); }
+    .vf-filters .field,
+    .report-pickers label { min-width: 0; }
+    .vf-foot { align-items: stretch; }
+    .vf-foot .office-button { width: 100%; min-height: 2.75rem; }
+
+    .report-title-block { padding: 1rem; }
+    .report-title-block h2 { font-size: 1.35rem; }
+    .report-seal { min-width: 4.6rem; padding-left: 0.75rem; }
+    .report-seal strong { font-size: 1.8rem; }
+    .report-panel, .shift-book { padding: 0.9rem; border-radius: 0.9rem; }
+    .shift-book { padding: 0; }
+    .report-empty, .office-blocked { padding: 1.5rem 1rem; }
+
+    .open-count-actions,
+    .sheet-actions,
+    .reason-actions { display: grid; grid-template-columns: 1fr; }
+    .open-count-actions > *,
+    .sheet-actions > *,
+    .reason-actions > * { width: 100%; min-height: 2.75rem; }
+    .pick-row, .receive-row { padding: 0.8rem; }
+    .custody-list li { align-items: flex-start; flex-wrap: wrap; gap: 0.35rem 0.7rem; }
+    .custody-kind { min-width: 0; flex: 1 1 11rem; }
+}

@@ -83,6 +83,19 @@ public sealed class CreateGoodsReceiptCommandHandler(
                 PurchasingErrors.ReceiptLocationTimeZoneMissing(order.DestinationLocationId));
         }
 
+        if (order.OrderedAtUtc is not { } orderedAt)
+        {
+            return Result<GoodsReceiptId>.Failure(Error.Conflict(
+                "purchasing.order_not_sent", "Send the order to the supplier before recording a delivery."));
+        }
+
+        if (clock.UtcNow < orderedAt)
+        {
+            return Result<GoodsReceiptId>.Failure(Error.Conflict(
+                "purchasing.receiving_before_order",
+                "A delivery cannot be recorded before the order was sent. Check the order date and server clock."));
+        }
+
         ProductId[] productIds = [.. order.Lines.Select(l => l.ProductId).Distinct()];
         IReadOnlyList<Product> products = await orders
             .GetProductsForReceivingAsync(productIds, cancellationToken)

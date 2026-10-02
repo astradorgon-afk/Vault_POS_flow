@@ -22,7 +22,7 @@
         OnMore="OpenMoreAsync"
         OnLock="SignOutAsync" />
 
-    <RegisterStatusStrip Status="Status" ContextError="@_contextError" />
+    <RegisterStatusStrip Status="Status" ContextError="@_contextError" SessionOffline="@Register.IsOffline" />
 
     @if (_completionNoticeOpen && _lastSale is not null)
     {

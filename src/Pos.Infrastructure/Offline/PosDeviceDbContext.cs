@@ -74,6 +74,8 @@ public sealed class PosDeviceDbContext(DbContextOptions<PosDeviceDbContext> opti
             entity.HasKey(x => x.DeviceId);
             entity.Property(x => x.DeviceId).HasColumnName("device_id").ValueGeneratedNever();
             entity.Property(x => x.LocationId).HasColumnName("location_id").IsRequired();
+            entity.Property(x => x.AllowedLocationIdsJson).HasColumnName("allowed_location_ids_json").HasMaxLength(4096).IsRequired();
+            entity.Ignore(x => x.AllowedLocationIds);
             entity.Property(x => x.ShortCode).HasColumnName("short_code").HasMaxLength(6).IsRequired();
             entity.Property(x => x.EnrolledAtUtc).HasColumnName("enrolled_at_utc").IsRequired();
             entity.HasIndex(x => x.ShortCode).IsUnique().HasDatabaseName("ux_device_profile_short_code");

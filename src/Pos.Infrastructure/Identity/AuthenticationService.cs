@@ -697,7 +697,7 @@ public sealed class AuthenticationService(
                 .GetAuthorizationAsync(userId, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (!authorization.HasAllLocations && !authorization.Locations.Contains(device.LocationId))
+            if (!authorization.HasAllLocations && !device.AllowedLocationIds.Any(authorization.Locations.Contains))
             {
                 await RecordFailureAsync(
                     identifierHash, LoginFailureReason.LocationNotPermitted, method,

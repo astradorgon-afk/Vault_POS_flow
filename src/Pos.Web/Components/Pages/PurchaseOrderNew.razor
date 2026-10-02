@@ -28,16 +28,27 @@ else
                     </div>
                 </div>
                 <div class="po-fields">
-                    <label class="po-field">
-                        <span>Supplier</span>
-                        <select @bind="supplierId" @bind:after="OnSupplierChanged">
-                            <option value="">Choose a supplier…</option>
-                            @foreach (PosSupplier supplier in suppliers.Where(s => s.IsActive).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
-                            {
-                                <option value="@supplier.Id">@supplier.Name</option>
-                            }
-                        </select>
-                    </label>
+                    <div class="po-field">
+                        <label for="po-supplier">Supplier</label>
+                        @if (useCustomSupplier)
+                        {
+                            <input id="po-supplier" type="text" maxlength="128" placeholder="Enter supplier name"
+                                   @bind="customSupplierName" @bind:event="oninput" />
+                        }
+                        else
+                        {
+                            <select id="po-supplier" @bind="supplierId" @bind:after="OnSupplierChanged">
+                                <option value="">Choose a supplier…</option>
+                                @foreach (PosSupplier supplier in suppliers.Where(s => s.IsActive).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <option value="@supplier.Id">@supplier.Name</option>
+                                }
+                            </select>
+                        }
+                        <button type="button" class="po-inline-link" @onclick="ToggleCustomSupplier">
+                            @(useCustomSupplier ? "Choose a listed supplier" : "Supplier not listed?")
+                        </button>
+                    </div>
                     <label class="po-field">
                         <span>Deliver to</span>
                         <select @bind="destinationId">
@@ -51,9 +62,12 @@ else
                         <span>Expected delivery</span>
                         <input type="date" @bind="expectedOn" />
                     </label>
-                    <div class="po-field po-delivery-note">
-                        <span>Delivery notes</span>
-                        <p>Estimated from the supplier's lead time. Adjust if the supplier confirms a different date; arrival is recorded separately.</p>
+                    <div class="po-field po-date-help">
+                        <span>Expected delivery</span>
+                        <details>
+                            <summary>How is this date set?</summary>
+                            <p>We estimate it from the supplier’s usual lead time. You can change it if they confirm another date.</p>
+                        </details>
                     </div>
                 </div>
             </section>
@@ -81,6 +95,38 @@ else
                         </label>
                     }
                 </div>
+
+                <details class="po-custom-product">
+                    <summary>Product not listed? Add it</summary>
+                    <div class="po-custom-product-fields">
+                        <label class="po-field"><span>Product name</span><input @bind="newProductName" maxlength="128" /></label>
+                        <label class="po-field"><span>SKU <small>(optional; generated if blank)</small></span><input @bind="newProductSku" maxlength="64" /></label>
+                        <label class="po-field"><span>Category</span>
+                            <select @bind="newProductCategoryId">
+                                <option value="">Choose a category</option>
+                                @foreach (PosCategory category in categories)
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="po-field"><span>Unit</span>
+                            <select @bind="newProductUnitId">
+                                <option value="">Choose a unit</option>
+                                @foreach (PosUnitOfMeasure unit in units.Values.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <option value="@unit.Id">@unit.Name (@unit.Code)</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="po-field"><span>Unit cost</span><input type="number" min="0" step="0.01" @bind="newProductCost" /></label>
+                        <button type="button" class="po-btn primary" @onclick="AddCustomProductAsync" disabled="@(saving || !CanAddCustomProduct)">Add product to order</button>
+                    </div>
+                    @if (categories.Count == 0)
+                    {
+                        <p class="po-hint">Product categories are unavailable, so a new product cannot be added right now.</p>
+                    }
+                </details>
 
                 @if (Matches.Count > 0)
                 {
@@ -164,7 +210,7 @@ else
                 <p>Complete the required details to send this order to a reviewer.</p>
             </div>
             <dl>
-                <div><dt>Supplier</dt><dd>@(Supplier?.Name ?? "—")</dd></div>
+                <div><dt>Supplier</dt><dd>@(useCustomSupplier && !string.IsNullOrWhiteSpace(customSupplierName) ? customSupplierName : Supplier?.Name ?? "—")</dd></div>
                 <div><dt>Deliver to</dt><dd>@(destinations.FirstOrDefault(d => d.Id == destinationId)?.Name ?? "—")</dd></div>
                 <div><dt>Expected</dt><dd>@(expectedOn?.ToString("d MMM yyyy", CultureInfo.InvariantCulture) ?? "—")</dd></div>
                 <div><dt>Lines</dt><dd>@lines.Count · @PurchasingText.Quantity(lines.Sum(l => l.Quantity)) units</dd></div>
@@ -196,6 +242,7 @@ else
     private readonly List<PosLocation> destinations = [];
     private readonly List<PosOrderableProduct> catalogue = [];
     private readonly Dictionary<Guid, PosUnitOfMeasure> units = [];
+    private readonly List<PosCategory> categories = [];
     private readonly List<DraftLine> lines = [];
 
     private bool loading = true;
@@ -206,8 +253,18 @@ else
     private DateOnly? expectedOn;
     private string productSearch = string.Empty;
     private bool onlySupplierProducts;
+    private bool useCustomSupplier;
+    private string customSupplierName = string.Empty;
+    private string newProductName = string.Empty;
+    private string newProductSku = string.Empty;
+    private decimal newProductCost;
+    private Guid newProductCategoryId;
+    private Guid newProductUnitId;
 
     private PosSupplier? Supplier => suppliers.FirstOrDefault(s => s.Id == supplierId);
+    private bool HasSupplier => useCustomSupplier ? !string.IsNullOrWhiteSpace(customSupplierName) : supplierId is not null;
+    private bool CanAddCustomProduct => !string.IsNullOrWhiteSpace(newProductName)
+        && newProductCategoryId != Guid.Empty && newProductUnitId != Guid.Empty && newProductCost >= 0;
 
     private bool IsStoreDelivery => destinations.FirstOrDefault(d => d.Id == destinationId)?.Kind == 1;
 
@@ -237,7 +294,7 @@ else
         get
         {
             List<string> missing = [];
-            if (supplierId is null) missing.Add("Choose a supplier");
+            if (!HasSupplier) missing.Add(useCustomSupplier ? "Enter a supplier name" : "Choose a supplier");
             if (destinationId == Guid.Empty) missing.Add("Choose where it is delivered");
             if (lines.Count == 0) missing.Add("Add at least one product");
             if (lines.Any(l => !l.IsValid)) missing.Add("Every line needs a quantity above 0 and a cost");
@@ -252,8 +309,9 @@ else
             Task<ApiResult<List<PosSupplier>>> suppliersTask = Api.GetSuppliersAsync(CancellationToken.None);
             Task<ApiResult<List<PosLocation>>> locationsTask = Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
             Task<ApiResult<List<PosUnitOfMeasure>>> unitsTask = Api.GetUnitsAsync(CancellationToken.None);
+            Task<ApiResult<List<PosCategory>>> categoriesTask = Api.GetAsync<List<PosCategory>>("/api/v1/catalog/categories", CancellationToken.None);
             Task catalogueTask = LoadCatalogueAsync();
-            await Task.WhenAll(suppliersTask, locationsTask, unitsTask, catalogueTask);
+            await Task.WhenAll(suppliersTask, locationsTask, unitsTask, categoriesTask, catalogueTask);
 
             suppliers.AddRange(suppliersTask.Result.Value ?? []);
             destinations.AddRange((locationsTask.Result.Value ?? [])
@@ -261,6 +319,9 @@ else
                 .OrderBy(l => l.Kind)
                 .ThenBy(l => l.Code, StringComparer.Ordinal));
             foreach (PosUnitOfMeasure unit in unitsTask.Result.Value ?? []) units[unit.Id] = unit;
+            categories.AddRange((categoriesTask.Result.Value ?? []).Where(c => c.IsActive).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase));
+            newProductCategoryId = categories.FirstOrDefault()?.Id ?? Guid.Empty;
+            newProductUnitId = units.Keys.FirstOrDefault();
 
             destinationId = destinations.FirstOrDefault()?.Id ?? Guid.Empty;
             if (suppliersTask.Result is { IsSuccess: false })
@@ -301,11 +362,63 @@ else
 
     private void OnSupplierChanged()
     {
+        useCustomSupplier = false;
+        customSupplierName = string.Empty;
         onlySupplierProducts = supplierId is not null && catalogue.Any(p => p.PrimarySupplierId == supplierId);
         if (Supplier is { } supplier)
         {
             expectedOn = StoreClock.Today.AddDays(Math.Max(1, supplier.LeadTimeDays));
         }
+    }
+
+    private void ToggleCustomSupplier()
+    {
+        useCustomSupplier = !useCustomSupplier;
+        if (useCustomSupplier) supplierId = null;
+        else customSupplierName = string.Empty;
+        onlySupplierProducts = false;
+        expectedOn = null;
+    }
+
+    private async Task AddCustomProductAsync()
+    {
+        if (!CanAddCustomProduct || saving) return;
+        string sku = string.IsNullOrWhiteSpace(newProductSku)
+            ? $"CUSTOM-{Guid.NewGuid():N}"[..15].ToUpperInvariant()
+            : newProductSku.Trim();
+        saving = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> created = await Api.PostAsync<PosReference>("/api/v1/catalog/products", new
+            {
+                sku,
+                name = newProductName.Trim(),
+                categoryId = newProductCategoryId,
+                baseUnitOfMeasureId = newProductUnitId,
+                primarySupplierId = useCustomSupplier ? null : supplierId,
+                defaultPurchaseCost = newProductCost
+            }, CancellationToken.None);
+            if (created is not { IsSuccess: true, Value: { } productRef })
+            {
+                message = created.Error;
+                return;
+            }
+
+            PosOrderableProduct product = new(productRef.Id, sku, newProductName.Trim(),
+                useCustomSupplier ? null : supplierId, newProductUnitId, newProductCost, false, false, true);
+            catalogue.Add(product);
+            AddLine(product);
+            newProductName = string.Empty;
+            newProductSku = string.Empty;
+            newProductCost = 0;
+            scanNote = $"{product.Name} added to the order.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "The product could not be added. Check your connection and product permissions.";
+        }
+        finally { saving = false; }
     }
 
     private void OnFinderKey(KeyboardEventArgs e)
@@ -365,7 +478,7 @@ else
 
     private async Task SaveAsync(bool submit)
     {
-        if (Missing.Count > 0 || supplierId is not { } supplier)
+        if (Missing.Count > 0)
         {
             return;
         }
@@ -376,10 +489,11 @@ else
         {
             ApiResult<PosReference> created = await Api.CreatePurchaseOrderAsync(
                 new PosCreatePurchaseOrder(
-                    supplier,
+                    useCustomSupplier ? null : supplierId,
                     destinationId,
                     [.. lines.Select(l => new PosCreatePurchaseOrderLine(l.Product.Id, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
-                    ExpectedAtUtc: expectedOn is { } day ? new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(8)) : null),
+                    ExpectedAtUtc: expectedOn is { } day ? new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(8)) : null,
+                    CustomSupplierName: useCustomSupplier ? customSupplierName.Trim() : null),
                 CancellationToken.None);
             if (created is not { IsSuccess: true, Value: { } reference })
             {
@@ -405,6 +519,8 @@ else
             saving = false;
         }
     }
+
+    private sealed record PosCategory(Guid Id, string Code, string Name, int SortOrder, bool IsActive);
 
     private sealed class DraftLine(PosOrderableProduct product)
     {

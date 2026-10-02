@@ -61,7 +61,7 @@ public sealed class SyncPushService(
             results.Add(await ProcessOneAsync(
                 request.DeviceId,
                 authenticatedUser.Value,
-                device.LocationId,
+                device.AllowedLocationIds,
                 item,
                 now,
                 cancellationToken).ConfigureAwait(false));
@@ -140,7 +140,7 @@ public sealed class SyncPushService(
     private async Task<SyncPushEventResult> ProcessOneAsync(
         Guid deviceId,
         UserId authenticatedUser,
-        LocationId deviceLocation,
+        IReadOnlyList<LocationId> deviceLocations,
         SyncPushEvent item,
         DateTimeOffset now,
         CancellationToken cancellationToken)
@@ -202,7 +202,7 @@ public sealed class SyncPushService(
             return SyncPushEventResult.Duplicate(item.EventId, existing.Outcome, existing.AppliedAtUtc);
         }
 
-        if (item.UserId != authenticatedUser.Value || item.LocationId != deviceLocation.Value)
+        if (item.UserId != authenticatedUser.Value || !deviceLocations.Contains(new LocationId(item.LocationId)))
         {
             return SyncPushEventResult.Rejected(item.EventId, "sync.event_scope", "The event identity or location is outside the authenticated device scope.");
         }

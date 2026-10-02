@@ -461,21 +461,24 @@ public sealed record PosDeviceSummary(
     DateTimeOffset? LastSeenAtUtc,
     DateTimeOffset? LastSyncAtUtc,
     decimal? ClockSkewSeconds,
-    string? StatusReason);
+    string? StatusReason,
+    IReadOnlyList<Guid> AllowedLocationIds);
 
 /// <summary>The body used to register a terminal.</summary>
 public sealed record PosRegisterDeviceRequest(
     string ShortCode,
     string Name,
     Guid LocationId,
-    int Platform);
+    int Platform,
+    IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 /// <summary>The one-time result of registering or reissuing a terminal enrolment.</summary>
 public sealed record PosDeviceRegistration(
     Guid DeviceId,
     string ShortCode,
     string? EnrolmentCode,
-    DateTimeOffset? ExpiresAtUtc);
+    DateTimeOffset? ExpiresAtUtc,
+    IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 // ---- Locations ----
 

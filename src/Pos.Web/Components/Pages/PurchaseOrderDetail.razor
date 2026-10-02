@@ -9,12 +9,14 @@
 
 <PageTitle>@PurchasingText.OrderName(order?.Number) · VaultFlow</PageTitle>
 
+<div class="purchase-detail">
 <header class="qr-head po-head">
     <div>
         @if (order is not null)
         {
+            <span class="order-eyebrow">Purchase order</span>
             <h1>@PurchasingText.OrderName(order.Number) <span class="ov-pill tone-@PurchasingText.Tone(order.Status, Outstanding)">@PurchasingText.Label(order.Status, Outstanding)</span></h1>
-            <p>@SupplierName · to @LocationName(order.DestinationLocationId) · raised by @PersonName(order.CreatedByUserId) on @order.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</p>
+            <p>@SupplierName <span aria-hidden="true">→</span> @LocationName(order.DestinationLocationId)</p>
         }
     </div>
     @if (order is not null)
@@ -34,23 +36,29 @@
 }
 else if (order is { } o)
 {
-    int stageIndex = PurchasingText.StageIndex(o.Status);
-    @if (stageIndex >= 0)
-    {
-        <ol class="po-progress" aria-label="Order progress">
-            @for (int i = 0; i < PurchasingText.Stages.Length; i++)
-            {
-                string state = i < stageIndex ? "done" : i == stageIndex ? "now" : "";
-                <li class="@state" aria-current="@(i == stageIndex ? "step" : null)">@PurchasingText.Label(PurchasingText.Stages[i])</li>
-            }
+    <section class="order-journey" aria-label="Order timeline">
+        <div class="journey-heading"><h2>Order timeline</h2><span>Dates in @(o.ReceivingTimeZoneId ?? "Asia/Manila")</span></div>
+        <ol class="journey-stages">
+            <li class="complete"><span class="stage-dot">1</span><strong>Created</strong><time>@When(o.CreatedAtUtc)</time><small>By @PersonName(o.CreatedByUserId)</small></li>
+            <li class="@(DecisionAt("Approve") is not null ? "complete" : "")"><span class="stage-dot">2</span><strong>Approved</strong><time>@When(DecisionAt("Approve"))</time></li>
+            <li class="@(o.OrderedAtUtc is not null ? "complete" : "")"><span class="stage-dot">3</span><strong>Sent to supplier</strong><time>@When(o.OrderedAtUtc)</time></li>
+            <li class="@(FirstReceivedAt is not null ? "complete" : "")"><span class="stage-dot">4</span><strong>@(o.Status == "PartiallyReceived" ? "Partly received" : "Delivery received")</strong><time>@(receiptsLoaded ? When(LastReceivedAt) : "History unavailable")</time>@if (receipts.Count > 1) { <small>@receipts.Count deliveries · first @When(FirstReceivedAt)</small> }</li>
+            <li class="@(DecisionAt("Close") is not null ? "complete" : "")"><span class="stage-dot">5</span><strong>Closed</strong><time>@When(DecisionAt("Close"))</time></li>
         </ol>
-    }
-    else
+        <dl class="order-facts">
+            <div><dt>Expected delivery</dt><dd>@ExpectedDate @if (IsDeliveryOverdue) { <span class="ov-pill tone-warn">Overdue</span> }</dd></div>
+            <div><dt>First delivery</dt><dd>@(receiptsLoaded ? When(FirstReceivedAt) : "History unavailable")</dd></div>
+            <div><dt>Order lines</dt><dd>@o.Lines.Count</dd></div>
+            <div><dt>Still to receive</dt><dd>@(receiptsLoaded ? $"{PurchasingText.Quantity(Outstanding)} units" : "History unavailable")</dd></div>
+        </dl>
+    </section>
+
+    @if (o.Status is "Cancelled" or "Rejected")
     {
         <div class="po-alert">This order was @PurchasingText.Label(o.Status).ToLowerInvariant()@(string.IsNullOrWhiteSpace(o.CancelledReason) ? "." : ": " + o.CancelledReason)</div>
     }
 
-    @if (PurchasingText.IsIncomplete(o.Status, Outstanding))
+    @if (receiptsLoaded && PurchasingText.IsIncomplete(o.Status, Outstanding))
     {
         List<PosPurchaseOrderLine> shortLines = [.. o.Lines.Where(line => Due(line) > 0)];
         <section class="po-incomplete" role="status">
@@ -104,7 +112,7 @@ else if (order is { } o)
                         <i style="width:@(o.Lines.Count == 0 ? 0 : reviewed.Count * 100 / o.Lines.Count)%"></i>
                     </div>
                 </div>
-                @if (o.CreatedByUserId == MyId)
+                @if (o.CreatedByUserId == MyId && !IsOwner)
                 {
                     <div class="po-alert">You raised this order. Unless it is within your self-approval limit, someone else has to approve it.</div>
                 }
@@ -152,22 +160,46 @@ else if (order is { } o)
             break;
 
         case "Ordered" or "PartiallyReceived" when Can("purchase.receive"):
-            @ReceivePanel(o)
+            <section class="qr-card po-card order-next">
+                <div><span class="order-eyebrow">Next step · receiving</span><h2>@(o.Status == "PartiallyReceived" ? "Waiting for the remaining goods" : "Waiting for delivery")</h2>
+                    <p>Expected @ExpectedDate.ToLowerInvariant(). Record only the goods that physically arrive at @LocationName(o.DestinationLocationId).</p>
+                    @if (!ReceivingDateAllowed)
+                    {
+                        <p class="receiving-date-note">Receiving is available after the order is sent. Check the order date if it is in the future.</p>
+                    }
+                    @if (!receiptsLoaded) { <p class="receiving-date-note">Delivery history is unavailable. Reload before recording stock.</p> }
+                </div>
+                <button type="button" class="po-btn primary" disabled="@(busy || !ReceivingDateAllowed || !receiptsLoaded)" @onclick="() => receivingOpen = !receivingOpen">@(receivingOpen ? "Hide receiving form" : "Receive a delivery")</button>
+            </section>
+            @if (receivingOpen && ReceivingDateAllowed && receiptsLoaded)
+            {
+                @ReceivePanel(o)
+            }
+            break;
+
+        case "FullyReceived":
+            <section class="qr-card po-card order-next received">
+                <div><span class="order-eyebrow">Delivery complete</span><h2>All ordered goods have been received</h2><p>Review the delivery records below. Closing completes the purchasing record; inventory inspection is handled separately.</p></div>
+                @if (Can("purchase.approve"))
+                {
+                    <button type="button" class="po-btn primary" disabled="@busy" @onclick="CloseAsync">Close purchase order</button>
+                }
+            </section>
             break;
     }
 
-    @if (o.Status is "Approved" or "Ordered" or "PartiallyReceived" or "FullyReceived" && Can("purchase.approve"))
+    @if (o.Status is "Approved" or "Ordered" or "PartiallyReceived" && Can("purchase.approve"))
     {
         <details class="po-more">
-            <summary>More actions</summary>
+            <summary>Cancel or close this order early</summary>
             <div class="po-more-body">
                 <label class="po-field wide"><span>Reason</span><input type="text" @bind="endReason" @bind:event="oninput" placeholder="Why are you closing or cancelling it? (5+ characters)" /></label>
                 <div class="po-buttons">
-                    @if (o.Status is "PartiallyReceived" or "FullyReceived")
+                    @if (o.Status is "Ordered" or "PartiallyReceived")
                     {
                         <button type="button" class="po-btn" disabled="@(busy || (o.Status != "FullyReceived" && endReason.Trim().Length < 5))" @onclick="CloseAsync">Close order</button>
                     }
-                    @if (o.Status != "FullyReceived")
+                    @if (o.Status is "Approved" or "Ordered")
                     {
                         <button type="button" class="po-btn danger" disabled="@(busy || endReason.Trim().Length < 5)" @onclick="CancelAsync">Cancel order</button>
                     }
@@ -179,7 +211,7 @@ else if (order is { } o)
     @if (o.Status is not "PendingApproval")
     {
         <section class="qr-card qr-results">
-            <header class="qr-results-head"><h2>Lines <small>@o.Lines.Count</small></h2></header>
+            <header class="qr-results-head"><h2>Order items <small>@o.Lines.Count</small></h2></header>
             <div class="qr-table-wrap">
                 <table class="qr-table po-lines">
                     <thead><tr><th>#</th><th>Product</th><th class="num">Ordered</th><th class="num">Received good</th><th class="num">Still due</th><th class="num">Unit cost</th><th class="num">Line total</th></tr></thead>
@@ -192,8 +224,8 @@ else if (order is { } o)
                                 <td>@line.LineNo</td>
                                 <td><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
                                 <td class="num">@PurchasingText.Quantity(line.OrderedQuantity)</td>
-                                <td class="num">@PurchasingText.Quantity(got)</td>
-                                <td class="num">@(Due(line) > 0 ? PurchasingText.Quantity(Due(line)) : "✓")@if (isShort) { <small>short</small> }</td>
+                                <td class="num">@(receiptsLoaded ? PurchasingText.Quantity(got) : "—")</td>
+                                <td class="num">@(receiptsLoaded ? Due(line) > 0 ? PurchasingText.Quantity(Due(line)) : "Complete" : "—")@if (receiptsLoaded && isShort) { <small>short</small> }</td>
                                 <td class="num">@PurchasingText.Money(line.UnitCost)</td>
                                 <td class="num">@PurchasingText.Money(line.LineTotal)</td>
                             </tr>
@@ -207,13 +239,13 @@ else if (order is { } o)
     @if (receipts.Count > 0)
     {
         <section class="qr-card po-card">
-            <h2>Deliveries <small>@receipts.Count</small></h2>
+            <h2>Delivery history <small>@receipts.Count</small></h2>
             @foreach (PosGoodsReceipt receipt in receipts.OrderByDescending(r => r.ReceivedAtUtc))
             {
                 <div class="po-delivery">
                     <div class="po-delivery-head">
                         <strong>@receipt.Number</strong>
-                        <span>@receipt.ReceivedAtUtc.InStoreTime().ToString("d MMM yyyy, h:mm tt", CultureInfo.InvariantCulture) · by @PersonName(receipt.ReceivedByUserId)</span>
+                        <span>Received @When(receipt.ReceivedAtUtc) · by @PersonName(receipt.ReceivedByUserId)</span>
                         @if (receipt.DocumentsMissing) { <span class="ov-pill tone-warn">Documents missing</span> }
                         @if (receipt.CostVariancePendingApproval) { <span class="ov-pill tone-warn">Cost change awaiting approval</span> }
                     </div>
@@ -222,7 +254,7 @@ else if (order is { } o)
                         {
                             <li>
                                 <span>@LineName(line.PurchaseOrderLineId)</span>
-                                <span>@PurchasingText.Quantity(line.QuantityReceived) received · @PurchasingText.Quantity(line.QuantityAccepted) accepted@(line.QuantityDamaged + line.QuantityWrongItem + line.QuantityExpired > 0 ? $" · {PurchasingText.Quantity(line.QuantityDamaged + line.QuantityWrongItem + line.QuantityExpired)} with problems" : "")</span>
+                                <span>@PurchasingText.Quantity(line.QuantityReceived) received · @PurchasingText.Quantity(line.QuantityAccepted) accepted@(line.QuantityDamaged + line.QuantityWrongItem + line.QuantityExpired > 0 ? $" · {PurchasingText.Quantity(line.QuantityDamaged + line.QuantityWrongItem + line.QuantityExpired)} with problems" : "")<small>Received into @SplitWords(line.AcceptedState).ToLowerInvariant()</small></span>
                             </li>
                         }
                     </ul>
@@ -248,6 +280,7 @@ else if (order is { } o)
         </section>
     }
 }
+</div>
 
 @code {
     // One delivery, checked line by line: every line is either counted or
@@ -257,8 +290,13 @@ else if (order is { } o)
         <section class="qr-card po-card">
             <div class="po-card-head">
                 <div>
-                    <h2>Record a delivery</h2>
+                    <h2>Count this delivery</h2>
                     <p>Go through the delivery line by line. Mark each line as arrived in full, enter what you counted, or mark it as not in this delivery.</p>
+                    <p>Receiving date: <strong>@ReceivingToday.ToString("d MMM yyyy", CultureInfo.InvariantCulture)</strong>. The actual recording time is saved with the receipt.</p>
+                    @if (IsSameDayDelivery)
+                    {
+                        <p class="receiving-date-note">Same-day delivery: this order was sent today. Continue only if the supplier has already delivered the goods.</p>
+                    }
                 </div>
                 <div class="po-meter" role="progressbar" aria-valuemin="0" aria-valuemax="@receiving.Count" aria-valuenow="@AccountedCount">
                     <strong>@AccountedCount of @receiving.Count</strong><span>lines accounted for</span>
@@ -302,6 +340,7 @@ else if (order is { } o)
             </div>
 
             <label class="switch-label"><input type="checkbox" @bind="documentsMissing" /><span>The delivery note or invoice is missing</span></label>
+            <label class="switch-label arrival-confirmation"><input type="checkbox" @bind="arrivalConfirmed" /><span>@(IsSameDayDelivery ? "I confirm this is a genuine same-day delivery: the goods have physically arrived and I have checked the quantities." : "I confirm these goods have physically arrived and the quantities above have been checked.")</span></label>
             <div class="po-buttons">
                 <span class="po-hint">@ReceiveSummary</span>
                 <button type="button" class="po-btn primary" disabled="@(busy || !CanRecord)" @onclick="RecordDeliveryAsync">

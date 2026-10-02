@@ -39,9 +39,21 @@ else
             <div class="fleet-form-grid">
                 <label><span>Short code</span><input maxlength="6" autocomplete="off" @bind="newShortCode" placeholder="T03" /></label>
                 <label><span>Device name</span><input maxlength="80" @bind="newName" placeholder="Front counter 3" /></label>
-                <label><span>Location</span><select @bind="newLocationId"><option value="">Select location</option>@foreach (PosLocationAdmin location in locations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+                <label><span>Default location</span><select value="@newLocationId" @onchange="OnHomeLocationChanged"><option value="">Select location</option>@foreach (PosLocationAdmin location in locations.Where(l => l.IsActive && l.Kind != 2)){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
                 <label><span>Platform</span><select @bind="newPlatform"><option value="1">Windows register</option><option value="2">Android terminal</option><option value="3">Browser lane</option></select></label>
             </div>
+            <fieldset class="fleet-location-access">
+                <legend>Locations this device can open</legend>
+                <p>Staff still need permission for the location they choose.</p>
+                <div>
+                    @foreach (PosLocationAdmin location in locations.Where(l => l.IsActive && l.Kind != 2))
+                    {
+                        <label><input type="checkbox" checked="@(selectedLocationIds.Contains(location.Id) || location.Id.ToString() == newLocationId)"
+                                      disabled="@(location.Id.ToString() == newLocationId)" @onchange="e => ToggleAllowedLocation(location.Id, e)" />
+                            <span>@location.Code · @location.Name</span></label>
+                    }
+                </div>
+            </fieldset>
             <footer><span>Short codes become part of offline document numbers and cannot be changed.</span><button class="fleet-primary" type="button" @onclick="RegisterDeviceAsync" disabled="@(!CanRegister || working)">@(working ? "Registering…" : "Issue identity")</button></footer>
         </section>
     }
@@ -91,7 +103,7 @@ else
                 <article class="device-row status-@StatusSlug(device.Status)" @key="device.Id">
                     <div class="device-state" aria-label="@StatusName(device.Status)"><i></i><span>@StatusName(device.Status)</span></div>
                     <div class="device-identity">
-                        <span>@PlatformName(device.Platform) · @LocationName(device.LocationId)</span>
+                        <span>@PlatformName(device.Platform) · @string.Join(", ", device.AllowedLocationIds.Select(LocationName))</span>
                         <h2>@device.Name</h2>
                         <code>@device.ShortCode</code>
                     </div>
@@ -101,6 +113,7 @@ else
                         <div><dt>App / clock</dt><dd>@(device.AppVersion ?? "Not reported") · @ClockLabel(device.ClockSkewSeconds)</dd></div>
                     </dl>
                     <div class="device-actions">
+                        <button type="button" @onclick="() => OpenLocationEditor(device)">Locations</button>
                         @if (device.Status == StatusPending)
                         {
                             <button type="button" @onclick="() => ReissueAsync(device)" disabled="@working">Reissue code</button>
@@ -121,6 +134,23 @@ else
                     @if (!string.IsNullOrWhiteSpace(device.StatusReason))
                     {
                         <p class="device-reason">@device.StatusReason</p>
+                    }
+                    @if (editingDevice?.Id == device.Id)
+                    {
+                        <div class="device-location-editor">
+                            <strong>Locations this device can open</strong>
+                            <div>
+                                @foreach (PosLocationAdmin location in locations.Where(l => l.IsActive && l.Kind != 2))
+                                {
+                                    <label><input type="checkbox" checked="@editingLocationIds.Contains(location.Id)"
+                                                  disabled="@(location.Id == device.LocationId)"
+                                                  @onchange="e => ToggleEditedLocation(location.Id, e)" />
+                                        @location.Code · @location.Name</label>
+                                }
+                            </div>
+                            <button type="button" class="fleet-primary" @onclick="() => SaveLocationsAsync(device)" disabled="@working">Save locations</button>
+                            <button type="button" @onclick="CloseLocationEditor">Cancel</button>
+                        </div>
                     }
                 </article>
             }
@@ -159,13 +189,17 @@ else
     private string newShortCode = string.Empty;
     private string newName = string.Empty;
     private string newLocationId = string.Empty;
+    private readonly HashSet<Guid> selectedLocationIds = [];
     private int newPlatform = 1;
     private PosDeviceSummary? actionDevice;
     private DeviceAction pendingAction;
     private string actionReason = string.Empty;
+    private PosDeviceSummary? editingDevice;
+    private readonly HashSet<Guid> editingLocationIds = [];
 
     private bool CanManageDevices => Session.Current?.User.Permissions.Contains("device.manage", StringComparer.Ordinal) == true;
-    private bool CanRegister => newShortCode.Trim().Length is >= 2 and <= 6 && !string.IsNullOrWhiteSpace(newName) && Guid.TryParse(newLocationId, out _);
+    private bool CanRegister => newShortCode.Trim().Length is >= 2 and <= 6 && !string.IsNullOrWhiteSpace(newName)
+        && Guid.TryParse(newLocationId, out Guid home) && (selectedLocationIds.Contains(home) || home != Guid.Empty);
     private List<PosDeviceSummary> FilteredDevices => devices.Where(device =>
         (filterLocationId is null || device.LocationId == filterLocationId) &&
         (string.IsNullOrEmpty(filterStatus) || device.Status.ToString(CultureInfo.InvariantCulture) == filterStatus)).ToList();
@@ -236,7 +270,8 @@ else
         try
         {
             ApiResult<PosDeviceRegistration> result = await Api.RegisterDeviceAsync(
-                new PosRegisterDeviceRequest(newShortCode.Trim().ToUpperInvariant(), newName.Trim(), locationId, newPlatform),
+                new PosRegisterDeviceRequest(newShortCode.Trim().ToUpperInvariant(), newName.Trim(), locationId, newPlatform,
+                    [.. selectedLocationIds.Append(locationId).Distinct()]),
                 CancellationToken.None);
             if (!result.IsSuccess || result.Value is null)
             {
@@ -259,6 +294,57 @@ else
         {
             working = false;
         }
+    }
+
+    private void OnHomeLocationChanged(ChangeEventArgs e)
+    {
+        newLocationId = e.Value?.ToString() ?? string.Empty;
+        if (Guid.TryParse(newLocationId, out Guid locationId)) selectedLocationIds.Add(locationId);
+    }
+
+    private void OpenLocationEditor(PosDeviceSummary device)
+    {
+        editingDevice = device;
+        editingLocationIds.Clear();
+        editingLocationIds.UnionWith(device.AllowedLocationIds);
+        editingLocationIds.Add(device.LocationId);
+    }
+
+    private void CloseLocationEditor() => editingDevice = null;
+
+    private void ToggleEditedLocation(Guid locationId, ChangeEventArgs e)
+    {
+        if (e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+            editingLocationIds.Add(locationId);
+        else
+            editingLocationIds.Remove(locationId);
+    }
+
+    private async Task SaveLocationsAsync(PosDeviceSummary device)
+    {
+        if (working || editingLocationIds.Count == 0) return;
+        working = true;
+        try
+        {
+            ApiResult<PosReference> result = await Api.SetDeviceLocationsAsync(
+                device.Id, [.. editingLocationIds], CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                message = result.Error;
+                return;
+            }
+            editingDevice = null;
+            await LoadDevicesAsync();
+        }
+        finally { working = false; }
+    }
+
+    private void ToggleAllowedLocation(Guid locationId, ChangeEventArgs e)
+    {
+        if (e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+            selectedLocationIds.Add(locationId);
+        else
+            selectedLocationIds.Remove(locationId);
     }
 
     private async Task ReissueAsync(PosDeviceSummary device)

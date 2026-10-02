@@ -17,11 +17,13 @@ namespace Pos.Api.Endpoints;
 /// <param name="Name">A human-readable name.</param>
 /// <param name="LocationId">The location the device belongs to.</param>
 /// <param name="Platform">The platform it runs on.</param>
+/// <param name="AllowedLocationIds">Locations this device may open.</param>
 public sealed record RegisterDeviceBody(
     string ShortCode,
     string Name,
     Guid LocationId,
-    DevicePlatform Platform);
+    DevicePlatform Platform,
+    IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 /// <summary>The body of a device enrolment.</summary>
 /// <param name="EnrolmentCode">The one-time code issued by an administrator.</param>
@@ -40,6 +42,9 @@ public sealed record EnrolDeviceBody(
 /// <param name="Reason">Why the change is being made.</param>
 public sealed record DeviceStatusChangeBody(string Reason);
 
+/// <summary>The locations a device may operate at.</summary>
+public sealed record DeviceLocationsBody(IReadOnlyList<Guid> LocationIds);
+
 /// <summary>A device as listed for administrators.</summary>
 /// <param name="Id">The device identifier.</param>
 /// <param name="ShortCode">Its document-number short code.</param>
@@ -52,6 +57,7 @@ public sealed record DeviceStatusChangeBody(string Reason);
 /// <param name="LastSyncAtUtc">When it last synchronized.</param>
 /// <param name="ClockSkewSeconds">The last observed clock difference.</param>
 /// <param name="StatusReason">Why it was suspended or revoked.</param>
+/// <param name="AllowedLocationIds">Locations this device may open.</param>
 public sealed record DeviceSummary(
     Guid Id,
     string ShortCode,
@@ -63,7 +69,8 @@ public sealed record DeviceSummary(
     DateTimeOffset? LastSeenAtUtc,
     DateTimeOffset? LastSyncAtUtc,
     decimal? ClockSkewSeconds,
-    string? StatusReason);
+    string? StatusReason,
+    IReadOnlyList<Guid> AllowedLocationIds);
 
 /// <summary>Device administration and enrolment endpoints.</summary>
 public static class DeviceEndpoints
@@ -118,6 +125,17 @@ public static class DeviceEndpoints
             .WithName("RevokeDevice")
             .WithSummary("Permanently blocks a device. Not reversible.");
 
+        group.MapPost("/{id:guid}/locations", SetLocationsAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageDevices))
+            .WithName("SetDeviceLocations")
+            .WithSummary("Sets the locations a registered device may operate at.");
+
+        group.MapGet("/{id:guid}/locations", GetDeviceLocationsAsync)
+            .AllowAnonymous()
+            .WithName("GetDeviceLocations")
+            .WithSummary("Returns the assigned locations to the bound device.")
+            .WithMetadata(new PublicEndpointAttribute("The device identifier is required to refresh its location assignments."));
+
         return app;
     }
 
@@ -126,32 +144,22 @@ public static class DeviceEndpoints
         [FromQuery] Guid? locationId,
         CancellationToken cancellationToken)
     {
-        IQueryable<Device> query = context.Devices.AsNoTracking();
-
-        if (locationId is { } scope)
-        {
-            LocationId id = new(scope);
-            query = query.Where(d => d.LocationId == id);
-        }
-
-        List<DeviceSummary> devices = await query
+        List<Device> devices = await context.Devices.AsNoTracking()
             .OrderBy(d => d.ShortCode)
-            .Select(d => new DeviceSummary(
-                d.Id.Value,
-                d.ShortCode,
-                d.Name,
-                d.LocationId.Value,
-                d.Platform,
-                d.Status,
-                d.AppVersion,
-                d.LastSeenAtUtc,
-                d.LastSyncAtUtc,
-                d.ClockSkewSeconds,
-                d.StatusReason))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return TypedResults.Ok(devices);
+        List<DeviceSummary> summaries = [.. devices.Select(d => new DeviceSummary(
+            d.Id.Value, d.ShortCode, d.Name, d.LocationId.Value, d.Platform, d.Status,
+            d.AppVersion, d.LastSeenAtUtc, d.LastSyncAtUtc, d.ClockSkewSeconds, d.StatusReason,
+            [.. d.AllowedLocationIds.Select(locationId => locationId.Value)]))];
+
+        if (locationId is { } scope)
+        {
+            summaries = [.. summaries.Where(device => device.AllowedLocationIds.Contains(scope))];
+        }
+
+        return TypedResults.Ok(summaries);
     }
 
     private static async Task<IResult> RegisterAsync(
@@ -161,7 +169,8 @@ public static class DeviceEndpoints
         CancellationToken cancellationToken)
     {
         Result<DeviceRegistration> result = await devices
-            .RegisterAsync(body.ShortCode, body.Name, new LocationId(body.LocationId), body.Platform, cancellationToken)
+            .RegisterAsync(body.ShortCode, body.Name, new LocationId(body.LocationId), body.Platform, cancellationToken,
+                body.AllowedLocationIds?.Select(id => new LocationId(id)).ToArray())
             .ConfigureAwait(false);
 
         return result.IsSuccess
@@ -208,10 +217,9 @@ public static class DeviceEndpoints
         // The device numbers its own documents under this short code and trades
         // at this location, so it records both before it can do anything else.
         DeviceId id = result.Value;
-        var enrolled = await context.Devices
+        Device enrolled = await context.Devices
             .AsNoTracking()
             .Where(d => d.Id == id)
-            .Select(d => new { d.ShortCode, d.LocationId })
             .SingleAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -220,6 +228,7 @@ public static class DeviceEndpoints
             deviceId = id.Value,
             shortCode = enrolled.ShortCode,
             locationId = enrolled.LocationId.Value,
+            allowedLocationIds = enrolled.AllowedLocationIds.Select(locationId => locationId.Value).ToArray(),
         });
     }
 
@@ -248,6 +257,65 @@ public static class DeviceEndpoints
         => ExecuteAsync(
             () => devices.RevokeAsync(new DeviceId(id), body.Reason, cancellationToken), currentUser);
 
+    private static async Task<IResult> SetLocationsAsync(
+        Guid id,
+        [FromBody] DeviceLocationsBody body,
+        IDeviceService devices,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result result = await devices.SetAllowedLocationsAsync(
+            new DeviceId(id), body.LocationIds.Select(locationId => new LocationId(locationId)).ToArray(), cancellationToken)
+            .ConfigureAwait(false);
+        return result.IsSuccess
+            ? TypedResults.Ok(new { id })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> GetDeviceLocationsAsync(
+        Guid id,
+        HttpContext http,
+        PosDbContext context,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        DeviceId deviceId = new(id);
+        if (!Guid.TryParse(http.Request.Headers["X-Device-Id"], out Guid boundDeviceId) || boundDeviceId != id)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.Validation("device.header_mismatch", "The enrolled device header is required.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        Device? device = await context.Devices.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == deviceId && candidate.Status == DeviceStatus.Active, cancellationToken)
+            .ConfigureAwait(false);
+        if (device is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.NotFound("device.not_found", "No active enrolled device was found.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        HashSet<Guid> locationIds = device.AllowedLocationIds.Select(location => location.Value).ToHashSet();
+        List<Pos.Domain.Organizations.Location> availableLocations = await context.Locations.AsNoTracking()
+            .Where(location => location.IsActive && location.Kind != Pos.Domain.Locations.LocationKind.External)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        List<LocationChoice> locations = [.. availableLocations
+            .Where(location => locationIds.Contains(location.Id.Value))
+            .OrderBy(location => location.Id == device.LocationId ? 0 : 1)
+            .ThenBy(location => location.Code)
+            .Select(location => new LocationChoice(location.Id.Value, location.Code, location.Name))
+        ];
+
+        return TypedResults.Ok(new
+        {
+            defaultLocationId = device.LocationId.Value,
+            locations,
+        });
+    }
+
     private static async Task<IResult> ExecuteAsync(Func<Task<Result>> action, ICurrentUser currentUser)
     {
         Result result = await action().ConfigureAwait(false);
@@ -267,6 +335,7 @@ public static class DeviceEndpoints
             // reissued rather than recovered.
             enrolmentCode = (string?)code,
             expiresAtUtc = registration.ExpiresAtUtc?.ToString("O", CultureInfo.InvariantCulture),
+            allowedLocationIds = registration.AllowedLocationIds.Select(id => id.Value).ToArray(),
         }
         : new
         {
@@ -277,5 +346,8 @@ public static class DeviceEndpoints
             // display, and the device is immediately usable.
             enrolmentCode = (string?)null,
             expiresAtUtc = (string?)null,
+            allowedLocationIds = registration.AllowedLocationIds.Select(id => id.Value).ToArray(),
         };
+
+    private sealed record LocationChoice(Guid Id, string Code, string Name);
 }

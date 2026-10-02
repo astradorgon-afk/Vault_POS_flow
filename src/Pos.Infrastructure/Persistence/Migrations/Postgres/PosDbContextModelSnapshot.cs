@@ -762,6 +762,12 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("AllowedLocationIdsJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)")
+                        .HasColumnName("allowed_location_ids_json");
+
                     b.Property<string>("AppVersion")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")

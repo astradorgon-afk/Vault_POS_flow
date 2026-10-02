@@ -85,6 +85,9 @@ public static class AuditActions
     /// <summary>Device lifecycle.</summary>
     public static class Devices
     {
+        /// <summary>A device's allowed locations changed.</summary>
+        public const string LocationsChanged = "device.locations.changed";
+
         /// <summary>An enrolment code was issued.</summary>
         public const string EnrolmentCodeIssued = "device.enrolment_code.issued";
 

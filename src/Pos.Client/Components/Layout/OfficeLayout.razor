@@ -83,6 +83,13 @@
             </nav>
 
             <main class="office-main">
+                @if (Register.IsOffline)
+                {
+                    <div class="office-error" role="status">
+                        This account is signed in with saved offline access. Office data needs a live sign-in. Sign out, then sign in again while connected.
+                        <button type="button" class="button-secondary" @onclick="SignOutAsync">Sign out and sign in again</button>
+                    </div>
+                }
                 @if (Place is { } place)
                 {
                     <nav class="office-trail" aria-label="Breadcrumb">
@@ -99,9 +106,66 @@
                         </ol>
                     </nav>
                 }
-                @Body
+                @if (!Register.IsOffline)
+                {
+                    @Body
+                }
             </main>
         </div>
+
+        <nav class="office-mobile-nav" aria-label="Mobile office">
+            <button type="button" class="office-mobile-nav-link @NavClass("/office")" aria-current="@Current("/office")" @onclick="GoOffice">
+                <span aria-hidden="true">⌂</span>
+                <small>Overview</small>
+            </button>
+            @if (Api.HasPermission(PermissionsInventoryView))
+            {
+                <button type="button" class="office-mobile-nav-link @InventoryNavClass" aria-current="@(InventoryNavClass.Length > 0 ? "page" : null)" @onclick="GoInventory">
+                    <span aria-hidden="true">▦</span>
+                    <small>Inventory</small>
+                </button>
+                <button type="button" class="office-mobile-nav-link @NavClass("/inventory/counts")" aria-current="@Current("/inventory/counts")" @onclick="GoCounts">
+                    <span aria-hidden="true">≡</span>
+                    <small>Counts</small>
+                </button>
+            }
+            @if (Api.HasPermission(PermissionsTransferView))
+            {
+                <button type="button" class="office-mobile-nav-link @NavClass("/transfers")" aria-current="@Current("/transfers")" @onclick="GoTransfers">
+                    <span aria-hidden="true">⇄</span>
+                    <small>Transfers</small>
+                </button>
+            }
+            <button type="button" class="office-mobile-nav-link @(mobileMoreOpen ? "active" : string.Empty)" aria-expanded="@mobileMoreOpen" @onclick="ToggleMobileMore">
+                <span aria-hidden="true">•••</span>
+                <small>More</small>
+            </button>
+        </nav>
+
+        @if (mobileMoreOpen)
+        {
+            <div class="office-mobile-more-backdrop" @onclick="CloseMobileMore"></div>
+            <section class="office-mobile-more" role="dialog" aria-modal="true" aria-label="More office tools">
+                <header>
+                    <strong>More tools</strong>
+                    <button type="button" aria-label="Close more tools" @onclick="CloseMobileMore">×</button>
+                </header>
+                @if (Api.HasPermission(PermissionsSaleCreate))
+                {
+                    <button type="button" @onclick="GoTill"><span>▣</span>Open till</button>
+                }
+                @if (Api.HasPermission(PermissionsPurchasingView))
+                {
+                    <button type="button" @onclick="GoReceiving"><span>□</span>Goods receiving</button>
+                }
+                @if (Api.HasPermission(PermissionsReportsView))
+                {
+                    <button type="button" @onclick="GoReports"><span>▤</span>Daily reports</button>
+                }
+                <button type="button" @onclick="GoScanner"><span>▥</span>Scanner test</button>
+                <button type="button" class="office-mobile-more-danger" @onclick="SignOutAsync"><span>↪</span>Sign out</button>
+            </section>
+        }
     </div>
 }
 else if (!_booted)
@@ -122,6 +186,7 @@ else if (!_booted)
 
     private (string Name, string TillCode)? _store;
     private bool _booted;
+    private bool mobileMoreOpen;
 
     protected override async Task OnInitializedAsync()
     {
@@ -171,6 +236,9 @@ else if (!_booted)
     private sealed record OfficePlace(string ParentLabel, string ParentHref, string Title);
 
     private void Go(string path) => Navigation.NavigateTo(path);
+
+    private void ToggleMobileMore() => mobileMoreOpen = !mobileMoreOpen;
+    private void CloseMobileMore() => mobileMoreOpen = false;
 
     private async Task GoOffice() => Go("/office");
     private async Task GoTill() => Go("/register");

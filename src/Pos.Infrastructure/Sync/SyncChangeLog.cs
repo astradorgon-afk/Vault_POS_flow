@@ -113,10 +113,12 @@ public sealed class SyncPullService(
             return SyncPullResponse.Refused("sync.device_not_operational", "The device is not permitted to synchronize.");
         }
 
+        Guid[] allowedLocationIds = [.. device.AllowedLocationIds.Select(locationId => locationId.Value)];
+
         List<SyncChangeLogEntry> entries = await context.SyncChangeLog
             .AsNoTracking()
             .Where(e => e.Sequence > cursor
-                        && (e.LocationScopeId == null || e.LocationScopeId == device.LocationId))
+                        && (e.LocationScopeId == null || allowedLocationIds.Contains(e.LocationScopeId.Value.Value)))
             .OrderBy(e => e.Sequence)
             .Take(limit)
             .ToListAsync(cancellationToken)
@@ -124,7 +126,7 @@ public sealed class SyncPullService(
 
         long? earliestRetainedSequence = await context.SyncChangeLog
             .AsNoTracking()
-            .Where(e => e.LocationScopeId == null || e.LocationScopeId == device.LocationId)
+            .Where(e => e.LocationScopeId == null || allowedLocationIds.Contains(e.LocationScopeId.Value.Value))
             .Select(e => (long?)e.Sequence)
             .MinAsync(cancellationToken)
             .ConfigureAwait(false);

@@ -26,7 +26,11 @@
     [Parameter]
     public string? ContextError { get; set; }
 
-    private bool Offline => Status?.Connectivity == DeviceConnectivityState.Offline || ContextError is not null;
+    /// <summary>Whether this account session was authenticated from saved offline access.</summary>
+    [Parameter]
+    public bool SessionOffline { get; set; }
+
+    private bool Offline => SessionOffline || Status?.Connectivity == DeviceConnectivityState.Offline || ContextError is not null;
 
     private string StateClass => ContextError is not null || Status?.Severity == DeviceStatusSeverity.Blocked
         ? "vf-statusstrip-blocked"
@@ -64,6 +68,11 @@
 
             if (Offline)
             {
+                if (SessionOffline)
+                {
+                    return "This account is signed in with saved offline access. Lock the register and sign in again while connected to refresh office access. Cash sales remain on this device until they sync.";
+                }
+
                 int waiting = Status?.UnsentEvents ?? 0;
                 return waiting == 0
                     ? RegisterService.OfflineSaleMessaging

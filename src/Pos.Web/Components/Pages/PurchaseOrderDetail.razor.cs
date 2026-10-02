@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
+using Pos.Application.Identity;
 using Pos.Web.Services;
 
 namespace Pos.Web.Components.Pages;
@@ -20,6 +21,9 @@ public partial class PurchaseOrderDetail
     private bool busy;
     private bool confirmDiscard;
     private bool documentsMissing;
+    private bool receivingOpen;
+    private bool arrivalConfirmed;
+    private bool receiptsLoaded;
     private string? notice;
     private bool noticeOk;
     private string decisionNotes = string.Empty;
@@ -43,11 +47,39 @@ public partial class PurchaseOrderDetail
 
     private Guid MyId => Session.Current?.User.Id ?? Guid.Empty;
 
+    private bool IsOwner => Session.Current?.User.Roles.Contains(Roles.Owner, StringComparer.Ordinal) == true;
+
     private string SupplierName => supplier?.Name ?? "the supplier";
+
+    private DateOnly ReceivingToday => DateOnly.FromDateTime(ReceivingTime(DateTimeOffset.UtcNow).DateTime);
+
+    private bool ReceivingDateAllowed => order?.OrderedAtUtc is { } sent && DateTimeOffset.UtcNow >= sent;
+
+    private bool IsSameDayDelivery => order?.OrderedAtUtc is { } sent
+        && DateOnly.FromDateTime(ReceivingTime(sent).DateTime) == ReceivingToday;
+
+    private bool IsDeliveryOverdue => order is { Status: "Ordered" or "PartiallyReceived", ExpectedAtUtc: { } expected }
+        && DateOnly.FromDateTime(ReceivingTime(expected).DateTime) < ReceivingToday;
+
+    private DateTimeOffset ReceivingTime(DateTimeOffset instant) => order?.ReceivingTimeZoneId is { } zone
+        ? TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(zone)) : instant.InStoreTime();
+
+    private string When(DateTimeOffset? instant) => instant is { } at
+        ? ReceivingTime(at).ToString("d MMM yyyy · h:mm tt", System.Globalization.CultureInfo.InvariantCulture) : "Not yet";
+
+    private DateTimeOffset? FirstReceivedAt => receipts.Count > 0 ? receipts.Min(r => r.ReceivedAtUtc) : null;
+
+    private DateTimeOffset? LastReceivedAt => receipts.Count > 0 ? receipts.Max(r => r.ReceivedAtUtc) : null;
+
+    private DateTimeOffset? DecisionAt(string decision) => order?.Approvals
+        .Where(a => a.Decision == decision).Select(a => (DateTimeOffset?)a.DecidedAtUtc).Max();
+
+    private string ExpectedDate => order?.ExpectedAtUtc is { } expected
+        ? ReceivingTime(expected).ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture) : "Not specified";
 
     private int AccountedCount => receiving.Count(line => line.Mode != ReceiveMode.None);
 
-    private bool CanRecord => receiving.Count > 0
+    private bool CanRecord => receiptsLoaded && ReceivingDateAllowed && arrivalConfirmed && receiving.Count > 0
         && AccountedCount == receiving.Count
         && receiving.All(line => line.Problem is null)
         && receiving.Any(line => line.ArrivingQuantity > 0);
@@ -114,6 +146,9 @@ public partial class PurchaseOrderDetail
 
     private async Task LoadOrderAsync()
     {
+        receiptsLoaded = false;
+        receivingOpen = false;
+        arrivalConfirmed = false;
         ApiResult<PosPurchaseOrder> loaded = await Api.GetPurchaseOrderAsync(OrderId, CancellationToken.None);
         if (loaded is not { IsSuccess: true, Value: { } fresh })
         {
@@ -130,7 +165,14 @@ public partial class PurchaseOrderDetail
         }
 
         receipts.Clear();
+        receiptsLoaded = false;
         ApiResult<List<PosGoodsReceiptSummary>> listed = await Api.GetGoodsReceiptsAsync(OrderId, CancellationToken.None);
+        if (!listed.IsSuccess)
+        {
+            Tell(false, listed.Error ?? "Delivery history could not be loaded. Reload before receiving stock.");
+            return;
+        }
+
         foreach (PosGoodsReceiptSummary summary in listed.Value ?? [])
         {
             ApiResult<PosGoodsReceipt> receipt = await Api.GetGoodsReceiptAsync(OrderId, summary.Id, CancellationToken.None);
@@ -138,7 +180,15 @@ public partial class PurchaseOrderDetail
             {
                 receipts.Add(detail);
             }
+            else
+            {
+                receipts.Clear();
+                Tell(false, "A delivery could not be loaded. Reload before receiving stock.");
+                return;
+            }
         }
+
+        receiptsLoaded = true;
 
         // Approval ticks and a half-entered delivery belong to the order as it
         // was; a reload starts both again.
@@ -148,6 +198,8 @@ public partial class PurchaseOrderDetail
             .Where(line => Due(line) > 0)
             .Select(line => new ReceiveLine(line, Due(line))));
         documentsMissing = false;
+        receivingOpen = false;
+        arrivalConfirmed = false;
     }
 
     private bool Can(string permission) => Session.HasPermission(permission);
@@ -235,6 +287,11 @@ public partial class PurchaseOrderDetail
 
     private async Task RecordDeliveryAsync()
     {
+        if (busy || !CanRecord)
+        {
+            return;
+        }
+
         await RecordReceiptAsync();
         if (noticeOk && order is { Status: "PartiallyReceived" } recorded)
         {
@@ -251,10 +308,15 @@ public partial class PurchaseOrderDetail
                     .Select(line => line.ToRequest())],
                 documentsMissing),
             CancellationToken.None),
-        "Delivery recorded. Stock has been updated.");
+        "Delivery recorded. Accepted goods are awaiting inventory inspection.");
 
     private async Task RunAsync(Func<Task<ApiResult<PosReference>>> action, string success)
     {
+        if (busy)
+        {
+            return;
+        }
+
         busy = true;
         try
         {
@@ -268,11 +330,14 @@ public partial class PurchaseOrderDetail
             decisionNotes = string.Empty;
             endReason = string.Empty;
             await LoadOrderAsync();
-            Tell(true, success);
+            if (receiptsLoaded)
+            {
+                Tell(true, success);
+            }
         }
         catch (HttpRequestException)
         {
-            Tell(false, "Head office could not be reached. Nothing was changed.");
+            Tell(false, "The result could not be confirmed. Reload the order to check its status before trying again.");
         }
         finally
         {

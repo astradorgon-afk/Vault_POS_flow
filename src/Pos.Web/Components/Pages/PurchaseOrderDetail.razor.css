@@ -1,0 +1,64 @@
+.purchase-detail { max-width: 1440px; margin: 0 auto; }
+.purchase-detail .po-head { padding: 0 0 22px; margin-bottom: 0; align-items: center; }
+.order-eyebrow { display: block; color: var(--forest-bright); font-size: .67rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 8px; }
+.purchase-detail .po-head h1 { font: 800 clamp(1.45rem, 2.2vw, 2rem)/1.25 'Manrope', sans-serif; letter-spacing: -.035em; margin: 0 0 7px; }
+.purchase-detail .po-head p { font-size: .87rem; margin: 0; }
+.purchase-detail .po-head p span { padding: 0 7px; color: var(--forest-bright); }
+.purchase-detail .po-head-total { padding-left: 24px; border-left: 1px solid var(--line); }
+.purchase-detail .po-head-total strong { font-size: 1.65rem; font-variant-numeric: tabular-nums; line-height: 1.4; }
+.order-journey { margin-bottom: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-card); }
+.journey-heading { padding: 18px 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.journey-heading h2 { margin: 0; font: 800 .95rem 'Manrope', sans-serif; }
+.journey-heading > span { color: var(--muted); font-size: .7rem; }
+.journey-stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); list-style: none; margin: 0; padding: 22px 24px; gap: 16px; }
+.journey-stages li { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; position: relative; color: var(--muted); min-width: 0; }
+.journey-stages li::before { content: ''; position: absolute; left: 38px; right: -6px; top: 14px; height: 2px; background: var(--line); }
+.journey-stages li:last-child::before { display: none; }
+.stage-dot { width: 29px; height: 29px; border-radius: 50%; background: var(--paper); border: 1px solid var(--line); display: grid; place-items: center; font-size: .7rem; font-weight: 800; margin-bottom: 7px; }
+.journey-stages .complete .stage-dot { background: var(--forest); border-color: var(--forest); color: white; }
+.journey-stages .complete::before { background: #b9d8c4; }
+.journey-stages strong { font-size: .79rem; color: var(--ink); }
+.journey-stages time, .journey-stages small { font-size: .7rem; line-height: 1.55; overflow-wrap: anywhere; }
+.order-facts { display: grid; grid-template-columns: 1.3fr 1.3fr .7fr .9fr; margin: 0; padding: 16px 24px; background: #f8faf7; border-top: 1px solid var(--line); gap: 14px; }
+.order-facts dt { font-size: .67rem; color: var(--muted); margin-bottom: 5px; }
+.order-facts dd { margin: 0; font-size: .79rem; font-weight: 700; line-height: 1.6; }
+.purchase-detail .order-next { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; border-left: 4px solid var(--amber); }
+.purchase-detail .order-next.received { border-left-color: var(--forest-bright); }
+.purchase-detail .order-next h2 { margin-bottom: 8px; font-size: 1.1rem; }
+.purchase-detail .order-next p { max-width: 760px; margin-bottom: 0; line-height: 1.65; }
+.purchase-detail .order-next > button { flex: 0 0 auto; }
+.purchase-detail .receiving-date-note { background: var(--amber-soft); color: #715519; border: 1px solid #ebd9a9; border-radius: 8px; padding: 12px 14px; margin-top: 12px; line-height: 1.6; }
+.purchase-detail .po-more { margin: 16px 0 20px; }
+.purchase-detail .po-more summary { font-size: .78rem; padding: 13px 18px; }
+.purchase-detail .po-delivery { padding: 18px 0; }
+.purchase-detail .po-delivery-head { gap: 8px 18px; }
+.purchase-detail .po-delivery-head strong { color: var(--forest); font-size: .85rem; }
+.purchase-detail .po-delivery li { padding: 10px 0 0; line-height: 1.6; }
+.purchase-detail .po-delivery li small { display: block; text-align: right; font-size: .7rem; }
+.purchase-detail .arrival-confirmation { padding: 16px; margin: 16px 0; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--mint-soft); align-items: flex-start; line-height: 1.55; }
+.purchase-detail .arrival-confirmation input { margin-top: 3px; min-width: 20px; min-height: 20px; }
+.purchase-detail button:focus-visible, .purchase-detail summary:focus-visible, .purchase-detail input:focus-visible { outline: 3px solid var(--forest-bright); outline-offset: 3px; }
+.purchase-detail .qr-table-wrap { max-width: 100%; overflow-x: auto; }
+.purchase-detail .po-lines { min-width: 720px; }
+@media (max-width: 950px) {
+    .journey-stages { gap: 10px; padding: 20px; }
+    .order-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .purchase-detail .order-next { align-items: flex-start; flex-direction: column; gap: 16px; }
+}
+@media (max-width: 600px) {
+    .purchase-detail .po-head { align-items: flex-start; gap: 15px; padding-bottom: 18px; }
+    .purchase-detail .po-head-total { padding-left: 0; border-left: 0; justify-items: start; }
+    .purchase-detail .po-head-total strong { font-size: 1.35rem; }
+    .journey-heading { padding: 16px 16px 0; flex-wrap: wrap; gap: 6px; }
+    .journey-stages { grid-template-columns: 1fr; padding: 20px 16px; gap: 0; }
+    .journey-stages li { display: grid; grid-template-columns: 29px 1fr; column-gap: 12px; row-gap: 2px; padding-bottom: 18px; }
+    .journey-stages li:last-child { padding-bottom: 0; }
+    .journey-stages .stage-dot { grid-column: 1; grid-row: 1 / span 3; margin: 0; z-index: 1; }
+    .journey-stages strong, .journey-stages time, .journey-stages small { grid-column: 2; }
+    .journey-stages li::before { top: 29px; bottom: 0; left: 14px; width: 2px; height: auto; }
+    .order-facts { padding: 16px; gap: 16px 12px; }
+    .purchase-detail .order-next { padding: 18px 16px; }
+    .purchase-detail .order-next > button { width: 100%; }
+    .purchase-detail .po-delivery li { flex-direction: column; gap: 3px; }
+    .purchase-detail .po-delivery li small { text-align: left; }
+}

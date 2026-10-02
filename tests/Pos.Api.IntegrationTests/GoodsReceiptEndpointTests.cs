@@ -28,6 +28,68 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
     // in parallel.
     private static long _barcodeSequence = 7200000000000;
 
+    [Theory]
+    [InlineData(-2, true)]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public async Task Receiving_UsesActualArrivalTime_AndCannotPrecedeOrdering(int orderedDaysFromToday, bool allowed)
+    {
+        string prefix = $"grn-date-{orderedDaysFromToday}";
+        Seed seed = await SeedAsync(prefix);
+        await factory.CreateUserAsync(prefix + "-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync(prefix + "-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, prefix + "-rec");
+        string approver = await SignInAsync(client, prefix + "-app");
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        // Simulate separately dated orders only in the isolated integration database.
+        DateTimeOffset orderedAt = DateTimeOffset.UtcNow.AddDays(orderedDaysFromToday);
+        await factory.WithServiceAsync(async context =>
+        {
+            PurchaseOrder entity = await context.PurchaseOrders.AsTracking()
+                .SingleAsync(o => o.Id == new PurchaseOrderId(orderId));
+            context.Entry(entity).Property(o => o.OrderedAtUtc).CurrentValue = orderedAt;
+            await context.SaveChangesAsync();
+            return 0;
+        });
+
+        (HttpStatusCode _, JsonElement before) = await GetOrderAsync(client, receiver, orderId);
+        before.GetProperty("status").GetString().Should().Be("Ordered");
+        before.GetProperty("orderedAtUtc").GetDateTimeOffset().Should().Be(orderedAt);
+        before.GetProperty("receivingTimeZoneId").GetString().Should().NotBeNullOrWhiteSpace();
+        using HttpResponseMessage emptyHistory = await GetAsync(client,
+            $"/api/v1/purchasing/orders/{orderId}/receipts", receiver);
+        using JsonDocument history = JsonDocument.Parse(await emptyHistory.Content.ReadAsStringAsync());
+        history.RootElement.GetArrayLength().Should().Be(0, "sending an order must not create a delivery");
+
+        DateTimeOffset arrivalStartedAt = DateTimeOffset.UtcNow;
+        using HttpResponseMessage response = await PostAsJsonAsync(client,
+            $"/api/v1/purchasing/orders/{orderId}/receipts", ReceiptBody(lineId, received: 10m, unitCost: 100m), receiver);
+
+        if (!allowed)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await ReadErrorCodeAsync(response)).Should().Be("purchasing.receiving_before_order");
+            (HttpStatusCode _, JsonElement unchanged) = await GetOrderAsync(client, receiver, orderId);
+            unchanged.GetProperty("status").GetString().Should().Be("Ordered");
+            (await ReceiptCountAsync(orderId)).Should().Be(0);
+            return;
+        }
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using JsonDocument created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Guid receiptId = created.RootElement.GetProperty("id").GetGuid();
+        (HttpStatusCode _, JsonElement receipt) = await GetReceiptAsync(client, receiver, orderId, receiptId);
+        receipt.GetProperty("receivedAtUtc").GetDateTimeOffset().Should().BeOnOrAfter(arrivalStartedAt);
+        (HttpStatusCode _, JsonElement after) = await GetOrderAsync(client, receiver, orderId);
+        after.GetProperty("orderedAtUtc").GetDateTimeOffset().Should().Be(orderedAt, "receiving must preserve the order date");
+        after.GetProperty("status").GetString().Should().Be("FullyReceived");
+    }
+
     [Fact]
     public async Task FullReceipt_PostsTheGrn_AndCompletesTheOrder()
     {

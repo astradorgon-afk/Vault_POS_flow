@@ -449,6 +449,14 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
             new { },
             cancellationToken);
 
+    /// <summary>Sets the locations a registered terminal may open.</summary>
+    public Task<ApiResult<PosReference>> SetDeviceLocationsAsync(
+        Guid deviceId, IReadOnlyList<Guid> locationIds, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/devices/{deviceId:D}/locations"),
+            new { locationIds },
+            cancellationToken);
+
     /// <summary>Temporarily blocks a terminal and ends its sessions.</summary>
     public Task<ApiResult<string>> SuspendDeviceAsync(
         Guid deviceId, string reason, CancellationToken cancellationToken)

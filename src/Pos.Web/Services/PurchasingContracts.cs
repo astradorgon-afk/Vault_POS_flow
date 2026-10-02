@@ -81,7 +81,10 @@ public sealed record PosPurchaseOrder(
     string? CancelledReason,
     string? ClosedReason,
     IReadOnlyList<PosPurchaseOrderLine> Lines,
-    IReadOnlyList<PosPurchaseApproval> Approvals);
+    IReadOnlyList<PosPurchaseApproval> Approvals)
+{
+    public string? ReceivingTimeZoneId { get; init; }
+}
 
 /// <summary>The body that creates a draft purchase order.</summary>
 public sealed record PosCreatePurchaseOrder(

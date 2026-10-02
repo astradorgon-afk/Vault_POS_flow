@@ -10,7 +10,8 @@ namespace Pos.Client.Services;
 /// <param name="DeviceId">The register's identity.</param>
 /// <param name="ShortCode">The code its offline documents are numbered under.</param>
 /// <param name="LocationId">The store it trades at.</param>
-public sealed record EnrolledDevice(Guid DeviceId, string ShortCode, Guid LocationId);
+/// <param name="AllowedLocationIds">Every location this device may open.</param>
+public sealed record EnrolledDevice(Guid DeviceId, string ShortCode, Guid LocationId, IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 /// <summary>A signed-in session with head office.</summary>
 /// <param name="AccessToken">The short-lived bearer token.</param>
@@ -22,13 +23,23 @@ public sealed record HeadOfficeSession(string AccessToken, string RefreshToken, 
 /// <param name="UserId">Their identifier.</param>
 /// <param name="DisplayName">Their display name.</param>
 /// <param name="Permissions">Their effective permissions for this session.</param>
-public sealed record HeadOfficeUser(Guid UserId, string DisplayName, IReadOnlyList<string> Permissions);
+/// <param name="Locations">The locations they may use.</param>
+/// <param name="HasAllLocations">Whether they may use every location.</param>
+public sealed record HeadOfficeUser(
+    Guid UserId,
+    string DisplayName,
+    IReadOnlyList<string> Permissions,
+    IReadOnlyList<Guid>? Locations = null,
+    bool HasAllLocations = false);
 
 /// <summary>A store a register can be set up for.</summary>
 /// <param name="Id">The location identifier.</param>
 /// <param name="Code">Its short code.</param>
 /// <param name="Name">Its name.</param>
 public sealed record StoreChoice(Guid Id, string Code, string Name);
+
+/// <summary>Current location assignments returned to an enrolled register.</summary>
+public sealed record DeviceLocationAssignment(Guid DefaultLocationId, IReadOnlyList<StoreChoice> Locations);
 
 /// <summary>The product identity fields a register needs when it submits a sale.</summary>
 /// <param name="Id">The product identifier.</param>
@@ -226,6 +237,9 @@ public sealed class HeadOfficeException : Exception
 
     /// <summary>The error code head office answers with when a device is suspended or revoked.</summary>
     public const string DeviceNotOperationalErrorCode = "auth.device_not_operational";
+
+    /// <summary>The local account snapshot lacks access to the selected location.</summary>
+    public const string OfflineLocationAccessMissingErrorCode = "register.offline_location_access_missing";
 }
 
 /// <summary>
@@ -323,6 +337,24 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
             .Where(l => l.Kind == StoreKind && l.IsActive)
             .OrderBy(l => l.Code, StringComparer.Ordinal)
             .Select(l => new StoreChoice(l.Id, l.Code, l.Name))];
+    }
+
+    /// <summary>Refreshes the assigned locations for this enrolled device.</summary>
+    public async Task<DeviceLocationAssignment> GetDeviceLocationsAsync(
+        Uri server, Guid deviceId, CancellationToken cancellationToken)
+    {
+        DeviceLocationsResponse response = await SendAsync<DeviceLocationsResponse>(
+            HttpMethod.Get,
+            server,
+            $"api/v1/devices/{deviceId:D}/locations",
+            null,
+            accessToken: null,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return new DeviceLocationAssignment(
+            response.DefaultLocationId,
+            [.. response.Locations.Select(location => new StoreChoice(location.Id, location.Code, location.Name))]);
     }
 
     /// <summary>Registers this machine as a new register and returns its one-time enrolment code.</summary>
@@ -894,6 +926,8 @@ public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability rea
     private sealed record SignInResponse(string AccessToken, string RefreshToken, HeadOfficeUser User);
 
     private sealed record LocationRow(Guid Id, string Code, string Name, int Kind, bool IsActive);
+
+    private sealed record DeviceLocationsResponse(Guid DefaultLocationId, IReadOnlyList<LocationRow> Locations);
 
     private sealed record RegistrationResponse(Guid DeviceId, string ShortCode, string? EnrolmentCode);
 

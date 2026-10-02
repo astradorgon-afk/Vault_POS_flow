@@ -1,6 +1,6 @@
 @inject RegisterService Register
 
-<div class="panel">
+<div class="panel sign-in-panel">
     <h2>Sign in</h2>
     <p class="panel-lead">Signing in loads this store's products and prices, and what you may do here while the connection is down.
         If head office can’t be reached, anyone who has signed in at this register in the last 7 days can still sign in and sell for cash.</p>
@@ -14,6 +14,18 @@
             <span>Password</span>
             <PasswordInput @bind-Value="_password" />
         </label>
+        @if (_locations.Count > 1)
+        {
+            <label>
+                <span>Open location</span>
+                <select @bind="_selectedLocationId">
+                    @foreach (StoreChoice location in _locations)
+                    {
+                        <option value="@location.Id">@location.Name (@location.Code)</option>
+                    }
+                </select>
+            </label>
+        }
         <div class="form-actions">
             <button type="submit" class="button-primary" disabled="@_busy">@(_busy ? "Signing in…" : "Sign in")</button>
         </div>
@@ -32,6 +44,25 @@
     private string _password = string.Empty;
     private bool _busy;
     private string? _error;
+    private IReadOnlyList<StoreChoice> _locations = [];
+    private Guid _selectedLocationId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _locations = await Register.GetAllowedLocationsAsync();
+            if (_locations.Count > 0) _selectedLocationId = _locations[0].Id;
+        }
+        catch (HeadOfficeException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _error = $"The register could not load its locations: {ex.GetBaseException().Message}";
+        }
+    }
 
     /// <summary>Raised once someone has signed in and the store data is on the device.</summary>
     [Parameter]
@@ -56,7 +87,10 @@
         _error = null;
         try
         {
-            await Register.SignInAsync(_userName, _password);
+            await Register.SignInAsync(
+                _userName,
+                _password,
+                _selectedLocationId == Guid.Empty ? null : _selectedLocationId);
             _password = string.Empty;
             await OnSignedIn.InvokeAsync();
         }

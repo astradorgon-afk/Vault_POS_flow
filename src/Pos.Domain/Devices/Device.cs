@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using Pos.Domain.Common;
 
 namespace Pos.Domain.Devices;
@@ -85,6 +86,7 @@ public sealed partial class Device : AggregateRoot<DeviceId>
         ShortCode = shortCode;
         Name = name;
         LocationId = locationId;
+        AllowedLocationIdsJson = JsonSerializer.Serialize(new[] { locationId.Value });
         Platform = platform;
         RegisteredAtUtc = registeredAtUtc;
         RegisteredByUserId = registeredByUserId;
@@ -96,6 +98,7 @@ public sealed partial class Device : AggregateRoot<DeviceId>
     {
         ShortCode = string.Empty;
         Name = string.Empty;
+        AllowedLocationIdsJson = "[]";
     }
 
     /// <summary>
@@ -109,6 +112,43 @@ public sealed partial class Device : AggregateRoot<DeviceId>
 
     /// <summary>Gets the location this device belongs to.</summary>
     public LocationId LocationId { get; private set; }
+
+    /// <summary>Gets every location this device is allowed to operate at.</summary>
+    public IReadOnlyList<LocationId> AllowedLocationIds
+    {
+        get
+        {
+            Guid[] ids = JsonSerializer.Deserialize<Guid[]>(AllowedLocationIdsJson) ?? [];
+            List<LocationId> locations = [.. ids.Where(id => id != Guid.Empty).Distinct().Select(id => new LocationId(id))];
+            if (!locations.Contains(LocationId))
+            {
+                locations.Insert(0, LocationId);
+            }
+            return locations;
+        }
+    }
+
+    /// <summary>Gets the serialized device location assignments.</summary>
+    public string AllowedLocationIdsJson { get; private set; }
+
+    /// <summary>Checks whether the device can operate at a location.</summary>
+    public bool CanOperateAt(LocationId locationId) => AllowedLocationIds.Contains(locationId);
+
+    /// <summary>Sets the locations the device is allowed to operate at.</summary>
+    public Result SetAllowedLocationIds(IEnumerable<LocationId> locationIds)
+    {
+        ArgumentNullException.ThrowIfNull(locationIds);
+        List<Guid> ids = [.. locationIds.Select(id => id.Value).Where(id => id != Guid.Empty).Distinct().Order()];
+        if (ids.Count == 0 || !ids.Contains(LocationId.Value))
+        {
+            return Result.Failure(Error.Validation(
+                "device.location_assignment_invalid",
+                "A device must keep its registered location in its allowed locations."));
+        }
+
+        AllowedLocationIdsJson = JsonSerializer.Serialize(ids);
+        return Result.Success();
+    }
 
     /// <summary>Gets the platform the device runs on.</summary>
     public DevicePlatform Platform { get; private set; }
