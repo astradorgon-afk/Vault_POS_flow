@@ -1,8 +1,25 @@
-﻿<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
-    <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector=".register-app" />
-    </Found>
-</Router>
+<ErrorBoundary>
+    <ChildContent>
+        <Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+            <Found Context="routeData">
+                <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+                <FocusOnNavigate RouteData="routeData" Selector=".register-app" />
+            </Found>
+        </Router>
 
-<ScannerHost />
+        <ScannerHost />
+    </ChildContent>
+    <ErrorContent Context="error">
+        <main class="register-app">
+            <div class="auth-card">
+                <div class="status status-error" role="alert">
+                    <div>
+                        <strong>The register could not open</strong>
+                        <p>@error.GetBaseException().Message</p>
+                        <a href=".">Reload</a>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </ErrorContent>
+</ErrorBoundary>
