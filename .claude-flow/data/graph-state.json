@@ -1,27 +1,27 @@
 {
   "version": 1,
-  "updatedAt": 1791104202687,
+  "updatedAt": 1791114971206,
   "nodeCount": 6,
   "nodes": {
     "mem-bash-heredoc-unreliable-----0": {
       "id": "mem-bash-heredoc-unreliable-----0",
       "category": "bash-heredoc-unreliable",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.56,
+      "accessCount": 2,
       "createdAt": 1790790810893
     },
     "mem-docker-desktop-stale-sockets-----0": {
       "id": "mem-docker-desktop-stale-sockets-----0",
       "category": "docker-desktop-stale-sockets",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.56,
+      "accessCount": 2,
       "createdAt": 1790790810903
     },
     "mem-hook-stray-redirect-files-----0": {
       "id": "mem-hook-stray-redirect-files-----0",
       "category": "hook-stray-redirect-files",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.53,
+      "accessCount": 1,
       "createdAt": 1790790810911
     },
     "mem-MEMORY----bash-heredocs-are-unreliabl-0": {
