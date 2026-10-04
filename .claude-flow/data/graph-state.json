@@ -1,48 +1,48 @@
 {
   "version": 1,
-  "updatedAt": 1790944329147,
+  "updatedAt": 1791104202687,
   "nodeCount": 6,
   "nodes": {
     "mem-bash-heredoc-unreliable-----0": {
       "id": "mem-bash-heredoc-unreliable-----0",
       "category": "bash-heredoc-unreliable",
-      "confidence": 0.495,
+      "confidence": 0.5,
       "accessCount": 0,
       "createdAt": 1790790810893
     },
     "mem-docker-desktop-stale-sockets-----0": {
       "id": "mem-docker-desktop-stale-sockets-----0",
       "category": "docker-desktop-stale-sockets",
-      "confidence": 0.495,
+      "confidence": 0.5,
       "accessCount": 0,
       "createdAt": 1790790810903
     },
     "mem-hook-stray-redirect-files-----0": {
       "id": "mem-hook-stray-redirect-files-----0",
       "category": "hook-stray-redirect-files",
-      "confidence": 0.525,
-      "accessCount": 1,
+      "confidence": 0.5,
+      "accessCount": 0,
       "createdAt": 1790790810911
     },
     "mem-MEMORY----bash-heredocs-are-unreliabl-0": {
       "id": "mem-MEMORY----bash-heredocs-are-unreliabl-0",
       "category": "core",
-      "confidence": 0.525,
-      "accessCount": 1,
+      "confidence": 0.5,
+      "accessCount": 0,
       "createdAt": 1790790810919
     },
     "mem-second-vaultflow-checkout-----0": {
       "id": "mem-second-vaultflow-checkout-----0",
       "category": "second-vaultflow-checkout",
-      "confidence": 0.525,
-      "accessCount": 1,
+      "confidence": 0.5,
+      "accessCount": 0,
       "createdAt": 1790790810930
     },
     "insight-1790842201511-0xbe": {
       "id": "insight-1790842201511-0xbe",
       "category": "insights",
-      "confidence": 0.53,
-      "accessCount": 1,
+      "confidence": 0.5,
+      "accessCount": 0,
       "createdAt": 1790842201511
     }
   },
