@@ -113,12 +113,15 @@ public sealed class SyncPullService(
             return SyncPullResponse.Refused("sync.device_not_operational", "The device is not permitted to synchronize.");
         }
 
-        Guid[] allowedLocationIds = [.. device.AllowedLocationIds.Select(locationId => locationId.Value)];
+// Comparing `LocationId` against `LocationId` lets the value converter
+        // map to the uuid column; unwrapping the nullable value object twice
+        // (`e.LocationScopeId.Value.Value`) cannot be translated by the provider.
+        LocationId?[] scopedLocationScopes = [.. device.AllowedLocationIds.Select(locationId => (LocationId?)locationId)];
 
         List<SyncChangeLogEntry> entries = await context.SyncChangeLog
             .AsNoTracking()
             .Where(e => e.Sequence > cursor
-                        && (e.LocationScopeId == null || allowedLocationIds.Contains(e.LocationScopeId.Value.Value)))
+                        && (e.LocationScopeId == null || scopedLocationScopes.Contains(e.LocationScopeId)))
             .OrderBy(e => e.Sequence)
             .Take(limit)
             .ToListAsync(cancellationToken)
@@ -126,7 +129,7 @@ public sealed class SyncPullService(
 
         long? earliestRetainedSequence = await context.SyncChangeLog
             .AsNoTracking()
-            .Where(e => e.LocationScopeId == null || allowedLocationIds.Contains(e.LocationScopeId.Value.Value))
+            .Where(e => e.LocationScopeId == null || scopedLocationScopes.Contains(e.LocationScopeId))
             .Select(e => (long?)e.Sequence)
             .MinAsync(cancellationToken)
             .ConfigureAwait(false);

@@ -84,15 +84,37 @@ public sealed class SyncBaselineService(
             }));
         }
 
-        Guid[] deviceLocationIds = [.. device.AllowedLocationIds.Select(location => location.Value)];
-        List<PriceBaselineRow> prices = await context.ProductPrices
+// The Npgsql provider cannot translate `.Value` member access on a
+        // strongly-typed identifier inside a query filter, so every location
+        // filter below compares `LocationId` against `LocationId` and lets the
+        // value converter do the mapping to the uuid column. Where an inner Guid
+        // is genuinely needed it is unwrapped only after the rows materialize.
+        LocationId[] scopedDeviceLocations = [.. device.AllowedLocationIds];
+        LocationId?[] nullableScopedDeviceLocations = [.. device.AllowedLocationIds.Select(location => (LocationId?)location)];
+
+        List<PriceBaselineRow> prices = [.. (await context.ProductPrices
             .AsNoTracking()
-            .Where(p => p.LocationId == null || deviceLocationIds.Contains(p.LocationId.Value.Value))
-            .Select(p => new PriceBaselineRow(
-                p.Id.Value, p.ProductId.Value, p.LocationId.HasValue ? p.LocationId.Value.Value : (Guid?)null,
-                p.Amount, p.Price.Currency, p.EffectiveFromUtc, p.EffectiveToUtc))
+            .Where(p => p.LocationId == null || nullableScopedDeviceLocations.Contains(p.LocationId))
+            .Select(p => new
+            {
+                p.Id,
+                p.ProductId,
+                p.LocationId,
+                p.Amount,
+                p.Price.Currency,
+                p.EffectiveFromUtc,
+                p.EffectiveToUtc,
+            })
             .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false))
+            .Select(p => new PriceBaselineRow(
+                p.Id.Value,
+                p.ProductId.Value,
+                p.LocationId.HasValue ? p.LocationId.Value.Value : null,
+                p.Amount,
+                p.Currency,
+                p.EffectiveFromUtc,
+                p.EffectiveToUtc))];
         foreach (PriceBaselineRow price in prices)
         {
             items.Add(Item("ProductPriceChanged", price.PriceId, new
@@ -107,9 +129,9 @@ public sealed class SyncBaselineService(
             }));
         }
 
-        List<Location> locations = await context.Locations
+List<Location> locations = await context.Locations
             .AsNoTracking()
-            .Where(l => deviceLocationIds.Contains(l.Id.Value))
+            .Where(l => scopedDeviceLocations.Contains(l.Id))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         foreach (Location location in locations)
@@ -117,7 +139,7 @@ public sealed class SyncBaselineService(
             string currencyCode = await context.Organizations
                 .Where(o => o.Id == location.OrganizationId)
                 .Select(o => o.CurrencyCode)
-                .SingleOrDefaultAsync(cancellationToken)
+                .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false) ?? "PHP";
             items.Add(Item("LocationChanged", location.Id.Value, new
             {
