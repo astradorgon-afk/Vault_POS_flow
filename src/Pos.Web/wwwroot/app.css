@@ -93,6 +93,21 @@ h1:focus { outline: none; }
 .login-panel button { height: 52px; margin-top: 28px; border: 0; border-radius: 9px; background: var(--forest); color: white; font-weight: 700; cursor: pointer; }
 .login-panel button:hover { background: var(--forest-bright); }
 .login-panel button:disabled { opacity: .6; cursor: wait; }
+.login-location { margin-top: 20px; }
+.login-panel .login-location-trigger { display:flex; align-items:center; gap:8px; width:100%; height:auto; min-height:42px; margin:0; padding:9px 12px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--forest); font-size:.84rem; font-weight:700; text-align:left; }
+.login-panel .login-location-trigger:hover { border-color:#9db9a5; background:var(--mint-soft); }
+.login-location-trigger small { margin-left:auto; color:var(--muted); font-size:.72rem; font-weight:500; }
+.login-location-arrow { width:12px; color:var(--forest-bright); font-size:1rem; }
+.login-location-options { margin-top:6px; padding:14px; border:1px solid var(--line); border-radius:9px; background:#fff; box-shadow:var(--shadow-card); }
+.login-location-options p { margin:0 0 10px; color:var(--muted); font-size:.79rem; line-height:1.5; }
+.login-panel .login-location-load { width:auto; height:36px; margin:0; padding:0 14px; font-size:.78rem; }
+.login-location-options fieldset { min-width:0; margin:0; padding:0; border:0; }
+.login-location-options legend { margin-bottom:7px; color:var(--forest); font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+.login-panel .login-location-option { display:flex; align-items:center; gap:10px; margin:0; padding:9px 8px; border-radius:7px; color:var(--ink); font-size:.83rem; font-weight:500; cursor:pointer; }
+.login-panel .login-location-option:hover { background:var(--mint-soft); }
+.login-panel .login-location-option input { flex:none; width:16px; height:16px; margin:0; accent-color:var(--forest); }
+.login-location-option span { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px; }
+.login-location-option small { margin-left:4px; color:var(--muted); font-size:.72rem; }
 .form-error { padding: 12px 14px; border-left: 4px solid #b43c35; background: #fff0ef; color: #7e2420; font-size: .86rem; }
 .route-message { max-width: 720px; margin: 10vh auto; padding: clamp(30px,6vw,70px); border: 1px solid var(--line); border-radius: 20px; background: #fff; }
 
@@ -761,23 +776,14 @@ select.qr-field{cursor:pointer}
 
 /* Password with its own Show/Hide switch. */
 .password-field{position:relative;display:flex}
-.password-field input{flex:1;min-width:0;padding-right:48px!important}
+.password-field input{flex:1;min-width:0;padding-right:76px!important}
 .password-field input::-ms-reveal,.password-field input::-ms-clear{display:none}
 .password-toggle{position:absolute;top:50%;right:7px;transform:translateY(-50%);width:36px;height:36px;padding:0;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;transition:color .15s,background-color .15s}
 .password-toggle:hover{background:var(--mint-soft);color:var(--forest)}
-.password-toggle.is-visible{color:var(--forest)}
 .password-toggle:focus-visible{outline:2px solid var(--forest);outline-offset:1px}
-.login-panel .password-toggle,.login-panel .password-toggle:hover{height:36px;margin-top:0;border:0}
-.login-panel .password-toggle{background:transparent;color:var(--muted)}
+.login-panel .password-toggle,.login-panel .password-toggle:hover{right:7px;width:61px;height:36px;margin-top:0;border:0;font-size:.75rem;font-weight:700}
+.login-panel .password-toggle{background:transparent;color:var(--forest)}
 .login-panel .password-toggle:hover{background:var(--mint-soft);color:var(--forest)}
-.login-panel .password-toggle.is-visible{color:var(--forest)}
-.password-toggle .eye { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
-.password-toggle .eye-pupil { transform-origin: 12px 12px; transition: transform .22s cubic-bezier(.2,.7,.2,1); }
-.password-toggle .eye-slash { stroke-dasharray: 22; stroke-dashoffset: 22; transition: stroke-dashoffset .24s cubic-bezier(.2,.7,.2,1); }
-.password-toggle.is-visible .eye-slash { stroke-dashoffset: 0; }
-.password-toggle.is-visible .eye-pupil { transform: scale(.55); }
-.password-toggle:active .eye { transform: scale(.9); }
-@media (prefers-reduced-motion: reduce) { .password-toggle .eye-pupil, .password-toggle .eye-slash { transition: none; } }
 .po-scan-hint{margin:0 0 10px!important;padding:8px 12px;border:1px dashed var(--line-strong);border-radius:9px;background:#f8faf8;color:var(--muted);font-size:.82rem!important}
 
 /* Purchase order creation ------------------------------------------------ */

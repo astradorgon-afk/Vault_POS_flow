@@ -1,0 +1,230 @@
+@page "/receiving/{OrderId:guid}"
+@attribute [Authorize(Policy = "purchase.view")]
+@attribute [Authorize(Policy = "purchase.receive")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Receive delivery · VaultFlow</PageTitle>
+
+<section class="receiving-page">
+    @if (loading)
+    {
+        <div class="receiving-empty">Loading order and delivery history…</div>
+    }
+    else if (order is null)
+    {
+        <div class="receiving-empty"><strong>Order unavailable.</strong><span>@(message ?? "This order could not be found at your assigned locations.")</span></div>
+    }
+    else
+    {
+        <header class="receiving-head">
+            <div><span class="eyebrow">Goods receiving · @locationName</span><h1>@(order.Number ?? "Purchase order")</h1><p>Count the goods that physically arrived. Previous deliveries are already deducted from the quantities due.</p></div>
+            <span class="receiving-state @(CanReceiveNow ? "ready" : "")">@SplitWords(order.Status)</span>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(message))
+        {
+            <div class="receiving-message" role="status">@message</div>
+        }
+
+        @if (CanReceiveNow)
+        {
+            <section class="receiving-card">
+                <header><div><span class="eyebrow">New delivery</span><h2>Count what arrived</h2></div><p>Leave a line at zero if it is not in this delivery.</p></header>
+                <div class="receiving-lines">
+                    @foreach (ReceiptLineInput line in lines)
+                    {
+                        <div class="receiving-line" @key="line.OrderLine.Id">
+                            <div class="receiving-line-title"><strong>@(line.OrderLine.ProductName ?? line.OrderLine.ProductSku ?? "Product")</strong><small>@line.OrderLine.ProductSku · @Quantity(line.Due) still due</small></div>
+                            <div class="receiving-fields">
+                                <label><span>Arrived</span><input type="number" min="0" step="0.001" @bind="line.Received" /></label>
+                                <label><span>Damaged</span><input type="number" min="0" step="0.001" @bind="line.Damaged" /></label>
+                                <label><span>Wrong item</span><input type="number" min="0" step="0.001" @bind="line.WrongItem" /></label>
+                                <label><span>Expired</span><input type="number" min="0" step="0.001" @bind="line.Expired" /></label>
+                                <label><span>Lot number <small>if tracked</small></span><input type="text" maxlength="80" @bind="line.LotNumber" /></label>
+                                <label><span>Made on <small>if known</small></span><input type="date" @bind="line.ManufacturedOn" /></label>
+                                <label><span>Expires on <small>if known</small></span><input type="date" @bind="line.ExpiresOn" /></label>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <footer>
+                    <label class="receiving-check"><input type="checkbox" @bind="documentsMissing" /><span>Delivery documents are missing</span></label>
+                    <button type="button" class="receiving-primary" @onclick="RecordAsync" disabled="@(saving || !CanRecord)">@(saving ? "Recording…" : "Record delivery")</button>
+                </footer>
+            </section>
+        }
+        else if (historyLoaded)
+        {
+            <div class="receiving-message">This order is not currently ready for another delivery.</div>
+        }
+
+        <section class="receiving-card receiving-history">
+            <header><div><span class="eyebrow">Recorded stock</span><h2>Delivery history</h2></div><p>@receipts.Count @(receipts.Count == 1 ? "delivery" : "deliveries") recorded</p></header>
+            @if (receipts.Count == 0)
+            {
+                <p class="receiving-history-empty">No deliveries recorded yet.</p>
+            }
+            else
+            {
+                @foreach (PosGoodsReceipt receipt in receipts.OrderByDescending(item => item.ReceivedAtUtc))
+                {
+                    <article class="receiving-history-row" @key="receipt.Id">
+                        <div><strong>@receipt.Number</strong><small>@receipt.ReceivedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
+                        <span>@Quantity(receipt.Lines.Sum(line => line.QuantityAccepted)) accepted</span>
+                        @if (receipt.DocumentsMissing) { <span class="receiving-state">Documents missing</span> }
+                    </article>
+                }
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [Parameter] public Guid OrderId { get; set; }
+
+    private readonly List<PosGoodsReceipt> receipts = [];
+    private readonly List<ReceiptLineInput> lines = [];
+    private PosPurchaseOrder? order;
+    private string locationName = "Assigned location";
+    private string? message;
+    private bool loading = true;
+    private bool saving;
+    private bool documentsMissing;
+    private bool historyLoaded;
+
+    private bool CanReceiveNow => historyLoaded && order?.Status is "Ordered" or "PartiallyReceived";
+    private bool CanRecord => lines.Any(line => line.Received > 0) &&
+        lines.All(line => line.Received >= 0 && line.Damaged >= 0 && line.WrongItem >= 0 &&
+            line.Expired >= 0 && line.Damaged + line.WrongItem + line.Expired <= line.Received);
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+        historyLoaded = false;
+        order = null;
+        receipts.Clear();
+        lines.Clear();
+        try
+        {
+            ApiResult<PosPurchaseOrder> orderResult = await Api.GetPurchaseOrderAsync(OrderId, CancellationToken.None);
+            if (!orderResult.IsSuccess || orderResult.Value is null)
+            {
+                message = orderResult.Error ?? "The order could not be loaded.";
+                return;
+            }
+            if (!Session.CanUseInventoryLocation(orderResult.Value.DestinationLocationId))
+            {
+                message = "This order is outside your assigned locations.";
+                return;
+            }
+
+            order = orderResult.Value;
+            ApiResult<List<PosLocation>> locationResult = await Api.GetLocationsAsync(CancellationToken.None);
+            locationName = locationResult.Value?.FirstOrDefault(location => location.Id == order.DestinationLocationId)?.Name ?? "Assigned location";
+
+            ApiResult<List<PosGoodsReceiptSummary>> history = await Api.GetGoodsReceiptsAsync(OrderId, CancellationToken.None);
+            if (!history.IsSuccess || history.Value is null)
+            {
+                message = history.Error ?? "Delivery history could not be loaded.";
+                return;
+            }
+            receipts.Clear();
+            foreach (PosGoodsReceiptSummary summary in history.Value)
+            {
+                ApiResult<PosGoodsReceipt> receipt = await Api.GetGoodsReceiptAsync(OrderId, summary.Id, CancellationToken.None);
+                if (!receipt.IsSuccess || receipt.Value is null)
+                {
+                    message = receipt.Error ?? "Delivery history could not be loaded.";
+                    receipts.Clear();
+                    return;
+                }
+                receipts.Add(receipt.Value);
+            }
+
+            lines.Clear();
+            foreach (PosPurchaseOrderLine line in order.Lines)
+            {
+                decimal accepted = receipts.SelectMany(receipt => receipt.Lines)
+                    .Where(received => received.PurchaseOrderLineId == line.Id)
+                    .Sum(received => received.QuantityReceived -
+                        received.QuantityDamaged - received.QuantityWrongItem - received.QuantityExpired);
+                decimal due = Math.Max(0, line.OrderedQuantity - accepted);
+                if (due > 0) { lines.Add(new ReceiptLineInput(line, due)); }
+            }
+            historyLoaded = true;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The receiving service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task RecordAsync()
+    {
+        if (saving || !CanReceiveNow || !CanRecord || order is null ||
+            !Session.CanUseInventoryLocation(order.DestinationLocationId))
+        {
+            message = "Enter an arrived quantity and check that problem quantities do not exceed what arrived.";
+            return;
+        }
+
+        saving = true;
+        message = null;
+        try
+        {
+            PosCreateGoodsReceipt body = new(
+                [.. lines.Where(line => line.Received > 0).Select(line => new PosCreateGoodsReceiptLine(
+                    line.OrderLine.Id, line.Received, line.Damaged, line.WrongItem, line.Expired,
+                    line.OrderLine.UnitCost, string.IsNullOrWhiteSpace(line.LotNumber) ? null : line.LotNumber.Trim(),
+                    line.ManufacturedOn, line.ExpiresOn))],
+                documentsMissing);
+            ApiResult<PosReference> result = await Api.CreateGoodsReceiptAsync(OrderId, body, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                message = result.Error ?? "The delivery could not be recorded.";
+                return;
+            }
+
+            await LoadAsync();
+            if (historyLoaded)
+            {
+                message = "Delivery recorded. Accepted stock is ready for inventory inspection.";
+                documentsMissing = false;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "The receiving service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private sealed class ReceiptLineInput(PosPurchaseOrderLine orderLine, decimal due)
+    {
+        public PosPurchaseOrderLine OrderLine { get; } = orderLine;
+        public decimal Due { get; } = due;
+        public decimal Received { get; set; }
+        public decimal Damaged { get; set; }
+        public decimal WrongItem { get; set; }
+        public decimal Expired { get; set; }
+        public string? LotNumber { get; set; }
+        public DateOnly? ManufacturedOn { get; set; }
+        public DateOnly? ExpiresOn { get; set; }
+    }
+
+    private static string Quantity(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

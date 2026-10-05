@@ -1,0 +1,205 @@
+@page "/restock"
+@attribute [Authorize(Policy = "transfer.request")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Restock requests · VaultFlow</PageTitle>
+
+<section class="restock-page">
+    <header class="restock-head">
+        <div><span class="eyebrow">Inventory · store supplies</span><h1>Restock requests</h1><p>Ask the main warehouse for the products your store needs. The owner reviews the request before stock is picked.</p></div>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="restock-message" role="status">@message</div>
+    }
+
+    <section class="restock-card">
+        <header><div><span class="eyebrow">New request</span><h2>Request supplies</h2></div><p>Select a store, add products, then send the request to the owner.</p></header>
+        @if (loading)
+        {
+            <p class="restock-empty">Loading stores and products…</p>
+        }
+        else if (stores.Count == 0)
+        {
+            <p class="restock-empty">No active store is assigned to this account.</p>
+        }
+        else
+        {
+            <div class="restock-form">
+                <label class="restock-field"><span>Deliver to</span><select @bind="selectedStoreId"><option value="">Select a store</option>@foreach (PosLocation store in stores) { <option value="@store.Id">@store.Code · @store.Name</option> }</select></label>
+                <div class="restock-product-search">
+                    <label class="restock-field"><span>Add products</span><input type="search" placeholder="Search product name or SKU" @bind="search" @bind:event="oninput" /></label>
+                    @if (!string.IsNullOrWhiteSpace(search))
+                    {
+                        <div class="restock-results">
+                            @foreach (PosProductSummary product in Matches)
+                            {
+                                <button type="button" @onclick="() => AddProduct(product)" disabled="@draft.Any(line => line.Product.Id == product.Id)"><strong>@product.Name</strong><small>@product.Sku</small><span>+ Add</span></button>
+                            }
+                            @if (Matches.Count == 0) { <p>No matching products.</p> }
+                        </div>
+                    }
+                </div>
+                @if (draft.Count > 0)
+                {
+                    <div class="restock-lines">
+                        @foreach (DraftLine line in draft)
+                        {
+                            <div class="restock-line" @key="line.Product.Id">
+                                <div><strong>@line.Product.Name</strong><small>@line.Product.Sku</small></div>
+                                <label><span>Quantity</span><input type="number" min="0.001" step="0.001" @bind="line.Quantity" /></label>
+                                <button type="button" aria-label="Remove @line.Product.Name" @onclick="() => draft.Remove(line)">Remove</button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <footer><span>@draft.Count product@(draft.Count == 1 ? "" : "s") selected</span><button type="button" class="restock-primary" disabled="@(!CanSend)" @onclick="SendAsync">@(sending ? "Sending…" : "Send for approval")</button></footer>
+        }
+    </section>
+
+    @if (savedDraftId is { } draftId)
+    {
+        <a class="restock-draft-link" href="@($"/transfers/{draftId:D}")">Open saved draft to submit it →</a>
+    }
+
+    <section class="restock-card">
+        <header><div><span class="eyebrow">Your stores</span><h2>Request history</h2></div><button type="button" class="restock-refresh" @onclick="LoadRequestsAsync" disabled="@loadingRequests">@(loadingRequests ? "Refreshing…" : "Refresh")</button></header>
+        @if (requests.Count == 0)
+        {
+            <p class="restock-empty">No restock requests for your assigned stores yet.</p>
+        }
+        else
+        {
+            <div class="restock-list">
+                @foreach (PosTransferSummary request in requests)
+                {
+                    <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
+                        <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></div>
+                        <span class="restock-status">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
+                    </a>
+                }
+            </div>
+        }
+    </section>
+</section>
+
+@code {
+    private sealed class DraftLine(PosProductSummary product)
+    {
+        public PosProductSummary Product { get; } = product;
+        public decimal Quantity { get; set; } = 1m;
+    }
+
+    private readonly List<PosLocation> stores = [];
+    private readonly List<PosProductSummary> products = [];
+    private readonly List<PosTransferSummary> requests = [];
+    private readonly List<DraftLine> draft = [];
+    private Guid? selectedStoreId;
+    private Guid? warehouseLocationId;
+    private Guid? savedDraftId;
+    private string search = string.Empty;
+    private string? message;
+    private bool loading = true;
+    private bool loadingRequests;
+    private bool sending;
+
+    private List<PosProductSummary> Matches => [.. products
+        .Where(product => product.IsActive && !draft.Any(line => line.Product.Id == product.Id) &&
+            (product.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             product.Sku.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)))
+        .Take(8)];
+
+    private bool CanSend => !sending && warehouseLocationId is not null && selectedStoreId is { } id &&
+        stores.Any(store => store.Id == id) && draft.Count > 0 && draft.All(line => line.Quantity > 0m);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            ApiResult<List<PosLocation>> locations = await Api.GetLocationsAsync(CancellationToken.None);
+            if (locations.IsSuccess && locations.Value is not null)
+            {
+                warehouseLocationId = locations.Value.FirstOrDefault(location => location.Kind == 0 && location.IsActive)?.Id;
+                stores.AddRange(locations.Value.Where(location => location.Kind == 1 && location.IsActive && Session.CanUseInventoryLocation(location.Id)).OrderBy(location => location.Code));
+                selectedStoreId = Session.WorkLocationId is { } preferred && stores.Any(store => store.Id == preferred)
+                    ? preferred : stores.Count == 1 ? stores[0].Id : null;
+            }
+            else { message = locations.Error ?? "Stores could not be loaded."; }
+
+            for (int offset = 0; offset < 2000; offset += 200)
+            {
+                ApiResult<List<PosProductSummary>> page = await Api.GetProductsAsync(null, offset, 200, CancellationToken.None);
+                if (!page.IsSuccess || page.Value is null) { message ??= page.Error ?? "Products could not be loaded."; break; }
+                products.AddRange(page.Value);
+                if (page.Value.Count < 200) { break; }
+            }
+            await LoadRequestsAsync();
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { loading = false; }
+    }
+
+    private void AddProduct(PosProductSummary product)
+    {
+        if (draft.All(line => line.Product.Id != product.Id)) { draft.Add(new DraftLine(product)); }
+        search = string.Empty;
+    }
+
+    private async Task SendAsync()
+    {
+        if (!CanSend || selectedStoreId is not { } storeId) { return; }
+        sending = true;
+        savedDraftId = null;
+        message = null;
+        try
+        {
+            PosCreateRestockRequest body = new(storeId,
+                [.. draft.Select(line => new PosTransferLineRequest(line.Product.Id, line.Quantity))],
+                warehouseLocationId);
+            ApiResult<PosReference> created = await Api.CreateRestockRequestAsync(body, CancellationToken.None);
+            if (!created.IsSuccess || created.Value is null) { message = created.Error ?? "The request could not be saved."; return; }
+
+            ApiResult<PosReference> submitted = await Api.SubmitTransferAsync(created.Value.Id, CancellationToken.None);
+            if (!submitted.IsSuccess)
+            {
+                savedDraftId = created.Value.Id;
+                message = submitted.Error ?? "The request was saved as a draft but could not be sent.";
+            }
+            else
+            {
+                draft.Clear();
+                message = "Restock request sent to the owner for approval.";
+            }
+            await LoadRequestsAsync();
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { sending = false; }
+    }
+
+    private async Task LoadRequestsAsync()
+    {
+        loadingRequests = true;
+        try
+        {
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { message ??= result.Error ?? "Requests could not be loaded."; return; }
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock" &&
+                stores.Any(store => store.Id == request.DestinationLocationId))
+                .OrderByDescending(request => request.CreatedAtUtc));
+        }
+        catch (HttpRequestException) { message ??= "Requests could not be refreshed."; }
+        finally { loadingRequests = false; }
+    }
+
+    private string StoreName(Guid id) => stores.FirstOrDefault(store => store.Id == id)?.Name ?? "Store";
+    private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
+        ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
+        : request.Number;
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

@@ -1,0 +1,643 @@
+@page "/transfers"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Transfers · VaultFlow</PageTitle>
+<div class="inventory-workflow web-workflow">
+
+<div class="office-head">
+    <div>
+        <p class="office-kicker">Inventory command</p>
+        <h1 class="office-title">Transfers</h1>
+        <p class="office-lead">Move stock between your stores and the main warehouse, and record what arrives at the door.</p>
+    </div>
+    <div class="head-pickers">
+        <label class="location-picker">
+            <span>State</span>
+            <select @bind="selectedStatus">
+                <option value="">All states</option>
+                @foreach (string statusName in StatusNames)
+                {
+                    <option value="@statusName">@SplitWords(statusName)</option>
+                }
+            </select>
+        </label>
+    </div>
+</div>
+
+@if (!CanViewTransfers)
+{
+    <section class="pos-blocked" role="alert">
+        <span>Access required</span>
+        <h2>This account cannot view transfers.</h2>
+        <p>Ask an administrator for the <code>transfer.view</code> permission.</p>
+    </section>
+}
+else
+{
+    <section class="search-strip">
+        <span>@visibleTransfers.Count transfer@(visibleTransfers.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")</span>
+        <span class="search-note">Available on the destination store once a dispatch leaves the source.</span>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    @if (CanRequestTransfers)
+    {
+        <section class="open-count">
+            <div class="open-count-title">
+                <strong>Request a transfer</strong>
+                <span>
+                    @(SourceKnown
+                        ? $"Shipping from {SourceLabel} — pick a destination, then search what's in stock here to add it."
+                        : "Choose the route, then add the lines.") The transfer is created as a draft for someone to review.
+                </span>
+            </div>
+            <div class="open-count-fields">
+                @if (SourceKnown)
+                {
+                    <div class="location-picker">
+                        <span>Source</span>
+                        <div class="source-fixed" title="This register's own location — every transfer here ships from it.">@SourceLabel</div>
+                    </div>
+                }
+                else
+                {
+                    <label class="location-picker">
+                        <span>Source</span>
+                        <select value="@(sourceLocationId?.ToString() ?? string.Empty)" @onchange="OnSourceLocationChangedAsync" disabled="@locationsLoading">
+                            <option value="">Select a source</option>
+                            @foreach (PosLocation location in sourceChoices)
+                            {
+                                <option value="@location.Id">@location.Code · @location.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+                <label class="location-picker">
+                    <span>Destination</span>
+                    <select value="@(destinationLocationId?.ToString() ?? string.Empty)" @onchange="OnDestinationLocationChangedAsync" disabled="@locationsLoading">
+                        <option value="">Select a destination</option>
+                        @foreach (PosLocation location in destinationChoices)
+                        {
+                            <option value="@location.Id">@location.Code · @location.Name</option>
+                        }
+                    </select>
+                </label>
+                <label class="location-picker">
+                    <span>Pre-approval token</span>
+                    <input type="text" placeholder="Optional token id"
+                           value="@preApprovalTokenId"
+                           @onchange="OnTokenChangedAsync" />
+                </label>
+            </div>
+            <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanCreateTransfer && !creating)" />
+            <div class="scan-strip" role="status">
+                <span class="scan-strip-mark" aria-hidden="true">▥</span>
+                <span>Scan products to add them; each scan adds one.</span>
+                
+            </div>
+            <div class="transfer-lines">
+                @for (int index = 0; index < draftLines.Count; index++)
+                {
+                    // Handlers run after the loop ends; capture this row's index,
+                    // not the loop variable (which would equal draftLines.Count).
+                    int lineIndex = index;
+                    <div class="transfer-line" @key="draftLines[lineIndex].Marker">
+                        <div class="line-product-field">
+                            @if (draftLines[lineIndex].ProductId is { } pickedId)
+                            {
+                                PosStockLevel? picked = FindStock(pickedId);
+                                PosProductSummary? scanned = picked is null ? products.FirstOrDefault(p => p.Id == pickedId) : null;
+                                <div class="line-product-picked">
+                                    <span class="lpp-name">@(picked is not null ? $"{picked.Sku} · {picked.Name}" : scanned is not null ? $"{scanned.Sku} · {scanned.Name}" : "Scanned product")</span>
+                                    @if (picked is not null)
+                                    {
+                                        <span class="lpp-avail">@Qty(picked.Available) available</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="lpp-avail lpp-unlisted">not counted here yet</span>
+                                    }
+                                    <button type="button" class="lpp-change" @onclick="() => ClearLineProduct(lineIndex)">Change</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <input type="text" class="line-product-search" placeholder="Search this location's stock by name or SKU…"
+                                       value="@draftLines[lineIndex].Search"
+                                       @oninput="(e) => OnLineSearchChanged(lineIndex, e)" />
+                                @if (draftLines[lineIndex].Search.Trim().Length > 0)
+                                {
+                                    List<PosStockLevel> matches = MatchingStock(draftLines[lineIndex].Search);
+                                    <div class="line-product-results">
+                                        @if (matches.Count == 0)
+                                        {
+                                            <div class="lpr-empty">Nothing in stock here matches "@draftLines[lineIndex].Search".</div>
+                                        }
+                                        else
+                                        {
+                                            @foreach (PosStockLevel match in matches)
+                                            {
+                                                <button type="button" class="line-product-result" @key="match.ProductId" @onclick="() => PickLineProduct(lineIndex, match)">
+                                                    <span class="lpr-name">@match.Sku · @match.Name</span>
+                                                    <span class="lpr-avail">@Qty(match.Available) available</span>
+                                                </button>
+                                            }
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <input class="line-quantity" type="number" min="0" step="1" placeholder="Qty"
+                               value="@draftLines[lineIndex].Quantity"
+                               @onchange="(e) => OnLineQuantityChanged(lineIndex, e)" />
+                        @if (draftLines.Count > 1)
+                        {
+                            <button type="button" class="line-remove" @onclick="() => RemoveLine(lineIndex)">✕</button>
+                        }
+                    </div>
+                }
+                <button type="button" class="search-action line-add" @onclick="AddLine" disabled="@(sourceStock.Count == 0)">
+                    + Add line
+                </button>
+            </div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="CreateTransferAsync"
+                        disabled="@(!CanCreateTransfer || creating)">
+                    @(creating ? "Creating…" : "Create transfer")
+                </button>
+            </div>
+        </section>
+    }
+
+    <section class="results-panel" aria-live="polite">
+        @if (loading)
+        {
+            <div class="results-empty">Loading transfers…</div>
+        }
+        else if (visibleTransfers.Count == 0)
+        {
+            <div class="results-empty"><strong>No transfers yet.</strong><span>Request one, or wait for a dispatch to arrive at your store.</span></div>
+        }
+        else
+        {
+            <table class="sales-table counts-table">
+                <thead>
+                    <tr><th>NUMBER</th><th>Status</th><th>Route</th><th>Lines</th><th>Value</th><th>Created</th><th>Dispatched</th><th>Received</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosTransferSummary transfer in visibleTransfers)
+                    {
+                        <tr class="office-row-click" @key="transfer.Id" @onclick="() => OpenTransfer(transfer.Id)">
+                            <td class="sale-number">@transfer.Number</td>
+                            <td>
+                                <span class="@StatusChipClass(transfer.Status)">@SplitWords(transfer.Status)</span>
+                                @if (AwaitingReceive(transfer.Status) && CanReceive)
+                                {
+                                    <span class="status-chip sc-dispatched">awaiting receipt</span>
+                                }
+                            </td>
+                            <td>@LocationLabel(transfer.SourceLocationId) → @LocationLabel(transfer.DestinationLocationId)</td>
+                            <td>@transfer.LineCount</td>
+                            <td>@Money(transfer.TotalValue)</td>
+                            <td>@transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@(transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td>@(transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+</div>
+
+@code {
+    private static readonly string[] StatusNames =
+    [
+        "Draft", "Submitted", "InReview", "Approved", "Picking", "Ready",
+        "Dispatched", "PartiallyReceived", "Received", "Closed", "Cancelled",
+        "PendingCentralReview",
+    ];
+
+    private sealed record DraftLine(long Marker, Guid? ProductId, decimal Quantity, string Search = "");
+
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosProductSummary> products = [];
+    private readonly List<PosStockLevel> sourceStock = [];
+    private readonly List<PosTransferSummary> transfers = [];
+    private readonly List<DraftLine> draftLines = [];
+
+    private Guid? sourceLocationId;
+    private Guid? destinationLocationId;
+    private string preApprovalTokenId = string.Empty;
+    private string selectedStatus = string.Empty;
+    private string searchedLabel = string.Empty;
+
+    private bool locationsLoading = true;
+    private bool loading;
+    private bool creating;
+    private string? message;
+    private long nextMarker = 1;
+
+    private bool CanViewTransfers => Session.HasPermission("transfer.view");
+    private bool CanRequestTransfers => Session.HasPermission("transfer.request");
+    private bool CanReceive => Session.HasPermission("transfer.receive");
+
+    private List<PosTransferSummary> visibleTransfers
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(selectedStatus))
+            {
+                return transfers;
+            }
+
+            return transfers.Where(t => string.Equals(t.Status, selectedStatus, StringComparison.Ordinal)).ToList();
+        }
+    }
+
+    private List<PosLocation> externalLocations =>
+        locations.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code).ToList();
+
+    private List<PosLocation> sourceChoices => externalLocations
+        .Where(location => Session.CanUseInventoryLocation(location.Id)).ToList();
+
+    // Destination can be anywhere but the route's own source.
+    private List<PosLocation> destinationChoices =>
+        externalLocations.Where(l => l.Id != sourceLocationId).ToList();
+
+    // A web session may work at several assigned locations, so the source is selected.
+    private bool SourceKnown => false;
+
+    private string SourceLabel
+    {
+        get
+        {
+            if (sourceLocationId is not { } id)
+            {
+                return "—";
+            }
+
+            PosLocation? location = locations.FirstOrDefault(l => l.Id == id);
+            return location is null ? "This register's location" : $"{location.Code} · {location.Name}";
+        }
+    }
+
+    private bool CanCreateTransfer =>
+        sourceLocationId is { } source &&
+        sourceChoices.Any(location => location.Id == source) &&
+        destinationLocationId is { } destination &&
+        source != destination &&
+        draftLines.Count > 0 &&
+        draftLines.All(line => line.ProductId is not null && line.Quantity > 0m);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanViewTransfers)
+        {
+            locationsLoading = false;
+            return;
+        }
+
+        await LoadLocationsAsync();
+        if (CanRequestTransfers)
+        {
+            sourceLocationId = Session.WorkLocationId is { } preferred && sourceChoices.Any(location => location.Id == preferred)
+                ? preferred : null;
+            await LoadProductsAsync();
+            await LoadSourceStockAsync();
+            AddLine();
+        }
+
+        await LoadTransfersAsync();
+    }
+
+    // The stock this register's own location holds, so a line can be picked by
+    // searching what is actually here to send, with how much of it there is.
+    private async Task LoadSourceStockAsync()
+    {
+        if (sourceLocationId is null)
+        {
+            return;
+        }
+
+        ApiResult<PosStockLevelReport> response = await Api.GetStockLevelsAsync(sourceLocationId.Value, CancellationToken.None);
+        if (response is { IsSuccess: true, Value: { } report })
+        {
+            sourceStock.Clear();
+            sourceStock.AddRange(report.Products.Where(p => p.Available > 0));
+        }
+    }
+
+    private async Task LoadLocationsAsync()
+    {
+        ApiResult<List<PosLocation>> response = await Api.GetLocationsAsync(CancellationToken.None);
+        locationsLoading = false;
+        if (!response.IsSuccess || response.Value is null)
+        {
+            message = response.Error;
+            return;
+        }
+
+        // Kind 0 is the Main Warehouse, Kind 1 a store; both can be a transfer
+        // route's endpoint. Excluding the warehouse here (as this used to) left
+        // it unresolvable by LocationLabel, which falls back to a raw id prefix.
+        locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1 && location.IsActive));
+    }
+
+    private async Task LoadProductsAsync()
+    {
+        const int pageSize = 200;
+        const int maxPages = 10;
+
+        for (int offset = 0; offset < maxPages * pageSize; offset += pageSize)
+        {
+            ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(
+                null, offset, pageSize, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null || response.Value.Count == 0)
+            {
+                break;
+            }
+
+            products.AddRange(response.Value);
+            if (response.Value.Count < pageSize)
+            {
+                break;
+            }
+        }
+
+        products.Sort((left, right) =>
+            string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task LoadTransfersAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosTransferSummary>> response = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            transfers.Clear();
+            transfers.AddRange(response.Value.Where(transfer =>
+                transfer.Mode != "StoreRestock" &&
+                (Session.CanUseInventoryLocation(transfer.SourceLocationId) ||
+                 Session.CanUseInventoryLocation(transfer.DestinationLocationId))));
+            searchedLabel = string.IsNullOrWhiteSpace(selectedStatus)
+                ? "all states"
+                : SplitWords(selectedStatus);
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task OnSourceLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        sourceLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) && sourceChoices.Any(location => location.Id == id) ? id : null;
+        sourceStock.Clear();
+        draftLines.Clear();
+        AddLine();
+        if (sourceLocationId == destinationLocationId)
+        {
+            destinationLocationId = null;
+        }
+        if (sourceLocationId is not null)
+        {
+            await LoadSourceStockAsync();
+        }
+    }
+
+    private void OnDestinationLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        destinationLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+    }
+
+    private void OnTokenChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        preApprovalTokenId = e.Value?.ToString() ?? string.Empty;
+    }
+
+    // Products this register's location actually holds, matching the typed
+    // text by name or SKU, best match first.
+    private List<PosStockLevel> MatchingStock(string search)
+    {
+        string query = (search ?? string.Empty).Trim();
+        if (query.Length == 0)
+        {
+            return [];
+        }
+
+        return [.. sourceStock
+            .Where(stock =>
+                stock.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || stock.Sku.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(stock => stock.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(stock => stock.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(8)];
+    }
+
+    private PosStockLevel? FindStock(Guid productId) => sourceStock.FirstOrDefault(s => s.ProductId == productId);
+
+    private void OnLineSearchChanged(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        draftLines[index] = draftLines[index] with { Search = e.Value?.ToString() ?? string.Empty };
+    }
+
+    private void PickLineProduct(int index, PosStockLevel stock)
+    {
+        draftLines[index] = draftLines[index] with { ProductId = stock.ProductId, Search = string.Empty };
+        if (products.All(p => p.Id != stock.ProductId))
+        {
+            products.Add(new PosProductSummary(stock.ProductId, stock.Sku, stock.Name, IsActive: true));
+        }
+    }
+
+    private void ClearLineProduct(int index)
+        => draftLines[index] = draftLines[index] with { ProductId = null, Search = string.Empty };
+
+    private static string Qty(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private void OnLineQuantityChanged(int index, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? value
+            : 0m;
+        draftLines[index] = draftLines[index] with { Quantity = quantity };
+    }
+
+    private void AddLine() => draftLines.Add(new DraftLine(nextMarker++, null, 0m));
+
+    private ScanLine? scanQueue;
+
+    private Task OnScannedAsync(BarcodeScan scan)
+    {
+        scanQueue ??= new ScanLine(AddScannedAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task AddScannedAsync(BarcodeScan scan)
+    {
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } product })
+            {
+                message = $"{scan.Code}: {found.Error ?? "not a known product."}";
+                return;
+            }
+
+            if (products.All(p => p.Id != product.Id))
+            {
+                products.Add(new PosProductSummary(product.Id, product.Sku, product.Name, product.IsActive));
+            }
+
+            int index = draftLines.FindIndex(line => line.ProductId == product.Id);
+            if (index < 0)
+            {
+                index = draftLines.FindIndex(line => line.ProductId is null);
+            }
+
+            if (index < 0)
+            {
+                AddLine();
+                index = draftLines.Count - 1;
+            }
+
+            DraftLine current = draftLines[index];
+            decimal quantity = current.ProductId == product.Id ? current.Quantity + 1m : 1m;
+            draftLines[index] = current with { ProductId = product.Id, Quantity = quantity };
+            message = $"{product.Name}: {quantity.ToString("0.###", CultureInfo.InvariantCulture)} on this transfer.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "Head office could not be reached to look that barcode up.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void RemoveLine(int index) => draftLines.RemoveAt(index);
+
+    private async Task CreateTransferAsync()
+    {
+        if (sourceLocationId is not { } source || !sourceChoices.Any(location => location.Id == source) ||
+            destinationLocationId is not { } destination)
+        {
+            message = "Choose an assigned source and a destination before creating the transfer.";
+            return;
+        }
+
+        List<PosTransferLineRequest> lines =
+        [
+            .. draftLines
+                .Where(line => line.ProductId is not null && line.Quantity > 0m)
+                .Select(line => new PosTransferLineRequest(line.ProductId!.Value, line.Quantity)),
+        ];
+
+        if (lines.Count == 0)
+        {
+            message = "Add at least one line with a quantity before creating the transfer.";
+            return;
+        }
+
+        Guid? tokenId = Guid.TryParse(preApprovalTokenId, out Guid token) ? token : null;
+
+        creating = true;
+        message = null;
+        try
+        {
+            ApiResult<PosReference> response = await Api.CreateTransferAsync(
+                new PosCreateTransferRequest(source, destination, lines, tokenId),
+                CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                message = response.Error;
+                return;
+            }
+
+            preApprovalTokenId = string.Empty;
+            sourceLocationId = Session.WorkLocationId is { } preferred && sourceChoices.Any(location => location.Id == preferred)
+                ? preferred : null;
+            destinationLocationId = null;
+            sourceStock.Clear();
+            draftLines.Clear();
+            AddLine();
+            Navigation.NavigateTo($"/transfers/{response.Value.Id:D}");
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+
+    private void OpenTransfer(Guid transferId) => Navigation.NavigateTo($"/transfers/{transferId:D}");
+
+    private string LocationLabel(Guid locationId)
+    {
+        PosLocation? location = locations.FirstOrDefault(l => l.Id == locationId);
+        return location?.Code ?? locationId.ToString("D", CultureInfo.InvariantCulture)[..8];
+    }
+
+    private static bool AwaitingReceive(string status)
+        => status is "Dispatched" or "PartiallyReceived";
+
+    private static string SplitWords(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character)
+                ? $" {char.ToLowerInvariant(character)}"
+                : character.ToString()));
+    }
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Draft" => "status-chip sc-draft",
+        "Submitted" => "status-chip sc-submitted",
+        "InReview" => "status-chip sc-in-review",
+        "Approved" => "status-chip sc-approved",
+        "Picking" => "status-chip sc-picking",
+        "Ready" => "status-chip sc-ready",
+        "Dispatched" => "status-chip sc-dispatched",
+        "PartiallyReceived" => "status-chip sc-partially-received",
+        "Received" => "status-chip sc-received",
+        "Closed" => "status-chip sc-closed",
+        "Cancelled" => "status-chip sc-cancelled",
+        "PendingCentralReview" => "status-chip sc-pending-central-review",
+        _ => "status-chip",
+    };
+}

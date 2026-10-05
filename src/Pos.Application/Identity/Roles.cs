@@ -52,7 +52,11 @@ public static class Roles
     /// administrator added on purpose is left alone.
     /// </summary>
     public static IReadOnlyList<(string Role, string Permission)> RetiredDefaultGrants { get; } =
-        [.. TillPermissions.Select(permission => (Owner, permission))];
+    [
+        .. TillPermissions.Select(permission => (Owner, permission)),
+        (MainInventoryManager, Permissions.Administration.ManageDevices),
+        (MainInventoryManager, Permissions.Administration.ManageSync),
+    ];
 
     /// <summary>
     /// The default permission grants per role. Seeded on first run and editable
@@ -128,8 +132,7 @@ public static class Roles
                 Permissions.Receipts.Create, Permissions.Receipts.View,
 
                 Permissions.Administration.ViewReports, Permissions.Administration.ViewFinancialReports,
-                Permissions.Administration.ExportReports, Permissions.Administration.ManageDevices,
-                Permissions.Administration.ManageSync, Permissions.Administration.AllLocations,
+                Permissions.Administration.ExportReports, Permissions.Administration.AllLocations,
             ],
 
             // Scoped to assigned locations by UserLocationAssignment: this role

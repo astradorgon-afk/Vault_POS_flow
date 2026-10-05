@@ -69,7 +69,7 @@
         </header>
 
         <article id="main-content" class="content" tabindex="-1">@Body</article>
-        <ScanFeedback Hint="Open a purchase order, a delivery or Store inventory to use it." />
+        <ScanFeedback Hint="Open an inventory page to use it." />
     </main>
 
     <AuthorizeView>
@@ -107,7 +107,9 @@
         ? "99+"
         : Notifications.UnreadCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    private string ScopeLabel => Session.Current?.User.HasAllLocations == true
+    private string ScopeLabel => Session.WorkLocationName is { Length: > 0 } chosen
+        ? chosen
+        : Session.Current?.User.HasAllLocations == true
         ? "All locations"
         : Session.Current?.User.Locations.Count switch
         {
@@ -158,7 +160,28 @@
                 tabs.Add(new("inventory/stock", "box", "Stock"));
             }
 
-            if (Session.HasPermission("purchase.view"))
+            if (Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true &&
+                Session.HasPermission("transfer.approve"))
+            {
+                tabs.Add(new("restock/approvals", "ledger", "Approvals"));
+            }
+            else if (Session.Current?.User.Roles.Contains("MainInventoryManager", StringComparer.Ordinal) == true &&
+                Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch"))
+            {
+                tabs.Add(new("restock/fulfillment", "box", "Fulfill"));
+            }
+            else if (Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view"))
+            {
+                tabs.Add(new("restock", "ledger", "Restock"));
+            }
+
+            if (Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive"))
+            {
+                tabs.Add(new("receiving", "receipt", "Receiving"));
+            }
+
+            if (Session.HasPermission("purchase.view") &&
+                Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true)
             {
                 tabs.Add(new("purchasing", "receipt", "Orders"));
             }

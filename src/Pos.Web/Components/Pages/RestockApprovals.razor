@@ -1,0 +1,88 @@
+@page "/restock/approvals"
+@attribute [Authorize(Roles = "Owner")]
+@attribute [Authorize(Policy = "transfer.approve")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+
+<PageTitle>Restock approvals · VaultFlow</PageTitle>
+
+<section class="restock-page">
+    <header class="restock-head">
+        <div><span class="eyebrow">Owner approvals · inventory</span><h1>Restock approvals</h1><p>Review supply requests from your stores. Approval releases a request to warehouse picking.</p></div>
+        <button type="button" class="restock-refresh" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
+
+    <nav class="restock-filters" aria-label="Filter restock requests">
+        <button type="button" class="@(showPending ? "active" : null)" @onclick="() => showPending = true">Needs decision <span>@Pending.Count</span></button>
+        <button type="button" class="@(!showPending ? "active" : null)" @onclick="() => showPending = false">All requests <span>@requests.Count</span></button>
+    </nav>
+
+    <section class="restock-card">
+        <header><div><span class="eyebrow">Warehouse supply</span><h2>@(showPending ? "Waiting for approval" : "All store requests")</h2></div><p>Open a request to review its products and approve or reject it.</p></header>
+        @if (loading)
+        {
+            <p class="restock-empty">Loading requests…</p>
+        }
+        else if (Visible.Count == 0)
+        {
+            <p class="restock-empty">@(showPending ? "No store requests need a decision." : "No restock requests have been sent yet.")</p>
+        }
+        else
+        {
+            <div class="restock-list">
+                @foreach (PosTransferSummary request in Visible)
+                {
+                    <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
+                        <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
+                        <span class="restock-status @(request.Status is "Submitted" or "InReview" ? "pending" : "")">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
+                    </a>
+                }
+            </div>
+        }
+    </section>
+</section>
+
+@code {
+    private readonly List<PosTransferSummary> requests = [];
+    private readonly Dictionary<Guid, string> storeNames = [];
+    private bool loading = true;
+    private bool showPending = true;
+    private string? message;
+
+    private List<PosTransferSummary> Pending => [.. requests.Where(request => request.Status is "Submitted" or "InReview")];
+    private List<PosTransferSummary> Visible => showPending ? Pending : requests;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosLocation>> locations = await Api.GetLocationsAsync(CancellationToken.None);
+            if (locations.IsSuccess && locations.Value is not null)
+            {
+                storeNames.Clear();
+                foreach (PosLocation location in locations.Value) { storeNames[location.Id] = location.Name; }
+            }
+
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { message = result.Error ?? "Requests could not be loaded."; return; }
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock")
+                .OrderByDescending(request => request.CreatedAtUtc));
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { loading = false; }
+    }
+
+    private string StoreName(Guid id) => storeNames.GetValueOrDefault(id, "Store");
+    private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
+        ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
+        : request.Number;
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

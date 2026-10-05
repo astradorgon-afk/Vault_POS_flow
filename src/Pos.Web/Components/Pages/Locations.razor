@@ -1,5 +1,5 @@
 @page "/admin/locations"
-@attribute [Authorize(Policy = "product.view")]
+@attribute [Authorize(Policy = "location.manage")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
@@ -11,7 +11,7 @@
     <div>
         <span class="eyebrow">Administration · operating rules</span>
         <h1>Locations</h1>
-        <p>Every store carries its own clock, stock guardrails, till tolerance and customer-facing receipt text.</p>
+        <p>Manage warehouses, stores, and the rules that protect their stock.</p>
     </div>
     @if (CanManageLocations)
     {
@@ -39,7 +39,7 @@ else
                 <label><span>Kind</span><select @bind="newKind"><option value="1">Retail store</option><option value="0">Main warehouse</option></select></label>
                 <label><span>IANA timezone</span><input @bind="newTimeZone" placeholder="Asia/Manila" /></label>
             </div>
-            <footer><span>Currency is settled organization-wide in Philippine pesos.</span><button class="location-primary" type="button" @onclick="CreateLocationAsync" disabled="@(!CanCreate || working)">@(working ? "Creating…" : "Create location")</button></footer>
+            <footer><span>Give the location a clear code and timezone for stock activity.</span><button class="location-primary" type="button" @onclick="CreateLocationAsync" disabled="@(!CanCreate || working)">@(working ? "Creating…" : "Create location")</button></footer>
         </section>
     }
 
@@ -82,11 +82,11 @@ else
                 <section class="policy-editor" aria-labelledby="policy-editor-title">
                     <header>
                         <div><span>@selected.Code · @KindName(selected.Kind)</span><h2 id="policy-editor-title">@selected.Name</h2><p>Open since @selected.OpenedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture) · @selected.TimeZoneId</p></div>
-                        <div class="settlement-stamp"><span>Settlement</span><strong>PHP</strong><small>Philippine peso</small></div>
+                        <span class="location-kind-badge">@KindName(selected.Kind)</span>
                     </header>
 
                     <div class="policy-section">
-                        <div class="policy-section-title"><span>01</span><div><strong>Inventory guardrails</strong><small>What happens when a movement would take stock below zero.</small></div></div>
+                        <div class="policy-section-title"><span>Stock</span><div><strong>Inventory rules</strong><small>Control negative stock, expiry alerts, and direct deliveries.</small></div></div>
                         <div class="policy-fields two-columns">
                             <label><span>Negative-stock policy</span><select @bind="editNegativePolicy" disabled="@(!CanManageSettings)"><option value="0">Prohibit</option><option value="1">Allow with permission</option><option value="2">Offline only, central review</option></select></label>
                             <label><span>Expiry warning</span><div class="unit-input"><input type="number" min="0" max="3650" @bind="editExpiryDays" disabled="@(!CanManageSettings)" /><i>days</i></div></label>
@@ -94,30 +94,11 @@ else
                         </div>
                     </div>
 
-                    <div class="policy-section">
-                        <div class="policy-section-title"><span>02</span><div><strong>Till and offline operation</strong><small>Boundaries the register uses when head office is unavailable or the drawer closes.</small></div></div>
-                        <div class="policy-fields three-columns">
-                            <label><span>Offline grace</span><div class="unit-input"><input type="number" min="0" step="1" @bind="editOfflineHours" disabled="@(!CanManageSettings)" /><i>hours</i></div></label>
-                            <label><span>Maximum shift</span><div class="unit-input"><input type="number" min="1" step="1" @bind="editShiftHours" disabled="@(!CanManageSettings)" /><i>hours</i></div></label>
-                            <label><span>Cash variance threshold</span><div class="unit-input"><i>₱</i><input type="number" min="0" step="0.01" @bind="editVariance" disabled="@(!CanManageSettings)" /></div></label>
-                            <label><span>VAT rate</span><div class="unit-input"><input type="number" min="0" max="100" step="0.01" @bind="editVatPercent" disabled="@(!CanManageSettings)" /><i>%</i></div></label>
-                            <label><span>Cash rounding</span><div class="unit-input"><i>₱</i><input type="number" min="0.01" step="0.01" @bind="editRounding" disabled="@(!CanManageSettings)" /></div></label>
-                        </div>
-                    </div>
-
-                    <div class="policy-section">
-                        <div class="policy-section-title"><span>03</span><div><strong>Receipt voice</strong><small>The message printed around the fiscal sale detail.</small></div></div>
-                        <div class="policy-fields two-columns receipt-fields">
-                            <label><span>Receipt header</span><textarea maxlength="120" @bind="editReceiptHeader" disabled="@(!CanManageSettings)" placeholder="Store or customer-service message"></textarea><small>@editReceiptHeader.Length / 120</small></label>
-                            <label><span>Receipt footer</span><textarea maxlength="120" @bind="editReceiptFooter" disabled="@(!CanManageSettings)" placeholder="Return policy or thank-you message"></textarea><small>@editReceiptFooter.Length / 120</small></label>
-                        </div>
-                    </div>
-
                     <footer>
-                        <span>@(CanManageSettings ? "Saving replaces the complete policy snapshot for this location." : "You can review this policy, but settings.manage is required to change it.")</span>
+                        <span>@(CanManageSettings ? "Changes to stock rules take effect for this location after saving." : "You can review this location's inventory rules.")</span>
                         @if (CanManageSettings)
                         {
-                            <button class="location-primary" type="button" @onclick="SaveSettingsAsync" disabled="@working">@(working ? "Saving…" : "Save operating policy")</button>
+                            <button class="location-primary" type="button" @onclick="SaveSettingsAsync" disabled="@working">@(working ? "Saving…" : "Save stock rules")</button>
                         }
                     </footer>
                 </section>
@@ -139,16 +120,9 @@ else
     private string newTimeZone = "Asia/Manila";
     private int editNegativePolicy;
     private bool editDirectDelivery;
-    private decimal editOfflineHours;
-    private string editReceiptHeader = string.Empty;
-    private string editReceiptFooter = string.Empty;
-    private decimal editVatPercent;
-    private decimal editRounding;
     private int editExpiryDays;
-    private decimal editVariance;
-    private decimal editShiftHours;
 
-    private bool CanViewLocations => Session.Current?.User.Permissions.Contains("product.view", StringComparer.Ordinal) == true;
+    private bool CanViewLocations => Session.HasPermission("location.manage");
     private bool CanManageLocations => Session.Current?.User.Permissions.Contains("location.manage", StringComparer.Ordinal) == true;
     private bool CanManageSettings => Session.Current?.User.Permissions.Contains("settings.manage", StringComparer.Ordinal) == true;
     private bool CanCreate => !string.IsNullOrWhiteSpace(newCode) && !string.IsNullOrWhiteSpace(newName) && !string.IsNullOrWhiteSpace(newTimeZone);
@@ -197,7 +171,7 @@ else
 
     private async Task CreateLocationAsync()
     {
-        if (!CanCreate)
+        if (!CanManageLocations || !CanCreate)
         {
             message = "Enter a code, name and IANA timezone.";
             return;
@@ -238,28 +212,23 @@ else
 
     private async Task SaveSettingsAsync()
     {
-        if (selected is not { } location)
+        if (!CanManageSettings || selected is not { } location)
         {
             return;
         }
 
-        if (editRounding <= 0 || editOfflineHours < 0 || editShiftHours <= 0 || editVatPercent is < 0 or > 100 || editExpiryDays < 0 || editVariance < 0)
+        if (editExpiryDays < 0 || editExpiryDays > 3650)
         {
-            message = "Check the policy values. Durations and rounding must be positive, and VAT must be between 0 and 100%.";
+            message = "Expiry warning must be between 0 and 3650 days.";
             return;
         }
 
-        PosLocationSettings settings = new(
-            editNegativePolicy,
-            editDirectDelivery,
-            TimeSpan.FromHours((double)editOfflineHours),
-            editReceiptHeader.Trim(),
-            editReceiptFooter.Trim(),
-            editVatPercent / 100m,
-            editRounding,
-            editExpiryDays,
-            editVariance,
-            TimeSpan.FromHours((double)editShiftHours));
+        PosLocationSettings settings = location.Settings with
+        {
+            NegativeStockPolicy = editNegativePolicy,
+            AllowsDirectSupplierDelivery = editDirectDelivery,
+            ExpiryWarningDays = editExpiryDays,
+        };
 
         working = true;
         message = null;
@@ -275,7 +244,7 @@ else
                 // LoadLocationsAsync re-runs SelectLocation, which clears
                 // message, so set the success text AFTER the reload.
                 await LoadLocationsAsync(location.Id);
-                message ??= $"Operating policy saved for {location.Name}.";
+                message ??= $"Stock rules saved for {location.Name}.";
             }
         }
         catch (HttpRequestException)
@@ -293,14 +262,7 @@ else
         selected = location;
         editNegativePolicy = location.Settings.NegativeStockPolicy;
         editDirectDelivery = location.Settings.AllowsDirectSupplierDelivery;
-        editOfflineHours = (decimal)location.Settings.OfflineGracePeriod.TotalHours;
-        editReceiptHeader = location.Settings.ReceiptHeader;
-        editReceiptFooter = location.Settings.ReceiptFooter;
-        editVatPercent = location.Settings.VatRate * 100m;
-        editRounding = location.Settings.CashRoundingIncrement;
         editExpiryDays = location.Settings.ExpiryWarningDays;
-        editVariance = location.Settings.CashVarianceThreshold;
-        editShiftHours = (decimal)location.Settings.MaxShiftHours.TotalHours;
         message = null;
     }
 

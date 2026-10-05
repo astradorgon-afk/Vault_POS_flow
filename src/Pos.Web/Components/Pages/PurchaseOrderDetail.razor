@@ -1,5 +1,6 @@
 @page "/purchasing/{OrderId:guid}"
 @attribute [Authorize(Policy = "purchase.view")]
+@attribute [Authorize(Roles = "Owner")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
@@ -306,6 +307,32 @@ else if (order is { } o)
 
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
             <p class="po-scan-hint">▥ @(scanNote ?? "Scan items as you unpack: each scan counts one more of that product.")</p>
+            @if (quarantineLines.Count > 0)
+            {
+                <section class="po-quarantine" aria-label="Goods not on this order">
+                    <h3>Goods not on this order</h3>
+                    <p>These scanned items need a quarantine incident before they can be inspected and released.</p>
+                    @foreach (QuarantineLine item in quarantineLines)
+                    {
+                        <div class="po-quarantine-line" @key="item.Barcode">
+                            <div><strong>@(item.ProductName ?? "Uncatalogued product")</strong><small>@item.Barcode</small></div>
+                            <label><span>Quantity</span><input type="number" min="0" step="1" value="@item.Quantity" @onchange="e => SetQuarantineQuantity(item, e)" /></label>
+                            <button type="button" class="po-btn" @onclick="() => RemoveQuarantineLine(item)">Remove</button>
+                        </div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(quarantineError))
+                    {
+                        <p class="po-problem" role="alert">@quarantineError</p>
+                    }
+                    <button type="button" class="po-btn primary" disabled="@(raisingQuarantine || !Can("quarantine.create"))" @onclick="RaiseQuarantineAsync">
+                        @(raisingQuarantine ? "Recording…" : "Record quarantine incident")
+                    </button>
+                    @if (!Can("quarantine.create"))
+                    {
+                        <small>Ask an administrator for the quarantine.create permission to record these goods.</small>
+                    }
+                </section>
+            }
             <div class="po-receive">
                 @foreach (ReceiveLine line in receiving)
                 {

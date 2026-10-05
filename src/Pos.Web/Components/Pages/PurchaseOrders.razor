@@ -1,5 +1,6 @@
 @page "/purchasing"
 @attribute [Authorize(Policy = "purchase.view")]
+@attribute [Authorize(Roles = "Owner")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api

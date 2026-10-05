@@ -48,7 +48,11 @@ public sealed class PosLocation
 
     /// <summary>Gets or sets the numeric location kind.</summary>
     public int Kind { get; set; }
+    public bool IsActive { get; set; }
 }
+
+/// <summary>A physical location shown in the optional pre-sign-in chooser.</summary>
+public sealed record PosSignInLocation(Guid Id, string Code, string Name, int Kind);
 
 /// <summary>One page of a store's sales and how many matched in all.</summary>
 public sealed record PosSalePage(IReadOnlyList<PosSaleSummary> Sales, int Total);
@@ -650,4 +654,5 @@ public sealed record PosStockLevel(
     decimal? MaximumStock,
     decimal DailySales,
     decimal? DaysOfCover,
-    string Status);
+    string Status,
+    DateOnly? LastSoldOn = null);

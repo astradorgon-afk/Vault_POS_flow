@@ -1,0 +1,89 @@
+@page "/restock/fulfillment"
+@attribute [Authorize(Policy = "transfer.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Restock fulfillment · VaultFlow</PageTitle>
+
+<section class="restock-page">
+    <header class="restock-head">
+        <div><span class="eyebrow">Main warehouse · store supplies</span><h1>Restock fulfillment</h1><p>Pick approved store requests, then dispatch them to their destination stores.</p></div>
+        <button type="button" class="restock-refresh" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
+
+    <nav class="restock-filters" aria-label="Filter warehouse requests">
+        <button type="button" class="@(showActive ? "active" : null)" @onclick="() => showActive = true">To fulfill <span>@Active.Count</span></button>
+        <button type="button" class="@(!showActive ? "active" : null)" @onclick="() => showActive = false">All assigned <span>@requests.Count</span></button>
+    </nav>
+
+    <section class="restock-card">
+        <header><div><span class="eyebrow">Warehouse dispatch</span><h2>@(showActive ? "Ready for warehouse action" : "Assigned warehouse requests")</h2></div><p>Open a request to record picking and dispatch.</p></header>
+        @if (loading)
+        {
+            <p class="restock-empty">Loading store requests…</p>
+        }
+        else if (Visible.Count == 0)
+        {
+            <p class="restock-empty">@(showActive ? "No approved requests need warehouse action." : "No restock requests for your assigned warehouse yet.")</p>
+        }
+        else
+        {
+            <div class="restock-list">
+                @foreach (PosTransferSummary request in Visible)
+                {
+                    <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
+                        <div><strong>@RequestLabel(request)</strong><small>To @StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
+                        <span class="restock-status @(request.Status is "Approved" or "Picking" or "Ready" ? "pending" : "")">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
+                    </a>
+                }
+            </div>
+        }
+    </section>
+</section>
+
+@code {
+    private readonly List<PosTransferSummary> requests = [];
+    private readonly Dictionary<Guid, string> storeNames = [];
+    private bool loading = true;
+    private bool showActive = true;
+    private string? message;
+
+    private List<PosTransferSummary> Active => [.. requests.Where(request => request.Status is "Approved" or "Picking" or "Ready")];
+    private List<PosTransferSummary> Visible => showActive ? Active : requests;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosLocation>> locations = await Api.GetLocationsAsync(CancellationToken.None);
+            if (!locations.IsSuccess || locations.Value is null) { message = locations.Error ?? "Locations could not be loaded."; return; }
+
+            HashSet<Guid> warehouses = [.. locations.Value.Where(location => location.Kind == 0 && location.IsActive &&
+                Session.CanUseInventoryLocation(location.Id)).Select(location => location.Id)];
+            storeNames.Clear();
+            foreach (PosLocation location in locations.Value.Where(location => location.Kind == 1)) { storeNames[location.Id] = location.Name; }
+
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { message = result.Error ?? "Requests could not be loaded."; return; }
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock" &&
+                warehouses.Contains(request.SourceLocationId)).OrderByDescending(request => request.CreatedAtUtc));
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { loading = false; }
+    }
+
+    private string StoreName(Guid id) => storeNames.GetValueOrDefault(id, "Store");
+    private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
+        ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
+        : request.Number;
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

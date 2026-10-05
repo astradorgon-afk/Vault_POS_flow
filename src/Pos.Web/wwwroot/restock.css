@@ -1,0 +1,53 @@
+.restock-page { display: grid; gap: 18px; color: var(--ink); }
+.restock-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.restock-head h1 { margin: 5px 0 7px; font: 800 clamp(1.7rem, 2.5vw, 2.2rem)/1.12 'Manrope', sans-serif; letter-spacing: -.035em; }
+.restock-head p { max-width: 720px; margin: 0; color: var(--muted); font-size: .9rem; }
+.restock-card { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: #fff; box-shadow: var(--shadow-card); }
+.restock-card > header { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); background: #f7faf7; }
+.restock-card h2 { margin: 4px 0 0; font: 700 1.1rem 'Manrope', sans-serif; }
+.restock-card header p { max-width: 390px; margin: 0; color: var(--muted); font-size: .79rem; text-align: right; }
+.restock-form { display: grid; gap: 18px; padding: 20px; }
+.restock-field { display: grid; min-width: 0; gap: 6px; color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.restock-field > :is(input, select) { box-sizing: border-box; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-size: .87rem; font-weight: 600; letter-spacing: normal; text-transform: none; }
+.restock-field:has(select) { max-width: 380px; }
+.restock-product-search { position: relative; max-width: 700px; }
+.restock-results { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; right: 0; overflow: auto; max-height: 300px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; box-shadow: var(--shadow-lift); }
+.restock-results button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 8px 11px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.restock-results button:hover { background: var(--mint-soft); }
+.restock-results button:disabled { opacity: .5; cursor: default; }
+.restock-results button strong { flex: 1; font-size: .85rem; }
+.restock-results button small { color: var(--muted); }
+.restock-results button span { color: var(--forest); font-size: .77rem; font-weight: 800; white-space: nowrap; }
+.restock-results p { margin: 0; padding: 11px; color: var(--muted); font-size: .82rem; }
+.restock-lines { display: grid; gap: 8px; }
+.restock-line { display: flex; align-items: end; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf8; }
+.restock-line > div { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.restock-line strong { font-size: .87rem; }
+.restock-line small { color: var(--muted); font-size: .75rem; }
+.restock-line label { display: grid; gap: 5px; color: var(--muted); font-size: .66rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.restock-line input { box-sizing: border-box; width: 120px; height: 42px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--ink); font-weight: 700; }
+.restock-line button { min-height: 42px; padding: 0 10px; border: 0; background: transparent; color: #a63d35; font-size: .78rem; font-weight: 800; cursor: pointer; }
+.restock-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 20px; border-top: 1px solid var(--line); background: #f7faf7; color: var(--muted); font-size: .8rem; }
+.restock-primary, .restock-refresh { min-height: 42px; padding: 0 16px; border-radius: 9px; font-weight: 800; cursor: pointer; }
+.restock-primary { border: 0; background: var(--forest); color: #fff; }
+.restock-primary:hover { background: var(--forest-bright); }
+.restock-refresh { border: 1px solid var(--line-strong); background: #fff; color: var(--forest); }
+.restock-primary:disabled, .restock-refresh:disabled { opacity: .5; cursor: default; }
+.restock-empty { margin: 0; padding: 24px 20px; color: var(--muted); font-size: .85rem; }
+.restock-list { display: grid; }
+.restock-row { display: flex; align-items: center; gap: 16px; min-height: 75px; padding: 13px 20px; border-bottom: 1px solid var(--line); color: var(--forest); text-decoration: none; }
+.restock-row:last-child { border-bottom: 0; }
+.restock-row:hover { background: var(--mint-soft); }
+.restock-row > div { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.restock-row strong { color: var(--ink); font: 700 .9rem 'Manrope', sans-serif; }
+.restock-row small { color: var(--muted); font-size: .76rem; }
+.restock-status { padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 99px; background: #f1f3ef; color: #53635a; font-size: .72rem; font-weight: 800; white-space: nowrap; }
+.restock-status.pending { border-color: #ebd3a0; background: #fff6dc; color: #8a5a16; }
+.restock-message { padding: 12px 15px; border-left: 3px solid var(--forest); border-radius: 5px; background: var(--mint-soft); color: var(--forest); font-size: .86rem; }
+.restock-draft-link { color: var(--forest); font-size: .85rem; font-weight: 800; }
+.restock-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.restock-filters button { min-height: 40px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--muted); font-size: .82rem; font-weight: 800; cursor: pointer; }
+.restock-filters button.active { border-color: #b6d6c1; background: var(--mint-soft); color: var(--forest); }
+.restock-filters span { margin-left: 6px; }
+.restock-page :is(button,input,select,a):focus-visible { outline: 3px solid rgba(36,90,66,.25); outline-offset: 2px; }
+@media (max-width: 650px) { .restock-head, .restock-card > header, .restock-card > footer { align-items: stretch; flex-direction: column; } .restock-card header p { text-align: left; } .restock-line { align-items: stretch; flex-wrap: wrap; } .restock-line > div { flex-basis: 100%; } .restock-line input { width: 110px; } .restock-row { flex-wrap: wrap; } }

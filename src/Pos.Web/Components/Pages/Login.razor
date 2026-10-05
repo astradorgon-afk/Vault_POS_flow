@@ -4,6 +4,7 @@
 @rendermode InteractiveServer
 @inject VaultFlowApiClient Api
 @inject VaultFlowAuthenticationStateProvider Authentication
+@inject UserSession Session
 @inject NavigationManager Navigation
 
 <PageTitle>Sign in · VaultFlow</PageTitle>
@@ -23,33 +24,156 @@
             <label for="password">Password</label>
             <div class="password-field">
                 <input id="password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" autocapitalize="off" spellcheck="false" required @bind="password" disabled="@busy" />
-                <button type="button" class="password-toggle @(showPassword ? "is-visible" : null)" title="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@(showPassword ? "true" : "false")" aria-label="@(showPassword ? "Hide password" : "Show password")" @onclick="() => showPassword = !showPassword"><svg class="eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="eye-lid" d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><circle class="eye-pupil" cx="12" cy="12" r="2.8" /><line class="eye-slash" x1="4.5" y1="4.5" x2="19.5" y2="19.5" /></svg></button>
+                <button type="button" class="password-toggle" title="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@showPassword" aria-label="@(showPassword ? "Hide password" : "Show password")" @onclick="() => showPassword = !showPassword">@(showPassword ? "Hide" : "Show")</button>
             </div>
             <label for="two-factor">Two-factor code <span>if required</span></label>
             <input id="two-factor" name="two-factor" inputmode="numeric" autocomplete="one-time-code" @bind="twoFactorCode" disabled="@busy" />
+
+            <div class="login-location">
+                <button type="button" class="login-location-trigger" aria-expanded="@locationOpen" aria-controls="login-location-options" @onclick="ToggleLocationAsync" disabled="@busy">
+                    <span class="login-location-arrow" aria-hidden="true">@(locationOpen ? "▾" : "▸")</span>
+                    Choose work location
+                    <small>Optional</small>
+                </button>
+                @if (locationOpen)
+                {
+                    <div id="login-location-options" class="login-location-options">
+                        @if (loadingLocations)
+                        {
+                            <p>Loading locations…</p>
+                        }
+                        else if (locationChoices.Count == 0 && locationMessage is not null)
+                        {
+                            <p>@locationMessage</p>
+                            @if (!locationsLoaded)
+                            {
+                                <button type="button" class="login-location-load" @onclick="LoadLocationChoicesAsync">Try again</button>
+                            }
+                        }
+                        else
+                        {
+                            <p>Choose where to start. Your account's access will be checked when you sign in.</p>
+                            <fieldset>
+                                <legend>Work location</legend>
+                                <label class="login-location-option">
+                                    <input type="radio" name="work-location" checked="@(selectedLocationId is null)" @onchange="() => selectedLocationId = null" />
+                                    <span>Choose later</span>
+                                </label>
+                                @foreach (PosSignInLocation location in locationChoices)
+                                {
+                                    <label class="login-location-option" @key="location.Id">
+                                        <input type="radio" name="work-location" checked="@(selectedLocationId == location.Id)" @onchange="() => selectedLocationId = location.Id" />
+                                        <span><strong>@location.Code</strong> @location.Name <small>@(location.Kind == 0 ? "Main warehouse" : "Store")</small></span>
+                                    </label>
+                                }
+                            </fieldset>
+                        }
+                    </div>
+                }
+            </div>
+
             <button type="submit" disabled="@busy">@(busy ? "Signing in…" : "Open workspace")</button>
         </form>
     </section>
 </main>
 
 @code {
-    private bool showPassword;
-
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    private bool showPassword;
+    private bool busy;
+    private bool locationOpen;
+    private bool loadingLocations;
+    private bool locationsLoaded;
     private string userName = string.Empty;
     private string password = string.Empty;
     private string? twoFactorCode;
     private string? error;
-    private bool busy;
+    private string? locationMessage;
+    private Guid? selectedLocationId;
+    private readonly List<PosSignInLocation> locationChoices = [];
+
+    private async Task ToggleLocationAsync()
+    {
+        locationOpen = !locationOpen;
+        if (locationOpen && !locationsLoaded)
+        {
+            await LoadLocationChoicesAsync();
+        }
+    }
+
+    private async Task LoadLocationChoicesAsync()
+    {
+        if (locationsLoaded || loadingLocations)
+        {
+            return;
+        }
+
+        loadingLocations = true;
+        locationMessage = null;
+        try
+        {
+            ApiResult<List<PosSignInLocation>> result = await Api.GetSignInLocationsAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                locationMessage = result.Error ?? "Locations could not be loaded. You can continue without choosing one.";
+                return;
+            }
+
+            locationsLoaded = true;
+            locationChoices.Clear();
+            locationChoices.AddRange(result.Value
+                .Where(location => location.Kind is 0 or 1)
+                .OrderBy(location => location.Kind)
+                .ThenBy(location => location.Code));
+            if (locationChoices.Count == 0)
+            {
+                locationMessage = "No active work locations are available. You can continue without choosing one.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            locationMessage = "Locations could not be loaded. You can continue without choosing one.";
+        }
+        finally
+        {
+            loadingLocations = false;
+        }
+    }
 
     private async Task SignInAsync()
     {
+        if (busy)
+        {
+            return;
+        }
+
         error = null;
         busy = true;
         try
         {
             ApiResult<SignInResponse> result = await Api.SignInAsync(userName.Trim(), password, twoFactorCode?.Trim(), CancellationToken.None);
-            if (!result.IsSuccess) { error = result.Error; return; }
+            if (!result.IsSuccess)
+            {
+                error = result.Error;
+                return;
+            }
+
+            PosSignInLocation? chosen = locationChoices.FirstOrDefault(location => location.Id == selectedLocationId);
+            if (selectedLocationId is not null && chosen is null)
+            {
+                Session.Clear();
+                error = "The selected location is no longer available. Choose another location or choose later.";
+                return;
+            }
+
+            if (!Session.SetWorkLocation(chosen?.Id, chosen?.Name))
+            {
+                Session.Clear();
+                error = "That location is not assigned to your account. Choose another location or choose later.";
+                return;
+            }
+
             Authentication.NotifySignedIn();
             Navigation.NavigateTo(SafeReturnUrl(ReturnUrl));
         }
@@ -57,7 +181,10 @@
         {
             error = "VaultFlow API is unavailable. Check that the API is running, then try again.";
         }
-        finally { busy = false; }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private static string SafeReturnUrl(string? value)

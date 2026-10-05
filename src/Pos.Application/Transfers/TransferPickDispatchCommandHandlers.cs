@@ -9,6 +9,17 @@ using Pos.Domain.Transfers;
 
 namespace Pos.Application.Transfers;
 
+internal static class RestockWarehouseGuard
+{
+    public static Error SourceRequired { get; } = Error.Forbidden(
+        "restock.warehouse_required", "Only warehouse staff assigned to the source or the owner can handle this shipment.");
+
+    public static bool CanHandleAtSource(Transfer transfer, ICurrentUser user)
+        => transfer.Mode != TransferMode.StoreRestock ||
+           user.AssignedLocations.Contains(transfer.SourceLocationId) ||
+           RestockOwnerGuard.IsOwner(user);
+}
+
 /// <summary>
 /// Handles <see cref="PickTransferCommand"/>. Validates the requested
 /// allocations against the available buckets at the source: batch-tracked
@@ -36,6 +47,11 @@ public sealed class PickTransferCommandHandler(
         if (transfer is null)
         {
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        if (!RestockWarehouseGuard.CanHandleAtSource(transfer, currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockWarehouseGuard.SourceRequired);
         }
 
         ProductId[] productIds = [.. transfer.Lines.Select(l => l.ProductId).Distinct()];
@@ -233,6 +249,7 @@ public sealed class PickTransferCommandHandler(
 /// <summary>Handles <see cref="ReadyTransferCommand"/>.</summary>
 public sealed class ReadyTransferCommandHandler(
     ITransferRepository transfers,
+    ICurrentUser currentUser,
     ISystemClock clock) : ICommandHandler<ReadyTransferCommand, TransferOrderId>
 {
     /// <inheritdoc />
@@ -249,6 +266,11 @@ public sealed class ReadyTransferCommandHandler(
         if (transfer is null)
         {
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        if (!RestockWarehouseGuard.CanHandleAtSource(transfer, currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockWarehouseGuard.SourceRequired);
         }
 
         Result ready = transfer.Ready(clock.UtcNow);
@@ -287,6 +309,11 @@ public sealed class DispatchTransferCommandHandler(
         if (transfer is null)
         {
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        if (!RestockWarehouseGuard.CanHandleAtSource(transfer, currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockWarehouseGuard.SourceRequired);
         }
 
         TransferLocationInfo? source = await transfers
@@ -423,6 +450,11 @@ public sealed class CancelTransferDispatchCommandHandler(
         if (transfer is null)
         {
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        if (!RestockWarehouseGuard.CanHandleAtSource(transfer, currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockWarehouseGuard.SourceRequired);
         }
 
         UserId canceller = currentUser.UserId ?? UserId.Empty;

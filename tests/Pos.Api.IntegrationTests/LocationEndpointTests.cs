@@ -31,6 +31,23 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task SignInLocations_WithoutAuthentication_ListsOnlyActivePhysicalLocationNames()
+    {
+        await factory.CreateLocationAsync("SIGNSTORE", "Sign-in Store", LocationKind.Store);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/locations/sign-in");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement[] locations = document.RootElement.EnumerateArray().ToArray();
+        locations.Should().Contain(location => location.GetProperty("code").GetString() == "SIGNSTORE");
+        locations.Should().NotContain(location => location.GetProperty("code").GetString() == SystemLocationCodes.ExternalSupplier);
+        locations.Should().OnlyContain(location => location.EnumerateObject().Select(property => property.Name)
+            .OrderBy(name => name).SequenceEqual(new[] { "code", "id", "kind", "name" }));
+    }
+
+    [Fact]
     public async Task Cashier_CanListLocations()
     {
         await factory.CreateLocationAsync("MAIN", "Main Warehouse", LocationKind.MainWarehouse);
@@ -53,6 +70,26 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
         // counterparty exists in the database but must never appear here.
         codes.Should().Contain(["MAIN", "STORE01"]);
         codes.Should().NotContain(SystemLocationCodes.ExternalSupplier);
+        document.RootElement.EnumerateArray().All(location =>
+            !location.TryGetProperty("settings", out _)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MainInventoryManager_CannotOpenLocationOrDeviceAdministration()
+    {
+        await factory.CreateUserAsync("loc-inventory-manager", Roles.MainInventoryManager);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, "loc-inventory-manager");
+
+        using HttpResponseMessage directory = await GetAsync(client, "/api/v1/locations", token);
+        using HttpResponseMessage administration = await GetAsync(client, "/api/v1/locations/administration", token);
+        using HttpResponseMessage deviceChoices = await GetAsync(client, "/api/v1/locations/device-choices", token);
+        using HttpResponseMessage devices = await GetAsync(client, "/api/v1/devices", token);
+
+        directory.StatusCode.Should().Be(HttpStatusCode.OK);
+        administration.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        deviceChoices.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        devices.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -85,6 +122,11 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
         using HttpClient client = factory.CreateClient();
 
         string token = await SignInAsync(client, "loc-admin");
+
+        using HttpResponseMessage administration = await GetAsync(client, "/api/v1/locations/administration", token);
+        using HttpResponseMessage deviceChoices = await GetAsync(client, "/api/v1/locations/device-choices", token);
+        administration.StatusCode.Should().Be(HttpStatusCode.OK);
+        deviceChoices.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using HttpResponseMessage created = await PostAsJsonAsync(
             client,

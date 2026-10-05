@@ -62,3 +62,12 @@
     .purchase-detail .po-delivery li { flex-direction: column; gap: 3px; }
     .purchase-detail .po-delivery li small { text-align: left; }
 }
+.po-quarantine { display:grid; gap:12px; margin:18px 0; padding:18px; border:1px solid #d5a673; border-radius:14px; background:#fff8ee; }
+.po-quarantine h3 { margin:0; font-size:1rem; }
+.po-quarantine p { margin:0; color:var(--muted); font-size:.86rem; }
+.po-quarantine-line { display:flex; align-items:end; flex-wrap:wrap; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+.po-quarantine-line > div { display:grid; gap:2px; flex:1 1 180px; }
+.po-quarantine-line small { color:var(--muted); }
+.po-quarantine-line label { display:grid; gap:4px; font-size:.75rem; }
+.po-quarantine-line input { width:96px; min-height:38px; padding:6px 9px; border:1px solid var(--line-strong); border-radius:8px; }
+.po-quarantine > .po-btn { justify-self:start; }

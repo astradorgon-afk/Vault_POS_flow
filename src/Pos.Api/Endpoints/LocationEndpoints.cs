@@ -49,6 +49,12 @@ public sealed record LocationSummary(
     DateOnly? ClosedOn,
     LocationSettings Settings);
 
+/// <summary>Only the location details needed by the public sign-in chooser.</summary>
+public sealed record SignInLocation(Guid Id, string Code, string Name, LocationKind Kind);
+
+/// <summary>Physical location details needed by inventory workflows.</summary>
+public sealed record LocationDirectorySummary(Guid Id, string Code, string Name, LocationKind Kind, bool IsActive);
+
 /// <summary>Location administration endpoints.</summary>
 public static class LocationEndpoints
 {
@@ -61,6 +67,12 @@ public static class LocationEndpoints
 
         RouteGroupBuilder group = app.MapGroup("/api/v1/locations").WithTags("Locations");
 
+        group.MapGet("/sign-in", ListSignInLocationsAsync)
+            .AllowAnonymous()
+            .WithMetadata(new PublicEndpointAttribute("People can choose a work location before entering their credentials; access is checked after sign-in."))
+            .WithName("ListSignInLocations")
+            .WithSummary("Lists active physical location names for the optional sign-in chooser.");
+
         group.MapGet("/", ListAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Catalog.View)
             {
@@ -68,6 +80,22 @@ public static class LocationEndpoints
             })
             .WithName("ListLocations")
             .WithSummary("Lists the physical locations of the organization.");
+
+        group.MapGet("/administration", ListAdministrationAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageLocations)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ListLocationAdministration")
+            .WithSummary("Lists physical locations and their operating settings for administrators.");
+
+        group.MapGet("/device-choices", ListAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageDevices)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("ListDeviceLocationChoices")
+            .WithSummary("Lists physical locations available for device assignment.");
 
         group.MapPost("/", CreateAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageLocations)
@@ -92,6 +120,21 @@ public static class LocationEndpoints
         PosDbContext context,
         CancellationToken cancellationToken)
     {
+        List<LocationDirectorySummary> locations = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.IsActive && !l.IsSystemCreated)
+            .OrderBy(l => l.Code)
+            .Select(l => new LocationDirectorySummary(l.Id.Value, l.Code, l.Name, l.Kind, l.IsActive))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(locations);
+    }
+
+    private static async Task<IResult> ListAdministrationAsync(
+        PosDbContext context,
+        CancellationToken cancellationToken)
+    {
         List<LocationSummary> locations = await context.Locations
             .AsNoTracking()
             .Where(l => l.IsActive && !l.IsSystemCreated)
@@ -107,6 +150,22 @@ public static class LocationEndpoints
                 l.OpenedOn,
                 l.ClosedOn,
                 l.Settings))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(locations);
+    }
+
+    private static async Task<IResult> ListSignInLocationsAsync(
+        PosDbContext context,
+        CancellationToken cancellationToken)
+    {
+        List<SignInLocation> locations = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.IsActive && !l.IsSystemCreated &&
+                (l.Kind == LocationKind.MainWarehouse || l.Kind == LocationKind.Store))
+            .OrderBy(l => l.Code)
+            .Select(l => new SignInLocation(l.Id.Value, l.Code, l.Name, l.Kind))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

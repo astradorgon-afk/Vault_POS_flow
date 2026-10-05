@@ -489,7 +489,11 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     /// <summary>Lists physical locations and their operating policies.</summary>
     public Task<ApiResult<List<PosLocationAdmin>>> GetLocationAdministrationAsync(
         CancellationToken cancellationToken)
-        => GetAsync<List<PosLocationAdmin>>("/api/v1/locations", cancellationToken);
+        => GetAsync<List<PosLocationAdmin>>("/api/v1/locations/administration", cancellationToken);
+
+    /// <summary>Lists physical locations for device assignment without exposing operating settings.</summary>
+    public Task<ApiResult<List<PosLocation>>> GetDeviceLocationChoicesAsync(CancellationToken cancellationToken)
+        => GetAsync<List<PosLocation>>("/api/v1/locations/device-choices", cancellationToken);
 
     /// <summary>Adds a warehouse or store.</summary>
     public Task<ApiResult<PosReference>> CreateLocationAsync(

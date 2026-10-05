@@ -432,10 +432,8 @@ else if (report is not null)
             return;
         }
 
-        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
-        bool everywhere = Session.Current?.User.HasAllLocations == true;
         locations.AddRange(response.Value
-            .Where(l => l.Kind is 0 or 1 && (everywhere || assigned.Contains(l.Id)))
+            .Where(l => l.Kind is 0 or 1 && l.IsActive && Session.CanUseInventoryLocation(l.Id))
             .OrderBy(l => l.Kind == 1 ? 0 : 1)
             .ThenBy(l => l.Code));
 
@@ -446,11 +444,18 @@ else if (report is not null)
             return;
         }
 
-        await SelectAsync(QueryStore is { } store && locations.Any(l => l.Id == store) ? store : locations[0].Id);
+        Guid? preferred = QueryStore ?? Session.WorkLocationId;
+        await SelectAsync(preferred is { } store && locations.Any(l => l.Id == store) ? store : locations[0].Id);
     }
 
     private async Task SelectAsync(Guid locationId)
     {
+        if (!locations.Any(location => location.Id == locationId))
+        {
+            message = "This location is outside your assignment.";
+            return;
+        }
+
         selectedId = locationId;
         page = 1;
         filter = null;

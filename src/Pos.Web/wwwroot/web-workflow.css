@@ -1,0 +1,199 @@
+/* Stock counts in the web workspace use the same surfaces as stock levels and administration. */
+.inventory-workflow.web-workflow {
+    --ink: #17211c;
+    --panel: #fff;
+    --surface-1: #fff;
+    --surface-2: #f7faf7;
+    --surface-3: #e8f5ec;
+    --field: #fff;
+    --line: #dce3dc;
+    --line-strong: #c8d1c9;
+    --text: #17211c;
+    --text-2: #35483b;
+    --muted: #647068;
+    --faint: #7c8b81;
+    --signal: #153c2b;
+    --signal-bright: #245a42;
+    --signal-ink: #fff;
+    --signal-soft: #e8f5ec;
+    --signal-line: #b6d6c1;
+    --cyan: #397d70;
+    --cyan-soft: #e5f3f0;
+    --cyan-line: #a9d4c9;
+    --danger: #a63d35;
+    --danger-soft: #fff0ef;
+    --danger-line: #e7c1bd;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+}
+
+.web-workflow .office-head {
+    align-items: center;
+    gap: 18px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+}
+.web-workflow .office-kicker { color: var(--forest-bright); letter-spacing: .13em; }
+.web-workflow .office-title { color: var(--ink); font: 800 clamp(1.65rem, 2.5vw, 2.15rem)/1.12 'Manrope', sans-serif; letter-spacing: -.035em; }
+.web-workflow .office-lead { color: var(--muted); }
+.web-workflow .head-pickers {
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+.web-workflow .location-picker { min-width: 170px; color: var(--muted); }
+.web-workflow .location-picker select,
+.web-workflow .location-picker input,
+.web-workflow .sheet-input,
+.web-workflow .reason-input {
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+}
+.web-workflow :is(select, input, button):focus-visible {
+    outline: 3px solid rgba(36, 90, 66, .22);
+    outline-offset: 2px;
+}
+.web-workflow .location-picker :is(select, input):disabled { background: #f1f3ef; color: var(--muted); }
+.web-workflow .search-strip,
+.web-workflow .open-count,
+.web-workflow .results-panel,
+.web-workflow .count-meta,
+.web-workflow .reason-editor {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+.web-workflow .search-strip { padding: 12px 16px; }
+.web-workflow .search-action,
+.web-workflow .action-button.primary {
+    border: 0;
+    background: var(--forest);
+    color: #fff;
+}
+.web-workflow .search-action:hover,
+.web-workflow .action-button.primary:hover { background: var(--forest-bright); }
+.web-workflow .open-count { padding: 20px; }
+.web-workflow .open-count-title strong { color: var(--ink); font: 700 1rem 'Manrope', sans-serif; }
+.web-workflow .open-count-hint {
+    border-left-color: #d49f43;
+    background: #fff6dc;
+    color: #77511f;
+}
+.web-workflow .results-empty strong,
+.web-workflow .product-name,
+.web-workflow .sheet-number { color: var(--ink); }
+.web-workflow .results-panel { overflow: auto; }
+.web-workflow .sales-table thead th,
+.web-workflow .sheet-table thead th {
+    background: #f7faf7;
+    color: var(--muted);
+}
+.web-workflow .sales-table tbody tr:hover td,
+.web-workflow .sheet-table tbody tr:hover td { background: var(--mint-soft); }
+.web-workflow .sale-number { color: var(--forest-bright); }
+.web-workflow .status-chip { border-color: var(--line); background: #eef0ee; color: #53635a; }
+.web-workflow .sc-counting { border-color: #ebd3a0; background: #fff6dc; color: #8a5a16; }
+.web-workflow .sc-pending-approval { border-color: #bfd4e6; background: #edf5fa; color: #2c5f86; }
+.web-workflow .sc-posted { border-color: #b8dbc4; background: #e8f5ec; color: #23704a; }
+.web-workflow .sc-cancelled { border-color: #e7c1bd; background: #fff0ef; color: #a63d35; }
+.web-workflow .count-note,
+.web-workflow .scan-strip { border-color: #b8dbc4; background: #e8f5ec; color: var(--forest); }
+.web-workflow .count-meta strong { color: var(--forest-bright); }
+.web-workflow .sheet-gain { color: #23704a; }
+.web-workflow .sheet-loss { color: var(--danger); }
+.web-workflow .action-button { border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+.web-workflow .action-button:hover { border-color: var(--forest-bright); }
+.web-workflow .action-button.danger { border-color: #e7c1bd; background: #fff0ef; color: var(--danger); }
+.web-workflow .action-button.danger:hover { border-color: var(--danger); }
+.web-workflow .action-button.subtle { border: 0; background: transparent; color: var(--forest-bright); }
+.web-workflow .pos-message { border-left-color: #d49f43; background: #fff6dc; color: #77511f; }
+
+@media (max-width: 760px) {
+    .web-workflow .office-head { align-items: stretch; }
+    .web-workflow .head-pickers { width: 100%; }
+    .web-workflow .head-pickers .location-picker { flex: 1 1 160px; }
+}
+
+/* Transfers keep their own controls while using the same web surfaces. */
+.web-workflow .source-fixed,
+.web-workflow .transfer-line .line-product-search,
+.web-workflow .transfer-line .line-quantity,
+.web-workflow .line-product-picked,
+.web-workflow .reason-input,
+.web-workflow .pick-row input,
+.web-workflow .receive-row input {
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+}
+.web-workflow .source-fixed { color: var(--forest); }
+.web-workflow .line-product-results {
+    border-color: var(--line-strong);
+    background: #fff;
+    box-shadow: var(--shadow-lift);
+}
+.web-workflow .line-product-result { color: var(--ink); }
+.web-workflow .line-product-result:hover,
+.web-workflow .line-product-result:focus-visible { background: var(--mint-soft); }
+.web-workflow .lpr-avail,
+.web-workflow .lpp-avail { color: var(--forest-bright); }
+.web-workflow .lpp-change,
+.web-workflow .line-add,
+.web-workflow .custody-title .search-action {
+    border: 1px solid var(--line-strong);
+    background: #f7faf7;
+    color: var(--forest);
+}
+.web-workflow .lpp-change:hover,
+.web-workflow .line-add:hover,
+.web-workflow .custody-title .search-action:hover { background: var(--mint-soft); }
+.web-workflow .line-remove { color: var(--danger); }
+.web-workflow .line-remove:hover { background: var(--danger-soft); }
+.web-workflow .transfer-summary > div,
+.web-workflow .lines-panel,
+.web-workflow .action-panel,
+.web-workflow .custody-panel {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+.web-workflow .transfer-summary .route,
+.web-workflow .custody-kind { color: var(--forest-bright); }
+.web-workflow .note-box { border-color: var(--cyan-line); background: var(--cyan-soft); color: var(--ink); }
+.web-workflow .note-box span { color: var(--forest-bright); }
+.web-workflow .pick-row,
+.web-workflow .receive-row { border-color: var(--line); background: #f7faf7; }
+.web-workflow .search-action.danger { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger-line); }
+.web-workflow .search-action.danger:hover { background: #fbe2df; }
+.web-workflow .sc-dispatched { border-color: #bfd4e6; background: #edf5fa; color: #2c5f86; }
+.web-workflow .sc-draft { border-color: var(--line); background: #f1f3ef; color: #53635a; }
+.web-workflow .sc-received,
+.web-workflow .sc-closed { border-color: #b8dbc4; background: var(--mint-soft); color: #23704a; }
+.web-workflow .sc-issue { border-color: #ebd3a0; background: #fff6dc; color: #8a5a16; }
+.web-workflow .sc-emergency { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
+
+/* A movement chain opened from an inventory record stays in the web theme. */
+.web-workflow .timeline-head h1 { color: var(--ink); }
+.web-workflow .timeline-shell,
+.web-workflow .timeline-empty,
+.web-workflow .timeline-event {
+    border-color: var(--line);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+.web-workflow .timeline-track::before { background: var(--line-strong); }
+.web-workflow .timeline-event { margin-bottom: 18px; }
+.web-workflow .timeline-pin { border-color: #fff; background: var(--forest); box-shadow: 0 0 0 2px var(--signal-line); }
+.web-workflow .timeline-leg { border-bottom-color: var(--line); }
+.web-workflow .timeline-summary span,
+.web-workflow .timeline-event header span { color: var(--forest-bright); }
+.web-workflow .quantity-in { color: #23704a; }

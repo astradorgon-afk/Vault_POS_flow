@@ -43,6 +43,14 @@ public sealed class ReceiveTransferCommandHandler(
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
         }
 
+        if (transfer.Mode == TransferMode.StoreRestock &&
+            !currentUser.AssignedLocations.Contains(transfer.DestinationLocationId) &&
+            !RestockOwnerGuard.IsOwner(currentUser))
+        {
+            return Result<TransferOrderId>.Failure(Error.Forbidden(
+                "restock.store_required", "Only staff assigned to the destination store or the owner can receive this request."));
+        }
+
         TransferLocationInfo? destination = await transfers
             .GetLocationInfoAsync(transfer.DestinationLocationId, cancellationToken)
             .ConfigureAwait(false);
@@ -380,6 +388,14 @@ public sealed class VerifyTransferCommandHandler(
         if (transfer is null)
         {
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        if (transfer.Mode == TransferMode.StoreRestock &&
+            !currentUser.AssignedLocations.Contains(transfer.DestinationLocationId) &&
+            !RestockOwnerGuard.IsOwner(currentUser))
+        {
+            return Result<TransferOrderId>.Failure(Error.Forbidden(
+                "restock.store_required", "Only staff assigned to the destination store or the owner can verify this request."));
         }
 
         Result verified = transfer.Verify(currentUser.UserId ?? UserId.Empty, clock.UtcNow);

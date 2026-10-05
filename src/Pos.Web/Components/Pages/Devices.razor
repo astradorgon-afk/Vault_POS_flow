@@ -39,14 +39,14 @@ else
             <div class="fleet-form-grid">
                 <label><span>Short code</span><input maxlength="6" autocomplete="off" @bind="newShortCode" placeholder="T03" /></label>
                 <label><span>Device name</span><input maxlength="80" @bind="newName" placeholder="Front counter 3" /></label>
-                <label><span>Default location</span><select value="@newLocationId" @onchange="OnHomeLocationChanged"><option value="">Select location</option>@foreach (PosLocationAdmin location in locations.Where(l => l.IsActive && l.Kind != 2)){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+                <label><span>Default location</span><select value="@newLocationId" @onchange="OnHomeLocationChanged"><option value="">Select location</option>@foreach (PosLocation location in locations.Where(l => l.IsActive && l.Kind != 2)){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
                 <label><span>Platform</span><select @bind="newPlatform"><option value="1">Windows register</option><option value="2">Android terminal</option><option value="3">Browser lane</option></select></label>
             </div>
             <fieldset class="fleet-location-access">
                 <legend>Locations this device can open</legend>
                 <p>Staff still need permission for the location they choose.</p>
                 <div>
-                    @foreach (PosLocationAdmin location in locations.Where(l => l.IsActive && l.Kind != 2))
+                    @foreach (PosLocation location in locations.Where(l => l.IsActive && l.Kind != 2))
                     {
                         <label><input type="checkbox" checked="@(selectedLocationIds.Contains(location.Id) || location.Id.ToString() == newLocationId)"
                                       disabled="@(location.Id.ToString() == newLocationId)" @onchange="e => ToggleAllowedLocation(location.Id, e)" />
@@ -82,7 +82,7 @@ else
     </section>
 
     <section class="fleet-toolbar">
-        <label><span>Location</span><select value="@(filterLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationFilterChanged"><option value="">All locations</option>@foreach (PosLocationAdmin location in locations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+        <label><span>Location</span><select value="@(filterLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationFilterChanged"><option value="">All locations</option>@foreach (PosLocation location in locations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
         <label><span>State</span><select @bind="filterStatus"><option value="">All states</option><option value="0">Awaiting enrolment</option><option value="1">Active</option><option value="2">Suspended</option><option value="3">Revoked</option></select></label>
         <button type="button" @onclick="LoadDevicesAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh fleet")</button>
     </section>
@@ -140,7 +140,7 @@ else
                         <div class="device-location-editor">
                             <strong>Locations this device can open</strong>
                             <div>
-                                @foreach (PosLocationAdmin location in locations.Where(l => l.IsActive && l.Kind != 2))
+                                @foreach (PosLocation location in locations.Where(l => l.IsActive && l.Kind != 2))
                                 {
                                     <label><input type="checkbox" checked="@editingLocationIds.Contains(location.Id)"
                                                   disabled="@(location.Id == device.LocationId)"
@@ -177,7 +177,7 @@ else
     private const int StatusSuspended = 2;
     private const int StatusRevoked = 3;
 
-    private readonly List<PosLocationAdmin> locations = [];
+    private readonly List<PosLocation> locations = [];
     private readonly List<PosDeviceSummary> devices = [];
     private bool loading = true;
     private bool working;
@@ -223,7 +223,7 @@ else
 
     private async Task LoadLocationsAsync()
     {
-        ApiResult<List<PosLocationAdmin>> result = await Api.GetLocationAdministrationAsync(CancellationToken.None);
+        ApiResult<List<PosLocation>> result = await Api.GetDeviceLocationChoicesAsync(CancellationToken.None);
         if (result.IsSuccess && result.Value is not null)
         {
             locations.Clear();

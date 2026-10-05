@@ -6,6 +6,12 @@ public sealed class UserSession
     /// <summary>Gets the current sign-in response.</summary>
     public SignInResponse? Current { get; private set; }
 
+    /// <summary>The optional work location chosen during sign-in.</summary>
+    public Guid? WorkLocationId { get; private set; }
+
+    /// <summary>The name shown for the chosen work location.</summary>
+    public string? WorkLocationName { get; private set; }
+
     /// <summary>Gets whether the access token is still usable.</summary>
     public bool IsAuthenticated => Current is { } current && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow;
 
@@ -21,15 +27,42 @@ public sealed class UserSession
     public bool HasAnyPermission(params string[] permissions)
         => permissions.Any(HasPermission);
 
+    /// <summary>Limits web inventory views to assigned locations, except location administrators.</summary>
+    public bool CanUseInventoryLocation(Guid locationId)
+        => Current is { } current &&
+           (current.User.Locations.Contains(locationId) ||
+            current.User.HasAllLocations && HasPermission("location.manage"));
+
     /// <summary>Replaces the current session.</summary>
     public void Set(SignInResponse response)
     {
         ArgumentNullException.ThrowIfNull(response);
         Current = response;
+        WorkLocationId = null;
+        WorkLocationName = null;
+    }
+
+    /// <summary>Sets an optional starting location within the signed-in user's scope.</summary>
+    public bool SetWorkLocation(Guid? locationId, string? name = null)
+    {
+        if (locationId is { } id &&
+            (Current is null || !Current.User.HasAllLocations && !Current.User.Locations.Contains(id)))
+        {
+            return false;
+        }
+
+        WorkLocationId = locationId;
+        WorkLocationName = locationId is null ? null : name;
+        return true;
     }
 
     /// <summary>Clears the current session.</summary>
-    public void Clear() => Current = null;
+    public void Clear()
+    {
+        Current = null;
+        WorkLocationId = null;
+        WorkLocationName = null;
+    }
 }
 
 /// <summary>A successful authentication response from the API.</summary>

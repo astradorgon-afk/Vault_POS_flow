@@ -1,8 +1,10 @@
 @page "/purchasing/new"
 @attribute [Authorize(Policy = "purchase.create")]
+@attribute [Authorize(Roles = "Owner")]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
+@inject UserSession Session
 @inject NavigationManager Navigation
 
 <PageTitle>New purchase order · VaultFlow</PageTitle>
@@ -323,7 +325,8 @@ else
             newProductCategoryId = categories.FirstOrDefault()?.Id ?? Guid.Empty;
             newProductUnitId = units.Keys.FirstOrDefault();
 
-            destinationId = destinations.FirstOrDefault()?.Id ?? Guid.Empty;
+            destinationId = Session.WorkLocationId is { } preferred && destinations.Any(location => location.Id == preferred)
+                ? preferred : destinations.FirstOrDefault()?.Id ?? Guid.Empty;
             if (suppliersTask.Result is { IsSuccess: false })
             {
                 message = suppliersTask.Result.Error;

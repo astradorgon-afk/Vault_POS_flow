@@ -74,6 +74,9 @@ public enum TransferMode
 
     /// <summary>The transfer was raised as an emergency and awaits central review.</summary>
     EmergencyOffline = 3,
+
+    /// <summary>A store's request for stock from the main warehouse, approved by the owner.</summary>
+    StoreRestock = 4,
 }
 
 /// <summary>The decision a central reviewer reaches on a pending emergency transfer.</summary>

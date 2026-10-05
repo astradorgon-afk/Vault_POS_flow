@@ -14,11 +14,13 @@ namespace Pos.Application.Transfers;
 /// handler validates its scope and value, and a tokenless transfer runs the
 /// ordinary review workflow.
 /// </param>
+/// <param name="Mode">Normal transfer or an owner-approved store restock request.</param>
 public sealed record CreateTransferCommand(
     LocationId SourceLocationId,
     LocationId DestinationLocationId,
     IReadOnlyList<TransferLineSpec> Lines,
-    PreApprovalTokenId? PreApprovalTokenId = null)
+    PreApprovalTokenId? PreApprovalTokenId = null,
+    TransferMode Mode = TransferMode.Normal)
     : ICommand<TransferOrderId>, IAuthorizedMessage
 {
     /// <inheritdoc />

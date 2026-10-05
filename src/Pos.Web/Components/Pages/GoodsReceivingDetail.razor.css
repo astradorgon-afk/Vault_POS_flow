@@ -1,0 +1,38 @@
+.receiving-page{display:grid;gap:18px}
+.receiving-head{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.receiving-head h1{margin:5px 0 7px;font:800 clamp(1.65rem,2.5vw,2.2rem)/1.12 'Manrope',sans-serif;letter-spacing:-.035em}
+.receiving-head p{margin:0;color:var(--muted);font-size:.9rem}
+.receiving-empty{min-height:230px;display:grid;place-content:center;justify-items:center;gap:6px;padding:25px;border:1px dashed var(--line-strong);border-radius:14px;background:#fff;color:var(--muted);text-align:center}
+.receiving-empty strong{color:var(--ink)}
+.receiving-empty span{font-size:.84rem}
+.receiving-message{padding:12px 15px;border-left:3px solid var(--amber);border-radius:5px;background:var(--amber-soft);color:#75551e;font-size:.86rem}
+.receiving-state{display:inline-flex;align-items:center;min-height:27px;padding:2px 9px;border:1px solid var(--line-strong);border-radius:999px;background:#f1f3ef;color:#53635a;font-size:.72rem;font-weight:800;white-space:nowrap}
+.receiving-state.ready{border-color:#b8dbc4;background:var(--mint-soft);color:var(--forest)}
+.receiving-card{border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:var(--shadow-card);overflow:hidden}
+.receiving-card>header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line);background:#f7faf7}
+.receiving-card h2{margin:4px 0 0;font:700 1.1rem 'Manrope',sans-serif}
+.receiving-card header p{max-width:380px;margin:0;color:var(--muted);font-size:.8rem;text-align:right}
+.receiving-lines{display:grid}
+.receiving-page .receiving-line{display:block;min-width:0;padding:20px;border-bottom:1px solid var(--line)}
+.receiving-line-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:16px}
+.receiving-line-title strong{color:var(--ink)}
+.receiving-line-title small{color:var(--muted)}
+.receiving-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 16px;align-items:start}
+.receiving-fields label{display:grid;min-width:0;gap:6px;color:var(--muted);font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+.receiving-fields label small{font-weight:500;text-transform:none;letter-spacing:0}
+.receiving-fields input{box-sizing:border-box;width:100%;min-width:0;height:42px;padding:0 11px;border:1px solid var(--line-strong);border-radius:8px;background:#fff;color:var(--ink);font-size:.86rem;font-weight:600}
+.receiving-fields label:nth-child(5){grid-column:span 2}
+.receiving-card>footer{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px;background:#f7faf7}
+.receiving-check{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:.82rem;font-weight:600}
+.receiving-check input{width:17px;height:17px;accent-color:var(--forest)}
+.receiving-primary{min-height:42px;padding:0 17px;border:0;border-radius:9px;background:var(--forest);color:#fff;font-weight:800;cursor:pointer}
+.receiving-primary:hover{background:var(--forest-bright)}
+.receiving-primary:disabled{opacity:.5;cursor:default}
+.receiving-history-empty{margin:0;padding:24px 20px;color:var(--muted);font-size:.85rem}
+.receiving-history-row{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);font-size:.84rem}
+.receiving-history-row:last-child{border-bottom:0}
+.receiving-history-row>div{display:grid;gap:3px;flex:1}
+.receiving-history-row small{color:var(--muted)}
+.receiving-page :is(a,button,input):focus-visible{outline:3px solid rgba(36,90,66,.22);outline-offset:2px}
+@media(max-width:850px){.receiving-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:570px){.receiving-head,.receiving-card>header,.receiving-card>footer{align-items:flex-start;flex-direction:column}.receiving-card header p{text-align:left}.receiving-fields{grid-template-columns:1fr}.receiving-fields label:nth-child(5){grid-column:auto}.receiving-line-title{display:grid}.receiving-history-row{flex-wrap:wrap}}

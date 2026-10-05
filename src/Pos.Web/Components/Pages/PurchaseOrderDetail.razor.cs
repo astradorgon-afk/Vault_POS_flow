@@ -11,6 +11,7 @@ public partial class PurchaseOrderDetail
     private readonly HashSet<Guid> reviewed = [];
     private readonly List<PosGoodsReceipt> receipts = [];
     private readonly List<ReceiveLine> receiving = [];
+    private readonly List<QuarantineLine> quarantineLines = [];
     private readonly Dictionary<Guid, PosLocation> locations = [];
     private readonly Dictionary<Guid, PosUnitOfMeasure> units = [];
     private readonly Dictionary<Guid, string> people = [];
@@ -24,6 +25,9 @@ public partial class PurchaseOrderDetail
     private bool receivingOpen;
     private bool arrivalConfirmed;
     private bool receiptsLoaded;
+    private bool raisingQuarantine;
+    private string? quarantineError;
+    private Pos.Web.Services.ScanLine? scanQueue;
     private string? notice;
     private bool noticeOk;
     private string decisionNotes = string.Empty;
@@ -79,7 +83,7 @@ public partial class PurchaseOrderDetail
 
     private int AccountedCount => receiving.Count(line => line.Mode != ReceiveMode.None);
 
-    private bool CanRecord => receiptsLoaded && ReceivingDateAllowed && arrivalConfirmed && receiving.Count > 0
+    private bool CanRecord => receiptsLoaded && ReceivingDateAllowed && arrivalConfirmed && quarantineLines.Count == 0 && receiving.Count > 0
         && AccountedCount == receiving.Count
         && receiving.All(line => line.Problem is null)
         && receiving.Any(line => line.ArrivingQuantity > 0);
@@ -230,19 +234,36 @@ public partial class PurchaseOrderDetail
     private string? scanNote;
 
     // A scan switches that line to counting and adds one received unit.
-    private async Task OnScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    private Task OnScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    {
+        scanQueue ??= new Pos.Web.Services.ScanLine(ProcessScanAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task ProcessScanAsync(Pos.Shared.Scanning.BarcodeScan scan)
     {
         ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
         if (found is not { IsSuccess: true, Value: { } product })
         {
-            scanNote = $"{scan.Code}: {found.Error ?? "not a known product."}";
+            if (found.ErrorCode is "catalog.barcode_unknown" or "catalog.barcode_retired")
+            {
+                AddQuarantineLine(scan.Code, null);
+                scanNote = $"{scan.Code} is not catalogued. Record it as a quarantine incident.";
+            }
+            else
+            {
+                scanNote = $"{scan.Code}: {found.Error ?? "The product could not be found."}";
+            }
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
         ReceiveLine? line = receiving.FirstOrDefault(l => l.Line.ProductId == product.Id);
         if (line is null)
         {
-            scanNote = $"{product.Name} is not on this order, or has already arrived in full.";
+            AddQuarantineLine(scan.Code, product.Name);
+            scanNote = $"{product.Name} is not on this order. Record it as a quarantine incident.";
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
@@ -254,6 +275,81 @@ public partial class PurchaseOrderDetail
 
         line.Received += 1m;
         scanNote = $"{product.Name}: {PurchasingText.Quantity(line.Received)} of {PurchasingText.Quantity(line.Due)} counted.";
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private sealed record QuarantineLine(string Barcode, string? ProductName, decimal Quantity);
+
+    private void AddQuarantineLine(string barcode, string? productName)
+    {
+        int index = quarantineLines.FindIndex(line => string.Equals(line.Barcode, barcode, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            quarantineLines[index] = quarantineLines[index] with { Quantity = quarantineLines[index].Quantity + 1m };
+        }
+        else
+        {
+            quarantineLines.Add(new QuarantineLine(barcode, productName, 1m));
+        }
+    }
+
+    private void SetQuarantineQuantity(QuarantineLine line, ChangeEventArgs change)
+    {
+        int index = quarantineLines.IndexOf(line);
+        if (index >= 0 && decimal.TryParse(change.Value?.ToString(), out decimal quantity) && quantity >= 0m)
+        {
+            quarantineLines[index] = line with { Quantity = quantity };
+        }
+    }
+
+    private void RemoveQuarantineLine(QuarantineLine line) => quarantineLines.Remove(line);
+
+    private async Task RaiseQuarantineAsync()
+    {
+        if (raisingQuarantine || order is null || quarantineLines.Count == 0)
+        {
+            return;
+        }
+
+        if (!Can("quarantine.create"))
+        {
+            quarantineError = "Your account needs the quarantine.create permission to record these goods.";
+            return;
+        }
+
+        List<PosCreateQuarantineLine> lines = [.. quarantineLines
+            .Where(line => line.Quantity > 0m)
+            .Select(line => new PosCreateQuarantineLine(line.Barcode, line.Quantity, ClaimedProductName: line.ProductName))];
+        if (lines.Count == 0)
+        {
+            quarantineError = "Enter a quantity for at least one item.";
+            return;
+        }
+
+        raisingQuarantine = true;
+        quarantineError = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.CreateQuarantineIncidentAsync(
+                order.DestinationLocationId, lines,
+                $"Found while receiving {PurchasingText.OrderName(order.Number)}.", CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                quarantineError = result.Error ?? "The quarantine incident could not be recorded.";
+                return;
+            }
+
+            quarantineLines.Clear();
+            Tell(true, "Quarantine incident recorded for the unordered goods.");
+        }
+        catch (HttpRequestException)
+        {
+            quarantineError = "The quarantine service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            raisingQuarantine = false;
+        }
     }
 
     private static void SetMode(ReceiveLine line, ReceiveMode mode)

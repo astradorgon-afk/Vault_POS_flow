@@ -308,6 +308,15 @@ else
     private bool CanCreateSale => Session.HasPermission("sale.create");
     private bool CanViewReports => Session.HasPermission("report.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
+    private bool CanViewTransfers => Session.HasPermission("transfer.view");
+    private bool CanApproveRestock => Session.HasPermission("transfer.approve") &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool CanRequestRestock => Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view");
+    private bool CanFulfillRestock => Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch") &&
+        Session.Current?.User.Roles.Contains("MainInventoryManager", StringComparer.Ordinal) == true;
+    private bool CanViewPurchasing => Session.HasPermission("purchase.view") &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool CanReceivePurchasing => Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive");
     private bool CanViewInventoryExceptions => Session.HasPermission("inventory.view.all");
     private bool CanManageUsers => Session.HasAnyPermission("user.manage", "role.manage");
     private bool CanManageDevices => Session.HasPermission("device.manage");
@@ -324,14 +333,14 @@ else
 
     private string Greeting => $"Welcome back, {FirstName}.";
     private string FirstName => Session.Current?.User.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "there";
-    private string ScopeLabel => Session.Current?.User.HasAllLocations == true
+    private string ScopeLabel => Session.Current?.User.HasAllLocations == true && Session.HasPermission("location.manage")
         ? "All locations"
         : Session.Current?.User.Locations.Count switch { 1 => "1 location", int count => $"{count} locations", _ => "No locations" };
 
     private string WorkspaceName => (CanManageUsers, CanViewInventory, CanCreateSale, CanViewReports) switch
     {
+        (_, true, _, _) => "Inventory control",
         (true, _, _, _) => "Business control",
-        (_, true, false, _) => "Inventory control",
         (_, _, true, _) => "Store operations",
         (_, _, _, true) => "Review workspace",
         _ => "Operations overview",
@@ -339,7 +348,7 @@ else
 
     private string WorkspaceDescription => (CanManageUsers, CanViewInventory, CanCreateSale) switch
     {
-        (true, _, _) => "Here's what's happening across your business today.",
+        (true, _, _) => "Here's your stock position and the work across your locations.",
         (_, true, false) => "Here's your stock position and the movement inside your assigned scope.",
         (_, _, true) => "Here's what's happening with your store today.",
         _ => "Here's the activity included in your current access.",
@@ -350,9 +359,16 @@ else
         get
         {
             List<DashboardAction> actions = [];
+            if (CanViewInventory) actions.Add(new("box", "Stock levels", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
+            if (CanViewInventory) actions.Add(new("ledger", "Stock counts", "Count physical stock, submit it, and review variances.", "/inventory/counts"));
+            if (CanViewTransfers) actions.Add(new("location", "Transfers", "Request and track stock moving between locations.", "/transfers"));
+            if (CanApproveRestock) actions.Add(new("ledger", "Restock approvals", "Decide store supply requests before warehouse picking.", "/restock/approvals"));
+            if (CanFulfillRestock) actions.Add(new("box", "Restock fulfillment", "Pick and dispatch approved store requests.", "/restock/fulfillment"));
+            if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock) actions.Add(new("ledger", "Restock requests", "Ask the main warehouse to supply your store.", "/restock"));
+            if (CanReceivePurchasing) actions.Add(new("receipt", "Goods receiving", "Check supplier deliveries into your assigned locations.", "/receiving"));
+            if (CanViewPurchasing) actions.Add(new("receipt", "Purchase orders", "Order stock and record goods received from suppliers.", "/purchasing"));
             if (CanViewSales) actions.Add(new("coins", "Store performance", "See what each store sold and took in, and its best sellers.", "/stores"));
             if (CanViewSales) actions.Add(new("trend-up", "Best & worst sellers", "Which products sell best, and which are not selling, in each store.", "/analytics/products"));
-            if (CanViewInventory) actions.Add(new("box", "Store inventory", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
             if (CanViewSales) actions.Add(new("ledger", "Review sales", "Browse each store's transactions, returns and receipts.", "/sales"));
             if (CanViewReports) actions.Add(new("report", "Open daily reports", "Reconcile trade, payment methods and drawer shifts.", "/reports"));
             if (CanManageUsers) actions.Add(new("people", "Manage people & roles", "Control accounts, access and location assignments.", "/admin/users"));

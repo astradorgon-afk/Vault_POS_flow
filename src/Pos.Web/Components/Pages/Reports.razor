@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
+@inject UserSession Session
 
 <PageTitle>Daily reports · VaultFlow</PageTitle>
 
@@ -98,8 +99,8 @@ else
     private bool loading;
     private string? message;
 
-    private bool CanLoad => Guid.TryParse(selectedLocationId, out _);
-    private List<PosLocation> ScopedStores => [.. locations.Where(location => location.Kind == 1)];
+    private bool CanLoad => Guid.TryParse(selectedLocationId, out Guid id) && ScopedStores.Any(store => store.Id == id);
+    private List<PosLocation> ScopedStores => [.. locations.Where(location => location.Kind == 1 && Session.CanUseInventoryLocation(location.Id))];
     private decimal PaymentTotal => report?.PaymentsByMethod.Sum(item => item.Amount) ?? 0m;
 
     protected override async Task OnInitializedAsync()
@@ -116,7 +117,7 @@ else
 
     private async Task LoadReportAsync()
     {
-        if (!Guid.TryParse(selectedLocationId, out Guid locationId)) { message = "Select a store before opening the report."; return; }
+        if (!Guid.TryParse(selectedLocationId, out Guid locationId) || !ScopedStores.Any(store => store.Id == locationId)) { message = "Select an assigned store before opening the report."; return; }
         loading = true; message = null; report = null;
         try
         {

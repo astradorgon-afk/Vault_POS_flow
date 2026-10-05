@@ -1,0 +1,91 @@
+@page "/receiving"
+@attribute [Authorize(Policy = "purchase.view")]
+@attribute [Authorize(Policy = "purchase.receive")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Goods receiving · VaultFlow</PageTitle>
+
+<section class="receiving-page">
+    <header class="receiving-head">
+        <div><span class="eyebrow">Inventory · inbound stock</span><h1>Goods receiving</h1><p>Record deliveries for orders headed to your assigned locations.</p></div>
+        <button type="button" class="receiving-secondary" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="receiving-message" role="status">@message</div>
+    }
+
+    @if (loading)
+    {
+        <div class="receiving-empty">Loading deliveries…</div>
+    }
+    else if (orders.Count == 0)
+    {
+        <div class="receiving-empty"><strong>No deliveries to show.</strong><span>Orders for your assigned locations appear here when they are sent to suppliers.</span></div>
+    }
+    else
+    {
+        <div class="receiving-list">
+            @foreach (PosPurchaseOrderSummary order in orders)
+            {
+                bool ready = order.Status is "Ordered" or "PartiallyReceived";
+                <a class="receiving-row" href="@($"/receiving/{order.Id:D}")" @key="order.Id">
+                    <span class="receiving-row-mark" aria-hidden="true">↘</span>
+                    <span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@LocationName(order.DestinationLocationId) · @order.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></span>
+                    <span class="receiving-state @(ready ? "ready" : "")">@(ready ? "Ready to receive" : SplitWords(order.Status))</span>
+                    <span class="receiving-row-arrow" aria-hidden="true">→</span>
+                </a>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosPurchaseOrderSummary> orders = [];
+    private bool loading = true;
+    private string? message;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<List<PosLocation>> locationResult = await Api.GetLocationsAsync(CancellationToken.None);
+            ApiResult<List<PosPurchaseOrderSummary>> orderResult = await Api.GetPurchaseOrdersAsync(CancellationToken.None);
+            if (!locationResult.IsSuccess || locationResult.Value is null ||
+                !orderResult.IsSuccess || orderResult.Value is null)
+            {
+                message = locationResult.Error ?? orderResult.Error ?? "Receiving information could not be loaded.";
+                return;
+            }
+
+            locations.Clear();
+            locations.AddRange(locationResult.Value);
+            orders.Clear();
+            orders.AddRange(orderResult.Value
+                .Where(order => Session.CanUseInventoryLocation(order.DestinationLocationId) &&
+                    order.Status is "Ordered" or "PartiallyReceived" or "FullyReceived" or "Closed")
+                .OrderBy(order => order.Status is "Ordered" or "PartiallyReceived" ? 0 : 1)
+                .ThenByDescending(order => order.CreatedAtUtc));
+        }
+        catch (HttpRequestException)
+        {
+            message = "The receiving service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private string LocationName(Guid id) => locations.FirstOrDefault(location => location.Id == id)?.Name ?? "Location";
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}
