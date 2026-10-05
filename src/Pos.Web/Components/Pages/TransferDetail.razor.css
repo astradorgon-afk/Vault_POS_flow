@@ -1,10 +1,27 @@
 .head-pickers { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
 .results-empty { min-height:200px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
+.transfer-route { display:grid; grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr); align-items:center; gap:12px; margin-bottom:14px; padding:15px 18px; border:1px solid var(--line); border-radius:13px; background:var(--panel); box-shadow:var(--shadow-card); }
+.transfer-route-stop { display:grid; min-width:0; gap:5px; }
+.transfer-route-stop>span { color:var(--muted); font-size:.67rem; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+.transfer-route-stop>strong { overflow-wrap:anywhere; color:var(--text); font:700 .98rem 'DM Sans',sans-serif; }
+.transfer-route-arrow { display:grid; width:34px; height:34px; place-items:center; border-radius:50%; background:rgba(134,197,193,.14); color:var(--cyan); font-size:1.2rem; font-weight:800; }
 .transfer-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
 .transfer-summary>div { padding:14px 16px; border:1px solid var(--line); border-radius:13px; background:var(--panel); display:grid; gap:4px; }
 .transfer-summary span { color:var(--muted); font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }
 .transfer-summary strong { font:700 .92rem 'DM Sans'; color:var(--text); }
+.transfer-summary small { color:var(--muted); font-size:.75rem; }
 .transfer-summary .route { color:#f2bd68; }
+.restock-warehouse-step { display:grid; gap:4px; margin:0 0 18px; padding:14px 16px; border:1px solid rgba(134,197,193,.35); border-left:4px solid var(--cyan); border-radius:10px; background:rgba(134,197,193,.1); color:var(--text); }
+.restock-warehouse-step strong { font:700 .9rem 'DM Sans'; }
+.restock-warehouse-step span { color:var(--muted); font-size:.82rem; line-height:1.5; }
+.owner-dispatch-backdrop { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; padding:20px; background:rgba(12,29,21,.58); backdrop-filter:blur(2px); }
+.owner-dispatch-dialog { width:min(100%,540px); max-height:calc(100dvh - 40px); overflow:auto; padding:24px; border:1px solid var(--line); border-top:4px solid var(--forest-bright); border-radius:16px; background:var(--panel); color:var(--ink); box-shadow:0 24px 64px rgba(21,60,43,.22); }
+.owner-dispatch-dialog>.eyebrow { color:var(--forest-bright); }
+.owner-dispatch-dialog h2 { margin:7px 0 10px; color:var(--ink); font:800 1.25rem/1.2 'Manrope',sans-serif; letter-spacing:-.02em; }
+.owner-dispatch-dialog p { margin:0; color:var(--muted); font-size:.9rem; line-height:1.6; }
+.owner-dispatch-actions { flex-wrap:wrap; gap:10px; margin-top:20px; }
+.owner-dispatch-actions .search-action { min-width:auto; padding:0 16px; }
+.owner-dispatch-actions .owner-dispatch-cancel { border:1px solid var(--line-strong); background:#fff; color:var(--forest); }
 .note-box { margin:0 0 18px; padding:12px 14px; border-left:3px solid var(--cyan); background:rgba(134,197,193,0.12); color:#d5efec; font-size:.86rem; }
 .note-box span { display:block; margin-bottom:3px; color:var(--cyan); font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }
 .lines-panel { margin-bottom:18px; border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; }
@@ -44,6 +61,8 @@
 .custody-date { color:var(--muted); font-size:.8rem; white-space:nowrap; }
 .custody-note { color:var(--muted); }
 @media(max-width:620px){.office-head{align-items:stretch;flex-direction:column}.pick-row{flex-wrap:wrap}.receive-row{align-items:flex-start}}
+@media(max-width:570px){.transfer-route{grid-template-columns:1fr;padding:14px}.transfer-route-arrow{transform:rotate(90deg)}}
+@media(max-width:520px){.owner-dispatch-backdrop{padding:14px}.owner-dispatch-dialog{max-height:calc(100dvh - 28px);padding:20px 18px}.owner-dispatch-actions{flex-direction:column-reverse}.owner-dispatch-actions .search-action{width:100%}}
 .restock-approval-lines { display:grid; gap:8px; margin:0 0 12px; }
 .restock-approval-line { display:flex; align-items:center; gap:16px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:#f7faf7; }
 .restock-approval-line > div { display:grid; gap:3px; flex:1; min-width:0; }

@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @using System.Globalization
 @inject VaultFlowApiClient Api
+@inject UserSession Session
 
 <PageTitle>Product analytics · VaultFlow</PageTitle>
 
@@ -178,7 +179,7 @@
     private string PeriodLabel => $"Last {period} days";
 
     private IEnumerable<PosStoreProductPerformance> Choices
-        => report is null ? [] : report.Stores.Count > 1 ? [report.Business, .. report.Stores] : report.Stores;
+        => report is null ? [] : report.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId));
 
     private PosStoreProductPerformance? Selected
         => Choices.FirstOrDefault(s => s.Code == selectedCode) ?? Choices.FirstOrDefault();
@@ -196,7 +197,8 @@
                 to.AddDays(-(period - 1)), to, byUnits, CancellationToken.None);
             if (result is { IsSuccess: true, Value: { } value })
             {
-                report = value;
+                report = value with { Stores = [.. value.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId))] };
+                selectedCode = report.Stores.FirstOrDefault()?.Code ?? string.Empty;
             }
             else
             {

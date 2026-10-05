@@ -116,6 +116,33 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
             store);
         received.StatusCode.Should().Be(HttpStatusCode.OK, await received.Content.ReadAsStringAsync());
         (await BalanceAsync(seed.Store, seed.Product, null, InventoryState.Available)).Should().Be(3m);
+
+        using HttpResponseMessage activity = await GetAsync(
+            client,
+            "/api/v1/audit?category=transfers&search=Product%20restock",
+            owner);
+        activity.StatusCode.Should().Be(HttpStatusCode.OK, await activity.Content.ReadAsStringAsync());
+        using JsonDocument activityBody = JsonDocument.Parse(await activity.Content.ReadAsStringAsync());
+        JsonElement[] transferActivity = [.. activityBody.RootElement.GetProperty("items").EnumerateArray()
+            .Where(item => item.GetProperty("entityId").GetGuid() == id)];
+        transferActivity.Select(item => item.GetProperty("action").GetString())
+            .Should().Contain([
+                "transfer.created",
+                "transfer.requested",
+                "transfer.review.started",
+                "transfer.approved",
+                "transfer.picked",
+                "transfer.ready",
+                "transfer.dispatched",
+                "transfer.received",
+            ]);
+        JsonElement requestActivity = transferActivity.Single(item => item.GetProperty("action").GetString() == "transfer.requested");
+        requestActivity.GetProperty("recordSummary").GetString().Should().Contain("Product restock");
+        using JsonDocument requestDetailsDocument = JsonDocument.Parse(requestActivity.GetProperty("newValueJson").GetString()!);
+        JsonElement requestDetails = requestDetailsDocument.RootElement;
+        requestDetails.GetProperty("products")[0].GetProperty("productName").GetString().Should().Be("Product restock");
+        requestDetails.GetProperty("products")[0].GetProperty("requestedQuantity").GetDecimal().Should().Be(3m);
+        requestDetails.GetProperty("quantityBasis").GetString().Should().Be("Current transfer totals");
     }
 
     [Fact]
@@ -123,7 +150,7 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
     {
         Seed seed = await SeedAsync("lcf");
         await factory.CreateUserAsync("lcf-requester", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
-        await factory.CreateUserAsync("lcf-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        UserId approverId = await factory.CreateUserAsync("lcf-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
         using HttpClient client = factory.CreateClient();
         string requester = await SignInAsync(client, "lcf-requester");
         string approver = await SignInAsync(client, "lcf-approver");
@@ -166,6 +193,18 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         afterDispatch.Number.Should().MatchRegex(@"^TRF-\d{4}-\d{6}$");
         afterDispatch.ShipmentNumber.Should().MatchRegex(@"^SHP-\d{4}-\d{6}$");
         afterDispatch.ShipmentId.Should().NotBeNull();
+
+        using HttpResponseMessage detailResponse = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/transfers/{transferId}"), approver);
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.OK, await detailResponse.Content.ReadAsStringAsync());
+        using (JsonDocument detailDocument = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync()))
+        {
+            JsonElement transferDetail = detailDocument.RootElement;
+            transferDetail.GetProperty("approvedByUserId").GetGuid().Should().Be(approverId.Value);
+            transferDetail.GetProperty("approvedByDisplayName").GetString().Should().Be("lcf-approver");
+            transferDetail.GetProperty("approvedAtUtc").ValueKind.Should().Be(JsonValueKind.String);
+            transferDetail.GetProperty("lines")[0].GetProperty("pickedQuantity").GetDecimal().Should().Be(6m);
+        }
 
         // Dispatch pulls six from available into in-transit at the source,
         // stamped with the shipment number.
@@ -219,7 +258,7 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         TransferDbo closed = await TransferDboAsync(transferId);
         closed.Status.Should().Be(TransferStatus.Closed);
         closed.CustodyKinds.Should().Equal(
-            "Created", "Submitted", "Reviewed", "Approved", "Picked", "Dispatched", "Received", "Verified");
+            "Created", "Submitted", "Reviewed", "Approved", "Picked", "Ready", "Dispatched", "Received", "Verified");
     }
 
     [Fact]

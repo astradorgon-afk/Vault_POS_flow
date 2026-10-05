@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
 using Pos.Application.Identity;
+using Pos.Web.Components.Shared;
 using Pos.Web.Services;
 
 namespace Pos.Web.Components.Pages;
@@ -54,6 +55,33 @@ public partial class PurchaseOrderDetail
     private bool IsOwner => Session.Current?.User.Roles.Contains(Roles.Owner, StringComparer.Ordinal) == true;
 
     private string SupplierName => supplier?.Name ?? "the supplier";
+
+    private WorkflowReceipt BuildPrintReceipt(PosPurchaseOrder value)
+    {
+        WorkflowReceiptLine[] lines = [.. value.Lines.Select(line => new WorkflowReceiptLine(
+            line.ProductName ?? "Product",
+            line.ProductSku,
+            [
+                $"{PurchasingText.Quantity(line.OrderedQuantity)} {UnitName(line.UnitOfMeasureId)}",
+                receiptsLoaded ? $"{PurchasingText.Quantity(ReceivedFor(line.Id))} {UnitName(line.UnitOfMeasureId)}" : "Not loaded",
+                receiptsLoaded ? $"{PurchasingText.Quantity(Due(line))} {UnitName(line.UnitOfMeasureId)}" : "Not loaded",
+            ]))];
+
+        return new WorkflowReceipt(
+            "Purchase order",
+            PurchasingText.OrderName(value.Number),
+            PurchasingText.Label(value.Status, Outstanding),
+            "Supplier",
+            SupplierName,
+            "Deliver to",
+            LocationName(value.DestinationLocationId),
+            "Created",
+            When(value.CreatedAtUtc),
+            "Expected delivery",
+            ExpectedDate,
+            ["Ordered", "Received good", "Still due"],
+            lines);
+    }
 
     private DateOnly ReceivingToday => DateOnly.FromDateTime(ReceivingTime(DateTimeOffset.UtcNow).DateTime);
 

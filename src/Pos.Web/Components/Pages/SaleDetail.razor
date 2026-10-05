@@ -163,6 +163,11 @@ else if (sale is not null)
 
             ApiResult<PosSaleDetail> response = await Api.GetSaleAsync(Id, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+            if (!Session.CanUseInventoryLocation(response.Value.LocationId))
+            {
+                message = "This sale is outside your selected work location.";
+                return;
+            }
             sale = response.Value;
             Trail.Name($"Sale {sale.Number}");
 

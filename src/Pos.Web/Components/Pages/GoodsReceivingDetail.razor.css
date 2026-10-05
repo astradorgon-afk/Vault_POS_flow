@@ -2,6 +2,11 @@
 .receiving-head{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:20px;border-bottom:1px solid var(--line)}
 .receiving-head h1{margin:5px 0 7px;font:800 clamp(1.65rem,2.5vw,2.2rem)/1.12 'Manrope',sans-serif;letter-spacing:-.035em}
 .receiving-head p{margin:0;color:var(--muted);font-size:.9rem}
+.receiving-route{display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);align-items:center;gap:12px;padding:15px 18px;border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:var(--shadow-card)}
+.receiving-route-stop{display:grid;min-width:0;gap:5px}
+.receiving-route-stop>span{color:var(--muted);font-size:.67rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase}
+.receiving-route-stop>strong{overflow-wrap:anywhere;color:var(--ink);font:700 .98rem 'Manrope',sans-serif}
+.receiving-route-arrow{display:grid;width:34px;height:34px;place-items:center;border-radius:50%;background:var(--mint-soft);color:var(--forest);font-size:1.2rem;font-weight:800}
 .receiving-empty{min-height:230px;display:grid;place-content:center;justify-items:center;gap:6px;padding:25px;border:1px dashed var(--line-strong);border-radius:14px;background:#fff;color:var(--muted);text-align:center}
 .receiving-empty strong{color:var(--ink)}
 .receiving-empty span{font-size:.84rem}
@@ -35,4 +40,4 @@
 .receiving-history-row small{color:var(--muted)}
 .receiving-page :is(a,button,input):focus-visible{outline:3px solid rgba(36,90,66,.22);outline-offset:2px}
 @media(max-width:850px){.receiving-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:570px){.receiving-head,.receiving-card>header,.receiving-card>footer{align-items:flex-start;flex-direction:column}.receiving-card header p{text-align:left}.receiving-fields{grid-template-columns:1fr}.receiving-fields label:nth-child(5){grid-column:auto}.receiving-line-title{display:grid}.receiving-history-row{flex-wrap:wrap}}
+@media(max-width:570px){.receiving-head,.receiving-card>header,.receiving-card>footer{align-items:flex-start;flex-direction:column}.receiving-card header p{text-align:left}.receiving-fields{grid-template-columns:1fr}.receiving-fields label:nth-child(5){grid-column:auto}.receiving-line-title{display:grid}.receiving-history-row{flex-wrap:wrap}.receiving-route{grid-template-columns:1fr;padding:14px}.receiving-route-arrow{transform:rotate(90deg)}}

@@ -167,6 +167,7 @@
         {
             string term = search.Trim();
             return [.. orders
+                .Where(o => Session.CanUseInventoryLocation(o.DestinationLocationId))
                 .Where(o => InStage(o, stage))
                 .Where(o => supplierFilter is null || o.SupplierId == supplierFilter)
                 .Where(o => destinationFilter is null || o.DestinationLocationId == destinationFilter)
@@ -195,7 +196,10 @@
             }
 
             foreach (PosSupplier supplier in suppliersTask.Result.Value ?? []) suppliers[supplier.Id] = supplier;
-            foreach (PosLocation location in locationsTask.Result.Value ?? []) locations[location.Id] = location;
+            foreach (PosLocation location in locationsTask.Result.Value ?? [])
+            {
+                if (Session.CanUseInventoryLocation(location.Id)) locations[location.Id] = location;
+            }
 
             // Arriving with work to do: open on what needs a decision.
             if (NeedsMyApproval.Count > 0)

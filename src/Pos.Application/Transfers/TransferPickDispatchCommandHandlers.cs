@@ -273,7 +273,7 @@ public sealed class ReadyTransferCommandHandler(
             return Result<TransferOrderId>.Failure(RestockWarehouseGuard.SourceRequired);
         }
 
-        Result ready = transfer.Ready(clock.UtcNow);
+        Result ready = transfer.Ready(currentUser.UserId ?? UserId.Empty, clock.UtcNow);
 
         return ready.IsSuccess
             ? Result<TransferOrderId>.Success(transfer.Id)

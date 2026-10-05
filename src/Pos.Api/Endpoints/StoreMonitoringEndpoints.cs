@@ -10,6 +10,7 @@ using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 using Pos.Domain.Sales;
+using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
@@ -28,6 +29,43 @@ public static class StoreMonitoringEndpoints
 
     /// <summary>The longest period a performance request may cover.</summary>
     private const int MaxPeriodDays = 366;
+    private static readonly TimeZoneInfo StoreTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila");
+
+    private sealed class StoreMovementAccumulator(Location location, DateOnly periodStart, int periodDays)
+    {
+        public Location Location { get; } = location;
+        public int PeriodDays { get; } = periodDays;
+        public DateOnly PeriodStart { get; } = periodStart;
+        public decimal IncomingUnits { get; set; }
+        public int InboundTransfers { get; set; }
+        public decimal OutgoingUnits { get; set; }
+        public int OutboundTransfers { get; set; }
+        public int RestockRequests { get; set; }
+        public int PendingApprovalRequests { get; set; }
+        public int AwaitingDispatchRequests { get; set; }
+        public DateTimeOffset? LastIncomingAtUtc { get; set; }
+        public DateTimeOffset? LastOutgoingAtUtc { get; set; }
+        public List<StoreMovementItem> RecentItems { get; } = [];
+        public decimal[] DailyIncoming { get; } = new decimal[7];
+        public decimal[] DailyOutgoing { get; } = new decimal[7];
+
+        public void AddItems(IEnumerable<StoreMovementItem> items) => RecentItems.AddRange(items);
+
+        public void AddDailyUnits(DateTimeOffset occurredAtUtc, decimal units, bool incoming)
+        {
+            DateOnly date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(occurredAtUtc, StoreTimeZone).DateTime);
+            int dayOffset = Math.Clamp(date.DayNumber - PeriodStart.DayNumber, 0, PeriodDays - 1);
+            int bucket = Math.Min(6, dayOffset * 7 / PeriodDays);
+            if (incoming)
+            {
+                DailyIncoming[bucket] += units;
+            }
+            else
+            {
+                DailyOutgoing[bucket] += units;
+            }
+        }
+    }
 
     public static IEndpointRouteBuilder MapStoreMonitoringEndpoints(this IEndpointRouteBuilder app)
     {
@@ -39,6 +77,13 @@ public static class StoreMonitoringEndpoints
             .WithTags("Dashboard")
             .WithName("GetStorePerformance")
             .WithSummary("Gets each store's sales, takings and transactions over a period of business dates.");
+
+        app.MapGet("/api/v1/dashboard/store-movements", GetStoreMovementsAsync)
+            .RequireAuthorization()
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.View) { Scope = ScopeSource.None })
+            .WithTags("Dashboard")
+            .WithName("GetStoreMovements")
+            .WithSummary("Gets dispatched product movements and store restock requests over a period.");
 
         app.MapGet("/api/v1/inventory/stock-levels", GetStockLevelsAsync)
             .RequireAuthorization()
@@ -200,6 +245,231 @@ public static class StoreMonitoringEndpoints
 
         return TypedResults.Ok(new StorePerformanceReport(start, end, performance));
     }
+
+    private static async Task<IResult> GetStoreMovementsAsync(
+        PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
+        ICurrentUser currentUser,
+        ISystemClock clock,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        CancellationToken cancellationToken)
+    {
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        DateOnly end = to ?? clock.BusinessDateFor("Asia/Manila");
+        DateOnly start = from ?? end.AddDays(-6);
+        if (start > end || end.DayNumber - start.DayNumber >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.Validation(
+                    "store_movements.period_invalid",
+                    FormattableString.Invariant($"Choose a period of 1 to {MaxPeriodDays} days that ends on or after it starts."))),
+                currentUser.CorrelationId.Value);
+        }
+
+        DateTimeOffset startUtc = StartOfStoreDayUtc(start);
+        DateTimeOffset endUtc = StartOfStoreDayUtc(end.AddDays(1));
+
+        List<Location> stores = await context.Locations
+            .AsNoTracking()
+            .Where(location => location.Kind == LocationKind.Store)
+            .OrderBy(location => location.Code)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        stores = [.. stores.Where(store => authorization.HasAllLocations || authorization.Locations.Contains(store.Id))];
+        Dictionary<Guid, StoreMovementAccumulator> movements = stores.ToDictionary(
+            store => store.Id.Value,
+            store => new StoreMovementAccumulator(store, start, end.DayNumber - start.DayNumber + 1));
+
+        List<Transfer> transfers = [];
+        if (movements.Count > 0)
+        {
+            LocationId[] storeIds = [.. stores.Select(store => store.Id)];
+            transfers = await context.Transfers
+                .AsNoTracking()
+                .Where(transfer => storeIds.Contains(transfer.SourceLocationId) || storeIds.Contains(transfer.DestinationLocationId))
+                .Where(transfer =>
+                    (transfer.Mode == TransferMode.StoreRestock && transfer.CreatedAtUtc >= startUtc && transfer.CreatedAtUtc < endUtc)
+                    || (transfer.DispatchedAtUtc != null && transfer.DispatchedAtUtc >= startUtc && transfer.DispatchedAtUtc < endUtc))
+                .Include(transfer => transfer.Lines)
+                .Include(transfer => transfer.Allocations)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        HashSet<Guid> routeLocationIds = [.. transfers
+            .SelectMany(transfer => new[] { transfer.SourceLocationId.Value, transfer.DestinationLocationId.Value })
+            .Distinct()];
+        List<Location> routeLocations = routeLocationIds.Count == 0
+            ? []
+            : await context.Locations
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        Dictionary<Guid, string> locationNames = routeLocations
+            .Where(location => routeLocationIds.Contains(location.Id.Value))
+            .ToDictionary(location => location.Id.Value, location => location.Name);
+
+        ProductId[] productIds = [.. transfers
+            .SelectMany(transfer => transfer.Lines)
+            .Select(line => line.ProductId)
+            .Distinct()];
+        List<Product> products = productIds.Length == 0
+            ? []
+            : await context.Products
+                .AsNoTracking()
+                .Where(product => productIds.Contains(product.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        Dictionary<Guid, string> productNames = products
+            .ToDictionary(product => product.Id.Value, product => product.Name);
+
+        List<StoreMovementActivity> activity = [];
+        int dispatchedTransferCount = 0;
+        foreach (Transfer transfer in transfers)
+        {
+            bool requestInPeriod = transfer.Mode == TransferMode.StoreRestock
+                && transfer.CreatedAtUtc >= startUtc
+                && transfer.CreatedAtUtc < endUtc;
+            bool dispatchInPeriod = transfer.Status != TransferStatus.Cancelled
+                && transfer.DispatchedAtUtc is { } dispatchedAt
+                && dispatchedAt >= startUtc
+                && dispatchedAt < endUtc;
+            decimal requestedUnits = transfer.Lines.Sum(line => line.RequestedQuantity);
+            decimal dispatchedUnits = transfer.Allocations.Sum(allocation => allocation.Quantity);
+            Guid sourceId = transfer.SourceLocationId.Value;
+            Guid destinationId = transfer.DestinationLocationId.Value;
+            string reference = string.IsNullOrWhiteSpace(transfer.Number)
+                ? $"REQ-{transfer.Id.Value.ToString("N")[..8].ToUpperInvariant()}"
+                : transfer.Number;
+
+            if (requestInPeriod && movements.TryGetValue(destinationId, out StoreMovementAccumulator? requestStore))
+            {
+                requestStore.RestockRequests++;
+                if (transfer.Status is TransferStatus.Submitted or TransferStatus.InReview)
+                {
+                    requestStore.PendingApprovalRequests++;
+                }
+                else if (transfer.Status is TransferStatus.Approved or TransferStatus.Picking or TransferStatus.Ready)
+                {
+                    requestStore.AwaitingDispatchRequests++;
+                }
+
+                requestStore.AddItems(transfer.Lines.Select(line => new StoreMovementItem(
+                    productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
+                    reference,
+                    "Requested",
+                    line.RequestedQuantity,
+                    transfer.CreatedAtUtc)));
+
+                activity.Add(new StoreMovementActivity(
+                    transfer.Id.Value,
+                    reference,
+                    "Store request",
+                    transfer.Status.ToString(),
+                    locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
+                    locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
+                    requestedUnits,
+                    transfer.CreatedAtUtc));
+            }
+
+            if (!dispatchInPeriod)
+            {
+                continue;
+            }
+
+            DateTimeOffset actualDispatchedAt = transfer.DispatchedAtUtc!.Value;
+            dispatchedTransferCount++;
+            if (movements.TryGetValue(sourceId, out StoreMovementAccumulator? sourceStore))
+            {
+                sourceStore.OutgoingUnits += dispatchedUnits;
+                sourceStore.OutboundTransfers++;
+                sourceStore.LastOutgoingAtUtc = Latest(sourceStore.LastOutgoingAtUtc, actualDispatchedAt);
+                sourceStore.AddDailyUnits(actualDispatchedAt, dispatchedUnits, incoming: false);
+                sourceStore.AddItems(DispatchedItems(transfer, productNames, reference, "Sent"));
+            }
+
+            if (movements.TryGetValue(destinationId, out StoreMovementAccumulator? destinationStore))
+            {
+                destinationStore.IncomingUnits += dispatchedUnits;
+                destinationStore.InboundTransfers++;
+                destinationStore.LastIncomingAtUtc = Latest(destinationStore.LastIncomingAtUtc, actualDispatchedAt);
+                destinationStore.AddDailyUnits(actualDispatchedAt, dispatchedUnits, incoming: true);
+                destinationStore.AddItems(DispatchedItems(transfer, productNames, reference, "Received"));
+            }
+
+            activity.Add(new StoreMovementActivity(
+                transfer.Id.Value,
+                reference,
+                "Dispatched transfer",
+                transfer.Status.ToString(),
+                locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
+                locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
+                dispatchedUnits,
+                actualDispatchedAt));
+        }
+
+        List<StoreMovement> storeResults = [.. movements.Values.Select(movement => new StoreMovement(
+            movement.Location.Id.Value,
+            movement.Location.Code,
+            movement.Location.Name,
+            movement.IncomingUnits,
+            movement.InboundTransfers,
+            movement.OutgoingUnits,
+            movement.OutboundTransfers,
+            movement.RestockRequests,
+            movement.PendingApprovalRequests,
+            movement.AwaitingDispatchRequests,
+            movement.LastIncomingAtUtc,
+            movement.LastOutgoingAtUtc,
+            [.. movement.RecentItems
+                .OrderByDescending(item => item.OccurredAtUtc)
+                .Take(3)],
+            [.. Enumerable.Range(0, 7).Select(index => new StoreMovementChartPoint(
+                index,
+                movement.DailyIncoming[index],
+                movement.DailyOutgoing[index]))]))];
+
+        return TypedResults.Ok(new StoreMovementReport(
+            start,
+            end,
+            dispatchedTransferCount,
+            storeResults,
+            [.. activity.OrderByDescending(entry => entry.OccurredAtUtc).Take(12)]));
+    }
+
+    private static IEnumerable<StoreMovementItem> DispatchedItems(
+        Transfer transfer,
+        IReadOnlyDictionary<Guid, string> productNames,
+        string reference,
+        string direction)
+    {
+        Dictionary<int, decimal> pickedByLine = transfer.Allocations
+            .GroupBy(allocation => allocation.LineNo)
+            .ToDictionary(group => group.Key, group => group.Sum(allocation => allocation.Quantity));
+
+        return transfer.Lines
+            .Select(line => new StoreMovementItem(
+                productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
+                reference,
+                direction,
+                pickedByLine.GetValueOrDefault(line.LineNo),
+                transfer.DispatchedAtUtc!.Value))
+            .Where(item => item.Units > 0m);
+    }
+
+    private static DateTimeOffset StartOfStoreDayUtc(DateOnly date)
+    {
+        DateTime localStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, StoreTimeZone));
+    }
+
+    private static DateTimeOffset? Latest(DateTimeOffset? current, DateTimeOffset? candidate)
+        => candidate is { } value && (current is null || value > current.Value) ? value : current;
 
     /// <summary>
     /// Runs a grouping over <paramref name="rows"/> in the database, or, on
@@ -419,6 +689,56 @@ public sealed record StoreDailySales(DateOnly Date, decimal NetSales, int Transa
 
 /// <summary>One of a store's best sellers over the period.</summary>
 public sealed record StoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);
+
+/// <summary>Every store's incoming and outgoing product movement over a date range.</summary>
+public sealed record StoreMovementReport(
+    DateOnly From,
+    DateOnly To,
+    int DispatchedTransferCount,
+    IReadOnlyList<StoreMovement> Stores,
+    IReadOnlyList<StoreMovementActivity> RecentActivity);
+
+/// <summary>A store's actual dispatched quantities and restock request activity.</summary>
+public sealed record StoreMovement(
+    Guid LocationId,
+    string Code,
+    string Name,
+    decimal IncomingUnits,
+    int InboundTransfers,
+    decimal OutgoingUnits,
+    int OutboundTransfers,
+    int RestockRequests,
+    int PendingApprovalRequests,
+    int AwaitingDispatchRequests,
+    DateTimeOffset? LastIncomingAtUtc,
+    DateTimeOffset? LastOutgoingAtUtc,
+    IReadOnlyList<StoreMovementItem> RecentItems,
+    IReadOnlyList<StoreMovementChartPoint> DailyMovement);
+
+/// <summary>A product line from a recent request or completed movement.</summary>
+public sealed record StoreMovementItem(
+    string ProductName,
+    string Reference,
+    string Direction,
+    decimal Units,
+    DateTimeOffset OccurredAtUtc);
+
+/// <summary>One of seven buckets across the selected movement period.</summary>
+public sealed record StoreMovementChartPoint(
+    int Bucket,
+    decimal IncomingUnits,
+    decimal OutgoingUnits);
+
+/// <summary>A store request or dispatch recorded during the selected period.</summary>
+public sealed record StoreMovementActivity(
+    Guid TransferId,
+    string Reference,
+    string Kind,
+    string Status,
+    string SourceLocationName,
+    string DestinationLocationName,
+    decimal ProductUnits,
+    DateTimeOffset OccurredAtUtc);
 
 /// <summary>A location's stock per product; the daily sales rate averages the
 /// last <c>SalesRateDays</c> days.</summary>

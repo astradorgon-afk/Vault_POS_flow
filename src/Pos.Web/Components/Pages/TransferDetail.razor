@@ -22,6 +22,10 @@
         {
             <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
         }
+        @if (detail is not null)
+        {
+            <WorkflowPrintButton Document="@BuildPrintReceipt()" />
+        }
     </div>
 </div>
 
@@ -52,16 +56,37 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
+    <section class="transfer-route" aria-label="Transfer route">
+        <div class="transfer-route-stop"><span>From</span><strong>@SourceLabel</strong></div>
+        <span class="transfer-route-arrow" aria-hidden="true">→</span>
+        <div class="transfer-route-stop"><span>Deliver to</span><strong>@DestinationLabel</strong></div>
+    </section>
+
     <section class="transfer-summary">
-        <div><span>Route</span><strong class="route">@SourceLabel → @DestinationLabel</strong></div>
         <div><span>Kind</span><strong>@KindLabel</strong></div>
         <div><span>Mode</span><strong>@ModeLabel</strong></div>
         <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
         <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
         <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
+        <div>
+            <span>Approved by</span>
+            <strong>@(detail.ApprovedByDisplayName ?? (detail.ApprovedByUserId is null ? "Not approved" : "Unknown user"))</strong>
+            @if (detail.ApprovedAtUtc is { } approvedAt)
+            {
+                <small>@approvedAt.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</small>
+            }
+        </div>
         <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
         <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
     </section>
+
+    @if (IsStoreRestock && Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) && !string.IsNullOrWhiteSpace(WarehouseStepMessage))
+    {
+        <section class="restock-warehouse-step" role="status">
+            <strong>@WarehouseStepTitle</strong>
+            <span>@WarehouseStepMessage</span>
+        </section>
+    }
 
     @if (!string.IsNullOrWhiteSpace(detail.ReviewNote))
     {
@@ -71,11 +96,11 @@ else
     <section class="lines-panel">
         <div class="lines-title">
             <strong>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</strong>
-            <span>Picked quantities are what the source actually sent; the difference shows up as a discrepancy when you count the boxes.</span>
+            <span>Picked shows the warehouse count; Dispatched shows what actually left the source. The difference shows up as a discrepancy when you count the boxes.</span>
         </div>
         <table class="sales-table counts-table">
             <thead>
-                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th><th>State</th></tr>
+                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Dispatched</th><th>Received</th><th>Damaged</th><th>State</th></tr>
             </thead>
             <tbody>
                 @foreach (PosTransferLineView line in detail.Lines)
@@ -85,6 +110,7 @@ else
                         <td><strong>@(line.ProductName ?? "Unknown product")</strong></td>
                         <td>@Quantity(line.RequestedQuantity)</td>
                         <td>@Quantity(line.PickedQuantity)</td>
+                        <td>@(detail.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity))</td>
                         <td>@Quantity(line.ReceivedQuantity)</td>
                         <td>@Quantity(line.DamagedQuantity)</td>
                         <td>
@@ -208,9 +234,24 @@ else
         <section class="action-panel">
             <div class="action-title"><strong>Dispatch</strong><span>Posts the movement to the ledger — the source's available stock drops and the goods go in transit.</span></div>
             <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="DispatchAsync" disabled="@acting">@(acting ? "Dispatching…" : "Dispatch transfer")</button>
+                <button type="button" class="search-action" @onclick="BeginDispatchAsync" disabled="@acting">@(acting ? "Dispatching…" : "Dispatch transfer")</button>
             </div>
         </section>
+    }
+
+    @if (ownerDispatchConfirmation && IsOwner)
+    {
+        <div class="owner-dispatch-backdrop" @onclick="CancelOwnerDispatch">
+            <section class="owner-dispatch-dialog" role="alertdialog" aria-modal="true" aria-labelledby="owner-dispatch-title" tabindex="-1" @onclick:stopPropagation="true">
+                <span class="eyebrow">Owner confirmation</span>
+                <h2 id="owner-dispatch-title">Dispatch as owner?</h2>
+                <p>Dispatch is normally handled by Main Inventory staff. Continuing will mark this request as Dispatched, move its picked products out of main warehouse available stock, and record them as in transit to the destination store. Store staff will still need to record receipt.</p>
+                <div class="open-count-actions owner-dispatch-actions">
+                    <button type="button" class="search-action owner-dispatch-cancel" @onclick="CancelOwnerDispatch">Go back</button>
+                    <button type="button" class="search-action" @onclick="ConfirmOwnerDispatchAsync" disabled="@acting">Override and dispatch</button>
+                </div>
+            </section>
+        </div>
     }
 
     @if (ShowCancelDispatch)
@@ -393,6 +434,7 @@ else
 
     private bool loading = true;
     private bool acting;
+    private bool ownerDispatchConfirmation;
     private bool custodyShown;
     private bool custodyLoading;
 
@@ -425,6 +467,27 @@ else
     private bool ShowVerify => Status == "Received" && CanVerify && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.DestinationLocationId));
     private bool ShowCentralReview => Status == "PendingCentralReview" && CanApprove;
 
+    private string WarehouseStepTitle => Status switch
+    {
+        "Submitted" => "Waiting for owner approval",
+        "InReview" => "Owner review in progress",
+        "Approved" => "Approved and ready to pick",
+        "Picking" => "Continue picking the products",
+        "Ready" => "Ready to dispatch to the store",
+        "Dispatched" => "Products have left the main warehouse",
+        _ => string.Empty,
+    };
+    private string WarehouseStepMessage => Status switch
+    {
+        "Submitted" => "The owner must review and approve this request before warehouse staff can pick or dispatch its products.",
+        "InReview" => "The owner is reviewing this request. Once approved, it will appear under To fulfill here.",
+        "Approved" => "Enter the quantities picked from main warehouse stock and select Record picking. Then mark the request ready and dispatch it to the store.",
+        "Picking" => "Enter any remaining quantities and select Record picking. When picking is complete, mark the request ready and dispatch it.",
+        "Ready" => "Select Dispatch transfer below to move the picked products out of main warehouse stock and send them to the store.",
+        "Dispatched" => "The products are in transit. Store staff can open this request and record what arrived.",
+        _ => string.Empty,
+    };
+
     private bool CanPickNow => pickRows.Any(row => row.Quantity > 0m);
     private bool CanReceiveNow => receiveRows.Any(row => row.Received > 0m || row.Damaged > 0m);
     private bool CanApproveQuantities => approvalRows.Count > 0 && approvalRows.All(row => row.Approved > 0m);
@@ -448,6 +511,41 @@ else
 
     private string SourceLabel => LocationLabel(detail?.Transfer.SourceLocationId);
     private string DestinationLabel => LocationLabel(detail?.Transfer.DestinationLocationId);
+
+    private WorkflowReceipt BuildPrintReceipt()
+    {
+        PosTransferDetail transfer = detail!;
+        string? dispatchedAt = transfer.Transfer.DispatchedAtUtc is { } dispatched
+            ? dispatched.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
+            : null;
+
+        WorkflowReceiptLine[] lines = [.. transfer.Lines.Select(line => new WorkflowReceiptLine(
+            line.ProductName ?? $"Product on line {line.LineNo}",
+            null,
+            [
+                Quantity(line.RequestedQuantity),
+                transfer.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity),
+                Quantity(line.ReceivedQuantity),
+                Quantity(line.DamagedQuantity),
+            ]))];
+
+        return new WorkflowReceipt(
+            IsStoreRestock ? "Product request" : "Inventory transfer",
+            string.IsNullOrWhiteSpace(transfer.Transfer.Number)
+                ? $"Transfer {TransferId.ToString("N", CultureInfo.InvariantCulture)[..8].ToUpperInvariant()}"
+                : transfer.Transfer.Number,
+            SplitWords(transfer.Transfer.Status),
+            "From",
+            SourceLabel,
+            "Deliver to",
+            DestinationLabel,
+            IsStoreRestock ? "Requested" : "Created",
+            transfer.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture),
+            "Dispatched",
+            dispatchedAt ?? "Not yet dispatched",
+            [IsStoreRestock ? "Needed / approved" : "Requested", "Dispatched", "Received", "Damaged"],
+            lines);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -721,6 +819,27 @@ else
         await LoadDetailAsync();
         return null;
     });
+
+    private async Task BeginDispatchAsync()
+    {
+        if (acting) { return; }
+        if (IsOwner)
+        {
+            ownerDispatchConfirmation = true;
+            return;
+        }
+
+        await DispatchAsync();
+    }
+
+    private async Task ConfirmOwnerDispatchAsync()
+    {
+        if (!IsOwner || !ownerDispatchConfirmation || acting) { return; }
+        ownerDispatchConfirmation = false;
+        await DispatchAsync();
+    }
+
+    private void CancelOwnerDispatch() => ownerDispatchConfirmation = false;
 
     private async Task DispatchAsync() => await RunActionAsync("Dispatching…", async () =>
     {

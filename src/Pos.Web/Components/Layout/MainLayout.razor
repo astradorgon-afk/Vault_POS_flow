@@ -149,9 +149,13 @@
         get
         {
             List<Tab> tabs = [new(string.Empty, "home", "Home")];
+            if (Session.HasPermission("transfer.view"))
+            {
+                tabs.Add(new("stores", "location", "Movement"));
+            }
+
             if (Session.HasPermission("sale.view"))
             {
-                tabs.Add(new("stores", "coins", "Stores"));
                 tabs.Add(new("analytics/products", "trend-up", "Analytics"));
             }
 
@@ -165,12 +169,14 @@
             {
                 tabs.Add(new("restock/approvals", "ledger", "Approvals"));
             }
-            else if (Session.Current?.User.Roles.Contains("MainInventoryManager", StringComparer.Ordinal) == true &&
+            else if (Session.WorkLocationKind == 0 &&
+                Session.Current?.User.Roles.Any(role => role is "MainInventoryManager" or "InventoryStaff") == true &&
                 Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch"))
             {
                 tabs.Add(new("restock/fulfillment", "box", "Fulfill"));
             }
-            else if (Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view"))
+            else if (Session.WorkLocationKind == 1 &&
+                Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view"))
             {
                 tabs.Add(new("restock", "ledger", "Restock"));
             }

@@ -24,6 +24,18 @@
             <span class="receiving-state @(CanReceiveNow ? "ready" : "")">@SplitWords(order.Status)</span>
         </header>
 
+        <section class="receiving-route" aria-label="Delivery route">
+            <div class="receiving-route-stop">
+                <span>From supplier</span>
+                <strong>@supplierName</strong>
+            </div>
+            <span class="receiving-route-arrow" aria-hidden="true">→</span>
+            <div class="receiving-route-stop">
+                <span>Deliver to</span>
+                <strong>@locationName</strong>
+            </div>
+        </section>
+
         @if (!string.IsNullOrWhiteSpace(message))
         {
             <div class="receiving-message" role="status">@message</div>
@@ -89,6 +101,7 @@
     private readonly List<ReceiptLineInput> lines = [];
     private PosPurchaseOrder? order;
     private string locationName = "Assigned location";
+    private string supplierName = "Supplier";
     private string? message;
     private bool loading = true;
     private bool saving;
@@ -108,6 +121,7 @@
         message = null;
         historyLoaded = false;
         order = null;
+        supplierName = "Supplier";
         receipts.Clear();
         lines.Clear();
         try
@@ -125,8 +139,13 @@
             }
 
             order = orderResult.Value;
-            ApiResult<List<PosLocation>> locationResult = await Api.GetLocationsAsync(CancellationToken.None);
+            Task<ApiResult<List<PosLocation>>> locationsTask = Api.GetLocationsAsync(CancellationToken.None);
+            Task<ApiResult<List<PosSupplier>>> suppliersTask = Api.GetSuppliersAsync(CancellationToken.None, includeInactive: true);
+            await Task.WhenAll(locationsTask, suppliersTask);
+            ApiResult<List<PosLocation>> locationResult = await locationsTask;
+            ApiResult<List<PosSupplier>> supplierResult = await suppliersTask;
             locationName = locationResult.Value?.FirstOrDefault(location => location.Id == order.DestinationLocationId)?.Name ?? "Assigned location";
+            supplierName = supplierResult.Value?.FirstOrDefault(supplier => supplier.Id == order.SupplierId)?.Name ?? "Supplier";
 
             ApiResult<List<PosGoodsReceiptSummary>> history = await Api.GetGoodsReceiptsAsync(OrderId, CancellationToken.None);
             if (!history.IsSuccess || history.Value is null)

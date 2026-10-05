@@ -270,15 +270,16 @@ public sealed class TransferTests
         Result<Transfer> result = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now);
         Transfer transfer = result.Value;
 
-        transfer.Ready(Now).Error.Code.Should().Be("transfer.invalid_state");
+        transfer.Ready(Picker, Now).Error.Code.Should().Be("transfer.invalid_state");
 
         transfer.Submit(Requester, Now);
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
 
-        transfer.Ready(Now).IsSuccess.Should().BeTrue();
+        transfer.Ready(Picker, Now).IsSuccess.Should().BeTrue();
         transfer.Status.Should().Be(TransferStatus.Ready);
+        transfer.CustodyEvents[^1].Kind.Should().Be(TransferCustodyEventKind.Ready);
     }
 
     [Fact]
@@ -290,7 +291,7 @@ public sealed class TransferTests
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
-        transfer.Ready(Now);
+        transfer.Ready(Picker, Now);
 
         Result dispatch = transfer.Dispatch(
             Now,
@@ -320,7 +321,7 @@ public sealed class TransferTests
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
-        transfer.Ready(Now);
+        transfer.Ready(Picker, Now);
 
         transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker).IsSuccess.Should().BeTrue();
         transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker)
@@ -501,7 +502,7 @@ public sealed class TransferTests
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
-        transfer.Ready(Now);
+        transfer.Ready(Picker, Now);
         transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker);
     }
 

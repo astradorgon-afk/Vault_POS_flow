@@ -23,6 +23,10 @@
 @if (!string.IsNullOrWhiteSpace(message))
 {
     <div class="dashboard-notices" role="status"><p>@message</p></div>
+    @if (lastRestockRequestId is { } requestId)
+    {
+        <a class="sk-restock-link" href="@($"/transfers/{requestId:D}")">View restock request</a>
+    }
 }
 
 @if (locations.Count > 0)
@@ -123,6 +127,23 @@ else if (report is not null)
             }
         </div>
 
+        @if (replenishment is { } selectedProduct)
+        {
+            <section class="sk-restock-request" aria-label="Request product replenishment">
+                <div class="sk-restock-copy">
+                    <span class="eyebrow">Owner approval required</span>
+                    <h3>Request @selectedProduct.Name</h3>
+                    <p>@selectedProduct.Sku · @report.Name currently has @Qty(selectedProduct.Available) available.</p>
+                    <small>The main warehouse will pick and send stock after the owner approves.</small>
+                </div>
+                <label><span>Quantity to request</span><input type="number" min="0.001" step="0.001" @bind="replenishmentQuantity" /></label>
+                <div class="sk-restock-actions">
+                    <button type="button" class="sk-restock-cancel" @onclick="CancelReplenishment" disabled="@submittingRestock">Cancel</button>
+                    <button type="button" class="sk-restock-button" @onclick="SubmitReplenishmentAsync" disabled="@(!CanSubmitReplenishment)">@(submittingRestock ? "Sending…" : "Send to owner")</button>
+                </div>
+            </section>
+        }
+
         <div class="qr-table-wrap">
             <table class="qr-table sk-table">
                 <thead>
@@ -136,13 +157,14 @@ else if (report is not null)
                         @SortHeader("days", "Days left", true)
                         @SortHeader("value", "Value", true)
                         @SortHeader("status", "Status", false)
+                        @if (CanRequestForSelectedStore) { <th>Replenishment</th> }
                     </tr>
                 </thead>
                 <tbody>
                     @if (visible.Count == 0)
                     {
                         <tr class="static">
-                            <td colspan="9" class="sk-none">
+                            <td colspan="@(CanRequestForSelectedStore ? 10 : 9)" class="sk-none">
                                 No products match. <button type="button" class="sk-clear" @onclick="ClearFilters">Clear filters</button>
                             </td>
                         </tr>
@@ -159,6 +181,19 @@ else if (report is not null)
                             <td class="num">@(row.DaysOfCover is { } days ? days.ToString("0.#", CultureInfo.InvariantCulture) : "—")</td>
                             <td class="num">@Money(row.StockValue)</td>
                             <td><span class="ov-pill tone-@Tone(row.Status)">@StatusLabel(row.Status)</span></td>
+                            @if (CanRequestForSelectedStore)
+                            {
+                                <td class="sk-restock-cell">
+                                    @if (row.Status == "Out" && row.InTransit <= 0m)
+                                    {
+                                        <button type="button" class="sk-restock-button" @onclick="() => BeginReplenishment(row)">Request stock</button>
+                                    }
+                                    else if (row.Status == "Out")
+                                    {
+                                        <span class="sk-restock-pending">Already on the way</span>
+                                    }
+                                </td>
+                            }
                         </tr>
                     }
                 </tbody>
@@ -180,6 +215,10 @@ else if (report is not null)
                         <span>@CoverLabel(row)</span>
                         @if (row.DailySales > 0) { <span>@row.DailySales.ToString("0.#", CultureInfo.InvariantCulture)/day</span> }
                         @if (row.InTransit > 0m) { <span>+@Qty(row.InTransit) coming</span> }
+                        @if (CanRequestForSelectedStore && row.Status == "Out" && row.InTransit <= 0m)
+                        {
+                            <button type="button" class="sk-restock-button" @onclick="() => BeginReplenishment(row)">Request stock</button>
+                        }
                     </div>
                 </li>
             }
@@ -252,6 +291,18 @@ else if (report is not null)
     private int page = 1;
     private bool focusTable;
     private ElementReference tableHeading;
+    private PosStockLevel? replenishment;
+    private decimal replenishmentQuantity;
+    private Guid? lastRestockRequestId;
+    private bool submittingRestock;
+
+    private bool CanRequestForSelectedStore => selectedId is { } locationId &&
+        locations.Any(location => location.Id == locationId && location.Kind == 1) &&
+        Session.HasPermission("transfer.request") &&
+        Session.Current?.User.Roles.Any(role => role is "InventoryStaff" or "StoreManager") == true;
+
+    private bool CanSubmitReplenishment => !submittingRestock && replenishment is not null &&
+        selectedId is not null && replenishmentQuantity > 0m;
 
     private List<PosStockLevel> Visible
     {
@@ -368,6 +419,65 @@ else if (report is not null)
         page = 1;
     }
 
+    private void BeginReplenishment(PosStockLevel row)
+    {
+        if (!CanRequestForSelectedStore || row.Status != "Out" || row.InTransit > 0m)
+        {
+            return;
+        }
+
+        replenishment = row;
+        decimal stockGoal = row.TargetStock is > 0m and { } target
+            ? target
+            : row.ReorderPoint is > 0m and { } reorderPoint ? reorderPoint : 1m;
+        replenishmentQuantity = Math.Max(0.001m, stockGoal - row.Available - row.InTransit);
+        lastRestockRequestId = null;
+    }
+
+    private void CancelReplenishment()
+    {
+        replenishment = null;
+        replenishmentQuantity = 0m;
+    }
+
+    private async Task SubmitReplenishmentAsync()
+    {
+        if (!CanSubmitReplenishment || replenishment is not { } product || selectedId is not { } storeId)
+        {
+            return;
+        }
+
+        submittingRestock = true;
+        message = null;
+        try
+        {
+            PosCreateRestockRequest request = new(storeId,
+                [new PosTransferLineRequest(product.ProductId, replenishmentQuantity, "Out of stock replenishment")]);
+            ApiResult<PosReference> created = await Api.CreateRestockRequestAsync(request, CancellationToken.None);
+            if (created is not { IsSuccess: true, Value: { } transfer })
+            {
+                message = created.Error ?? "The restock request could not be created.";
+                return;
+            }
+
+            ApiResult<PosReference> submitted = await Api.SubmitTransferAsync(transfer.Id, CancellationToken.None);
+            lastRestockRequestId = transfer.Id;
+            message = submitted.IsSuccess
+                ? "Restock request sent to the owner for approval."
+                : "The request was saved as a draft but could not be sent. Open it to submit for approval.";
+            replenishment = null;
+            replenishmentQuantity = 0m;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The inventory service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            submittingRestock = false;
+        }
+    }
+
     private void OnSearchKey(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
@@ -454,6 +564,12 @@ else if (report is not null)
         {
             message = "This location is outside your assignment.";
             return;
+        }
+
+        if (selectedId != locationId)
+        {
+            CancelReplenishment();
+            lastRestockRequestId = null;
         }
 
         selectedId = locationId;

@@ -15,7 +15,10 @@ builder.Services.AddAuthorizationCore(options =>
 {
     foreach (PermissionDefinition permission in Permissions.All)
     {
-        options.AddPolicy(permission.Code, policy => policy.RequireClaim("permission", permission.Code));
+        options.AddPolicy(permission.Code, policy => policy.RequireAssertion(context =>
+            context.User.HasClaim("permission", permission.Code)
+            || (permission.Code == Permissions.Administration.ViewAudit &&
+                (context.User.IsInRole(Roles.Owner) || context.User.IsInRole(Roles.Administrator)))));
     }
 
     options.AddPolicy(

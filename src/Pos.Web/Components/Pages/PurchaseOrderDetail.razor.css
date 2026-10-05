@@ -6,6 +6,7 @@
 .purchase-detail .po-head p span { padding: 0 7px; color: var(--forest-bright); }
 .purchase-detail .po-head-total { padding-left: 24px; border-left: 1px solid var(--line); }
 .purchase-detail .po-head-total strong { font-size: 1.65rem; font-variant-numeric: tabular-nums; line-height: 1.4; }
+.purchase-detail .po-head-actions { display:flex; align-items:center; gap:20px; }
 .order-journey { margin-bottom: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-card); }
 .journey-heading { padding: 18px 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .journey-heading h2 { margin: 0; font: 800 .95rem 'Manrope', sans-serif; }
@@ -49,6 +50,7 @@
     .purchase-detail .po-head { align-items: flex-start; gap: 15px; padding-bottom: 18px; }
     .purchase-detail .po-head-total { padding-left: 0; border-left: 0; justify-items: start; }
     .purchase-detail .po-head-total strong { font-size: 1.35rem; }
+    .purchase-detail .po-head-actions { align-items:flex-start; flex-wrap:wrap; gap:12px; }
     .journey-heading { padding: 16px 16px 0; flex-wrap: wrap; gap: 6px; }
     .journey-stages { grid-template-columns: 1fr; padding: 20px 16px; gap: 0; }
     .journey-stages li { display: grid; grid-template-columns: 29px 1fr; column-gap: 12px; row-gap: 2px; padding-bottom: 18px; }

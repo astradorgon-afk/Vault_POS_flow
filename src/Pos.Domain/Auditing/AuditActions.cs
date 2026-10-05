@@ -203,8 +203,14 @@ public static class AuditActions
     /// <summary>Transfer actions.</summary>
     public static class Transfers
     {
+        /// <summary>A transfer draft was created.</summary>
+        public const string Created = "transfer.created";
+
         /// <summary>A transfer was requested.</summary>
         public const string Requested = "transfer.requested";
+
+        /// <summary>An approver started reviewing a transfer.</summary>
+        public const string ReviewStarted = "transfer.review.started";
 
         /// <summary>A transfer was approved.</summary>
         public const string Approved = "transfer.approved";
@@ -215,8 +221,20 @@ public static class AuditActions
         /// <summary>A transfer was dispatched.</summary>
         public const string Dispatched = "transfer.dispatched";
 
+        /// <summary>Picking was recorded for a transfer.</summary>
+        public const string Picked = "transfer.picked";
+
+        /// <summary>A transfer was marked ready to dispatch.</summary>
+        public const string Ready = "transfer.ready";
+
+        /// <summary>A transfer dispatch was cancelled.</summary>
+        public const string DispatchCancelled = "transfer.dispatch.cancelled";
+
         /// <summary>A transfer was received.</summary>
         public const string Received = "transfer.received";
+
+        /// <summary>A transfer was verified and closed.</summary>
+        public const string Verified = "transfer.verified";
 
         /// <summary>A transfer discrepancy was raised.</summary>
         public const string DiscrepancyRaised = "transfer.discrepancy.raised";

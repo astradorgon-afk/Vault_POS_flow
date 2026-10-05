@@ -33,7 +33,7 @@
                 <button type="button" class="login-location-trigger" aria-expanded="@locationOpen" aria-controls="login-location-options" @onclick="ToggleLocationAsync" disabled="@busy">
                     <span class="login-location-arrow" aria-hidden="true">@(locationOpen ? "▾" : "▸")</span>
                     Choose work location
-                    <small>Optional</small>
+                    <small>Required for store-scoped access</small>
                 </button>
                 @if (locationOpen)
                 {
@@ -57,7 +57,7 @@
                                 <legend>Work location</legend>
                                 <label class="login-location-option">
                                     <input type="radio" name="work-location" checked="@(selectedLocationId is null)" @onchange="() => selectedLocationId = null" />
-                                    <span>Choose later</span>
+                                    <span>Select a location</span>
                                 </label>
                                 @foreach (PosSignInLocation location in locationChoices)
                                 {
@@ -116,7 +116,7 @@
             ApiResult<List<PosSignInLocation>> result = await Api.GetSignInLocationsAsync(CancellationToken.None);
             if (!result.IsSuccess || result.Value is null)
             {
-                locationMessage = result.Error ?? "Locations could not be loaded. You can continue without choosing one.";
+                locationMessage = result.Error ?? "Locations could not be loaded. Try again before signing in.";
                 return;
             }
 
@@ -128,12 +128,12 @@
                 .ThenBy(location => location.Code));
             if (locationChoices.Count == 0)
             {
-                locationMessage = "No active work locations are available. You can continue without choosing one.";
+                locationMessage = "No active work locations are available.";
             }
         }
         catch (HttpRequestException)
         {
-            locationMessage = "Locations could not be loaded. You can continue without choosing one.";
+            locationMessage = "Locations could not be loaded. Try again before signing in.";
         }
         finally
         {
@@ -149,6 +149,10 @@
         }
 
         error = null;
+        if (!locationsLoaded)
+        {
+            await LoadLocationChoicesAsync();
+        }
         busy = true;
         try
         {
@@ -159,18 +163,26 @@
                 return;
             }
 
+            if (selectedLocationId is null && !Session.CanWorkAcrossLocations)
+            {
+                Session.Clear();
+                locationOpen = true;
+                error = "Choose a work location before signing in.";
+                return;
+            }
+
             PosSignInLocation? chosen = locationChoices.FirstOrDefault(location => location.Id == selectedLocationId);
             if (selectedLocationId is not null && chosen is null)
             {
                 Session.Clear();
-                error = "The selected location is no longer available. Choose another location or choose later.";
+                error = "The selected location is no longer available. Choose another location.";
                 return;
             }
 
-            if (!Session.SetWorkLocation(chosen?.Id, chosen?.Name))
+            if (!Session.SetWorkLocation(chosen?.Id, chosen?.Name, chosen?.Kind))
             {
                 Session.Clear();
-                error = "That location is not assigned to your account. Choose another location or choose later.";
+                error = "That location is not assigned to your account. Choose another location.";
                 return;
             }
 

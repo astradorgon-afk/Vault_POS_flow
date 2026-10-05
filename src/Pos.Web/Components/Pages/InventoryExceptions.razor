@@ -17,7 +17,6 @@
         <label class="location-picker">
             <span>Location</span>
             <select value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChangedAsync">
-                <option value="">All locations</option>
                 @foreach (PosLocation location in locations)
                 {
                     <option value="@location.Id">@location.Code · @location.Name</option>
@@ -132,7 +131,8 @@
         ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
         if (locationResponse.IsSuccess && locationResponse.Value is not null)
         {
-            locations.AddRange(locationResponse.Value);
+            locations.AddRange(locationResponse.Value.Where(location => Session.CanUseInventoryLocation(location.Id)));
+            selectedLocationId = Session.WorkLocationId;
         }
 
         await LoadAsync();
@@ -152,7 +152,7 @@
         {
             if (viewMode == "summary")
             {
-                ApiResult<List<PosNegativeStockAttemptSummaryRow>> response = await Api.GetNegativeStockAttemptSummaryAsync(selectedLocationId, CancellationToken.None);
+                ApiResult<List<PosNegativeStockAttemptSummaryRow>> response = await Api.GetNegativeStockAttemptSummaryAsync(Session.WorkLocationId, CancellationToken.None);
                 if (!response.IsSuccess || response.Value is null)
                 {
                     message = response.Error;
@@ -164,7 +164,7 @@
             }
             else
             {
-                ApiResult<List<PosNegativeStockAttemptView>> response = await Api.GetNegativeStockAttemptsAsync(selectedLocationId, CancellationToken.None);
+                ApiResult<List<PosNegativeStockAttemptView>> response = await Api.GetNegativeStockAttemptsAsync(Session.WorkLocationId, CancellationToken.None);
                 if (!response.IsSuccess || response.Value is null)
                 {
                     message = response.Error;

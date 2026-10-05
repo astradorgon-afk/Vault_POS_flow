@@ -1,0 +1,177 @@
+@page "/admin/audit"
+@attribute [Authorize(Policy = "audit.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@using System.Text.Json
+@inject VaultFlowApiClient Api
+
+<PageTitle>Activity log · VaultFlow</PageTitle>
+
+<section class="audit-page">
+    <header class="audit-head">
+        <div><span class="eyebrow">Business oversight</span><h1>Activity log</h1><p>Review recorded activity across sales, inventory, transfers, access, and more.</p></div>
+    </header>
+
+    <section class="audit-filters" aria-label="Filter activity">
+        <label><span>Activity type</span>
+            <select @bind="category">
+                <option value="">All activity</option>
+                <option value="transactions">Transactions</option>
+                <option value="inventory">Inventory</option>
+                <option value="transfers">Transfers</option>
+                <option value="purchasing">Purchasing</option>
+                <option value="people">People &amp; access</option>
+                <option value="security">Security &amp; devices</option>
+                <option value="products">Products</option>
+                <option value="other">Other activity</option>
+            </select>
+        </label>
+        <label class="audit-search"><span>Search</span><input type="search" @bind="search" @bind:event="oninput" placeholder="Action, product, transfer number, reason" /></label>
+        <label><span>From</span><input type="date" @bind="fromDate" /></label>
+        <label><span>To</span><input type="date" @bind="toDate" /></label>
+        <button type="button" class="audit-apply" @onclick="ApplyFiltersAsync" disabled="@loading">@(loading ? "Loading…" : "Apply filters")</button>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="audit-message" role="status">@message</div>
+    }
+
+    <section class="audit-results" aria-live="polite">
+        @if (loading)
+        {
+            <div class="audit-empty">Loading activity…</div>
+        }
+        else if (items.Count == 0)
+        {
+            <div class="audit-empty"><strong>No activity matched these filters.</strong><span>Try another category, date range, or search term.</span></div>
+        }
+        else
+        {
+            <header class="audit-results-head">
+                <strong>@total.ToString("N0", CultureInfo.InvariantCulture) activity records</strong>
+                <span>Showing @((offset + 1).ToString("N0", CultureInfo.InvariantCulture))–@Math.Min(offset + PageSize, total).ToString("N0", CultureInfo.InvariantCulture)</span>
+            </header>
+            <div class="audit-table-scroll">
+                <table>
+                    <thead><tr><th>When</th><th>Activity</th><th>Who</th><th>Location</th><th>Record</th></tr></thead>
+                    <tbody>
+                        @foreach (PosAuditLogItem item in items)
+                        {
+                            <tr @key="item.Id">
+                                <td class="audit-when"><strong>@item.OccurredAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</strong><small>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</small></td>
+                                <td><span class="audit-action">@ActionLabel(item.Action)</span><small class="audit-code">@item.Action</small></td>
+                                <td><strong>@item.ActorName</strong><small>@(string.IsNullOrWhiteSpace(item.RoleSnapshot) ? "Role not recorded" : item.RoleSnapshot)</small></td>
+                                <td>@(item.LocationName ?? "Business-wide")</td>
+                                <td>
+                                    <strong>@item.EntityType</strong>
+                                    @if (!string.IsNullOrWhiteSpace(item.RecordSummary)) { <small class="audit-record-summary">@item.RecordSummary</small> }
+                                    @if (item.EntityId is { } entityId) { <small>@ShortId(entityId)</small> }
+                                    <details class="audit-details">
+                                        <summary>Details</summary>
+                                        <dl>
+                                            @if (!string.IsNullOrWhiteSpace(item.Reason)) { <div><dt>Reason</dt><dd>@item.Reason</dd></div> }
+                                            @if (item.ReferenceDocumentType is not null) { <div><dt>Reference</dt><dd>@item.ReferenceDocumentType · @ShortId(item.ReferenceDocumentId)</dd></div> }
+                                            @if (!string.IsNullOrWhiteSpace(item.PreviousValueJson)) { <div><dt>Before</dt><dd><pre class="audit-json">@PrettyJson(item.PreviousValueJson)</pre></dd></div> }
+                                            @if (!string.IsNullOrWhiteSpace(item.NewValueJson))
+                                            {
+                                                <div>
+                                                    <dt>@(item.Action.StartsWith("transfer.", StringComparison.OrdinalIgnoreCase) ? "Transfer details (current state)" : "Updated")</dt>
+                                                    <dd><pre class="audit-json">@PrettyJson(item.NewValueJson)</pre></dd>
+                                                </div>
+                                            }
+                                            @if (item.CorrelationId != Guid.Empty) { <div><dt>Correlation</dt><dd>@ShortId(item.CorrelationId)</dd></div> }
+                                        </dl>
+                                    </details>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <footer class="audit-pager">
+                <span>Page @(offset / PageSize + 1) of @Math.Max(1, (total + PageSize - 1) / PageSize)</span>
+                <div>
+                    <button type="button" @onclick="PreviousAsync" disabled="@(offset == 0 || loading)">Previous</button>
+                    <button type="button" @onclick="NextAsync" disabled="@(offset + PageSize >= total || loading)">Next</button>
+                </div>
+            </footer>
+        }
+    </section>
+</section>
+
+@code {
+    private const int PageSize = 50;
+    private readonly List<PosAuditLogItem> items = [];
+    private string category = string.Empty;
+    private string search = string.Empty;
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private string? message;
+    private int total;
+    private int offset;
+    private bool loading = true;
+
+    protected override Task OnInitializedAsync() => LoadAsync(0);
+
+    private Task ApplyFiltersAsync() => LoadAsync(0);
+    private Task PreviousAsync() => LoadAsync(Math.Max(0, offset - PageSize));
+    private Task NextAsync() => LoadAsync(offset + PageSize);
+
+    private async Task LoadAsync(int nextOffset)
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            ApiResult<PosAuditLogPage> result = await Api.GetAuditLogAsync(
+                category, search,
+                fromDate is { } start ? DateOnly.FromDateTime(start) : null,
+                toDate is { } end ? DateOnly.FromDateTime(end) : null,
+                nextOffset, PageSize, CancellationToken.None);
+            if (result is not { IsSuccess: true, Value: { } page })
+            {
+                message = result.Error ?? "The activity log could not be loaded.";
+                return;
+            }
+
+            items.Clear();
+            items.AddRange(page.Items);
+            total = page.Total;
+            offset = page.Offset;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The activity log is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private static string ActionLabel(string action)
+        => string.Join(' ', action.Split('.', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Length == 0 ? part : char.ToUpperInvariant(part[0]) + part[1..]));
+
+    private static string ShortId(Guid? id)
+        => id is { } value ? value.ToString("N", CultureInfo.InvariantCulture)[..8].ToUpperInvariant() : "—";
+
+    private static string PrettyJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+    }
+}

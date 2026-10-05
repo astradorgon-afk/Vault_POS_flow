@@ -1,24 +1,26 @@
 @page "/stores"
 @using System.Globalization
-@attribute [Authorize(Policy = "sale.view")]
+@attribute [Authorize(Policy = "transfer.view")]
 @rendermode InteractiveServer
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 
-<PageTitle>Stores · VaultFlow</PageTitle>
+<PageTitle>Store movement · VaultFlow</PageTitle>
 
 <header class="qr-head st-head">
     <div>
-        <span class="eyebrow">Monitoring</span>
-        <h1>Stores</h1>
-        <p>What each store sold and took in, as synced from its registers.</p>
+        <span class="eyebrow">Stores</span>
+        <h1>Store movement</h1>
     </div>
-    <div class="st-periods" role="group" aria-label="Period">
-        @foreach ((string key, string label) in Periods)
-        {
-            <button type="button" class="@(period == key ? "active" : null)" @onclick="() => SelectPeriodAsync(key)" disabled="@loading">@label</button>
-        }
-    </div>
+    <label class="st-period-picker">
+        <span class="sr-only">Movement date range</span>
+        <select value="@period" @onchange="HandlePeriodChanged" disabled="@loading" aria-label="Movement date range">
+            <option value="today">@(period == "today" ? RangeLabel : "Today")</option>
+            <option value="7">@(period == "7" ? RangeLabel : "Last 7 days")</option>
+            <option value="30">@(period == "30" ? RangeLabel : "Last 30 days")</option>
+            <option value="month">@(period == "month" ? RangeLabel : "This month")</option>
+        </select>
+    </label>
 </header>
 
 @if (!string.IsNullOrWhiteSpace(message))
@@ -28,107 +30,143 @@
 
 @if (loading && report is null)
 {
-    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading store results…</p></div></section>
+    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading store movements…</p></div></section>
+}
+else if (report is not null && report.Stores.Count == 0)
+{
+    <section class="qr-card"><div class="qr-empty"><h2>No stores in your scope.</h2><p>Ask an administrator to assign a store location to this account.</p></div></section>
 }
 else if (report is not null)
 {
-    <section class="st-totals" aria-label="All stores">
-        <article><span>Takings</span><strong>@Money(report.Stores.Sum(s => s.Takings))</strong><small>after @Money(report.Stores.Sum(s => s.Refunds)) refunded</small></article>
-        <article><span>Net sales</span><strong>@Money(report.Stores.Sum(s => s.NetSales))</strong><small>@RangeLabel</small></article>
-        <article><span>Transactions</span><strong>@report.Stores.Sum(s => s.Transactions).ToString("N0", CultureInfo.InvariantCulture)</strong><small>@report.Stores.Sum(s => s.VoidedTransactions) voided</small></article>
-        <article><span>Average ticket</span><strong>@Money(AverageTicket)</strong><small>across @report.Stores.Count stores</small></article>
-    </section>
-
-    @if (report.Stores.Count == 0)
+    @if (QuietestStore is { } quietest)
     {
-        <section class="qr-card"><div class="qr-empty"><h2>No stores in your scope.</h2><p>Ask an administrator to assign a store to this account.</p></div></section>
+        <section class="st-quiet-banner" aria-label="Quietest store">
+            <span class="st-quiet-label">Quietest store this period</span>
+            <strong>@quietest.Name <small>(@quietest.Code)</small></strong>
+            <p>@TransferCount(quietest) transfer@(TransferCount(quietest) == 1 ? "" : "s") · @Quantity(StoreProductsMoved(quietest)) product units moved</p>
+        </section>
     }
 
     <div class="st-grid">
-        @foreach (PosStorePerformance store in report.Stores.OrderByDescending(s => s.Takings))
+        @foreach (PosStoreMovement store in report.Stores
+            .OrderByDescending(StoreProductsMoved)
+            .ThenBy(store => store.Name, StringComparer.CurrentCultureIgnoreCase))
         {
-            decimal peak = Math.Max(store.Daily.Count == 0 ? 0m : store.Daily.Max(d => d.NetSales), 1m);
-            decimal paid = Math.Max(store.CashSales + store.CardSales + store.EWalletSales, 1m);
+            bool isQuietest = QuietestStore?.LocationId == store.LocationId;
             <article class="st-card" @key="store.LocationId">
                 <header>
                     <div>
                         <span class="st-code">@store.Code</span>
                         <h2>@store.Name</h2>
                     </div>
-                    <span class="st-last">@LastSaleLabel(store.LastSaleAtUtc)</span>
+                    @if (isQuietest)
+                    {
+                        <span class="st-last st-quiet-tag">Quietest</span>
+                    }
+                    else
+                    {
+                        <span class="st-last">@LastMovementLabel(store)</span>
+                    }
                 </header>
 
-                <div class="st-takings">
-                    <span>Takings</span>
-                    <strong>@Money(store.Takings)</strong>
-                    <small>@Share(store.Takings) of all stores</small>
+                <div class="st-flow-total">
+                    <span>Product units moved</span>
+                    <strong>@Quantity(StoreProductsMoved(store))</strong>
+                    <small>@ShareOfMovement(store)% of all stores</small>
                 </div>
 
                 <dl class="st-stats">
-                    <div><dt>Net sales</dt><dd>@Money(store.NetSales)</dd></div>
-                    <div><dt>Transactions</dt><dd>@store.Transactions.ToString("N0", CultureInfo.InvariantCulture)</dd></div>
-                    <div><dt>Average ticket</dt><dd>@Money(store.AverageTicket)</dd></div>
-                    <div><dt>Discounts</dt><dd>@Money(store.Discounts)</dd></div>
-                    <div><dt>Voided</dt><dd>@store.VoidedTransactions · @Money(store.VoidedValue)</dd></div>
-                    <div><dt>Refunded</dt><dd>@Money(store.Refunds)</dd></div>
+                    <div><dt>Products in</dt><dd>@Quantity(store.IncomingUnits)</dd><small>@store.InboundTransfers inbound transfers</small></div>
+                    <div><dt>Products out</dt><dd>@Quantity(store.OutgoingUnits)</dd><small>@store.OutboundTransfers outbound transfers</small></div>
+                    <div><dt>Supply requests</dt><dd>@store.RestockRequests.ToString("N0", CultureInfo.InvariantCulture)</dd><small>@store.PendingApprovalRequests awaiting approval</small></div>
+                    <div><dt>Approved, awaiting dispatch</dt><dd>@store.AwaitingDispatchRequests.ToString("N0", CultureInfo.InvariantCulture)</dd></div>
+                    <div><dt>Last products received</dt><dd>@LastEventTime(store.LastIncomingAtUtc)</dd></div>
+                    <div><dt>Last products sent</dt><dd>@LastEventTime(store.LastOutgoingAtUtc)</dd></div>
                 </dl>
 
-                <div class="st-mix" aria-label="Payment mix">
-                    <div class="st-mix-bar">
-                        <i class="cash" style="width:@Percent(store.CashSales, paid)"></i>
-                        <i class="card" style="width:@Percent(store.CardSales, paid)"></i>
-                        <i class="wallet" style="width:@Percent(store.EWalletSales, paid)"></i>
-                    </div>
-                    <ul>
-                        <li><b class="cash"></b>Cash @Money(store.CashSales)</li>
-                        <li><b class="card"></b>Card @Money(store.CardSales)</li>
-                        <li><b class="wallet"></b>E-wallet @Money(store.EWalletSales)</li>
-                    </ul>
+                <div class="st-flow-share" role="img" aria-label="@ShareOfMovement(store)% share of product units moved across stores">
+                    <span style="width:@ShareOfMovement(store)%"></span>
+                </div>
+                <div class="st-chart-legend"><span><i class="st-chart-in-key"></i>In @Quantity(store.IncomingUnits)</span><span><i class="st-chart-out-key"></i>Out @Quantity(store.OutgoingUnits)</span></div>
+                <div class="st-chart" role="img" aria-label="Incoming and outgoing product units over the selected period">
+                    @foreach (PosStoreMovementChartPoint point in store.DailyMovement)
+                    {
+                        <span class="st-chart-column" title="@ChartBucketLabel(point.Bucket)">
+                            <i class="st-chart-in" style="height:@ChartHeight(point.IncomingUnits, store)%"></i>
+                            <b class="st-chart-out" style="height:@ChartHeight(point.OutgoingUnits, store)%"></b>
+                        </span>
+                    }
                 </div>
 
-                @if (store.Daily.Count > 1)
-                {
-                    <div class="st-trend" aria-label="Net sales per day">
-                        @foreach (PosStoreDailySales day in store.Daily)
-                        {
-                            <span title="@day.Date.ToString("ddd MMM d", CultureInfo.InvariantCulture): @Money(day.NetSales) · @day.Transactions sales"
-                                  style="height:@Percent(day.NetSales, peak)"></span>
-                        }
-                    </div>
-                }
-
-                @if (store.TopProducts.Count > 0)
-                {
-                    <div class="st-top">
-                        <h3>Best sellers</h3>
-                        <ol>
-                            @foreach (PosStoreTopProduct product in store.TopProducts)
+                <div class="st-recent-products">
+                    <h3>Latest transfers</h3>
+                    @if (store.RecentItems.Count == 0)
+                    {
+                        <p>No product movement or requests in this period.</p>
+                    }
+                    else
+                    {
+                        <ul>
+                            @foreach (PosStoreMovementItem item in store.RecentItems)
                             {
-                                <li><span>@product.Name</span><small>@product.Quantity.ToString("0.##", CultureInfo.InvariantCulture) sold</small><strong>@Money(product.NetSales)</strong></li>
+                                <li @key="(item.Reference, item.ProductName, item.Direction, item.OccurredAtUtc)">
+                                    <span><strong>@item.ProductName</strong><small>@item.Reference · @item.Direction</small></span>
+                                    <b>@Quantity(item.Units) units</b>
+                                </li>
                             }
-                        </ol>
-                    </div>
-                }
+                        </ul>
+                    }
+                </div>
 
                 <footer>
-                    <a href="@SalesLink(store.LocationId)">Transactions <AppIcon Name="arrow" /></a>
-                    <a href="@($"inventory/stock?store={store.LocationId:D}")">Inventory <AppIcon Name="arrow" /></a>
+                    <a href="transfers">Transfers <AppIcon Name="arrow" /></a>
+                    <a href="@($"inventory/stock?store={store.LocationId:D}")">Stock levels <AppIcon Name="arrow" /></a>
+                    @if (CanReviewRequests)
+                    {
+                        <a href="restock/approvals">Requests <AppIcon Name="arrow" /></a>
+                    }
+                    else if (CanRequestRestock)
+                    {
+                        <a href="restock">Requests <AppIcon Name="arrow" /></a>
+                    }
                 </footer>
             </article>
         }
     </div>
+
+    <section class="st-activity" aria-label="Recent store requests and transfers">
+        <header>
+            <div><span class="eyebrow">Movement ledger</span><h2>Latest transfers and requests</h2></div>
+            <a href="transfers">Open transfers <AppIcon Name="arrow" /></a>
+        </header>
+        @if (report.RecentActivity.Count == 0)
+        {
+            <div class="st-activity-empty">No dispatched transfers or store requests in this period.</div>
+        }
+        else
+        {
+            <div class="st-ledger-scroll">
+                <table class="st-ledger">
+                    <thead><tr><th>Reference</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead>
+                    <tbody>
+                        @foreach (PosStoreMovementActivity entry in report.RecentActivity)
+                        {
+                            <tr @key="(entry.TransferId, entry.Kind)">
+                                <td><a href="@($"transfers/{entry.TransferId:D}")"><strong>@entry.Reference</strong><small>@entry.Kind · @entry.SourceLocationName → @entry.DestinationLocationName</small></a></td>
+                                <td><strong>@Quantity(entry.ProductUnits)</strong><small>@(entry.Kind == "Store request" ? "requested" : "units sent")</small></td>
+                                <td><span class="st-activity-status @ActivityStatusClass(entry.Status)">@SplitWords(entry.Status)</span></td>
+                                <td><time>@entry.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</time></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
 }
 
 @code {
-    private static readonly (string Key, string Label)[] Periods =
-    [
-        ("today", "Today"),
-        ("7", "7 days"),
-        ("30", "30 days"),
-        ("month", "This month"),
-    ];
-
-    private PosStorePerformanceReport? report;
+    private PosStoreMovementReport? report;
     private string period = "7";
     private bool loading = true;
     private string? message;
@@ -149,16 +187,25 @@ else if (report is not null)
             ? report.From.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)
             : $"{report.From.ToString("MMM d", CultureInfo.InvariantCulture)} – {report.To.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}";
 
-    private decimal AverageTicket
-    {
-        get
-        {
-            int transactions = report?.Stores.Sum(s => s.Transactions) ?? 0;
-            return transactions == 0 ? 0m : decimal.Round(report!.Stores.Sum(s => s.NetSales) / transactions, 2);
-        }
-    }
+    private PosStoreMovement? QuietestStore => report?.Stores
+        .OrderBy(StoreActivityCount)
+        .ThenBy(StoreProductsMoved)
+        .ThenBy(store => store.Name, StringComparer.CurrentCultureIgnoreCase)
+        .FirstOrDefault();
+
+    private bool CanReviewRequests => Session.HasPermission("transfer.approve") &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool CanRequestRestock => Session.WorkLocationKind == 1 && Session.HasPermission("transfer.request");
 
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task HandlePeriodChanged(ChangeEventArgs args)
+    {
+        if (args.Value?.ToString() is { } key && key is "today" or "7" or "30" or "month")
+        {
+            await SelectPeriodAsync(key);
+        }
+    }
 
     private async Task SelectPeriodAsync(string key)
     {
@@ -173,18 +220,21 @@ else if (report is not null)
         try
         {
             (DateOnly from, DateOnly to) = Range;
-            ApiResult<PosStorePerformanceReport> response = await Api.GetStorePerformanceAsync(from, to, CancellationToken.None);
+            ApiResult<PosStoreMovementReport> response = await Api.GetStoreMovementsAsync(from, to, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null)
             {
                 message = response.Error;
                 return;
             }
 
-            report = response.Value;
+            report = response.Value with
+            {
+                Stores = [.. response.Value.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId))],
+            };
         }
         catch (HttpRequestException)
         {
-            message = "Store results are unavailable. Try again shortly.";
+            message = "Store movement data is unavailable. Try again shortly.";
         }
         finally
         {
@@ -192,34 +242,62 @@ else if (report is not null)
         }
     }
 
-    private string SalesLink(Guid store)
+    private static decimal StoreProductsMoved(PosStoreMovement store) => store.IncomingUnits + store.OutgoingUnits;
+    private static int TransferCount(PosStoreMovement store) => store.InboundTransfers + store.OutboundTransfers;
+    private static int StoreActivityCount(PosStoreMovement store) => TransferCount(store) + store.RestockRequests;
+    private decimal ShareOfMovement(PosStoreMovement store)
     {
-        (DateOnly from, DateOnly to) = Range;
-        return FormattableString.Invariant($"sales?store={store:D}&from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}");
+        decimal total = report?.Stores.Sum(StoreProductsMoved) ?? 0m;
+        return total == 0m ? 0m : decimal.Round(StoreProductsMoved(store) / total * 100m, 0);
     }
 
-    private string Share(decimal takings)
+    private static string ChartHeight(decimal units, PosStoreMovement store)
     {
-        decimal total = report?.Stores.Sum(s => s.Takings) ?? 0m;
-        return total <= 0m ? "0%" : (takings / total).ToString("P0", CultureInfo.InvariantCulture);
+        decimal max = store.DailyMovement.Count == 0
+            ? 0m
+            : store.DailyMovement.Max(point => point.IncomingUnits + point.OutgoingUnits);
+        return (max <= 0m ? 0m : decimal.Round(units / max * 100m, 0))
+            .ToString(CultureInfo.InvariantCulture);
     }
 
-    private static string Percent(decimal part, decimal whole)
-        => FormattableString.Invariant($"{Math.Clamp(part / whole * 100m, 0m, 100m):0.#}%");
-
-    private static string LastSaleLabel(DateTimeOffset? at)
+    private string ChartBucketLabel(int bucket)
     {
-        if (at is not { } last)
+        if (report is null)
         {
-            return "No sales yet";
+            return string.Empty;
         }
 
-        TimeSpan ago = DateTimeOffset.UtcNow - last;
-        return ago.TotalMinutes < 60 ? $"Last sale {Math.Max(1, (int)ago.TotalMinutes)} min ago"
-            : ago.TotalHours < 24 ? $"Last sale {(int)ago.TotalHours} h ago"
-            : $"Last sale {last.InStoreTime().ToString("MMM d", CultureInfo.InvariantCulture)}";
+        int days = report.To.DayNumber - report.From.DayNumber + 1;
+        int firstOffset = Math.Min(days - 1, (int)Math.Ceiling(bucket * days / 7d));
+        int lastOffset = Math.Min(days - 1, Math.Max(firstOffset, (int)Math.Ceiling((bucket + 1) * days / 7d) - 1));
+        DateOnly first = report.From.AddDays(firstOffset);
+        DateOnly last = report.From.AddDays(lastOffset);
+        return first == last
+            ? first.ToString("MMM d", CultureInfo.InvariantCulture)
+            : $"{first.ToString("MMM d", CultureInfo.InvariantCulture)}–{last.ToString("MMM d", CultureInfo.InvariantCulture)}";
     }
 
-    private static string Money(decimal value)
-        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+    private static string Quantity(decimal value) => value.ToString("#,##0.##", CultureInfo.InvariantCulture);
+
+    private static string LastMovementLabel(PosStoreMovement store)
+        => Latest(store.LastIncomingAtUtc, store.LastOutgoingAtUtc) is { } at
+            ? $"Last movement {at.InStoreTime().ToString("MMM d", CultureInfo.InvariantCulture)}"
+            : "No movement yet";
+
+    private static string LastEventTime(DateTimeOffset? at)
+        => at is { } instant ? instant.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) : "—";
+
+    private static DateTimeOffset? Latest(DateTimeOffset? first, DateTimeOffset? second)
+        => first is { } a && (second is null || a >= second.Value) ? a : second;
+
+    private static string SplitWords(string value)
+        => string.Concat(value.Select((character, index) =>
+            index > 0 && char.IsUpper(character) ? $" {char.ToLowerInvariant(character)}" : character.ToString()));
+
+    private static string ActivityStatusClass(string status) => status switch
+    {
+        "Cancelled" or "Closed" => "is-closed",
+        "Submitted" or "InReview" or "Approved" or "Picking" or "Ready" => "is-pending",
+        _ => "is-complete",
+    };
 }

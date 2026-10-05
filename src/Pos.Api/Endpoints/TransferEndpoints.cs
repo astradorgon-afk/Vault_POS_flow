@@ -201,6 +201,9 @@ public sealed record TransferDetailView(
     string Kind,
     string Mode,
     string? ReviewNote,
+    Guid? ApprovedByUserId,
+    string? ApprovedByDisplayName,
+    DateTimeOffset? ApprovedAtUtc,
     IReadOnlyList<TransferLineView> Lines);
 
 /// <summary>One line of a transfer detail.</summary>
@@ -790,6 +793,15 @@ public static class TransferEndpoints
 
         ProductId[] productIds = [.. transfer.Lines.Select(l => l.ProductId).Distinct()];
 
+        string? approvedByDisplayName = transfer.ApprovedByUserId is { } approvedByUserId
+            ? await context.Users
+                .AsNoTracking()
+                .Where(user => user.Id == approvedByUserId.Value)
+                .Select(user => user.DisplayName)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
         Dictionary<Guid, string> names = await context.Products
             .AsNoTracking()
             .Where(p => productIds.Contains(p.Id))
@@ -845,6 +857,9 @@ public static class TransferEndpoints
             transfer.Kind.ToString(),
             transfer.Mode.ToString(),
             transfer.ReviewNote,
+            transfer.ApprovedByUserId?.Value,
+            approvedByDisplayName,
+            transfer.ApprovedAtUtc,
             lines);
 
         return TypedResults.Ok(detail);

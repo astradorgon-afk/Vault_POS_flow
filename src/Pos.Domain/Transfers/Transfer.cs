@@ -156,6 +156,9 @@ public enum TransferCustodyEventKind
 
     /// <summary>Central review rejected the emergency transfer; its stock was reversed.</summary>
     CentralReviewRejected = 16,
+
+    /// <summary>The picked stock was marked ready to dispatch.</summary>
+    Ready = 17,
 }
 
 /// <summary>One requested line of a transfer.</summary>
@@ -982,9 +985,10 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
     }
 
     /// <summary>Marks picking complete; the transfer may now be dispatched.</summary>
+    /// <param name="readiedBy">The user who marked the picked stock ready.</param>
     /// <param name="now">The current instant.</param>
     /// <returns>Success, or a state or validation error.</returns>
-    public Result Ready(DateTimeOffset now)
+    public Result Ready(UserId readiedBy, DateTimeOffset now)
     {
         if (Status != TransferStatus.Picking)
         {
@@ -997,6 +1001,7 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         }
 
         Status = TransferStatus.Ready;
+        _custodyEvents.Add(Event(TransferCustodyEventKind.Ready, readiedBy, now, null));
         return Result.Success();
     }
 

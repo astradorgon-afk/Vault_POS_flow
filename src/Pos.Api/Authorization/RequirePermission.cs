@@ -207,6 +207,13 @@ public sealed class PermissionAuthorizationHandler(
                     $"Endpoint requires permission {requirement.Permission}, which is not in the catalogue."));
         }
 
+        if (requirement.Permission == Permissions.Administration.ViewAudit &&
+            (context.User.IsInRole(Roles.Owner) || context.User.IsInRole(Roles.Administrator)))
+        {
+            context.Succeed(requirement);
+            return;
+        }
+
         LocationId? scope = ResolveScope(requirement);
         CancellationToken cancellationToken = httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None;
 

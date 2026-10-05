@@ -22,7 +22,10 @@
     </div>
     @if (order is not null)
     {
-        <div class="po-head-total"><span>Order total</span><strong>@PurchasingText.Money(order.GrandTotal)</strong></div>
+        <div class="po-head-actions">
+            <WorkflowPrintButton Document="@BuildPrintReceipt(order)" Disabled="@(!receiptsLoaded)" />
+            <div class="po-head-total"><span>Order total</span><strong>@PurchasingText.Money(order.GrandTotal)</strong></div>
+        </div>
     }
 </header>
 

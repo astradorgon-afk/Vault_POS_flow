@@ -9,26 +9,27 @@
 
 <section class="restock-page">
     <header class="restock-head">
-        <div><span class="eyebrow">Main warehouse · store supplies</span><h1>Restock fulfillment</h1><p>Pick approved store requests, then dispatch them to their destination stores.</p></div>
+        <div><span class="eyebrow">Main warehouse · store supplies</span><h1>Restock fulfillment</h1><p>Open an approved request to pick its products, mark it ready, and dispatch it to the store.</p></div>
         <button type="button" class="restock-refresh" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
 
     @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
 
     <nav class="restock-filters" aria-label="Filter warehouse requests">
-        <button type="button" class="@(showActive ? "active" : null)" @onclick="() => showActive = true">To fulfill <span>@Active.Count</span></button>
-        <button type="button" class="@(!showActive ? "active" : null)" @onclick="() => showActive = false">All assigned <span>@requests.Count</span></button>
+        <button type="button" class="@(selectedView == "fulfill" ? "active" : null)" @onclick='() => selectedView = "fulfill"'>To fulfill <span>@Active.Count</span></button>
+        <button type="button" class="@(selectedView == "approval" ? "active" : null)" @onclick='() => selectedView = "approval"'>Waiting for owner <span>@WaitingForOwner.Count</span></button>
+        <button type="button" class="@(selectedView == "all" ? "active" : null)" @onclick='() => selectedView = "all"'>All assigned <span>@requests.Count</span></button>
     </nav>
 
     <section class="restock-card">
-        <header><div><span class="eyebrow">Warehouse dispatch</span><h2>@(showActive ? "Ready for warehouse action" : "Assigned warehouse requests")</h2></div><p>Open a request to record picking and dispatch.</p></header>
+        <header><div><span class="eyebrow">Warehouse dispatch</span><h2>@ViewTitle</h2></div><p>@ViewDescription</p></header>
         @if (loading)
         {
             <p class="restock-empty">Loading store requests…</p>
         }
         else if (Visible.Count == 0)
         {
-            <p class="restock-empty">@(showActive ? "No approved requests need warehouse action." : "No restock requests for your assigned warehouse yet.")</p>
+            <p class="restock-empty">@EmptyMessage</p>
         }
         else
         {
@@ -36,8 +37,8 @@
                 @foreach (PosTransferSummary request in Visible)
                 {
                     <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
-                        <div><strong>@RequestLabel(request)</strong><small>To @StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
-                        <span class="restock-status @(request.Status is "Approved" or "Picking" or "Ready" ? "pending" : "")">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
+                        <div><strong>@RequestLabel(request)</strong><small>To @StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small><small class="restock-row-hint">@StatusHint(request)</small></div>
+                        <span class="restock-status @(request.Status is "Approved" or "Picking" or "Ready" ? "pending" : "")">@SplitWords(request.Status)</span><span class="restock-row-action">@ActionLabel(request)</span>
                     </a>
                 }
             </div>
@@ -49,11 +50,36 @@
     private readonly List<PosTransferSummary> requests = [];
     private readonly Dictionary<Guid, string> storeNames = [];
     private bool loading = true;
-    private bool showActive = true;
+    private string selectedView = "all";
     private string? message;
 
     private List<PosTransferSummary> Active => [.. requests.Where(request => request.Status is "Approved" or "Picking" or "Ready")];
-    private List<PosTransferSummary> Visible => showActive ? Active : requests;
+    private List<PosTransferSummary> WaitingForOwner => [.. requests.Where(request => request.Status is "Submitted" or "InReview")];
+    private List<PosTransferSummary> Visible => selectedView switch
+    {
+        "fulfill" => Active,
+        "approval" => WaitingForOwner,
+        _ => requests,
+    };
+    private string ViewTitle => selectedView switch
+    {
+        "fulfill" => "Ready for warehouse action",
+        "approval" => "Waiting for owner approval",
+        _ => "All assigned warehouse requests",
+    };
+    private string ViewDescription => selectedView switch
+    {
+        "fulfill" => "Open an approved request to pick the products, then mark it ready and dispatch it.",
+        "approval" => "These requests become available to pick after the owner reviews and approves them.",
+        _ => "Open any request to see its status and the next step.",
+    };
+    private string EmptyMessage => selectedView switch
+    {
+        "fulfill" when WaitingForOwner.Count > 0 => $"No requests are approved for picking yet. {WaitingForOwner.Count} request(s) are waiting for owner approval.",
+        "fulfill" => "No approved requests need warehouse action.",
+        "approval" => "No requests are waiting for owner approval.",
+        _ => "No restock requests are assigned to your warehouse yet.",
+    };
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -82,6 +108,24 @@
     }
 
     private string StoreName(Guid id) => storeNames.GetValueOrDefault(id, "Store");
+    private static string StatusHint(PosTransferSummary request) => request.Status switch
+    {
+        "Submitted" => "Waiting for the owner to review this request.",
+        "InReview" => "The owner is reviewing this request.",
+        "Approved" => "Approved. Open to record the products picked from stock.",
+        "Picking" => "Picking in progress. Open to finish picking and mark ready.",
+        "Ready" => "Picking is complete. Open to dispatch the products to the store.",
+        "Dispatched" => "Dispatched from the main warehouse. The store can now receive it.",
+        "Received" or "Closed" => "The store has received this request.",
+        _ => "Open to review request details.",
+    };
+    private static string ActionLabel(PosTransferSummary request) => request.Status switch
+    {
+        "Approved" => "Open to pick →",
+        "Picking" => "Continue picking →",
+        "Ready" => "Open to dispatch →",
+        _ => "View request →",
+    };
     private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
         ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
         : request.Number;

@@ -4,6 +4,7 @@
 .transfer-summary>div { padding:14px 16px; border:1px solid var(--line); border-radius:13px; background:var(--panel); display:grid; gap:4px; }
 .transfer-summary span { color:var(--muted); font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }
 .transfer-summary strong { font:700 .92rem 'DM Sans'; color:var(--text); }
+.transfer-summary small { color:var(--muted); font-size:.75rem; }
 .transfer-summary .route { color:#f2bd68; }
 .note-box { margin:0 0 18px; padding:12px 14px; border-left:3px solid var(--cyan); background:rgba(134,197,193,0.12); color:#d5efec; font-size:.86rem; }
 .note-box span { display:block; margin-bottom:3px; color:var(--cyan); font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }

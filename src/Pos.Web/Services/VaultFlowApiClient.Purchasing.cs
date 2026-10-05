@@ -68,8 +68,10 @@ public sealed partial class VaultFlowApiClient
         => GetAsync<PosGoodsReceipt>(OrderPath(orderId, FormattableString.Invariant($"receipts/{receiptId:D}")), cancellationToken);
 
     /// <summary>Lists the suppliers the signed-in user may buy from.</summary>
-    public Task<ApiResult<List<PosSupplier>>> GetSuppliersAsync(CancellationToken cancellationToken)
-        => GetAsync<List<PosSupplier>>("/api/v1/catalog/suppliers", cancellationToken);
+    public Task<ApiResult<List<PosSupplier>>> GetSuppliersAsync(CancellationToken cancellationToken, bool includeInactive = false)
+        => GetAsync<List<PosSupplier>>(
+            includeInactive ? "/api/v1/catalog/suppliers?includeInactive=true" : "/api/v1/catalog/suppliers",
+            cancellationToken);
 
     /// <summary>Searches the catalogue for products to order.</summary>
     public Task<ApiResult<List<PosOrderableProduct>>> GetOrderableProductsAsync(

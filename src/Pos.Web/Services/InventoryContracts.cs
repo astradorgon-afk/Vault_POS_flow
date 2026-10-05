@@ -110,6 +110,9 @@ public sealed record PosTransferDetail(
     string Kind,
     string Mode,
     string? ReviewNote,
+    Guid? ApprovedByUserId,
+    string? ApprovedByDisplayName,
+    DateTimeOffset? ApprovedAtUtc,
     IReadOnlyList<PosTransferLineView> Lines);
 
 /// <summary>One line of a transfer detail.</summary>

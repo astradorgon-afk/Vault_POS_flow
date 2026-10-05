@@ -41,6 +41,8 @@
 .restock-row > div { display: grid; gap: 4px; flex: 1; min-width: 0; }
 .restock-row strong { color: var(--ink); font: 700 .9rem 'Manrope', sans-serif; }
 .restock-row small { color: var(--muted); font-size: .76rem; }
+.restock-row small.restock-row-hint { color: var(--forest); font-weight: 700; }
+.restock-row-action { color: var(--forest); font-size: .76rem; font-weight: 800; white-space: nowrap; }
 .restock-status { padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 99px; background: #f1f3ef; color: #53635a; font-size: .72rem; font-weight: 800; white-space: nowrap; }
 .restock-status.pending { border-color: #ebd3a0; background: #fff6dc; color: #8a5a16; }
 .restock-message { padding: 12px 15px; border-left: 3px solid var(--forest); border-radius: 5px; background: var(--mint-soft); color: var(--forest); font-size: .86rem; }

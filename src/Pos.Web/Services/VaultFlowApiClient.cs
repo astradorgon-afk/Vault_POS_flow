@@ -144,6 +144,13 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
             FormattableString.Invariant($"/api/v1/dashboard/store-performance?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
             cancellationToken);
 
+    /// <summary>Gets dispatched product movement and restock requests for each store over a business-date period.</summary>
+    public Task<ApiResult<PosStoreMovementReport>> GetStoreMovementsAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken)
+        => GetAsync<PosStoreMovementReport>(
+            FormattableString.Invariant($"/api/v1/dashboard/store-movements?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
+            cancellationToken);
+
     /// <summary>Finds one page of a store's sales in a business-date window, newest
     /// first, with the total that matched so a list can page through all of them.
     /// Pass a store the operator may operate; the API re-checks <c>sale.view</c>.</summary>
@@ -204,7 +211,9 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     public Task<ApiResult<PosInventoryOverview>> GetInventoryOverviewAsync(
         CancellationToken cancellationToken)
         => GetAsync<PosInventoryOverview>(
-            "/api/v1/dashboard/inventory-overview", cancellationToken);
+            session.WorkLocationId is { } locationId
+                ? FormattableString.Invariant($"/api/v1/dashboard/inventory-overview?locationId={locationId:D}")
+                : "/api/v1/dashboard/inventory-overview", cancellationToken);
 
     /// <summary>Gets open synchronization failures for authorized operators.</summary>
     public Task<ApiResult<List<PosSyncFailure>>> GetSyncFailuresAsync(

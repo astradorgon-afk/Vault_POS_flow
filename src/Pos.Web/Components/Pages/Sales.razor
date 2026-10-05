@@ -153,10 +153,9 @@ else
             return;
         }
 
-        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
         locations.AddRange(response.Value.Where(location =>
             location.Kind == 1 &&
-            (Session.Current?.User.HasAllLocations == true || assigned.Contains(location.Id))));
+            Session.CanUseInventoryLocation(location.Id)));
         selectedLocationId = locations.Count == 1 ? locations[0].Id : null;
         if (locations.Count == 0)
         {

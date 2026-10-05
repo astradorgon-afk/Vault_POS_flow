@@ -22,6 +22,10 @@
                 <small>@Notifications.UnreadCount</small>
             }
         </NavLink>
+        @if (CanViewAudit)
+        {
+            <NavLink class="nav-link" href="admin/audit" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Activity log</span></NavLink>
+        }
     </div>
 
     @if (CanViewInventory || CanViewTransfers || CanReceivePurchasing || CanViewExceptions)
@@ -60,13 +64,16 @@
         </div>
     }
 
-    @if (CanViewSales || CanViewReports)
+    @if (CanViewTransfers || CanViewSales || CanViewReports)
     {
         <div class="nav-group">
             <span class="nav-heading">Stores</span>
+            @if (CanViewTransfers)
+            {
+                <NavLink class="nav-link" href="stores" @onclick="NotifyNavigation"><AppIcon Name="location" /> <span>Store movement</span></NavLink>
+            }
             @if (CanViewSales)
             {
-                <NavLink class="nav-link" href="stores" @onclick="NotifyNavigation"><AppIcon Name="coins" /> <span>Store performance</span></NavLink>
                 <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
                 <NavLink class="nav-link" href="analytics/products" @onclick="NotifyNavigation"><AppIcon Name="trend-up" /> <span>Product analytics</span></NavLink>
             }
@@ -85,7 +92,7 @@
         </div>
     }
 
-    @if (CanViewLocations || CanViewAdministration || CanManageDevices || CanManageSync)
+    @if (CanViewLocations || CanViewAdministration || CanManageDevices || CanManageSync || CanViewAudit)
     {
         <div class="nav-group">
             <span class="nav-heading">Administration</span>
@@ -128,9 +135,11 @@
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
     private bool CanApproveRestock => Session.HasPermission("transfer.approve") &&
         Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
-    private bool CanRequestRestock => Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view");
-    private bool CanFulfillRestock => Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch") &&
-        Session.Current?.User.Roles.Contains("MainInventoryManager", StringComparer.Ordinal) == true;
+    private bool CanRequestRestock => Session.WorkLocationKind == 1 &&
+        Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view");
+    private bool CanFulfillRestock => Session.WorkLocationKind == 0 &&
+        Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch") &&
+        Session.Current?.User.Roles.Any(role => role is "MainInventoryManager" or "InventoryStaff") == true;
     private bool CanViewPurchasing => Session.HasPermission("purchase.view") &&
         Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
     private bool CanReceivePurchasing => Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive");
@@ -140,6 +149,8 @@
     private bool CanManageDevices => Session.HasPermission("device.manage");
     private bool CanManageSync => Session.HasPermission("sync.manage");
     private bool CanViewAdministration => Session.HasAnyPermission("user.manage", "role.manage");
+    private bool CanViewAudit => Session.HasPermission("audit.view") ||
+        Session.Current?.User.Roles.Any(role => role is "Owner" or "Administrator") == true;
 
     private Task NotifyNavigation() => OnNavigate.InvokeAsync();
 

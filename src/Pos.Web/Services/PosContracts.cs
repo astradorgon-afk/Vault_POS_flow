@@ -451,6 +451,28 @@ public sealed record PosPermissionView(
     bool IsReadOnly,
     bool IsPrivileged);
 
+/// <summary>A page of filtered business audit activity.</summary>
+public sealed record PosAuditLogPage(IReadOnlyList<PosAuditLogItem> Items, int Total, int Offset, int Limit);
+
+/// <summary>One recorded activity entry.</summary>
+public sealed record PosAuditLogItem(
+    Guid Id,
+    DateTimeOffset OccurredAtUtc,
+    string Action,
+    string EntityType,
+    string? RecordSummary,
+    Guid? EntityId,
+    Guid? UserId,
+    string ActorName,
+    string? RoleSnapshot,
+    string? LocationName,
+    string? Reason,
+    string? ReferenceDocumentType,
+    Guid? ReferenceDocumentId,
+    string? PreviousValueJson,
+    string? NewValueJson,
+    Guid CorrelationId);
+
 // ---- Devices ----
 
 /// <summary>A registered terminal as shown in the fleet console.</summary>
@@ -629,6 +651,56 @@ public sealed record PosStoreDailySales(DateOnly Date, decimal NetSales, int Tra
 
 /// <summary>One of a store's best sellers over the period.</summary>
 public sealed record PosStoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);
+
+/// <summary>Every store's dispatched product movement and restock requests.</summary>
+public sealed record PosStoreMovementReport(
+    DateOnly From,
+    DateOnly To,
+    int DispatchedTransferCount,
+    IReadOnlyList<PosStoreMovement> Stores,
+    IReadOnlyList<PosStoreMovementActivity> RecentActivity);
+
+/// <summary>A store's incoming and outgoing dispatched quantities and requests.</summary>
+public sealed record PosStoreMovement(
+    Guid LocationId,
+    string Code,
+    string Name,
+    decimal IncomingUnits,
+    int InboundTransfers,
+    decimal OutgoingUnits,
+    int OutboundTransfers,
+    int RestockRequests,
+    int PendingApprovalRequests,
+    int AwaitingDispatchRequests,
+    DateTimeOffset? LastIncomingAtUtc,
+    DateTimeOffset? LastOutgoingAtUtc,
+    IReadOnlyList<PosStoreMovementItem> RecentItems,
+    IReadOnlyList<PosStoreMovementChartPoint> DailyMovement);
+
+/// <summary>A product line from a recent store request or completed movement.</summary>
+public sealed record PosStoreMovementItem(
+    string ProductName,
+    string Reference,
+    string Direction,
+    decimal Units,
+    DateTimeOffset OccurredAtUtc);
+
+/// <summary>One of seven buckets across a selected movement period.</summary>
+public sealed record PosStoreMovementChartPoint(
+    int Bucket,
+    decimal IncomingUnits,
+    decimal OutgoingUnits);
+
+/// <summary>A restock request or dispatch in the selected period.</summary>
+public sealed record PosStoreMovementActivity(
+    Guid TransferId,
+    string Reference,
+    string Kind,
+    string Status,
+    string SourceLocationName,
+    string DestinationLocationName,
+    decimal ProductUnits,
+    DateTimeOffset OccurredAtUtc);
 
 /// <summary>A location's stock per product, scarcest first.</summary>
 public sealed record PosStockLevelReport(

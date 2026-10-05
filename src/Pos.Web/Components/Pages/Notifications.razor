@@ -4,6 +4,7 @@
 @implements IDisposable
 @using System.Globalization
 @inject NotificationStore Store
+@inject UserSession Session
 @inject VaultFlowApiClient Api
 @inject NavigationManager Navigation
 
@@ -162,7 +163,7 @@
                 DateRange.Month => DateTimeOffset.UtcNow.AddDays(-30),
                 _ => null,
             };
-            return Store.Items.Where(item => since is null || item.CreatedAtUtc >= since);
+            return Store.Items.Where(item => item.LocationId == Session.WorkLocationId && (since is null || item.CreatedAtUtc >= since));
         }
     }
 

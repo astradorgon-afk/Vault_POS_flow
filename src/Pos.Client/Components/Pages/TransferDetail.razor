@@ -55,6 +55,14 @@ else
         <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
         <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
         <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
+        <div>
+            <span>Approved by</span>
+            <strong>@(detail.ApprovedByDisplayName ?? (detail.ApprovedByUserId is null ? "Not approved" : "Unknown user"))</strong>
+            @if (detail.ApprovedAtUtc is { } approvedAt)
+            {
+                <small>@approvedAt.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</small>
+            }
+        </div>
         <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
         <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
     </section>
@@ -67,11 +75,11 @@ else
     <section class="lines-panel">
         <div class="lines-title">
             <strong>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</strong>
-            <span>Picked quantities are what the source actually sent; the difference shows up as a discrepancy when you count the boxes.</span>
+            <span>Picked shows the warehouse count; Dispatched shows what actually left the source. The difference shows up as a discrepancy when you count the boxes.</span>
         </div>
         <table class="sales-table counts-table">
             <thead>
-                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th><th>State</th></tr>
+                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Dispatched</th><th>Received</th><th>Damaged</th><th>State</th></tr>
             </thead>
             <tbody>
                 @foreach (PosTransferLineView line in detail.Lines)
@@ -81,6 +89,7 @@ else
                         <td><strong>@(line.ProductName ?? "Unknown product")</strong></td>
                         <td>@Quantity(line.RequestedQuantity)</td>
                         <td>@Quantity(line.PickedQuantity)</td>
+                        <td>@(detail.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity))</td>
                         <td>@Quantity(line.ReceivedQuantity)</td>
                         <td>@Quantity(line.DamagedQuantity)</td>
                         <td>

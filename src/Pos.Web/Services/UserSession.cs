@@ -6,11 +6,14 @@ public sealed class UserSession
     /// <summary>Gets the current sign-in response.</summary>
     public SignInResponse? Current { get; private set; }
 
-    /// <summary>The optional work location chosen during sign-in.</summary>
+    /// <summary>The work location chosen during sign-in.</summary>
     public Guid? WorkLocationId { get; private set; }
 
     /// <summary>The name shown for the chosen work location.</summary>
     public string? WorkLocationName { get; private set; }
+
+    /// <summary>The kind of location chosen during sign-in (0 main warehouse, 1 store).</summary>
+    public int? WorkLocationKind { get; private set; }
 
     /// <summary>Gets whether the access token is still usable.</summary>
     public bool IsAuthenticated => Current is { } current && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow;
@@ -27,11 +30,15 @@ public sealed class UserSession
     public bool HasAnyPermission(params string[] permissions)
         => permissions.Any(HasPermission);
 
-    /// <summary>Limits web inventory views to assigned locations, except location administrators.</summary>
+    /// <summary>Business administrators may open the workspace without choosing one location.</summary>
+    public bool CanWorkAcrossLocations
+        => Current?.User.HasAllLocations == true && HasPermission("location.manage");
+
+    /// <summary>Limits operational views to the signed-in work location.</summary>
     public bool CanUseInventoryLocation(Guid locationId)
         => Current is { } current &&
-           (current.User.Locations.Contains(locationId) ||
-            current.User.HasAllLocations && HasPermission("location.manage"));
+           (WorkLocationId is { } chosen ? chosen == locationId : CanWorkAcrossLocations) &&
+           (current.User.Locations.Contains(locationId) || CanWorkAcrossLocations);
 
     /// <summary>Replaces the current session.</summary>
     public void Set(SignInResponse response)
@@ -40,19 +47,22 @@ public sealed class UserSession
         Current = response;
         WorkLocationId = null;
         WorkLocationName = null;
+        WorkLocationKind = null;
     }
 
     /// <summary>Sets an optional starting location within the signed-in user's scope.</summary>
-    public bool SetWorkLocation(Guid? locationId, string? name = null)
+    public bool SetWorkLocation(Guid? locationId, string? name = null, int? kind = null)
     {
-        if (locationId is { } id &&
-            (Current is null || !Current.User.HasAllLocations && !Current.User.Locations.Contains(id)))
+        if (Current is not { } current ||
+            (locationId is { } id && !current.User.HasAllLocations && !current.User.Locations.Contains(id)) ||
+            (locationId is null && !CanWorkAcrossLocations))
         {
             return false;
         }
 
         WorkLocationId = locationId;
         WorkLocationName = locationId is null ? null : name;
+        WorkLocationKind = locationId is null ? null : kind;
         return true;
     }
 
@@ -62,6 +72,7 @@ public sealed class UserSession
         Current = null;
         WorkLocationId = null;
         WorkLocationName = null;
+        WorkLocationKind = null;
     }
 }
 
