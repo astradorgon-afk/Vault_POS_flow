@@ -33,8 +33,8 @@ else if (timeline is not null)
             {
                 <article class="timeline-event">
                     <div class="timeline-pin" aria-hidden="true"></div>
-                    <header><div><span>@group.MovementType</span><h2>@group.ReferenceNumber</h2></div><time datetime="@group.RecordedAtUtc.ToString("O")">@group.RecordedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</time></header>
-                    <p class="timeline-occurred">Occurred @group.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) · group @group.MovementGroupId</p>
+                    <header><div><span>@group.MovementType</span><h2>@group.ReferenceNumber</h2></div><time datetime="@group.RecordedAtUtc.ToString("O")">@group.RecordedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</time></header>
+                    <p class="timeline-occurred">Occurred @group.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) · group @group.MovementGroupId</p>
                     <div class="timeline-legs">
                         @foreach (PosInventoryTimelineLeg leg in group.Legs)
                         {

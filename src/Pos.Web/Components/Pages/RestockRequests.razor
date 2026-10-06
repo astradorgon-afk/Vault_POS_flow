@@ -79,7 +79,7 @@
                 @foreach (PosTransferSummary request in requests)
                 {
                     <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
-                        <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></div>
+                        <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></div>
                         <span class="restock-status">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
                     </a>
                 }
@@ -107,6 +107,18 @@
     private bool loading = true;
     private bool loadingRequests;
     private bool sending;
+
+    [SupplyParameterFromQuery(Name = "store")]
+    private Guid? PrefillStoreId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "product")]
+    private Guid? PrefillProductId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "quantity")]
+    private decimal? PrefillQuantity { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sku")]
+    private string? PrefillSku { get; set; }
 
     private List<PosProductSummary> Matches => [.. products
         .Where(product => product.IsActive && !draft.Any(line => line.Product.Id == product.Id) &&
@@ -137,6 +149,27 @@
                 if (!page.IsSuccess || page.Value is null) { message ??= page.Error ?? "Products could not be loaded."; break; }
                 products.AddRange(page.Value);
                 if (page.Value.Count < 200) { break; }
+            }
+            if (PrefillStoreId is { } storeId && stores.Any(store => store.Id == storeId))
+            {
+                selectedStoreId = storeId;
+            }
+            if (PrefillProductId is { } productId && !products.Any(product => product.Id == productId) && !string.IsNullOrWhiteSpace(PrefillSku))
+            {
+                ApiResult<List<PosProductSummary>> match = await Api.GetProductsAsync(PrefillSku, 0, 20, CancellationToken.None);
+                if (match.IsSuccess && match.Value is not null)
+                {
+                    products.AddRange(match.Value.Where(product => products.All(existing => existing.Id != product.Id)));
+                }
+            }
+            if (PrefillProductId is { } selectedProductId && products.FirstOrDefault(product => product.Id == selectedProductId && product.IsActive) is { } product)
+            {
+                AddProduct(product);
+                draft[^1].Quantity = PrefillQuantity is > 0m and { } quantity ? quantity : 1m;
+            }
+            else if (PrefillProductId is not null)
+            {
+                message ??= "The suggested product could not be loaded. Search for it before sending this request.";
             }
             await LoadRequestsAsync();
         }

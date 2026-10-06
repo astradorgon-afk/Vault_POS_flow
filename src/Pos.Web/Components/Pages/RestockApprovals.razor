@@ -36,7 +36,7 @@
                 @foreach (PosTransferSummary request in Visible)
                 {
                     <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
-                        <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
+                        <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
                         <span class="restock-status @(request.Status is "Submitted" or "InReview" ? "pending" : "")">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
                     </a>
                 }

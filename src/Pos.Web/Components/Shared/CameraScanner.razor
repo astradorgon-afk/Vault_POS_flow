@@ -1,0 +1,306 @@
+@using Pos.Shared.Scanning
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ScanRouter Router
+
+<div class="camera-scanner">
+    @if (!cameraOpen)
+    {
+        <button type="button" class="camera-open" disabled="@(!Enabled)" @onclick="OpenCameraAsync">Scan with camera</button>
+    }
+    else
+    {
+        <div class="camera-panel">
+            <div class="camera-panel-head">
+                <strong>Camera barcode scanner</strong>
+                <button type="button" @onclick="CloseCameraAsync">Stop camera</button>
+            </div>
+            <video @ref="videoElement" autoplay muted playsinline aria-label="Live camera view for barcode scanning"></video>
+            <p role="status">@(starting ? "Starting camera…" : lastCode is null ? "Hold the full barcode steady and close enough to fill the view. Avoid glare." : $"Scanned {lastCode}. Show a different barcode or choose Scan same again.")</p>
+            @if (!starting && (cameras.Count > 1 || canTorch || CanZoom))
+            {
+                <div class="camera-tools">
+                    @if (cameras.Count > 1)
+                    {
+                        <label>Camera
+                            <select value="@selectedDeviceId" @onchange="ChangeCameraAsync">
+                                @foreach (CameraDevice camera in cameras)
+                                {
+                                    <option value="@camera.Id">@camera.Label</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (canTorch)
+                    {
+                        <button type="button" @onclick="ToggleTorchAsync">@(torchOn ? "Turn light off" : "Turn light on")</button>
+                    }
+                    @if (CanZoom)
+                    {
+                        <div class="camera-zoom" aria-label="Camera zoom">
+                            <button type="button" aria-label="Zoom out" disabled="@(zoom <= minZoom)" @onclick="() => ChangeZoomAsync(-1)">−</button>
+                            <span>@zoom?.ToString("0.#")×</span>
+                            <button type="button" aria-label="Zoom in" disabled="@(zoom >= maxZoom)" @onclick="() => ChangeZoomAsync(1)">+</button>
+                        </div>
+                    }
+                </div>
+            }
+            @if (lastCode is not null)
+            {
+                <button type="button" class="camera-repeat" @onclick="ScanSameAgainAsync">Scan same again</button>
+            }
+        </div>
+    }
+    @if (error is not null)
+    {
+        <p class="camera-error" role="alert">@error</p>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    private ElementReference videoElement;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<CameraScanner>? self;
+    private bool cameraOpen;
+    private bool starting;
+    private bool pendingStart;
+    private string? lastCode;
+    private string? error;
+    private readonly List<CameraDevice> cameras = [];
+    private string? selectedDeviceId;
+    private bool canTorch;
+    private bool torchOn;
+    private double? minZoom;
+    private double? maxZoom;
+    private double? zoom;
+    private bool CanZoom => minZoom is not null && maxZoom > minZoom && zoom is not null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Enabled && cameraOpen)
+        {
+            await CloseCameraAsync();
+        }
+    }
+
+    private Task OpenCameraAsync()
+    {
+        if (!Enabled)
+        {
+            return Task.CompletedTask;
+        }
+
+        error = null;
+        lastCode = null;
+        selectedDeviceId = null;
+        cameraOpen = true;
+        starting = true;
+        pendingStart = true;
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!cameraOpen || !pendingStart)
+        {
+            return;
+        }
+
+        pendingStart = false;
+        await StartCameraAsync();
+    }
+
+    private async Task StartCameraAsync()
+    {
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/camera-scanner.js?v=3");
+            self ??= DotNetObjectReference.Create(this);
+            CameraStartResult result = await module.InvokeAsync<CameraStartResult>("start", videoElement, self, selectedDeviceId);
+            if (result.Error is not null)
+            {
+                error = result.Error;
+                cameraOpen = false;
+            }
+            else
+            {
+                cameras.Clear();
+                cameras.AddRange(result.Cameras);
+                selectedDeviceId = result.SelectedDeviceId;
+                canTorch = result.CanTorch;
+                torchOn = false;
+                minZoom = result.MinZoom;
+                maxZoom = result.MaxZoom;
+                zoom = result.Zoom;
+            }
+        }
+        catch (JSException)
+        {
+            error = "The camera could not start. Check camera permission and try again.";
+            cameraOpen = false;
+        }
+        catch (JSDisconnectedException)
+        {
+            cameraOpen = false;
+        }
+        finally
+        {
+            starting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnCameraBarcode(string raw)
+    {
+        if (!cameraOpen || !Enabled)
+        {
+            return;
+        }
+
+        string code = BarcodeText.Clean(raw);
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        bool claimed = await Router.DispatchAsync(new BarcodeScan(code, ScanSource.Camera, DateTimeOffset.UtcNow));
+        lastCode = code;
+        if (!claimed)
+        {
+            error = "No product field is ready for this scan.";
+        }
+        else
+        {
+            error = null;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ScanSameAgainAsync()
+    {
+        if (module is null || !cameraOpen)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("rearm", videoElement);
+        lastCode = null;
+    }
+
+    private async Task ChangeCameraAsync(ChangeEventArgs change)
+    {
+        if (module is null || !cameraOpen || starting || change.Value is not string deviceId)
+        {
+            return;
+        }
+
+        selectedDeviceId = deviceId;
+        starting = true;
+        lastCode = null;
+        error = null;
+        await StartCameraAsync();
+    }
+
+    private async Task ToggleTorchAsync()
+    {
+        if (module is null || !cameraOpen)
+        {
+            return;
+        }
+
+        bool enabled = !torchOn;
+        if (await module.InvokeAsync<bool>("setTorch", videoElement, enabled))
+        {
+            torchOn = enabled;
+            error = null;
+        }
+        else
+        {
+            error = "This camera could not change its light setting.";
+        }
+    }
+
+    private async Task ChangeZoomAsync(int direction)
+    {
+        if (module is null || !cameraOpen || !CanZoom)
+        {
+            return;
+        }
+
+        double desired = Math.Clamp(zoom!.Value + direction * 0.5, minZoom!.Value, maxZoom!.Value);
+        double? actual = await module.InvokeAsync<double?>("setZoom", videoElement, desired);
+        if (actual is not null)
+        {
+            zoom = actual;
+            error = null;
+        }
+        else
+        {
+            error = "This camera could not change its zoom setting.";
+        }
+    }
+
+    private async Task CloseCameraAsync()
+    {
+        if (module is not null)
+        {
+            try
+            {
+                await module.InvokeVoidAsync("stop", videoElement);
+            }
+            catch (JSDisconnectedException)
+            {
+                // Navigation can disconnect the circuit while the camera closes.
+            }
+        }
+
+        cameraOpen = false;
+        starting = false;
+        pendingStart = false;
+        lastCode = null;
+        cameras.Clear();
+        canTorch = false;
+        torchOn = false;
+        minZoom = maxZoom = zoom = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await CloseCameraAsync();
+        if (module is not null)
+        {
+            try
+            {
+                await module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The page is already gone.
+            }
+        }
+
+        self?.Dispose();
+    }
+
+    public sealed class CameraStartResult
+    {
+        public string? Error { get; set; }
+        public List<CameraDevice> Cameras { get; set; } = [];
+        public string? SelectedDeviceId { get; set; }
+        public bool CanTorch { get; set; }
+        public double? MinZoom { get; set; }
+        public double? MaxZoom { get; set; }
+        public double? Zoom { get; set; }
+    }
+
+    public sealed class CameraDevice
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+    }
+}

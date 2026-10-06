@@ -35,7 +35,7 @@
                 bool ready = order.Status is "Ordered" or "PartiallyReceived";
                 <a class="receiving-row" href="@($"/receiving/{order.Id:D}")" @key="order.Id">
                     <span class="receiving-row-mark" aria-hidden="true">↘</span>
-                    <span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@LocationName(order.DestinationLocationId) · @order.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></span>
+                    <span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@LocationName(order.DestinationLocationId) · @order.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></span>
                     <span class="receiving-state @(ready ? "ready" : "")">@(ready ? "Ready to receive" : SplitWords(order.Status))</span>
                     <span class="receiving-row-arrow" aria-hidden="true">→</span>
                 </a>

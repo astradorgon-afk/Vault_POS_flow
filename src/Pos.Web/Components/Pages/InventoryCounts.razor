@@ -97,13 +97,7 @@ else
                     <input type="text" @bind="openNote" placeholder="Optional" />
                 </label>
             </div>
-            @if (selectedKind == 4)
-            {
-                <div class="open-count-hint" role="note">
-                    Product-specific sheets need a product picker, which lands in a later build. Open a category or full count instead.
-                </div>
-            }
-            else if (selectedKind is 2 or 3 && CategoryOptions.Count == 0)
+            @if (selectedKind is 2 or 3 && CategoryOptions.Count == 0)
             {
                 <div class="open-count-hint" role="note">
                     The catalogue is unavailable to this account, so category (and cycle) counts cannot be scoped here. Use a full count instead.
@@ -137,13 +131,13 @@ else
                     @foreach (PosInventoryCountSummary count in counts)
                     {
                         <tr class="office-row-click" @key="count.Id" @onclick="() => OpenCount(count.Id)">
-                            <td class="sale-number">@count.Number</td>
+                            <td class="sale-number"><a href="@($"/inventory/counts/{count.Id:D}")" @onclick:stopPropagation="true">@count.Number</a></td>
                             <td>@SplitWords(count.Kind)</td>
                             <td><span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span></td>
                             <td>@count.CountedLines / @count.Lines</td>
                             <td>@Money(count.TotalAbsoluteVarianceValue)</td>
-                            <td>@count.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td>@(count.PostedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td>@count.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@(count.PostedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                         </tr>
                     }
                 </tbody>
@@ -158,7 +152,6 @@ else
     private const int KindFullPhysical = 1;
     private const int KindCycle = 2;
     private const int KindCategory = 3;
-    private const int KindProductSpecific = 4;
 
     private static readonly string[] StatusNames = ["Counting", "PendingApproval", "Posted", "Cancelled"];
 
@@ -169,7 +162,6 @@ else
         new(KindFullPhysical, "Full physical"),
         new(KindCycle, "Cycle (by category)"),
         new(KindCategory, "Category"),
-        new(KindProductSpecific, "Product-specific"),
     ];
 
     private readonly List<PosLocation> locations = [];
@@ -195,7 +187,6 @@ else
 
     private bool CanOpenCount =>
         selectedLocationId is not null &&
-        selectedKind != KindProductSpecific &&
         (selectedKind is KindCycle or KindCategory
             ? selectedCategoryId is not null
             : true);

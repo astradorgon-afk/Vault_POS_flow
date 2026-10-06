@@ -88,6 +88,54 @@ dotnet user-secrets set 'ConnectionStrings:Postgres' `
 
 The API applies migrations and seeds the development users on first start.
 
+## Test web camera scanning on Android
+
+For the simplest phone test, keep the local API and Web UI running, start the
+Docker ngrok tunnel, and open the printed HTTPS URL on the phone:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-phone-ngrok.ps1
+```
+
+On first use, the script asks for an ngrok authtoken and saves it in the ignored
+`.secrets/ngrok.env` file. The token is never passed on the Docker command line.
+The phone can use any internet connection; it needs no local CA certificate or
+Windows inbound firewall rule. Continue past ngrok's one-time browser notice,
+sign in, and tap **Scan with camera** on the purchase order or receiving page.
+The tunnel exposes this development site to the internet while it runs; stop it
+after testing with `docker stop vaultflow-phone-ngrok`.
+
+The LAN-only Caddy option below remains available if a public tunnel is not
+suitable:
+
+Camera access needs a trusted HTTPS page when a phone uses this computer's LAN
+address. With the API and Web UI running, connect the phone to the same Wi-Fi
+and run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-phone-https.ps1
+```
+
+The script prints the current LAN address. On the phone, download the public
+certificate from `http://<printed-ip>:8445/phone-ca.crt`. In Android Settings,
+search for **Install a certificate**, choose **CA certificate**, and select the
+downloaded file. Then open `https://<printed-ip>:8444` in Chrome, sign in, and
+use **Scan with camera**. The private signing key stays in the local Docker
+volume; only the public certificate is downloadable. You can transfer the
+`.secrets/vaultflow-phone-ca.crt` file by USB instead of downloading it over
+the LAN.
+
+If either address times out on the phone, run the relevant `New-NetFirewallRule`
+commands printed by the script in an Administrator PowerShell, then retry on
+the same Wi-Fi. The script detects whether Windows labels that Wi-Fi **Public**
+or **Private** and restricts the rules to the local subnet. The HTTPS app uses
+port 8444 because port 8443 timed out on the test Android phone while HTTP on
+8444 worked. Do not continue past a browser certificate warning: the phone
+must trust the installed CA before camera access can work. Remove the
+**VaultFlow local/Caddy** CA from Android's user-installed certificates after
+testing; a trusted CA can validate other sites too. Stop the proxy with
+`docker stop vaultflow-phone-https` when finished.
+
 ## Run the desktop register (Windows)
 
 The desktop register is the .NET MAUI Blazor Hybrid app in `src/Pos.Client`. It

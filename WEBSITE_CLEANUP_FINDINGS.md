@@ -1,0 +1,87 @@
+# Website cleanup findings
+
+## Audit scope
+
+Source review of all 31 routes in `src/Pos.Web/Components/Pages`, the shared navigation and layout, and the main inventory, purchasing, sales, and administration workflows. Findings below are limited to the most consequential issues supported by the current UI code. No browser session or role-specific live walkthrough was available, so visual appearance and runtime outcomes still need confirmation before implementation.
+
+## Prioritized findings
+
+### 1. Stock counts can submit older quantities — High
+
+- **Page/module:** Stock count detail (`/inventory/counts/{id}`).
+- **Problem:** `Submit for approval` calls `SubmitInventoryCountAsync` without saving current `gauges`. `Save counts` is a separate button, while both buttons are enabled by `HasDrafts`, which only checks for any populated count. See `src/Pos.Web/Components/Pages/InventoryCountDetail.razor:125`, `:128`, `:200`, `:357`, and `:372`.
+- **Why it affects usability:** A counter can change a quantity and submit, reasonably expecting the visible value to be reviewed. The submission uses the last saved server value; the page reload can then discard the latest edit.
+- **Recommended fix:** Track dirty lines. On submit, save dirty quantities first and submit only after a successful save. Show the saved/submitted state clearly and keep the actions disabled while either operation runs.
+- **Priority:** High.
+
+### 2. Transfer picking starts with unverified quantities — High
+
+- **Page/module:** Transfer detail, picking step (`/transfers/{id}`).
+- **Problem:** Each pick row is initialized with the full remaining requested quantity, and `Record picking` is enabled when any row is positive. The page says a first scan replaces the default with one. See `src/Pos.Web/Components/Pages/TransferDetail.razor:202`, `:217`, `:631`, `:639`, and `:789`.
+- **Why it affects usability:** An operator can record every requested item as picked without counting or scanning it, creating a misleading handoff before dispatch.
+- **Recommended fix:** Start unverified pick quantities blank or zero, or require an explicit per-line confirmation of the proposed full quantity. Keep scanning and manual entry as equivalent ways to confirm the actual pick.
+- **Priority:** High.
+
+### 3. Two receiving screens implement different versions of the same task — High
+
+- **Page/module:** Purchase order detail and Goods receiving detail (`/purchasing/{id}` and `/receiving/{id}`).
+- **Problem:** Both screens record a delivery. The purchase-order form includes line-by-line accounted status, scanning, quarantine for unexpected items, invoice unit cost, and physical-arrival confirmation; the dedicated receiving form uses a simpler set of quantity fields and adds manufactured date. See `src/Pos.Web/Components/Pages/PurchaseOrderDetail.razor:176` and `:294`, plus `src/Pos.Web/Components/Pages/GoodsReceivingDetail.razor:43` and `:50`.
+- **Why it affects usability:** Staff can reach the same operation through two different workflows and may miss a field or safeguard depending on the route. Maintaining two forms also risks further divergence.
+- **Recommended fix:** Choose one canonical receiving workflow and route both entry points to it. Reconcile the fields and safeguards first; preserve needed cost, batch, exception, and confirmation handling in one shared form.
+- **Priority:** High.
+
+### 4. Operational timestamps use different time zones — High
+
+- **Page/module:** Transfers, counts, receiving, restock, movement timeline, and related pages.
+- **Problem:** Several pages format timestamps with `ToLocalTime()`, while sales, purchase orders, and audit records use the explicit `InStoreTime()` helper. Compare `src/Pos.Web/Components/Pages/Transfers.razor:211`, `src/Pos.Web/Components/Pages/InventoryTimeline.razor:36`, `src/Pos.Web/Components/Pages/PurchaseOrders.razor:109`, and `src/Pos.Web/Services/StoreClock.cs:22`.
+- **Why it affects usability:** `ToLocalTime()` follows the web server's time zone. If the server is outside Asia/Manila, users see inconsistent times for related events and may misread the order of stock movements.
+- **Recommended fix:** Use the store/business time helper consistently for operational timestamps. Where a location has its own time zone, display that zone explicitly. Verify with a server configured outside Asia/Manila.
+- **Priority:** High.
+
+### 5. Core ledger rows are mouse-only navigation — Medium
+
+- **Page/module:** Sales, transfers, stock counts, and purchasing lists.
+- **Problem:** Sales, transfer, and count tables navigate only through `@onclick` on `<tr>`; purchase orders have a link in the first cell but also make the entire row clickable. See `src/Pos.Web/Components/Pages/Sales.razor:84`, `Transfers.razor:199`, `InventoryCounts.razor:139`, and `PurchaseOrders.razor:94`.
+- **Why it affects usability:** Keyboard users cannot open the first three lists through a normal focusable link. The interaction is also less discoverable than an explicit record link.
+- **Recommended fix:** Make the record number an actual `<a>` to its detail page on each list. Keep row-wide click only as an optional pointer shortcut.
+- **Priority:** Medium.
+
+### 6. Restock creation is duplicated across entry points — Medium
+
+- **Page/module:** Restock requests, Stock levels, and Transfers.
+- **Problem:** `RestockRequests` has a multi-product request form; Stock levels has a single-product `Request stock` form; Transfers has a separate transfer creation form. The first two independently perform create-then-submit for restock. See `src/Pos.Web/Components/Pages/RestockRequests.razor:153`, `src/Pos.Web/Components/Pages/StoreInventory.razor:135`, `:443`, and `src/Pos.Web/Components/Pages/Transfers.razor:54`.
+- **Why it affects usability:** The same store-supply intent has several labels and paths, with separate success and failure handling. Users must learn which entry point supports one product versus several.
+- **Recommended fix:** Keep contextual `Request stock` actions, but feed them into one restock request flow with product and store prefilled. Share the create-and-submit behavior and its draft-recovery message.
+- **Priority:** Medium.
+
+### 7. Transfer processing has avoidable handoff clicks — Medium
+
+- **Page/module:** Transfer detail, approval and fulfillment.
+- **Problem:** A submitted request must be marked `InReview` before the Approve/Reject actions appear. After picking, a separate `Mark ready for dispatch` action is required before Dispatch appears. See `src/Pos.Web/Components/Pages/TransferDetail.razor:150`, `:160`, `:222`, and `:458`.
+- **Why it affects usability:** Reviewers and warehouse staff must reopen or continue through multiple action panels for one decision or completed pick. The next action is hidden behind a status transition.
+- **Recommended fix:** Put the decision on the submitted request and offer review notes there. When picking is complete, offer a clear next action to dispatch while retaining any required audit states behind the workflow. Confirm business approval rules before combining server transitions.
+- **Priority:** Medium.
+
+### 8. The count-kind picker offers an unusable option — Medium
+
+- **Page/module:** Stock counts (`/inventory/counts`).
+- **Problem:** `Product-specific` appears in the Kind menu, but selecting it only shows a later-build message and `CanOpenCount` explicitly disables opening it. See `src/Pos.Web/Components/Pages/InventoryCounts.razor:100`, `:167`, and `:196`.
+- **Why it affects usability:** Users can spend time choosing a workflow that cannot proceed. The page exposes implementation status inside an operational task.
+- **Recommended fix:** Hide the option until the product picker is usable. If it must remain visible, disable it in the menu and label it unavailable before selection.
+- **Priority:** Medium.
+
+## Agent Handoff
+
+- **Areas already reviewed:** Route inventory for all 31 Blazor web pages; shared `MainLayout` and `NavMenu`; source-level walkthroughs of stock counts, transfers/restock, purchase orders/receiving, sales/reporting, store inventory, notifications, analytics, audit, devices, locations, people/roles, login, and sync failures.
+- **Cleanup completed:** Findings 1, 2, 4, 5, 6, and 8. Count submission now saves changed values first; pick quantities start at zero; web operational timestamps use `InStoreTime()`; sales, transfer, and count numbers are keyboard-accessible links; Stock levels opens the restock form with store/product/quantity prefilled instead of submitting independently; the unavailable count kind is hidden. The web project builds with zero warnings and errors using an isolated artifacts path.
+- **Camera scanning added after the audit:** The web app now has a `Scan with camera` action on product scan targets, including New purchase order and the dedicated Goods receiving form. In Goods receiving, each recognized scan adds one to the matching line's Arrived quantity up to the amount due. `CameraScanner.razor` sends decoded values through `ScanRouter` as `ScanSource.Camera`; `wwwroot/js/camera-scanner.js` loads a local ZXing Browser bundle only when opened. The same barcode needs an explicit `Scan same again` action to prevent accidental repeated counts. External scanners still work. The web project builds with zero warnings and errors; the local site on port 5215 was rebuilt and restarted. A real device and camera-permission test remains outstanding.
+- **Local run note:** `scripts/dev-desktop.ps1` owns the API process when it starts both services. Restarting the web process ended that script and stopped the API, causing a login error. The API was restarted separately on port 5177; `GET /health/live` returned `200 Healthy` and the web login page returned 200. Keep both processes running for the camera walkthrough.
+- **Camera read improvement:** A user confirmed the live picture opened but no barcode was decoded. `camera-scanner.js` now requests up to 1080p, retries decoding every 180 ms, limits decoding to product barcode formats, and requests continuous focus when the camera supports it. `CameraScanner.razor` exposes camera choice, light, and zoom only when supported, and its preview no longer crops the image. The site was rebuilt and restarted; the updated scanner script and API health endpoint both returned HTTP 200. Physical barcode recognition still needs a real camera test.
+- **Camera frame fix:** The user supplied a valid Code 128 image (`ABC-abc-1234`) and reported no scan response from the phone. An independent decoder read the image. A headless Chrome test using the exact image as a fake live camera feed reproduced the failure: ZXing Browser did not decode the full 960×540 video frame, although the same frame decoded after being scaled to 640 or 480 pixels wide. `wwwroot/js/camera-scanner.js` now reads scaled full and center-cropped frames in a paced loop while preserving camera choice, focus, light, zoom, duplicate protection, and cleanup. The component imports `?v=3` to avoid a stale phone cache. The fake live feed now produces `ABC-abc-1234` once, then again only after rearming; a second EAN-13 feed produces `5901234123457` likewise. The web build passed with zero warnings/errors, the site was restarted, and the public ngrok URL serves the new script. Physical Android testing remains outstanding. Decoding an unregistered barcode confirms the code but does not create a product; the product must have that barcode registered before an order line can be added.
+- **Android HTTPS setup:** `scripts/start-phone-https.ps1` starts a Caddy proxy at `https://<LAN-IP>:8444` for the existing Web UI and serves only the public local CA certificate at `http://<LAN-IP>:8445/phone-ca.crt`. `scripts/Caddyfile.phone` holds the proxy configuration; `docs/LOCAL_TESTING.md` records Android trust and cleanup steps. On this machine the current address is `192.168.1.12`; the proxy, web app, and API are running. A trusted-CA request to the HTTPS login page and camera script returned HTTP 200 from inside the proxy container, and the exported CA hash matches the live CA. The user still needs to install the CA on Android and verify camera scanning on the device.
+- **Phone connection follow-up:** Android Chrome timed out at `https://192.168.1.12:8443` but successfully downloaded the public CA over `http://192.168.1.12:8444/phone-ca.crt`. Thus the phone can reach the PC and port 8444 specifically. The proxy now serves HTTPS on port 8444 and the public CA download on port 8445, preserving the same CA in its Docker volume. Await the user's test of `https://192.168.1.12:8444` after installing the already downloaded CA. Windows Wi-Fi profile `hotspot` is **Public**; creating firewall rules from this session was denied without Administrator rights. The script prints Public-profile commands restricted to `LocalSubnet` if the new address times out. Port 8445 download from the phone is unverified; the user already has the cert from old port 8444.
+- **ngrok phone shortcut:** At the user's request, `scripts/start-phone-ngrok.ps1` now runs an ngrok Docker container for the local Web UI on port 5215. A manually started ngrok container already existed; its token was moved from its command argument into ignored `.secrets/ngrok.env`, and the old container was replaced with `vaultflow-phone-ngrok`. The container's diagnostics are bound only to `127.0.0.1:4041`. The live URL is `https://jokester-confider-handful.ngrok-free.dev/purchasing/new` (check the script's printed URL in future sessions). The app initially sent signed-out users to HTTP; `Pos.Web/Program.cs` now trusts forwarded HTTPS only from local host proxy addresses in Development and explicitly orders authentication after forwarded headers. The public purchase-order URL now redirects to an HTTPS login page (HTTP 200), and scanner JS returns HTTP 200. Normal phone browsers see ngrok's one-time notice. The Web UI, API, and ngrok container are running; the Caddy proxy was stopped. Android camera interaction and login through the tunnel still need a physical phone test. The existing ngrok token appeared in an earlier local diagnostic output and should be rotated in the ngrok dashboard; update `.secrets/ngrok.env` and recreate the container after rotation.
+- **Areas not yet reviewed:** Rendered desktop/mobile behavior, keyboard and screen-reader walkthroughs, role-specific navigation, end-to-end actions against a running API/database, and real phone/webcam camera behavior. Android HTTPS was verified from the host with the exported CA, but device trust and physical barcode reading remain unverified. The MAUI `Pos.Client` application is outside this website audit.
+- **Important findings still needing implementation:** Findings 3 and 7. Receiving has two forms with different fields and safeguards; `PurchaseOrderDetail` is Owner-only while `GoodsReceivingDetail` serves receiving staff, so redirecting one route to the other would remove access or behavior. Transfer review/ready steps remain separate until required approval and audit transitions are checked. The timestamp fix should be exercised with a server outside Asia/Manila.
+- **Recommended next task:** Reload the printed ngrok HTTPS URL on Android, allow camera access, and verify the camera says `Scanned ABC-abc-1234` for the supplied image. Then scan a barcode already registered to a product and confirm it adds an order line or receiving unit; if no products have assigned barcodes, register one first. Rotate the ngrok token after the device test. Then design one receiving form that preserves both role paths and all captured fields. Follow with a role-specific browser walkthrough of count submission, transfer picking, restock prefill, ledger links, and the approval/dispatch workflow.
+- **Files/modules already modified:** Web pages for stock counts, transfers, sales, store inventory, restock, receiving (including `GoodsReceivingDetail.razor` and its CSS), purchasing, and inventory timeline; `src/Pos.Web/Program.cs`, `src/Pos.Web/wwwroot/inventory-office.css`, and `src/Pos.Web/Components/App.razor`; `src/Pos.Shared/Scanning/BarcodeScan.cs`; new `src/Pos.Web/Components/Shared/CameraScanner.razor` and scoped CSS; new `src/Pos.Web/wwwroot/js/camera-scanner.js`; local ZXing bundle and license under `src/Pos.Web/wwwroot/lib/zxing`; new `scripts/Caddyfile.phone`, `scripts/start-phone-https.ps1`, and `scripts/start-phone-ngrok.ps1`; `docs/LOCAL_TESTING.md`; and this findings file. Other `.claude-flow` session/state changes are unrelated and were left alone.

@@ -309,6 +309,7 @@ else if (order is { } o)
             </div>
 
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
+            <CameraScanner Enabled="@(!busy)" />
             <p class="po-scan-hint">▥ @(scanNote ?? "Scan items as you unpack: each scan counts one more of that product.")</p>
             @if (quarantineLines.Count > 0)
             {

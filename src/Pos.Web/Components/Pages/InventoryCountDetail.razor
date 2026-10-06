@@ -32,7 +32,7 @@ else
         <div>
             <p class="office-kicker">Stock count · @StoreName(count.LocationId)</p>
             <h1 class="office-title">@count.Number</h1>
-            <p class="office-lead">@SplitWords(count.Kind) · @count.Lines line@(count.Lines == 1 ? "" : "s")@(count.PostedAtUtc is { } posted ? $" · posted {posted.ToLocalTime():MMM d, yyyy}" : "")</p>
+            <p class="office-lead">@SplitWords(count.Kind) · @count.Lines line@(count.Lines == 1 ? "" : "s")@(count.PostedAtUtc is { } posted ? $" · posted {posted.InStoreTime():MMM d, yyyy}" : "")</p>
         </div>
         <span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span>
     </div>
@@ -48,8 +48,8 @@ else
     }
 
     <section class="count-meta">
-        <span><strong>Snapshot</strong>@detail.SnapshotTakenAtUtc.ToLocalTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)</span>
-        <span><strong>Created</strong>@detail.Count.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
+        <span><strong>Snapshot</strong>@detail.SnapshotTakenAtUtc.InStoreTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)</span>
+        <span><strong>Created</strong>@detail.Count.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
         @if (detail.SubmittedByUserId is { })
         {
             <span><strong>Submitted</strong>yes</span>
@@ -71,6 +71,7 @@ else
     @if (IsCounting && CanCount)
     {
         <ScanTarget OnScan="OnScannedAsync" />
+        <CameraScanner Enabled="@(!busy)" />
         <div class="scan-strip" role="status">
             <span class="scan-strip-mark" aria-hidden="true">▥</span>
             <span>@(scanNote ?? "Scan items to count them: each scan adds one to that product.")</span>
@@ -112,7 +113,7 @@ else
                         <td class="@VarianceTone(VarianceOf(line))">@(VarianceOf(line) is { } variance ? $"{variance:+#.###;-#.###;0}" : "—")</td>
                         <td class="sheet-number">@line.UnitCost.ToString("C", CultureInfo.GetCultureInfo("en-PH"))</td>
                         <td class="sheet-number">@(ValueOf(line) is { } value ? value.ToString("C", CultureInfo.GetCultureInfo("en-PH")) : "—")</td>
-                        <td class="sheet-muted">@(line.CountedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td class="sheet-muted">@(line.CountedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                     </tr>
                 }
             </tbody>
@@ -122,7 +123,7 @@ else
     <section class="sheet-actions">
         @if (IsCounting && CanCount)
         {
-            <button type="button" class="action-button primary" @onclick="SaveCountsAsync" disabled="@(busy || !HasDrafts)">
+            <button type="button" class="action-button primary" @onclick="SaveCountsAsync" disabled="@(busy || !HasUnsavedCounts)">
                 @(busy ? "Saving…" : "Save counts")
             </button>
             <button type="button" class="action-button" @onclick="SubmitAsync" disabled="@(busy || !HasDrafts)">
@@ -198,6 +199,7 @@ else
     private bool IsCounting => detail?.Count.Status == "Counting";
     private bool IsPendingApproval => detail?.Count.Status == "PendingApproval";
     private bool HasDrafts => detail?.Lines.Any(line => Gauge(line.LineNo) is not null) == true;
+    private bool HasUnsavedCounts => detail?.Lines.Any(line => Gauge(line.LineNo) != line.PhysicalQuantity) == true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -340,9 +342,18 @@ else
 
     private void OnGaugeChangedAsync(int lineNo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
-        gauges[lineNo] = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
-            ? Math.Max(0m, decimal.Round(value, 3, MidpointRounding.ToEven))
-            : null;
+        if (decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value))
+        {
+            gauges[lineNo] = Math.Max(0m, decimal.Round(value, 3, MidpointRounding.ToEven));
+            message = null;
+            return;
+        }
+
+        decimal? saved = detail?.Lines.FirstOrDefault(line => line.LineNo == lineNo)?.PhysicalQuantity;
+        gauges[lineNo] = saved;
+        message = saved is null
+            ? "Enter a non-negative quantity to count this line."
+            : "A saved count cannot be cleared. Enter zero if none of this product was found.";
     }
 
     private static decimal? VarianceOf(PosInventoryCountLineView line)
@@ -361,18 +372,38 @@ else
             return;
         }
 
-        List<PosCountLineRequest> lines = detail.Lines
-            .Where(line => Gauge(line.LineNo) is { } gauge)
-            .Select(line => new PosCountLineRequest(line.ProductId, Gauge(line.LineNo) ?? 0m, line.BatchId))
-            .ToList();
-
-        await RunCommandAsync(() => Api.RecordInventoryCountLinesAsync(CountId, lines, CancellationToken.None), "Counts saved.");
+        await RunCommandAsync(
+            () => Api.RecordInventoryCountLinesAsync(CountId, CountedLines(), CancellationToken.None),
+            "Counts saved.");
     }
 
     private async Task SubmitAsync()
     {
-        await RunCommandAsync(() => Api.SubmitInventoryCountAsync(CountId, CancellationToken.None), "Count submitted for approval.");
+        if (detail is null)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            if (HasUnsavedCounts)
+            {
+                ApiResult<PosReference> saved = await Api.RecordInventoryCountLinesAsync(
+                    CountId, CountedLines(), CancellationToken.None);
+                if (!saved.IsSuccess)
+                {
+                    return saved;
+                }
+            }
+
+            return await Api.SubmitInventoryCountAsync(CountId, CancellationToken.None);
+        }, "Count submitted for approval.");
     }
+
+    private List<PosCountLineRequest> CountedLines() => detail?.Lines
+        .Where(line => Gauge(line.LineNo) is not null)
+        .Select(line => new PosCountLineRequest(line.ProductId, Gauge(line.LineNo)!.Value, line.BatchId))
+        .ToList() ?? [];
 
     private async Task ApproveAsync()
     {

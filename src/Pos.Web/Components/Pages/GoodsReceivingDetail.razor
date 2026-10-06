@@ -45,6 +45,11 @@
         {
             <section class="receiving-card">
                 <header><div><span class="eyebrow">New delivery</span><h2>Count what arrived</h2></div><p>Leave a line at zero if it is not in this delivery.</p></header>
+                <div class="receiving-scanner">
+                    <ScanTarget OnScan="OnScannedAsync" Enabled="@(!saving)" />
+                    <CameraScanner Enabled="@(!saving)" />
+                    <span>Scan a product to add one to Arrived, or enter quantities below.</span>
+                </div>
                 <div class="receiving-lines">
                     @foreach (ReceiptLineInput line in lines)
                     {
@@ -84,7 +89,7 @@
                 @foreach (PosGoodsReceipt receipt in receipts.OrderByDescending(item => item.ReceivedAtUtc))
                 {
                     <article class="receiving-history-row" @key="receipt.Id">
-                        <div><strong>@receipt.Number</strong><small>@receipt.ReceivedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
+                        <div><strong>@receipt.Number</strong><small>@receipt.ReceivedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
                         <span>@Quantity(receipt.Lines.Sum(line => line.QuantityAccepted)) accepted</span>
                         @if (receipt.DocumentsMissing) { <span class="receiving-state">Documents missing</span> }
                     </article>
@@ -107,6 +112,7 @@
     private bool saving;
     private bool documentsMissing;
     private bool historyLoaded;
+    private ScanLine? scanQueue;
 
     private bool CanReceiveNow => historyLoaded && order?.Status is "Ordered" or "PartiallyReceived";
     private bool CanRecord => lines.Any(line => line.Received > 0) &&
@@ -228,6 +234,51 @@
         finally
         {
             saving = false;
+        }
+    }
+
+    private Task OnScannedAsync(BarcodeScan scan)
+    {
+        scanQueue ??= new ScanLine(CountScannedAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task CountScannedAsync(BarcodeScan scan)
+    {
+        if (!CanReceiveNow || saving)
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } product })
+            {
+                message = $"{scan.Code}: {found.Error ?? "Product not found."}";
+                return;
+            }
+
+            ReceiptLineInput? line = lines.FirstOrDefault(item =>
+                item.OrderLine.ProductId == product.Id && item.Received + 1m <= item.Due);
+            if (line is null)
+            {
+                message = lines.Any(item => item.OrderLine.ProductId == product.Id)
+                    ? $"{product.Name} has reached the quantity due. Enter a fractional amount manually if needed."
+                    : $"{product.Name} is not on this purchase order.";
+                return;
+            }
+
+            line.Received += 1m;
+            message = $"{product.Name}: {Quantity(line.Received)} arrived of {Quantity(line.Due)} due.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "The product lookup is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
         }
     }
 

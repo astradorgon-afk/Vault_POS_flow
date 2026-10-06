@@ -205,6 +205,8 @@
 .sales-table td { padding: 15px 16px; border-bottom: 1px solid var(--line); font-size: 0.9rem; color: var(--text); }
 .sales-table tbody tr:last-child td { border-bottom: 0; }
 .sale-number { color: var(--signal-bright); font-size: 0.9rem; font-weight: 700; }
+.sale-number a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.sale-number a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
 .office-row-click { cursor: pointer; }
 .office-row-click:hover td { background: var(--signal-soft); }
 

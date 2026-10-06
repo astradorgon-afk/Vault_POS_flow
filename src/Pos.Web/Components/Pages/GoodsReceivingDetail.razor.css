@@ -17,6 +17,9 @@
 .receiving-card>header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line);background:#f7faf7}
 .receiving-card h2{margin:4px 0 0;font:700 1.1rem 'Manrope',sans-serif}
 .receiving-card header p{max-width:380px;margin:0;color:var(--muted);font-size:.8rem;text-align:right}
+.receiving-scanner{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:12px 20px;border-bottom:1px solid var(--line)}
+.receiving-scanner>span{color:var(--muted);font-size:.8rem}
+.receiving-scanner ::deep .camera-scanner{margin:0}
 .receiving-lines{display:grid}
 .receiving-page .receiving-line{display:block;min-width:0;padding:20px;border-bottom:1px solid var(--line)}
 .receiving-line-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:16px}

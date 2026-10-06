@@ -67,17 +67,17 @@ else
         <div><span>Mode</span><strong>@ModeLabel</strong></div>
         <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
         <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
-        <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
+        <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
         <div>
             <span>Approved by</span>
             <strong>@(detail.ApprovedByDisplayName ?? (detail.ApprovedByUserId is null ? "Not approved" : "Unknown user"))</strong>
             @if (detail.ApprovedAtUtc is { } approvedAt)
             {
-                <small>@approvedAt.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</small>
+                <small>@approvedAt.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</small>
             }
         </div>
-        <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
-        <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
+        <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
+        <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
     </section>
 
     @if (IsStoreRestock && Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) && !string.IsNullOrWhiteSpace(WarehouseStepMessage))
@@ -199,8 +199,9 @@ else
     @if (ShowPick)
     {
         <section class="action-panel">
-            <div class="action-title"><strong>Pick the stock</strong><span>Confirm what the source is sending. Quantities default to the full request; scanning a product counts it from one.</span></div>
+            <div class="action-title"><strong>Pick the stock</strong><span>Enter or scan the quantity actually picked for each product. Uncounted products stay at zero.</span></div>
             <ScanTarget OnScan="OnScannedAsync" />
+            <CameraScanner Enabled="@(!acting)" />
             
             <div class="pick-rows">
                 @foreach (PickRow row in pickRows)
@@ -208,7 +209,7 @@ else
                     <div class="pick-row @(scanned.ContainsKey(row.LineNo) ? "scan-hit" : null)" @key="row.LineNo">
                         <span class="pick-name">@row.ProductName</span>
                         <span class="pick-requested">requested @Quantity(row.Requested) · already picked @Quantity(row.Picked)</span>
-                        <input type="number" min="0" step="1" value="@row.Quantity"
+                        <input type="number" min="0" max="@(row.Requested - row.Picked)" step="1" value="@row.Quantity" aria-label="Picked quantity for @row.ProductName"
                                @onchange="(e) => OnPickQuantityChanged(row, e)" />
                     </div>
                 }
@@ -270,6 +271,7 @@ else
         <section class="action-panel receive-panel">
             <div class="action-title"><strong>Receive and count</strong><span>Enter what actually arrived, or scan each item: scanning a product counts it from one. Shortfalls are kept on the books as a discrepancy for review.</span></div>
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(!ShowPick)" />
+            <CameraScanner Enabled="@(!acting && !ShowPick)" />
             
             <div class="receive-rows">
                 @foreach (ReceiveRow row in receiveRows)
@@ -333,7 +335,7 @@ else
                     {
                         <li>
                             <span class="custody-kind">@SplitWords(custodyEvent.Kind)</span>
-                            <span class="custody-date">@custodyEvent.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
+                            <span class="custody-date">@custodyEvent.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
                             <span class="custody-note">@(string.IsNullOrWhiteSpace(custodyEvent.Note) ? "—" : custodyEvent.Note)</span>
                         </li>
                     }
@@ -362,8 +364,7 @@ else
     private readonly List<ApprovalRow> approvalRows = [];
     private readonly List<ReceiveRow> receiveRows = [];
 
-    // Lines counted by scanning in this visit: the first scan replaces the
-    // default full quantity with one, and each scan after adds one.
+    // Lines counted by scanning in this visit; each scan adds one unit.
     private readonly Dictionary<int, decimal> scanned = [];
     private ScanLine? scanQueue;
 
@@ -396,15 +397,23 @@ else
                 return;
             }
 
-            decimal count = scanned.GetValueOrDefault(line.LineNo) + 1m;
-            scanned[line.LineNo] = count;
             if (ShowPick && pickRows.FindIndex(r => r.LineNo == line.LineNo) is var pick and >= 0)
             {
+                decimal count = pickRows[pick].Quantity + 1m;
+                if (count > pickRows[pick].Requested - pickRows[pick].Picked)
+                {
+                    message = $"{product.Name}: the remaining request has already been counted.";
+                    return;
+                }
+
+                scanned[line.LineNo] = count;
                 pickRows[pick] = pickRows[pick] with { Quantity = count };
                 message = $"{product.Name}: {Quantity(count)} picked by scan (requested {Quantity(pickRows[pick].Requested)}).";
             }
             else if (ShowReceive && receiveRows.FindIndex(r => r.LineNo == line.LineNo) is var receive and >= 0)
             {
+                decimal count = scanned.GetValueOrDefault(line.LineNo) + 1m;
+                scanned[line.LineNo] = count;
                 receiveRows[receive] = receiveRows[receive] with { Received = count };
                 message = $"{product.Name}: {Quantity(count)} received by scan (awaiting {Quantity(receiveRows[receive].Remaining)}).";
             }
@@ -516,7 +525,7 @@ else
     {
         PosTransferDetail transfer = detail!;
         string? dispatchedAt = transfer.Transfer.DispatchedAtUtc is { } dispatched
-            ? dispatched.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
+            ? dispatched.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
             : null;
 
         WorkflowReceiptLine[] lines = [.. transfer.Lines.Select(line => new WorkflowReceiptLine(
@@ -540,7 +549,7 @@ else
             "Deliver to",
             DestinationLabel,
             IsStoreRestock ? "Requested" : "Created",
-            transfer.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture),
+            transfer.Transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture),
             "Dispatched",
             dispatchedAt ?? "Not yet dispatched",
             [IsStoreRestock ? "Needed / approved" : "Requested", "Dispatched", "Received", "Damaged"],
@@ -641,7 +650,7 @@ else
                 line.ProductName ?? $"Line {line.LineNo}",
                 line.RequestedQuantity,
                 line.PickedQuantity,
-                remaining));
+                0m));
         }
     }
 
@@ -698,7 +707,7 @@ else
     private void OnPickQuantityChanged(PickRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
         decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
-            ? value
+            ? Math.Clamp(value, 0m, row.Requested - row.Picked)
             : 0m;
         int index = pickRows.IndexOf(row);
         if (index >= 0)

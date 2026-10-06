@@ -99,6 +99,7 @@ else
                 </label>
             </div>
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanCreateTransfer && !creating)" />
+            <CameraScanner Enabled="@(CanCreateTransfer && !creating)" />
             <div class="scan-strip" role="status">
                 <span class="scan-strip-mark" aria-hidden="true">▥</span>
                 <span>Scan products to add them; each scan adds one.</span>
@@ -197,7 +198,7 @@ else
                     @foreach (PosTransferSummary transfer in visibleTransfers)
                     {
                         <tr class="office-row-click" @key="transfer.Id" @onclick="() => OpenTransfer(transfer.Id)">
-                            <td class="sale-number">@transfer.Number</td>
+                            <td class="sale-number"><a href="@($"/transfers/{transfer.Id:D}")" @onclick:stopPropagation="true">@transfer.Number</a></td>
                             <td>
                                 <span class="@StatusChipClass(transfer.Status)">@SplitWords(transfer.Status)</span>
                                 @if (AwaitingReceive(transfer.Status) && CanReceive)
@@ -208,9 +209,9 @@ else
                             <td>@LocationLabel(transfer.SourceLocationId) → @LocationLabel(transfer.DestinationLocationId)</td>
                             <td>@transfer.LineCount</td>
                             <td>@Money(transfer.TotalValue)</td>
-                            <td>@transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td>@(transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
-                            <td>@(transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td>@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@(transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td>@(transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                         </tr>
                     }
                 </tbody>

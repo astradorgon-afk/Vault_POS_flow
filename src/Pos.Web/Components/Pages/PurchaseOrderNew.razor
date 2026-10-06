@@ -85,6 +85,7 @@ else
                     <span class="po-line-count">@lines.Count @(lines.Count == 1 ? "line" : "lines")</span>
                 </div>
                 <ScanTarget OnScan="OnScanned" Enabled="@(!saving)" />
+                <CameraScanner Enabled="@(!saving)" />
                 <p class="po-scan-hint">▥ @(scanNote ?? "Scan a product's barcode to add it; each scan adds one.")</p>
                 <div class="po-finder">
                     <input type="search" placeholder="Search products by name or SKU" aria-label="Search products"

@@ -11,6 +11,9 @@ public enum ScanSource
 
     /// <summary>A test scan from the scanner test page or a developer tool.</summary>
     Simulated = 2,
+
+    /// <summary>A barcode read from the web app's camera.</summary>
+    Camera = 3,
 }
 
 /// <summary>One barcode read, from any scanner.</summary>

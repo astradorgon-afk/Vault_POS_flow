@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 using Pos.Application.Identity;
 using Pos.SharedUI.Scanning;
 using Pos.Web.Components;
@@ -51,6 +53,29 @@ builder.Services.AddOptions<ApiOptions>()
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    // Docker Desktop forwards local ngrok/Caddy requests from an address owned
+    // by this host. Trust only those local proxy addresses for the HTTPS scheme.
+    var forwarded = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedProto
+    };
+    foreach (IPAddress address in Dns.GetHostAddresses(Dns.GetHostName()))
+    {
+        if (IPAddress.IsLoopback(address))
+        {
+            continue;
+        }
+        forwarded.KnownProxies.Add(address);
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            forwarded.KnownProxies.Add(address.MapToIPv6());
+        }
+    }
+    app.UseForwardedHeaders(forwarded);
+}
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -59,6 +84,8 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.UseAntiforgery();
 
