@@ -99,11 +99,16 @@ else
                     }
                 </div>
 
-                <details class="po-custom-product">
-                    <summary>Product not listed? Add it</summary>
+                <div class="po-custom-product">
+                    <button type="button" class="po-inline-link po-custom-product-toggle" aria-expanded="@showCustomProduct" @onclick="ToggleCustomProduct">
+                        @(showCustomProduct ? "Close new product form" : "Product not listed? Add it")
+                    </button>
+                    @if (showCustomProduct)
+                    {
                     <div class="po-custom-product-fields">
                         <label class="po-field"><span>Product name</span><input @bind="newProductName" maxlength="128" /></label>
                         <label class="po-field"><span>SKU <small>(optional; generated if blank)</small></span><input @bind="newProductSku" maxlength="64" /></label>
+                        <label class="po-field"><span>Barcode <small>(optional)</small></span><input @bind="newProductBarcode" maxlength="48" /></label>
                         <label class="po-field"><span>Category</span>
                             <select @bind="newProductCategoryId">
                                 <option value="">Choose a category</option>
@@ -129,7 +134,8 @@ else
                     {
                         <p class="po-hint">Product categories are unavailable, so a new product cannot be added right now.</p>
                     }
-                </details>
+                    }
+                </div>
 
                 @if (Matches.Count > 0)
                 {
@@ -260,6 +266,8 @@ else
     private string customSupplierName = string.Empty;
     private string newProductName = string.Empty;
     private string newProductSku = string.Empty;
+    private string newProductBarcode = string.Empty;
+    private bool showCustomProduct;
     private decimal newProductCost;
     private Guid newProductCategoryId;
     private Guid newProductUnitId;
@@ -384,12 +392,15 @@ else
         expectedOn = null;
     }
 
+    private void ToggleCustomProduct() => showCustomProduct = !showCustomProduct;
+
     private async Task AddCustomProductAsync()
     {
         if (!CanAddCustomProduct || saving) return;
         string sku = string.IsNullOrWhiteSpace(newProductSku)
             ? $"CUSTOM-{Guid.NewGuid():N}"[..15].ToUpperInvariant()
             : newProductSku.Trim();
+        string barcode = BarcodeText.Clean(newProductBarcode);
         saving = true;
         message = null;
         try
@@ -401,7 +412,8 @@ else
                 categoryId = newProductCategoryId,
                 baseUnitOfMeasureId = newProductUnitId,
                 primarySupplierId = useCustomSupplier ? null : supplierId,
-                defaultPurchaseCost = newProductCost
+                defaultPurchaseCost = newProductCost,
+                initialBarcode = barcode.Length == 0 ? null : barcode
             }, CancellationToken.None);
             if (created is not { IsSuccess: true, Value: { } productRef })
             {
@@ -410,12 +422,15 @@ else
             }
 
             PosOrderableProduct product = new(productRef.Id, sku, newProductName.Trim(),
-                useCustomSupplier ? null : supplierId, newProductUnitId, newProductCost, false, false, true);
+                useCustomSupplier ? null : supplierId, newProductUnitId, newProductCost, false, false, true,
+                barcode.Length == 0 ? [] : [barcode.ToUpperInvariant()]);
             catalogue.Add(product);
             AddLine(product);
             newProductName = string.Empty;
             newProductSku = string.Empty;
+            newProductBarcode = string.Empty;
             newProductCost = 0;
+            showCustomProduct = false;
             scanNote = $"{product.Name} added to the order.";
         }
         catch (HttpRequestException)
@@ -444,11 +459,13 @@ else
     private void OnScanned(BarcodeScan scan)
     {
         IReadOnlyList<string> codes = BarcodeText.LookupVariants(scan.Code);
-        PosOrderableProduct? product = catalogue.FirstOrDefault(p => p.IsActive && (p.Barcodes ?? []).Any(codes.Contains))
+        PosOrderableProduct? product = catalogue.FirstOrDefault(p => p.IsActive && (p.Barcodes ?? []).Any(code => codes.Contains(code, StringComparer.OrdinalIgnoreCase)))
             ?? catalogue.FirstOrDefault(p => p.IsActive && string.Equals(p.Sku, scan.Code, StringComparison.OrdinalIgnoreCase));
         if (product is null)
         {
-            scanNote = $"No product has the barcode {scan.Code}.";
+            newProductBarcode = scan.Code;
+            showCustomProduct = true;
+            scanNote = $"Barcode {scan.Code} is not in the catalog. Enter the product details below to add it to this order.";
             return;
         }
 

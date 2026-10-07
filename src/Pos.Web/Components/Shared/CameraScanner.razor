@@ -117,7 +117,7 @@
     {
         try
         {
-            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/camera-scanner.js?v=3");
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/camera-scanner.js?v=5");
             self ??= DotNetObjectReference.Create(this);
             CameraStartResult result = await module.InvokeAsync<CameraStartResult>("start", videoElement, self, selectedDeviceId);
             if (result.Error is not null)

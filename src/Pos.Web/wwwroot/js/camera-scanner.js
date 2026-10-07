@@ -1,6 +1,13 @@
 const sessions = new WeakMap();
-// Wide 1D codes can fail at the camera's native resolution; try several scales.
-const scanWidths = [640, 960, 640, 480];
+// Try wide views for large labels and closer views that preserve small barcode lines.
+const scanPlans = [
+    { width: 640, crop: 1 },
+    { width: 960, crop: 1 },
+    { width: 960, crop: 0.65 },
+    { width: 960, crop: 0.45 },
+    { width: 480, crop: 1 },
+    { width: 640, crop: 1, rotate: true },
+];
 
 async function scanFrame(video, dotnet, session) {
     if (session.closed) { return; }
@@ -8,25 +15,31 @@ async function scanFrame(video, dotnet, session) {
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
         const width = video.videoWidth;
         const height = video.videoHeight;
-        const frame = session.frame++ % scanWidths.length;
-        const centerCrop = frame === 2;
-        const sourceWidth = centerCrop ? Math.round(width * 0.65) : width;
-        const sourceHeight = centerCrop ? Math.round(height * 0.65) : height;
+        const plan = scanPlans[session.frame++ % scanPlans.length];
+        const sourceWidth = Math.round(width * plan.crop);
+        const sourceHeight = Math.round(height * plan.crop);
         const sourceX = Math.round((width - sourceWidth) / 2);
         const sourceY = Math.round((height - sourceHeight) / 2);
-        const scale = Math.min(1, scanWidths[frame] / sourceWidth);
+        const scale = Math.min(1, plan.width / sourceWidth);
+        const drawnWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const drawnHeight = Math.max(1, Math.round(sourceHeight * scale));
         const canvas = session.canvas;
-        canvas.width = Math.max(1, Math.round(sourceWidth * scale));
-        canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+        canvas.width = plan.rotate ? drawnHeight : drawnWidth;
+        canvas.height = plan.rotate ? drawnWidth : drawnHeight;
         try {
+            if (plan.rotate) {
+                session.context.translate(canvas.width, 0);
+                session.context.rotate(Math.PI / 2);
+            }
             session.context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight,
-                0, 0, canvas.width, canvas.height);
+                0, 0, drawnWidth, drawnHeight);
             const result = await session.reader.decodeFromCanvas(canvas);
             const code = result.getText()?.trim();
             if (code && !session.delivering && code !== session.lastCode && !session.closed) {
                 session.lastCode = code;
                 session.delivering = true;
                 dotnet.invokeMethodAsync('OnCameraBarcode', code)
+                    .then(() => window.vaultflowScanBeep?.())
                     .catch(() => { /* The page may have closed while a scan was in flight. */ })
                     .finally(() => { session.delivering = false; });
             }
@@ -34,7 +47,7 @@ async function scanFrame(video, dotnet, session) {
     }
 
     if (!session.closed) {
-        session.timer = setTimeout(() => scanFrame(video, dotnet, session), 180);
+        session.timer = setTimeout(() => scanFrame(video, dotnet, session), 150);
     }
 }
 
