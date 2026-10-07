@@ -1,18 +1,49 @@
 const sessions = new WeakMap();
-// Try wide views for large labels and closer views that preserve small barcode lines.
+let decoderPromise;
+const decoderScript = new URL('../lib/zxing-wasm/reader.js', import.meta.url).href;
+const decoderBinary = new URL('../lib/zxing-wasm/zxing_reader.wasm', import.meta.url).href;
+const readerOptions = {
+    formats: ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128', 'Code39', 'Code93', 'ITF', 'QRCode'],
+    maxNumberOfSymbols: 1,
+    tryHarder: true,
+    tryRotate: true,
+    tryInvert: true,
+};
+
+function loadDecoder() {
+    decoderPromise ??= new Promise((resolve, reject) => {
+        if (globalThis.ZXingWASM) { resolve(globalThis.ZXingWASM); return; }
+        const script = document.createElement('script');
+        script.src = decoderScript;
+        script.onload = () => resolve(globalThis.ZXingWASM);
+        script.onerror = () => reject(new Error('The barcode reader could not load.'));
+        document.head.appendChild(script);
+    }).then(async decoder => {
+        if (!decoder?.readBarcodes) { throw new Error('The barcode reader is unavailable.'); }
+        await decoder.prepareZXingModule({
+            overrides: { locateFile: () => decoderBinary },
+            fireImmediately: true,
+        });
+        return decoder;
+    }).catch(error => {
+        decoderPromise = null;
+        throw error;
+    });
+    return decoderPromise;
+}
+
+// Alternate wide and close views so both large and small labels are found quickly.
 const scanPlans = [
-    { width: 640, crop: 1 },
     { width: 960, crop: 1 },
     { width: 960, crop: 0.65 },
+    { width: 640, crop: 1 },
     { width: 960, crop: 0.45 },
-    { width: 480, crop: 1 },
-    { width: 640, crop: 1, rotate: true },
 ];
 
 async function scanFrame(video, dotnet, session) {
     if (session.closed) { return; }
 
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
+    if (!session.delivering && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
         const width = video.videoWidth;
         const height = video.videoHeight;
         const plan = scanPlans[session.frame++ % scanPlans.length];
@@ -24,30 +55,30 @@ async function scanFrame(video, dotnet, session) {
         const drawnWidth = Math.max(1, Math.round(sourceWidth * scale));
         const drawnHeight = Math.max(1, Math.round(sourceHeight * scale));
         const canvas = session.canvas;
-        canvas.width = plan.rotate ? drawnHeight : drawnWidth;
-        canvas.height = plan.rotate ? drawnWidth : drawnHeight;
+        if (canvas.width !== drawnWidth) { canvas.width = drawnWidth; }
+        if (canvas.height !== drawnHeight) { canvas.height = drawnHeight; }
         try {
-            if (plan.rotate) {
-                session.context.translate(canvas.width, 0);
-                session.context.rotate(Math.PI / 2);
-            }
             session.context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight,
                 0, 0, drawnWidth, drawnHeight);
-            const result = await session.reader.decodeFromCanvas(canvas);
-            const code = result.getText()?.trim();
+            const image = session.context.getImageData(0, 0, drawnWidth, drawnHeight);
+            const results = await session.decoder.readBarcodes(image, readerOptions);
+            const code = results.find(result => result.text?.trim())?.text.trim();
             if (code && !session.delivering && code !== session.lastCode && !session.closed) {
                 session.lastCode = code;
                 session.delivering = true;
                 dotnet.invokeMethodAsync('OnCameraBarcode', code)
                     .then(() => window.vaultflowScanBeep?.())
-                    .catch(() => { /* The page may have closed while a scan was in flight. */ })
+                    .catch(() => {
+                        // A temporary connection failure must not block this code forever.
+                        if (!session.closed && session.lastCode === code) { session.lastCode = null; }
+                    })
                     .finally(() => { session.delivering = false; });
             }
         } catch { /* A frame without a readable barcode is normal. */ }
     }
 
     if (!session.closed) {
-        session.timer = setTimeout(() => scanFrame(video, dotnet, session), 150);
+        session.timer = setTimeout(() => scanFrame(video, dotnet, session), 60);
     }
 }
 
@@ -60,7 +91,7 @@ export async function start(video, dotnet, deviceId = null) {
 
     const session = {
         closed: false,
-        reader: null,
+        decoder: null,
         canvas: document.createElement('canvas'),
         context: null,
         frame: 0,
@@ -73,18 +104,6 @@ export async function start(video, dotnet, deviceId = null) {
     sessions.set(video, session);
 
     try {
-        await import('../lib/zxing/zxing-browser.min.js');
-        const { BrowserMultiFormatReader, BarcodeFormat } = globalThis.ZXingBrowser;
-        const reader = new BrowserMultiFormatReader();
-        reader.possibleFormats = [
-            BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
-            BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
-            BarcodeFormat.CODE_128, BarcodeFormat.CODE_39,
-            BarcodeFormat.CODE_93, BarcodeFormat.ITF,
-            BarcodeFormat.QR_CODE,
-        ];
-        session.reader = reader;
-
         const videoConstraints = deviceId
             ? { deviceId: { exact: deviceId } }
             : { facingMode: { ideal: 'environment' } };
@@ -99,6 +118,12 @@ export async function start(video, dotnet, deviceId = null) {
 
         video.srcObject = stream;
         await video.play();
+        try {
+            session.decoder = await loadDecoder();
+        } catch {
+            throw new Error('The barcode reader could not load. Refresh the page and try again.');
+        }
+        if (session.closed) { return { error: 'The camera was stopped.' }; }
         session.track = stream.getVideoTracks()[0] ?? null;
         const track = session.track;
         const capabilities = track?.getCapabilities?.() ?? {};
@@ -131,6 +156,9 @@ export async function start(video, dotnet, deviceId = null) {
         };
     } catch (error) {
         stop(video);
+        if (error?.message?.startsWith('The barcode reader')) {
+            return { error: error.message };
+        }
         if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
             return { error: 'Camera access was denied. Allow camera access in the browser and try again.' };
         }
