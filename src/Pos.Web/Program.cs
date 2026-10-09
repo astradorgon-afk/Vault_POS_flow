@@ -36,6 +36,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<UserSession>();
 builder.Services.AddScoped<NotificationStore>();
+builder.Services.AddScoped<OfflineReadinessNotice>();
 builder.Services.AddScoped<PageTrail>();
 builder.Services.AddSingleton<PwaSessions>();
 builder.Services.AddSingleton<PwaLoginHandoffs>();

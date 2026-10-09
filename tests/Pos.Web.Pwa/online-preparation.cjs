@@ -27,8 +27,11 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
     await setup.getByRole('button', { name: 'Continue online without enrolling' }).waitFor();
     await setup.getByLabel('Installation enrollment code').fill('pilot-enrolment');
     await setup.getByRole('button', { name: 'Enroll and prepare offline access' }).click();
-    await setup.getByRole('heading', { name: 'Offline access is ready' }).waitFor({ timeout: 60000 });
-    const installButton = setup.getByRole('button', { name: 'Install VaultFlow' });
+    await page.waitForURL(origin + '/', { timeout: 60000 });
+    const banner = page.locator('.offline-ready-banner');
+    await banner.waitFor({ timeout: 60000 });
+    await banner.getByText('Offline access is ready on this device.').waitFor();
+    const installButton = banner.getByRole('button', { name: 'Install VaultFlow' });
     await installButton.waitFor();
     await page.evaluate(() => {
       window.__installPromptCalls = 0;
@@ -37,19 +40,19 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
       window.dispatchEvent(event);
     });
     await installButton.click();
-    await setup.getByText('Installation accepted.', { exact: false }).waitFor();
+    await banner.getByText('Installation accepted.', { exact: false }).waitFor();
     if (await page.evaluate(() => window.__installPromptCalls) !== 1)
       throw new Error('Install button did not call the browser installation prompt.');
     await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
-    await setup.getByText('VaultFlow is installed on this device.').waitFor();
+    await banner.getByText('VaultFlow is installed on this device.').waitFor();
     const state = await page.evaluate(async () => {
       const store = await import('/offline/js/offline-store.js');
       return store.initialize();
     });
     if (!state.device || state.profiles.length !== 1 || state.profiles[0].userName !== 'pilot')
       throw new Error(`Sign-in did not prepare a local account: ${JSON.stringify(state)}`);
-    await setup.getByRole('button', { name: 'Continue to workspace' }).click();
-    await setup.waitFor({ state: 'hidden' });
+    await banner.getByRole('button', { name: 'Dismiss offline notice' }).click();
+    await banner.waitFor({ state: 'hidden' });
     await context.setOffline(true);
     await page.goto(origin + '/login');
     await page.getByRole('heading', { name: 'Welcome back' }).waitFor();
@@ -71,16 +74,15 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
     await page.getByRole('button', { name: 'Choose work location' }).click();
     await page.getByLabel(/PILOT Pilot store/).check();
     await page.getByRole('button', { name: 'Open workspace' }).click();
+    const secondBanner = page.locator('.offline-ready-banner');
     try {
-      await page.getByRole('dialog', { name: 'Offline access is ready' })
-        .getByRole('button', { name: 'Install VaultFlow' }).waitFor({ timeout: 60000 });
+      await secondBanner.getByRole('button', { name: 'Install VaultFlow' }).waitFor({ timeout: 60000 });
     } catch (error) {
       throw new Error(`${error.message}; page=${(await page.locator('body').innerText()).slice(-900)}; requests=${failedRequests.join('; ')}`);
     }
     if (await page.getByLabel('Installation enrollment code').count())
       throw new Error('Previously enrolled device was asked for a second enrollment code.');
-    await page.getByRole('dialog', { name: 'Offline access is ready' })
-      .getByRole('button', { name: 'Continue to workspace' }).click();
+    await secondBanner.getByRole('button', { name: 'Dismiss offline notice' }).click();
     if (errors.length) throw new Error(errors.join('; '));
     const onlineOnlyContext = await browser.newContext();
     await onlineOnlyContext.route('**/_content/Pos.SharedUI/login.css', route => route.abort());

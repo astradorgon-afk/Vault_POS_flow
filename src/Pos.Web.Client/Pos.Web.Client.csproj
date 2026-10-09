@@ -7,6 +7,9 @@
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
     <StaticWebAssetBasePath>offline</StaticWebAssetBasePath>
+    <!-- The debug Hot Reload module resolves from /_framework while this client
+         is hosted under /offline/_framework, preventing the PWA from starting. -->
+    <WasmEnableHotReload>false</WasmEnableHotReload>
   </PropertyGroup>
 
   <ItemGroup>

@@ -100,6 +100,12 @@ export async function initialize() {
         persisted: await navigator.storage?.persisted?.() ?? false };
 }
 
+export async function requestPersistentStorage() {
+    if (!navigator.storage?.persist) return false;
+    try { return await navigator.storage.persist(); }
+    catch { return false; }
+}
+
 export async function waitForAppFiles(timeoutMs = 20000) {
     if (!('serviceWorker' in navigator)) return false;
     const deadline = Date.now() + timeoutMs;

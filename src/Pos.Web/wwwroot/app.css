@@ -54,6 +54,20 @@ h1:focus { outline: none; }
 .operator > span:last-child { display: grid; line-height: 1.25; }
 .operator small { color: var(--muted); font-size: .7rem; }
 .content { width: min(100%,1520px); margin: 0 auto; padding: clamp(20px,2.5vw,36px); }
+.offline-ready-banner { width: min(100%,1520px); margin: clamp(12px,1.5vw,20px) auto 0; padding: 12px 16px; display: flex; align-items: flex-start; gap: 12px; border: 1px solid #cfe4d6; border-left: 4px solid var(--forest-bright); border-radius: 12px; background: #e8f5ec; color: #153c2b; }
+.offline-ready-icon { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--forest); color: #fff; }
+.offline-ready-icon svg { width: 17px; height: 17px; }
+.offline-ready-copy { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.offline-ready-copy strong { font-size: .9rem; }
+.offline-ready-copy small { color: #2c5b45; font-size: .78rem; }
+.offline-ready-copy p { margin: 4px 0 0; font-size: .76rem; color: #2c5b45; }
+.offline-ready-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.offline-ready-install { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 14px; border: 0; border-radius: 9px; background: var(--forest); color: #fff; font-size: .76rem; font-weight: 800; cursor: pointer; }
+.offline-ready-install:hover,.offline-ready-install:focus-visible { background: var(--forest-bright); }
+.offline-ready-dismiss { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #b6d3c1; border-radius: 9px; background: #fff; color: #2c5b45; cursor: pointer; }
+.offline-ready-dismiss:hover { background: #dcefe2; }
+.offline-ready-dismiss svg { width: 16px; height: 16px; }
+@media(max-width:650px){ .offline-ready-banner { flex-wrap: wrap; } .offline-ready-actions { width: 100%; justify-content: flex-end; } }
 
 .brand-block { min-height: 68px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.1); }
 .brand { display: flex; align-items: center; gap: 12px; color: #fff; text-decoration: none; }

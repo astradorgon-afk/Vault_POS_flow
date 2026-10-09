@@ -9,8 +9,32 @@
         window.vaultFlowOffline.ready = ready;
         window.dispatchEvent(new Event('vaultflow-offline-status'));
     };
+    let repairPending = false;
+    const repairCache = async registration => {
+        if (repairPending || !navigator.onLine || !registration?.active) return;
+        const worker = registration.active;
+        repairPending = true;
+        showCacheWarning('Offline files are downloading again. Keep this page open and connected.');
+        const channel = new MessageChannel();
+        const ready = await new Promise(resolve => {
+            const timeout = setTimeout(() => resolve(false), 120000);
+            channel.port1.onmessage = event => {
+                clearTimeout(timeout);
+                resolve(event.data?.ready === true);
+            };
+            try { worker.postMessage({ type: 'VAULTFLOW_CACHE_REPAIR' }, [channel.port2]); }
+            catch { clearTimeout(timeout); resolve(false); }
+        });
+        channel.port1.close();
+        repairPending = false;
+        if (registration.active !== worker) return;
+        announce(ready);
+        if (ready) warning.hidden = true;
+        else showCacheWarning('Offline files could not be downloaded. Check the connection and reload to retry. If browser data was cleared, work saved only on this device may have been lost.');
+    };
     const checkCache = async registration => {
         if (!registration?.active) return;
+        const worker = registration.active;
         const channel = new MessageChannel();
         const ready = await new Promise(resolve => {
             const timeout = setTimeout(() => resolve(false), 3000);
@@ -18,12 +42,17 @@
                 clearTimeout(timeout);
                 resolve(event.data?.ready === true);
             };
-            registration.active.postMessage({ type: 'VAULTFLOW_CACHE_STATUS' }, [channel.port2]);
+            try { worker.postMessage({ type: 'VAULTFLOW_CACHE_STATUS' }, [channel.port2]); }
+            catch { clearTimeout(timeout); resolve(false); }
         });
         channel.port1.close();
+        if (registration.active !== worker) return;
         announce(ready);
         if (ready) warning.hidden = true;
-        else showCacheWarning('Offline files are not ready. Keep this page open while they download. A development build cannot be used offline.');
+        else {
+            showCacheWarning('Offline files are not ready. Connect and keep this page open while they download.');
+            void repairCache(registration);
+        }
     };
 
     // Registration can fail independently of app startup (for example, a tunnel
@@ -37,10 +66,11 @@
                 }
                 void checkCache(registration);
                 navigator.serviceWorker.addEventListener('controllerchange', () => void checkCache(registration));
+                window.addEventListener('online', () => void checkCache(registration));
                 const watch = worker => worker?.addEventListener('statechange', () => {
                     if (worker.state === 'activated') void checkCache(registration);
                     if (worker.state === 'redundant' && !window.vaultFlowOffline.ready)
-                        showCacheWarning('Offline download failed. Check your connection and reload to retry. Your saved work has not been cleared.');
+                        showCacheWarning('Offline download failed. Connect to the internet and reload to retry. If browser data was cleared, work saved only on this device may have been lost.');
                 });
                 watch(registration.installing);
                 registration.addEventListener('updatefound', () => watch(registration.installing));
@@ -64,7 +94,7 @@
             const status = document.getElementById('startup-status');
             const retry = document.getElementById('startup-retry');
             if (title) title.textContent = 'The app could not finish loading';
-            if (status) status.textContent = 'Check your connection, complete any website access notice, then try again. Your saved work has not been cleared.';
+            if (status) status.textContent = 'Connect to the internet, complete any website access notice, then try again. If browser data was cleared, offline files and work saved only on this device may have been removed. Open VaultFlow online and sign in to prepare offline access again.';
             document.querySelector('.loading-progress')?.remove();
             document.querySelector('.loading-progress-text')?.remove();
             if (retry) { retry.hidden = false; retry.addEventListener('click', () => location.reload()); }

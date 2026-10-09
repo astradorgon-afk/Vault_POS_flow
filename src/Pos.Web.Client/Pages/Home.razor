@@ -32,7 +32,7 @@
             {
                 <label for="offline-enrol">Enroll installation <span>one-time setup</span></label>
                 <input id="offline-enrol" @bind="enrolmentCode" disabled="@(!ready || !connected || busy)" />
-                <p class="login-help">Connect to enroll this installation. An administrator provides the one-time code.</p>
+                <p class="login-help">Connect to enroll this installation. An administrator provides the one-time code. If browser data was cleared, work that was only saved on this device may be gone.</p>
             }
             <div class="login-location">
                 <div class="login-location-trigger"><span class="login-location-arrow" aria-hidden="true">▸</span> Work location <small>@(device?.LocationName ?? (device is null ? "Assigned during enrollment" : "Enrolled on this device"))</small></div>
@@ -89,7 +89,10 @@ else
                 @if (CanInventory) { <a class="quick-action" href="inventory/stock"><span class="quick-icon">▣</span><strong>Stock levels</strong><small>View downloaded quantities</small><span aria-hidden="true">→</span></a> }
                 <a class="quick-action" href="sync"><span class="quick-icon">↻</span><strong>Pending work</strong><small>Review and sync device edits</small><span aria-hidden="true">→</span></a>
             </section>
-            <section class="panel readiness-panel"><div><h2>Ready for work away from the connection</h2><p>@(cacheReady ? "App files are saved in this browser." : "App files are still downloading.") @StorageText()</p></div><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button></section>
+            <section class="panel readiness-panel"><div><h2>Ready for work away from the connection</h2><p>@(cacheReady ? "App files are saved in this browser." : "App files are still downloading.") @StorageText()</p>
+                @if (HasDeviceOnlyWork) { <p class="notice" role="status">@DeviceWorkWarning</p> }
+                @if (!storagePersisted) { <p class="notice" role="status">This browser may remove offline data when storage is low. @((HasDeviceOnlyWork) ? "Unsynced work could be lost." : "")</p><button type="button" @onclick="RequestPersistentStorageAsync">Request persistent storage</button> }
+            </div><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button></section>
         }
         @if (section == "purchase" && CanPurchase)
         {
@@ -172,6 +175,7 @@ else
         else if (section == "queue")
         {
             <header class="qr-head"><div><span class="eyebrow">Workspace</span><h1>Pending work</h1><p>Review device edits and send them for server confirmation.</p></div></header>
+            @if (HasDeviceOnlyWork) { <p class="notice" role="status">@DeviceWorkWarning</p> }
             <section class="panel"><h2>Synchronization</h2><p>Retries keep the same event ID. Failed work stays on this device for review.</p><div class="actions"><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button><button class="primary" disabled="@(busy || !connected)" @onclick="SyncAsync">Sync pending work</button></div>
                 @foreach (OfflineOperation operation in operations) { <article class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span><small>@operation.UpdatedAtUtc.ToLocalTime().ToString("g") · #@operation.Sequence</small>@if (operation.EntityId is { } id) { <p>Official record: @id</p> }@if (operation.Message is not null) { <p>@operation.Message</p> }@if (operation.EventType == "PwaPurchaseDraft" && (operation.Status is "Needs review" or "Conflict")) { <button @onclick="() => RevisePurchaseAsync(operation)">Revise purchase draft</button> }</article> }
                 @if (operations.Count == 0) { <p>No local operations yet.</p> }
@@ -212,6 +216,10 @@ else
     private string twoFactorCode = string.Empty, selectedScope = string.Empty;
     private string section = "overview", productSearch = string.Empty, stockSearch = string.Empty, manualCode = string.Empty, displayName = string.Empty;
     private int PendingCount => operations.Count(o => o.Status != "Confirmed");
+    private int SavedFormCount => (purchase.Lines.Count > 0 || purchase.Proposals.Count > 0 || purchase.SupplierId is not null || !string.IsNullOrWhiteSpace(purchase.CustomSupplierName) ? 1 : 0)
+        + (receiving.PurchaseOrderId != Guid.Empty || receiving.UnexpectedGoods.Count > 0 ? 1 : 0);
+    private bool HasDeviceOnlyWork => PendingCount > 0 || SavedFormCount > 0;
+    private string DeviceWorkWarning => $"Saved only on this device: {PendingCount} unconfirmed {(PendingCount == 1 ? "edit" : "edits")} and {SavedFormCount} saved {(SavedFormCount == 1 ? "form" : "forms")}. Queue saved forms, then sync and confirm edits before clearing browser or VaultFlow site data.";
     private string Initials => string.Concat((displayName.Length > 0 ? displayName : "VaultFlow").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => char.ToUpperInvariant(part[0])));
     private string PageTitleText => section switch { "purchase" => "Purchase orders", "receiving" => "Goods receiving", "inventory" => "Stock levels", "queue" => "Pending work", "prepare" => "Offline access", _ => "Overview" };
     private string PageSection => section switch { "purchase" => "Purchasing", "receiving" or "inventory" => "Inventory", "prepare" => "Administration", _ => "Workspace" };
@@ -363,6 +371,8 @@ else
     }
     private Task LockAsync() => RunAsync("Locking…", async () =>
     {
+        int pendingAtLock = PendingCount;
+        int formsAtLock = SavedFormCount;
         await store!.InvokeVoidAsync("lock");
         unlocked = false; snapshot = null; displayName = string.Empty;
         products.Clear(); orders.Clear(); operations.Clear();
@@ -371,6 +381,7 @@ else
         canProvision = false; currentPermissions.Clear(); staff.Clear();
         scanMessage = null; selectedScope = userName = password = twoFactorCode = string.Empty;
         await RefreshStateAsync();
+        if (pendingAtLock > 0 || formsAtLock > 0) message = $"Still saved only on this device: {pendingAtLock} unconfirmed {(pendingAtLock == 1 ? "edit" : "edits")} and {formsAtLock} saved {(formsAtLock == 1 ? "form" : "forms")}. Sign in, queue saved forms, and sync before clearing browser data.";
         Navigation.NavigateTo("/login");
     });
     private void ShowPurchase() => Navigation.NavigateTo("purchasing");
@@ -427,6 +438,11 @@ else
         message = "Preparation finished. Record each new PIN before leaving this page.";
     });
     private string StorageText() => storageQuota == 0 ? "Storage estimate unavailable" : $"{storageUsed / 1024 / 1024} MB used of {storageQuota / 1024 / 1024} MB · {(storagePersisted ? "persistent" : "browser may evict")}";
+    private Task RequestPersistentStorageAsync() => RunAsync("Requesting persistent storage…", async () =>
+    {
+        storagePersisted = await store!.InvokeAsync<bool>("requestPersistentStorage");
+        message = storagePersisted ? "Persistent storage is enabled for this browser." : "The browser did not grant persistent storage. Keep pending work synced and avoid clearing VaultFlow site data.";
+    });
     private OfflineProduct? FindProduct(string raw)
     {
         string code = raw.Trim().ToUpperInvariant();

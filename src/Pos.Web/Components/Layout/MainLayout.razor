@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject NavigationManager Navigation
 @inject NotificationStore Notifications
+@inject OfflineReadinessNotice OfflineNotice
 @inject UserSession Session
 @inject PageTrail Trail
 @inject KeyboardScanListener Scanner
@@ -68,6 +69,33 @@
             </AuthorizeView>
         </header>
 
+        @if (OfflineNotice.IsVisible)
+        {
+            <section class="offline-ready-banner" role="status" aria-label="Offline access notice">
+                <span class="offline-ready-icon" aria-hidden="true"><AppIcon Name="check" /></span>
+                <div class="offline-ready-copy">
+                    <strong>Offline access is ready on this device.</strong>
+                    <small>@(OfflineNotice.IsInstalled
+                        ? "You can open your saved workspace from the sign-in page without a connection."
+                        : "Install VaultFlow to open it from your home screen.")</small>
+                    <p id="offline-install-status"></p>
+                    @if (!OfflineNotice.IsInstalled)
+                    {
+                        <p id="offline-install-steps">If no install prompt opens, use your browser menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+                    }
+                </div>
+                <div class="offline-ready-actions">
+                    @if (!OfflineNotice.IsInstalled)
+                    {
+                        <button type="button" class="offline-ready-install" data-vaultflow-install>Install VaultFlow</button>
+                    }
+                    <button type="button" class="offline-ready-dismiss" aria-label="Dismiss offline notice" @onclick="DismissOfflineNotice">
+                        <AppIcon Name="close" />
+                    </button>
+                </div>
+            </section>
+        }
+
         <article id="main-content" class="content" tabindex="-1">@Body</article>
         <ScanFeedback Hint="Open an inventory page to use it." />
     </main>
@@ -121,6 +149,7 @@
     protected override void OnInitialized()
     {
         Notifications.Changed += OnNotificationsChanged;
+        OfflineNotice.Changed += OnNotificationsChanged;
         Navigation.LocationChanged += OnLocationChanged;
         Trail.Changed += OnNotificationsChanged;
     }
@@ -204,6 +233,7 @@
 
     private sealed record Tab(string Href, string Icon, string Label);
     private void CloseNavigation() => navigationOpen = false;
+    private void DismissOfflineNotice() => OfflineNotice.Dismiss();
     private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
@@ -225,6 +255,7 @@
     public void Dispose()
     {
         Notifications.Changed -= OnNotificationsChanged;
+        OfflineNotice.Changed -= OnNotificationsChanged;
         Navigation.LocationChanged -= OnLocationChanged;
         Trail.Changed -= OnNotificationsChanged;
     }
