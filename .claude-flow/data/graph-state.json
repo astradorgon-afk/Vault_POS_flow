@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": 1791543155253,
+  "updatedAt": 1791569303058,
   "nodeCount": 6,
   "nodes": {
     "mem-bash-heredoc-unreliable-----0": {
@@ -13,8 +13,8 @@
     "mem-docker-desktop-stale-sockets-----0": {
       "id": "mem-docker-desktop-stale-sockets-----0",
       "category": "docker-desktop-stale-sockets",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.53,
+      "accessCount": 1,
       "createdAt": 1790790810903
     },
     "mem-hook-stray-redirect-files-----0": {
@@ -41,8 +41,8 @@
     "insight-1790842201511-0xbe": {
       "id": "insight-1790842201511-0xbe",
       "category": "insights",
-      "confidence": 0.53,
-      "accessCount": 1,
+      "confidence": 0.5,
+      "accessCount": 0,
       "createdAt": 1790842201511
     }
   },

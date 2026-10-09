@@ -1,0 +1,24 @@
+@inject NavigationManager Navigation
+
+@if (Connected)
+{
+    <button type="button" class="@CssClass online-feature" title="Open in the online workspace" @onclick="Open">
+        <AppIcon Name="@Icon" /> <span>@Label</span>
+    </button>
+}
+else
+{
+    <span class="@CssClass offline-unavailable" aria-disabled="true" title="Needs Wi-Fi">
+        <AppIcon Name="@Icon" /> <span>@Label</span><small>Wi-Fi</small>
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Href { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+    [Parameter] public string CssClass { get; set; } = "nav-link";
+    [Parameter] public bool Connected { get; set; }
+
+    private void Open() => Navigation.NavigateTo(Href, forceLoad: true);
+}

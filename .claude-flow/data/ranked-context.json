@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computedAt": 1791543155255,
+  "computedAt": 1791569303060,
   "entries": [
     {
       "id": "mem-bash-heredoc-unreliable-----0",
@@ -67,9 +67,9 @@
       "content": "name: docker-desktop-stale-sockets\ndescription: Docker Desktop on this Windows machine crashes at start on leftover unix socket files; rename the folders holding them\nmetadata: \n  node_type: memory\n  type: reference\n  originSessionId: 32c16f71-c4f7-4620-b556-a6992c79c9cb\n  modified: 2026-09-13T17:05:54.334Z\n---\n\nDocker Desktop 4.81 on this machine (Windows 11 build 26200) crashes during start-up with\n\"starting services: initializing <Inference manager | Secrets Engine>: listening on unix://...:…",
       "summary": "---",
       "category": "docker-desktop-stale-sockets",
-      "confidence": 0.5,
+      "confidence": 0.53,
       "pageRank": 0.16666666666666666,
-      "accessCount": 0,
+      "accessCount": 1,
       "words": [
         "name",
         "docker-desktop-stale-sockets",
@@ -311,9 +311,9 @@
       "content": "File unknown was edited 13 times this session — likely a hot path worth monitoring.",
       "summary": "Frequently edited: unknown (13x)",
       "category": "insights",
-      "confidence": 0.53,
+      "confidence": 0.5,
       "pageRank": 0.16666666666666666,
-      "accessCount": 1,
+      "accessCount": 0,
       "words": [
         "file",
         "unknown",

@@ -5,7 +5,7 @@ const cachePrefix = 'vaultflow-root-shell-';
 const cacheName = cachePrefix + self.assetsManifest.version;
 const shell = '/offline/index.html';
 const readyMarker = '/offline/cache-ready';
-const routes = new Set(['/login', '/', '/purchasing', '/receiving', '/inventory/stock', '/sync', '/team', '/offline', '/offline/']);
+const routes = new Set(['/login', '/', '/purchasing', '/receiving', '/inventory/stock', '/stores', '/sync', '/team', '/offline', '/offline/']);
 const cacheable = /\.(?:dll|pdb|wasm|html|js|json|css|woff2?|png|jpe?g|gif|ico|blat|dat|webmanifest)$/i;
 
 let cacheDownload;
@@ -20,6 +20,9 @@ function downloadShell() {
             }));
         assets.push(new Request('/offline/_framework/blazor.webassembly.js', { cache: 'no-cache' }));
         assets.push(new Request('/offline/_framework/dotnet.js', { cache: 'no-cache' }));
+        // The client uses the same visual shell as the server-rendered site.
+        for (const path of ['/app.css', '/fonts/dm-sans-latin.woff2', '/fonts/manrope-latin.woff2'])
+            assets.push(new Request(path, { cache: 'no-cache' }));
         const cache = await caches.open(cacheName);
         await cache.addAll(assets);
         // A proxy can answer a script request with an empty page or access notice.
@@ -77,7 +80,8 @@ self.addEventListener('fetch', event => {
         })());
         return;
     }
-    if (url.pathname.startsWith('/offline/') || url.pathname.startsWith('/_content/Pos.SharedUI/'))
+    if (url.pathname.startsWith('/offline/') || url.pathname.startsWith('/_content/Pos.SharedUI/') ||
+        url.pathname === '/app.css' || url.pathname.startsWith('/fonts/'))
         event.respondWith((async () => {
             const cache = await caches.open(cacheName);
             const alias = url.pathname.replace(/\.[a-z0-9]{10,}\.(js|css)$/i, '.$1');
