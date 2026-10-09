@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Inventory;
@@ -273,6 +274,11 @@ public static class DependencyInjection
 
         string connectionName = provider == PersistenceProvider.Postgres ? "Postgres" : "Sqlite";
         string? connectionString = configuration.GetConnectionString(connectionName);
+        if (provider == PersistenceProvider.Postgres && string.IsNullOrWhiteSpace(connectionString) &&
+            configuration["DATABASE_URL"] is { Length: > 0 } databaseUrl)
+        {
+            connectionString = PostgresUrlToConnectionString(databaseUrl);
+        }
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -315,6 +321,32 @@ public static class DependencyInjection
         });
 
         return services;
+    }
+
+    private static string PostgresUrlToConnectionString(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? url) ||
+            url.Scheme is not ("postgres" or "postgresql") ||
+            string.IsNullOrWhiteSpace(url.Host) || string.IsNullOrWhiteSpace(url.UserInfo) ||
+            string.IsNullOrWhiteSpace(url.AbsolutePath.Trim('/')) || !string.IsNullOrEmpty(url.Query))
+        {
+            throw new InvalidOperationException("DATABASE_URL must be an internal PostgreSQL URL without query parameters.");
+        }
+
+        string[] credentials = url.UserInfo.Split(':', 2);
+        if (credentials.Length != 2)
+        {
+            throw new InvalidOperationException("DATABASE_URL must include a database user and password.");
+        }
+
+        return new NpgsqlConnectionStringBuilder
+        {
+            Host = url.Host,
+            Port = url.IsDefaultPort ? 5432 : url.Port,
+            Database = Uri.UnescapeDataString(url.AbsolutePath.TrimStart('/')),
+            Username = Uri.UnescapeDataString(credentials[0]),
+            Password = Uri.UnescapeDataString(credentials[1]),
+        }.ConnectionString;
     }
 
     /// <summary>Adds ASP.NET Core Identity and the authorization services built on it.</summary>

@@ -1,0 +1,563 @@
+@page "/"
+@page "/login"
+@page "/offline"
+@page "/purchasing"
+@page "/receiving"
+@page "/inventory/stock"
+@page "/sync"
+@page "/team"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>@PageTitleText · VaultFlow</PageTitle>
+@if (!unlocked)
+{
+    <LoginSurface>
+        <form @onsubmit="UnifiedOfflineSignInAsync" @onsubmit:preventDefault="true">
+            <header><span class="eyebrow">Secure workspace</span><h2>Welcome back</h2><p>Use your VaultFlow account to open the operations console.</p></header>
+            <p class="login-mode">Offline mode · saved work on this device</p>
+            @if (!ready) { <p class="login-help" role="status">Opening saved data…</p> }
+            @if (busy) { <p class="login-help" role="status">@activity</p> }
+            @if (message is not null) { <p class="login-help" role="status">@message</p> }
+            @if (error is not null) { <div class="form-error" role="alert">@error</div> }
+            <label for="offline-username">Username or email</label>
+            <input id="offline-username" name="username" autocomplete="username" required autofocus @bind="userName" @bind:event="oninput" disabled="@busy" />
+            <label for="offline-password">Password</label>
+            <div class="password-field">
+                <input id="offline-password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" required @bind="password" disabled="@busy" />
+                <button type="button" class="password-toggle" aria-label="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@showPassword" @onclick="() => showPassword = !showPassword">@(showPassword ? "Hide" : "Show")</button>
+            </div>
+            @if (device is null)
+            {
+                <label for="offline-enrol">Enroll installation <span>one-time setup</span></label>
+                <input id="offline-enrol" @bind="enrolmentCode" disabled="@(!ready || !connected || busy)" />
+                <p class="login-help">Connect to enroll this installation. An administrator provides the one-time code.</p>
+            }
+            <div class="login-location">
+                <div class="login-location-trigger"><span class="login-location-arrow" aria-hidden="true">▸</span> Work location <small>@(device?.LocationName ?? (device is null ? "Assigned during enrollment" : "Enrolled on this device"))</small></div>
+            </div>
+            <button type="submit" disabled="@(!ready || busy)">@((device is null) ? "Enroll installation" : "Open workspace")</button>
+            @if (!connected) { <p class="login-help">A saved employee profile is required to sign in without a connection.</p> }
+        </form>
+    </LoginSurface>
+}
+else
+{
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="app-shell">
+<aside id="primary-navigation" class="sidebar @(navigationOpen ? "is-open" : string.Empty)">
+    <div class="brand-block"><a class="brand" href="./"><span class="brand-glyph">V</span><span><strong>VaultFlow</strong><small>Operations ledger</small></span></a><button class="sidebar-close" type="button" aria-label="Close navigation" @onclick="CloseNavigation">×</button></div>
+    <nav class="nav-stack" aria-label="Primary navigation">
+        <div class="nav-group"><span class="nav-heading">Workspace</span><NavLink class="nav-link" href="" Match="NavLinkMatch.All" @onclick="CloseNavigation"><span class="nav-icon">⌂</span><span>Overview</span></NavLink></div>
+        @if (unlocked)
+        {
+            <div class="nav-group"><span class="nav-heading">Inventory</span>
+                @if (CanInventory) { <NavLink class="nav-link" href="inventory/stock" @onclick="CloseNavigation"><span class="nav-icon">▣</span><span>Stock levels</span></NavLink> }
+                @if (CanReceive) { <NavLink class="nav-link" href="receiving" @onclick="CloseNavigation"><span class="nav-icon">▤</span><span>Goods receiving</span></NavLink> }
+            </div>
+            @if (CanPurchase) { <div class="nav-group"><span class="nav-heading">Purchasing</span><NavLink class="nav-link" href="purchasing" @onclick="CloseNavigation"><span class="nav-icon">▧</span><span>Purchase orders</span></NavLink></div> }
+            <div class="nav-group"><span class="nav-heading">Workspace</span><NavLink class="nav-link" href="sync" @onclick="CloseNavigation"><span class="nav-icon">↻</span><span>Pending work (@PendingCount)</span></NavLink>
+                @if (canProvision) { <NavLink class="nav-link" href="team" @onclick="CloseNavigation"><span class="nav-icon">♙</span><span>Offline access</span></NavLink> }
+            </div>
+        }
+    </nav>
+    <div class="sidebar-footer"><span>@(unlocked ? "Signed in as" : "Browser workspace")</span><strong>@(unlocked ? displayName : "VaultFlow")</strong>@if (unlocked) { <button class="sign-out" @onclick="LockAsync">Lock workspace</button> }</div>
+</aside>
+@if (navigationOpen) { <button class="nav-scrim" type="button" aria-label="Close navigation" @onclick="CloseNavigation"></button> }
+<div class="app-main">
+<header class="top-row"><button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@navigationOpen" @onclick="ToggleNavigation">☰</button><div class="workspace-context"><small>@PageSection</small><strong>@PageTitleText</strong></div><div class="top-actions"><span class="connection-pill @(connected ? "is-online" : "is-offline")" role="status">@(connected ? "Online" : "Offline")</span><span class="operator-mark" aria-hidden="true">@Initials</span></div></header>
+<main id="main-content" class="workspace content" tabindex="-1">
+    @if (!cacheReady) { <p class="notice" role="status">Downloading offline files. Keep this page open until it is ready.</p> }
+    @if (unlocked && !connected) { <p class="notice" role="status">You are working from downloaded data. Edits stay <strong>Saved on device</strong> until the server confirms them.</p> }
+    @if (busy) { <p class="notice" role="status">@activity</p> }
+    @if (message is not null) { <p class="notice" role="status">@message</p> }
+    @if (error is not null) { <p class="error" role="alert">@error</p> }
+    @if (unlocked)
+    {
+        @if (section == "overview")
+        {
+            <section class="ov-hero"><div class="ov-hero-copy"><span class="eyebrow">Your workspace</span><h1>Welcome, @displayName</h1><p>Pick up purchasing, receiving, and stock work from this device. Shared records update after server confirmation.</p></div><div class="hero-mark" aria-hidden="true">V</div></section>
+        <section class="status-grid">
+            <div class="panel"><small>Connection</small><h2>@(connected ? "Online" : "Offline")</h2><p>@(connected ? "You can refresh and sync your work." : "You can continue with downloaded data.")</p></div>
+            <div class="panel"><small>Last downloaded</small><h2>@(snapshot is null ? "No data yet" : snapshot.DownloadedAtUtc.ToLocalTime().ToString("g"))</h2><p>@products.Count products · @orders.Count orders</p></div>
+            <div class="panel"><small>Pending work</small><h2>@PendingCount</h2><p>Saved on this device until confirmed.</p></div>
+        </section>
+            <section class="quick-actions" aria-label="Workflows">
+                @if (CanPurchase) { <a class="quick-action" href="purchasing"><span class="quick-icon">▧</span><strong>Purchase orders</strong><small>Create a purchase draft</small><span aria-hidden="true">→</span></a> }
+                @if (CanReceive) { <a class="quick-action" href="receiving"><span class="quick-icon">▤</span><strong>Goods receiving</strong><small>Count a downloaded order</small><span aria-hidden="true">→</span></a> }
+                @if (CanInventory) { <a class="quick-action" href="inventory/stock"><span class="quick-icon">▣</span><strong>Stock levels</strong><small>View downloaded quantities</small><span aria-hidden="true">→</span></a> }
+                <a class="quick-action" href="sync"><span class="quick-icon">↻</span><strong>Pending work</strong><small>Review and sync device edits</small><span aria-hidden="true">→</span></a>
+            </section>
+            <section class="panel readiness-panel"><div><h2>Ready for work away from the connection</h2><p>@(cacheReady ? "App files are saved in this browser." : "App files are still downloading.") @StorageText()</p></div><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button></section>
+        }
+        @if (section == "purchase" && CanPurchase)
+        {
+            <header class="qr-head"><div><span class="eyebrow">Purchasing</span><h1>Purchase orders</h1><p>Review downloaded orders or create a draft for server confirmation.</p></div><button class="primary" @onclick="() => showPurchaseForm = !showPurchaseForm">@(showPurchaseForm ? "Close form" : "+ New purchase order")</button></header>
+            <section class="panel order-list"><h2>Downloaded orders</h2><p>Open orders from the last download. Status may have changed since then.</p>
+                @if (orders.Count == 0) { <p>No open orders were downloaded for this location.</p> }
+                else
+                {
+                    <div class="table-wrap"><table><thead><tr><th>Order</th><th>Status at download</th><th>Lines</th></tr></thead><tbody>
+                        @foreach (OfflineOrder order in orders) { <tr><td><strong>@(order.Number ?? order.Id.ToString("D"))</strong></td><td>@order.Status</td><td>@order.Lines.Count</td></tr> }
+                    </tbody></table></div>
+                }
+                @if (operations.Any(o => o.EventType == "PwaPurchaseDraft"))
+                {
+                    <h3>Drafts from this device</h3>
+                    @foreach (OfflineOperation operation in operations.Where(o => o.EventType == "PwaPurchaseDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
+                }
+            </section>
+            @if (showPurchaseForm)
+            {
+            <section class="panel"><h2>New purchase order</h2><p>Your draft is saved on this device until the server confirms it.</p>
+                <div class="form-grid"><label>Supplier<select @bind="purchase.SupplierId"><option value="">New supplier by name</option>@foreach (OfflineSupplier supplier in snapshot?.Suppliers ?? []) { <option value="@supplier.Id">@supplier.Name</option> }</select></label>
+                @if (purchase.SupplierId is null) { <label>Supplier name<input @bind="purchase.CustomSupplierName" /></label> }
+                <label>Search catalog<input @bind="productSearch" @bind:event="oninput" /></label></div>
+                @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button @onclick="() => AddProductAsync(product)">Add</button></li> }</ul> }
+                <div class="scanner-row"><BarcodeCamera OnScan="OnPurchaseScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnPurchaseScanAsync(manualCode)">Find on device</button></div>
+                @if (scanMessage is not null) { <p role="status">@scanMessage</p> }
+                @if (showProposal)
+                {
+                    <div class="subpanel"><h3>Unknown product details</h3><div class="form-grid">
+                        <label>Barcode<input @bind="proposal.Barcode" /></label><label>SKU<input @bind="proposal.Sku" /></label><label>Name<input @bind="proposal.Name" /></label>
+                        <label>Category<select @bind="proposal.CategoryId"><option value="@Guid.Empty">Choose</option>@foreach (OfflineCategory category in snapshot?.Categories ?? []) { <option value="@category.Id">@category.Name</option> }</select></label>
+                        <label>Unit<select @bind="proposal.BaseUnitOfMeasureId"><option value="@Guid.Empty">Choose</option>@foreach (OfflineUnit unit in snapshot?.Units ?? []) { <option value="@unit.Id">@unit.Name</option> }</select></label>
+                        <label>Purchase cost<input type="number" min="0" step="0.01" @bind="proposal.DefaultPurchaseCost" /></label>
+                    </div><button @onclick="AddProposalAsync">Add proposal</button></div>
+                }
+                <h3>Order lines</h3>@if (purchase.Lines.Count == 0) { <p>Scan or search to begin.</p> }
+                @foreach (ProposedProduct item in purchase.Proposals)
+                {
+                    <div class="subpanel" @key="item"><h3>Proposed: @item.Name</h3><div class="form-grid"><label>Barcode<input @bind="item.Barcode" /></label><label>SKU<input @bind="item.Sku" /></label><label>Name<input @bind="item.Name" /></label><label>Link existing product<select value="" @onchange="args => LinkProposalAsync(item, args)"><option value="">Choose product</option>@foreach (OfflineProduct known in products) { <option value="@known.Id">@known.Name · @known.Sku</option> }</select></label></div></div>
+                }
+                @foreach (PurchaseWorkingLine line in purchase.Lines) { <div class="line-row" @key="line"><strong>@line.Name</strong><label>Quantity<input type="number" min="0.001" step="0.001" @bind="line.OrderedQuantity" /></label><label>Unit cost<input type="number" min="0" step="0.01" @bind="line.UnitCost" /></label><button @onclick="() => RemoveLineAsync(line)">Remove</button></div> }
+                <div class="actions"><button @onclick="SavePurchaseAsync">Save form on device</button><button class="primary" disabled="@busy" @onclick="QueuePurchaseAsync">Queue purchase draft</button></div>
+            </section>
+            }
+        }
+        else if (section == "receiving" && CanReceive)
+        {
+            <header class="qr-head"><div><span class="eyebrow">Inventory</span><h1>Goods receiving</h1><p>Count a downloaded order. Stock remains unavailable until the server confirms the count.</p></div></header>
+            <section class="panel"><h2>Physical receiving count</h2><p>Unexpected goods require server review.</p>
+                <label>Order<select value="@receiving.PurchaseOrderId" @onchange="SelectOrderAsync"><option value="@Guid.Empty">Choose downloaded order</option>@foreach (OfflineOrder order in orders) { <option value="@order.Id">@(order.Number ?? order.Id.ToString("D")) · @order.Status</option> }</select></label>
+                @if (receiving.PurchaseOrderId != Guid.Empty)
+                {
+                    <div class="scanner-row"><BarcodeCamera OnScan="OnReceivingScanAsync" /><label>Barcode<input @bind="manualCode" /></label><button @onclick="() => OnReceivingScanAsync(manualCode)">Count one</button></div>
+                    @foreach (ReceivingWorkingLine line in receiving.Lines) { <div class="receiving-line" @key="line"><strong>@line.Name</strong><label>Arrived<input type="number" min="0" step="0.001" @bind="line.QuantityReceived" /></label><label>Damaged<input type="number" min="0" step="0.001" @bind="line.QuantityDamaged" /></label><label>Wrong item<input type="number" min="0" step="0.001" @bind="line.QuantityWrongItem" /></label><label>Expired<input type="number" min="0" step="0.001" @bind="line.QuantityExpired" /></label><label>Cost<input type="number" min="0" step="0.01" @bind="line.UnitCost" /></label><label>Lot<input @bind="line.LotNumber" /></label></div> }
+                    <label class="checkbox"><input type="checkbox" @bind="receiving.DocumentsMissing" /> Delivery documents missing</label>
+                    @if (receiving.UnexpectedGoods.Count > 0) { <h3>Unexpected goods · quarantine review</h3>@foreach (UnexpectedGood good in receiving.UnexpectedGoods) { <div class="line-row" @key="good"><strong>@good.Barcode</strong><label>Description<input @bind="good.Description" /></label><label>Quantity<input type="number" min="0" step="0.001" @bind="good.Quantity" /></label></div> } }
+                    <div class="actions"><button @onclick="SaveReceivingAsync">Save count on device</button><button class="primary" disabled="@busy" @onclick="QueueReceivingAsync">Queue receiving count</button></div>
+                }
+            </section>
+        }
+        else if (section == "inventory" && CanInventory)
+        {
+            <header class="qr-head"><div><span class="eyebrow">Inventory</span><h1>Stock levels</h1><p>Server-confirmed quantities from @(snapshot?.DownloadedAtUtc.ToLocalTime().ToString("g") ?? "no download"). Pending receiving and later movements are not included.</p></div></header>
+            <section class="panel"><h2>Downloaded inventory</h2>
+                @if (snapshot?.StockLevels is null) { <p>Inventory data was not available for this employee or location at the last download.</p> }
+                else
+                {
+                    <label>Find product<input @bind="stockSearch" @bind:event="oninput" /></label>
+                    <p>@snapshot.StockLevels.Name · @StockMatches.Count() products shown</p>
+                    @foreach (OfflineStockRow row in StockMatches) { <div class="stock-row" @key="row.ProductId"><strong>@row.Name <small>@row.Sku</small></strong><span>@row.Status</span><span>Available @row.Available</span><span>In transit @row.InTransit</span><span>On hold @row.OnHold</span></div> }
+                }
+            </section>
+        }
+        else if (section == "prepare")
+        {
+            <header class="qr-head"><div><span class="eyebrow">Administration</span><h1>Offline access</h1><p>Each employee prepares their own account on this device.</p></div></header>
+            <section class="panel"><h2>Prepare an employee</h2><p>Connect this device, then ask the employee to sign in at <strong>/login</strong> with their usual username and password. VaultFlow will download and encrypt their permitted work automatically.</p><p>Employees with older PIN-protected data will be prompted to move it safely after online sign-in.</p></section>
+        }
+        else if (section == "queue")
+        {
+            <header class="qr-head"><div><span class="eyebrow">Workspace</span><h1>Pending work</h1><p>Review device edits and send them for server confirmation.</p></div></header>
+            <section class="panel"><h2>Synchronization</h2><p>Retries keep the same event ID. Failed work stays on this device for review.</p><div class="actions"><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button><button class="primary" disabled="@(busy || !connected)" @onclick="SyncAsync">Sync pending work</button></div>
+                @foreach (OfflineOperation operation in operations) { <article class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span><small>@operation.UpdatedAtUtc.ToLocalTime().ToString("g") · #@operation.Sequence</small>@if (operation.EntityId is { } id) { <p>Official record: @id</p> }@if (operation.Message is not null) { <p>@operation.Message</p> }@if (operation.EventType == "PwaPurchaseDraft" && (operation.Status is "Needs review" or "Conflict")) { <button @onclick="() => RevisePurchaseAsync(operation)">Revise purchase draft</button> }</article> }
+                @if (operations.Count == 0) { <p>No local operations yet.</p> }
+            </section>
+        }
+        else if (section != "overview")
+        {
+            <section class="panel"><h1>Workflow unavailable</h1><p>This employee does not have access to this workflow on the device.</p><a href="./">Back to overview</a></section>
+        }
+    }
+</main>
+<nav class="tabbar" aria-label="Main">
+    <NavLink class="tab-item" href="" Match="NavLinkMatch.All"><span class="tab-icon">⌂</span><span>Home</span></NavLink>
+    @if (unlocked)
+    {
+        @if (CanPurchase) { <NavLink class="tab-item" href="purchasing"><span class="tab-icon">▧</span><span>Orders</span></NavLink> }
+        @if (CanReceive) { <NavLink class="tab-item" href="receiving"><span class="tab-icon">▤</span><span>Receiving</span></NavLink> }
+        @if (CanInventory) { <NavLink class="tab-item" href="inventory/stock"><span class="tab-icon">▣</span><span>Stock</span></NavLink> }
+        <NavLink class="tab-item" href="sync"><span class="tab-icon">↻</span><span>Pending</span></NavLink>
+    }
+</nav>
+</div>
+</div>
+}
+
+@code {
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
+    private IJSObjectReference? store;
+    private DotNetObjectReference<Home>? lifecycle;
+    private bool ready, busy, unlocked, unlockMode, cacheReady, storagePersisted, showProposal, showPurchaseForm, navigationOpen, showPassword;
+    private bool appInstalled, showInstallSteps;
+    private bool connected = true;
+    private string? installMessage;
+    private long storageUsed, storageQuota;
+    private string activity = string.Empty;
+    private string? message, error, scanMessage;
+    private string enrolmentCode = string.Empty, userName = string.Empty, password = string.Empty, offlinePin = string.Empty;
+    private string twoFactorCode = string.Empty, selectedScope = string.Empty;
+    private string section = "overview", productSearch = string.Empty, stockSearch = string.Empty, manualCode = string.Empty, displayName = string.Empty;
+    private int PendingCount => operations.Count(o => o.Status != "Confirmed");
+    private string Initials => string.Concat((displayName.Length > 0 ? displayName : "VaultFlow").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => char.ToUpperInvariant(part[0])));
+    private string PageTitleText => section switch { "purchase" => "Purchase orders", "receiving" => "Goods receiving", "inventory" => "Stock levels", "queue" => "Pending work", "prepare" => "Offline access", _ => "Overview" };
+    private string PageSection => section switch { "purchase" => "Purchasing", "receiving" or "inventory" => "Inventory", "prepare" => "Administration", _ => "Workspace" };
+    protected override void OnInitialized()
+    {
+        SetSectionFromUri();
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+    private void ToggleNavigation() => navigationOpen = !navigationOpen;
+    private void CloseNavigation() => navigationOpen = false;
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        SetSectionFromUri();
+        navigationOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+    private void SetSectionFromUri()
+    {
+        string path = Navigation.ToBaseRelativePath(Navigation.Uri).TrimEnd('/');
+        section = path switch { "purchasing" => "purchase", "receiving" => "receiving", "inventory/stock" => "inventory", "sync" => "queue", "team" => "prepare", _ => "overview" };
+    }
+    private DeviceView? device;
+    private List<ProfileView> profiles = [];
+    private List<StaffView> staff = [];
+    private bool canProvision;
+    private List<string> currentPermissions = [];
+    private bool CanPurchase => currentPermissions.Contains("purchase.create");
+    private bool CanReceive => currentPermissions.Contains("purchase.receive");
+    private bool CanInventory => currentPermissions.Contains("inventory.view");
+    private ProfileView? SelectedPinProfile => profiles.FirstOrDefault(profile =>
+        profile.Scope == selectedScope && profile.UnlockMethod == "pin");
+    private ProfileView? MatchedPinProfile => profiles.FirstOrDefault(profile =>
+        profile.UnlockMethod == "pin" && profile.UserName.Equals(userName.Trim(), StringComparison.OrdinalIgnoreCase));
+    private OfflineSnapshot? snapshot;
+    private List<OfflineProduct> products = [];
+    private List<OfflineOrder> orders = [];
+    private List<OfflineOperation> operations = [];
+    private PurchaseWorking purchase = new();
+    private ReceivingWorking receiving = new();
+    private ProposedProduct proposal = new();
+    private IEnumerable<OfflineProduct> ProductMatches => products.Where(p => p.IsActive && (p.Name.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Sku.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Barcodes.Any(b => b.Contains(productSearch, StringComparison.OrdinalIgnoreCase))));
+    private IEnumerable<OfflineStockRow> StockMatches => snapshot?.StockLevels?.Products.Where(p => string.IsNullOrWhiteSpace(stockSearch) || p.Name.Contains(stockSearch, StringComparison.OrdinalIgnoreCase) || p.Sku.Contains(stockSearch, StringComparison.OrdinalIgnoreCase)) ?? [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { appInstalled = await JS.InvokeAsync<bool>("vaultFlowInstall.isInstalled"); }
+        catch (JSException) { showInstallSteps = true; }
+        try { store = await JS.InvokeAsync<IJSObjectReference>("import", "/offline/js/offline-store.js"); lifecycle = DotNetObjectReference.Create(this); await store.InvokeVoidAsync("watchLifecycle", lifecycle); await RefreshStateAsync(); ready = true; if (!unlocked && Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/') != "login") Navigation.NavigateTo("/login"); StateHasChanged(); }
+        catch (Exception ex) { error = UiError.Message(ex); ready = true; StateHasChanged(); }
+    }
+    private async Task InstallAppAsync()
+    {
+        try
+        {
+            string outcome = await JS.InvokeAsync<string>("vaultFlowInstall.prompt");
+            appInstalled = outcome == "installed";
+            showInstallSteps = outcome is "instructions" or "dismissed";
+            installMessage = outcome switch
+            {
+                "accepted" => "Install accepted. Open VaultFlow from your device's app list when it appears.",
+                "installed" => "VaultFlow is already open as an installed app.",
+                "dismissed" => "Install canceled. You can try again from your browser's install menu.",
+                _ => "Use the browser steps below to add VaultFlow to your device."
+            };
+        }
+        catch (JSException)
+        {
+            showInstallSteps = true;
+            installMessage = "Use the browser steps below to add VaultFlow to your device.";
+        }
+    }
+    private async Task RefreshStateAsync()
+    {
+        InitialView state = await store!.InvokeAsync<InitialView>("initialize");
+        device = state.Device; profiles = state.Profiles ?? []; cacheReady = state.CacheReady; connected = state.Online;
+        storageUsed = state.StorageUsed; storageQuota = state.StorageQuota; storagePersisted = state.Persisted;
+        unlockMode = profiles.Count > 0;
+        selectedScope = profiles.Count == 1 ? profiles[0].Scope
+            : profiles.Any(profile => profile.Scope == selectedScope) ? selectedScope : string.Empty;
+    }
+    private async Task RunAsync(string description, Func<Task> action)
+    {
+        error = null; message = null; activity = description; busy = true;
+        try { await action(); } catch (Exception ex) { error = UiError.Message(ex); }
+        finally { busy = false; StateHasChanged(); }
+    }
+    private Task EnrolAsync() => RunAsync("Enrolling browser…", async () => { device = await store!.InvokeAsync<DeviceView>("enrol", enrolmentCode.Trim()); message = "Installation enrolled. Sign in to download data."; });
+    private async Task UnifiedOfflineSignInAsync()
+    {
+        if (!ready || busy) return;
+        if (device is null)
+        {
+            if (!connected) { error = "Connect to enroll this installation first."; return; }
+            if (string.IsNullOrWhiteSpace(enrolmentCode)) { error = "Enter the one-time enrollment code."; return; }
+            await EnrolAsync();
+            return;
+        }
+        ProfileView? profile = profiles.FirstOrDefault(item =>
+            item.UserName.Equals(userName.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (profile is null)
+        {
+            error = "No saved data for this account on this device. Sign in online once to prepare it.";
+            return;
+        }
+        if (profile.UnlockMethod == "pin")
+        {
+            error = "This saved profile uses an older offline PIN. Connect and sign in online to move its saved work to your account password.";
+            return;
+        }
+        selectedScope = profile.Scope;
+        await UnlockAsync();
+        if (unlocked) Navigation.NavigateTo("/");
+    }
+    private Task OpenWorkspaceAsync() => unlockMode ? UnlockAsync() : LoginAsync();
+    private Task LoginAsync() => RunAsync("Signing in and downloading…", async () =>
+    {
+        LoginView login = await store!.InvokeAsync<LoginView>("login", userName.Trim(), password, twoFactorCode.Trim(), offlinePin);
+        displayName = login.User.DisplayName; unlocked = true; password = offlinePin = string.Empty;
+        currentPermissions = login.User.Permissions;
+        canProvision = CanProvision(login.User.Permissions);
+        ChooseFirstWorkflow();
+        await LoadWorkingAsync();
+        try { snapshot = await store!.InvokeAsync<OfflineSnapshot>("download"); PrepareSnapshot(); }
+        catch (Exception ex) { message = $"Signed in. Download needs attention: {UiError.Message(ex)}"; }
+        await RefreshStateAsync(); await RefreshOperationsAsync(); await SyncCoreAsync(); message ??= "Workspace ready on this device.";
+    });
+    private Task UnlockAsync() => RunAsync("Unlocking saved data…", async () =>
+    {
+        UnlockView result = await store!.InvokeAsync<UnlockView>("unlock", selectedScope, password);
+        displayName = result.DisplayName; snapshot = result.Snapshot; unlocked = true; password = string.Empty;
+        currentPermissions = result.Permissions;
+        canProvision = CanProvision(result.Permissions);
+        ChooseFirstWorkflow();
+        PrepareSnapshot(); await LoadWorkingAsync(); await RefreshOperationsAsync();
+        try { await SyncCoreAsync(); } catch (JSException) { }
+        message = "Local workspace unlocked. Shared records still need server confirmation.";
+    });
+    private async Task LoadWorkingAsync()
+    {
+        purchase = await store!.InvokeAsync<PurchaseWorking?>("loadWorking", "purchase") ?? new();
+        receiving = await store!.InvokeAsync<ReceivingWorking?>("loadWorking", "receiving") ?? new();
+        showPurchaseForm = purchase.Lines.Count > 0 || purchase.SupplierId is not null || !string.IsNullOrWhiteSpace(purchase.CustomSupplierName);
+    }
+    private void PrepareSnapshot()
+    {
+        products = snapshot?.Products.Where(p => p.IsActive).ToList() ?? [];
+        orders = snapshot?.Orders.Where(o => o.DestinationLocationId == device?.LocationId && (o.Status is "Ordered" or "PartiallyReceived")).ToList() ?? [];
+    }
+    private Task LockAsync() => RunAsync("Locking…", async () =>
+    {
+        await store!.InvokeVoidAsync("lock");
+        unlocked = false; snapshot = null; displayName = string.Empty;
+        products.Clear(); orders.Clear(); operations.Clear();
+        purchase = new(); receiving = new(); proposal = new(); showProposal = showPurchaseForm = false;
+        section = "overview"; productSearch = stockSearch = manualCode = offlinePin = string.Empty;
+        canProvision = false; currentPermissions.Clear(); staff.Clear();
+        scanMessage = null; selectedScope = userName = password = twoFactorCode = string.Empty;
+        await RefreshStateAsync();
+        Navigation.NavigateTo("/login");
+    });
+    private void ShowPurchase() => Navigation.NavigateTo("purchasing");
+    private void ShowReceiving() => Navigation.NavigateTo("receiving");
+    private void ShowInventory() => Navigation.NavigateTo("inventory/stock");
+    private void ShowQueue() => Navigation.NavigateTo("sync");
+    private void ChooseFirstWorkflow() => SetSectionFromUri();
+    private static bool CanProvision(IReadOnlyList<string>? permissions)
+        => permissions?.Contains("user.manage") == true && permissions.Contains("device.manage");
+    private bool IsPrepared(Guid userId)
+        => profiles.Any(profile => profile.Scope.Equals($"{userId:D}:{device?.LocationId:D}", StringComparison.OrdinalIgnoreCase));
+    private async Task ShowPrepareAsync()
+    {
+        Navigation.NavigateTo("team");
+        await LoadEmployeesAsync();
+    }
+    private Task LoadEmployeesAsync() => RunAsync("Loading assigned employees…", async () =>
+    {
+        Dictionary<Guid, StaffView> previous = staff.ToDictionary(employee => employee.UserId);
+        staff = await store!.InvokeAsync<List<StaffView>>("employees") ?? [];
+        foreach (StaffView employee in staff)
+        {
+            if (!previous.TryGetValue(employee.UserId, out StaffView? saved)) continue;
+            employee.Pin = saved.Pin;
+            employee.Error = saved.Error;
+        }
+    });
+    private async Task PrepareCoreAsync(StaffView employee)
+    {
+        employee.Error = null;
+        try
+        {
+            string pin = await store!.InvokeAsync<string>("newPin");
+            await store!.InvokeVoidAsync("provision", employee.UserId, pin);
+            employee.Pin = pin;
+            await RefreshStateAsync();
+        }
+        catch (Exception ex) { employee.Error = UiError.Message(ex); }
+    }
+    private Task PrepareEmployeeAsync(StaffView employee) => RunAsync("Preparing employee…", async () =>
+    {
+        await PrepareCoreAsync(employee);
+        message = employee.Error is null ? $"{employee.DisplayName} can now unlock offline." : null;
+    });
+    private Task PrepareAllAsync() => RunAsync("Preparing employees…", async () =>
+    {
+        foreach (StaffView employee in staff.Where(employee => !IsPrepared(employee.UserId)))
+        {
+            activity = $"Preparing {employee.DisplayName}…";
+            StateHasChanged();
+            await Task.Yield();
+            await PrepareCoreAsync(employee);
+        }
+        message = "Preparation finished. Record each new PIN before leaving this page.";
+    });
+    private string StorageText() => storageQuota == 0 ? "Storage estimate unavailable" : $"{storageUsed / 1024 / 1024} MB used of {storageQuota / 1024 / 1024} MB · {(storagePersisted ? "persistent" : "browser may evict")}";
+    private OfflineProduct? FindProduct(string raw)
+    {
+        string code = raw.Trim().ToUpperInvariant();
+        string alternate = code.Length == 12 ? "0" + code : code.Length == 13 && code[0] == '0' ? code[1..] : code;
+        return products.FirstOrDefault(p => p.Sku.Equals(code, StringComparison.OrdinalIgnoreCase) || p.Barcodes.Any(b => b.Equals(code, StringComparison.OrdinalIgnoreCase) || b.Equals(alternate, StringComparison.OrdinalIgnoreCase)));
+    }
+    private async Task AddProductAsync(OfflineProduct product)
+    {
+        PurchaseWorkingLine? line = purchase.Lines.FirstOrDefault(l => l.ProductId == product.Id);
+        if (line is null) purchase.Lines.Add(new PurchaseWorkingLine { ProductId = product.Id, UnitOfMeasureId = product.BaseUnitOfMeasureId, UnitCost = product.DefaultPurchaseCost ?? 0, Name = product.Name });
+        else line.OrderedQuantity++;
+        productSearch = string.Empty; await SavePurchaseCoreAsync();
+    }
+    private async Task OnPurchaseScanAsync(string code)
+    {
+        OfflineProduct? product = FindProduct(code);
+        if (product is not null) { await AddProductAsync(product); scanMessage = $"{product.Name} added."; }
+        else { proposal = new ProposedProduct { Barcode = code, CategoryId = snapshot?.Categories.FirstOrDefault()?.Id ?? Guid.Empty, BaseUnitOfMeasureId = snapshot?.Units.FirstOrDefault()?.Id ?? Guid.Empty }; showProposal = true; scanMessage = $"{code} is unknown. Enter product details."; }
+    }
+    private Task AddProposalAsync() => RunAsync("Saving proposed product…", async () =>
+    {
+        if (string.IsNullOrWhiteSpace(proposal.Name) || proposal.CategoryId == Guid.Empty || proposal.BaseUnitOfMeasureId == Guid.Empty) throw new InvalidOperationException("Name, category and unit are required.");
+        proposal.Sku = string.IsNullOrWhiteSpace(proposal.Sku) ? $"PWA-{proposal.ClientId:N}"[..15] : proposal.Sku.Trim();
+        purchase.Proposals.Add(proposal); purchase.Lines.Add(new PurchaseWorkingLine { ProposedProductClientId = proposal.ClientId, UnitOfMeasureId = proposal.BaseUnitOfMeasureId, UnitCost = proposal.DefaultPurchaseCost, Name = proposal.Name });
+        proposal = new(); showProposal = false; await SavePurchaseCoreAsync();
+    });
+    private async Task RemoveLineAsync(PurchaseWorkingLine line) { purchase.Lines.Remove(line); if (line.ProposedProductClientId is { } id) purchase.Proposals.RemoveAll(p => p.ClientId == id); await SavePurchaseCoreAsync(); }
+    private Task LinkProposalAsync(ProposedProduct item, ChangeEventArgs args) => RunAsync("Linking product…", async () =>
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out Guid productId)) return;
+        OfflineProduct? known = products.FirstOrDefault(p => p.Id == productId);
+        if (known is null) return;
+        foreach (PurchaseWorkingLine line in purchase.Lines.Where(l => l.ProposedProductClientId == item.ClientId))
+        {
+            line.ProposedProductClientId = null; line.ProductId = productId;
+            line.UnitOfMeasureId = known.BaseUnitOfMeasureId; line.Name = known.Name;
+        }
+        purchase.Proposals.Remove(item); await SavePurchaseCoreAsync();
+        message = $"Linked {known.Name} to this draft. Queue the corrected operation.";
+    });
+    private Task RevisePurchaseAsync(OfflineOperation operation) => RunAsync("Opening saved draft…", async () =>
+    {
+        System.Text.Json.JsonElement payload = await store!.InvokeAsync<System.Text.Json.JsonElement>("operationPayload", operation.EventId.ToString("D"));
+        purchase = new PurchaseWorking
+        {
+            SupplierId = payload.GetProperty("supplierId").ValueKind == System.Text.Json.JsonValueKind.Null ? null : payload.GetProperty("supplierId").GetGuid(),
+            CustomSupplierName = payload.GetProperty("customSupplierName").GetString() ?? string.Empty,
+            Proposals = System.Text.Json.JsonSerializer.Deserialize<List<ProposedProduct>>(payload.GetProperty("proposedProducts"), JsonOptions) ?? [],
+            Lines = System.Text.Json.JsonSerializer.Deserialize<List<PurchaseWorkingLine>>(payload.GetProperty("lines"), JsonOptions) ?? [],
+        };
+        foreach (PurchaseWorkingLine line in purchase.Lines)
+            line.Name = line.ProductId is { } id ? products.FirstOrDefault(p => p.Id == id)?.Name ?? id.ToString("D") :
+                purchase.Proposals.FirstOrDefault(p => p.ClientId == line.ProposedProductClientId)?.Name ?? "Proposed product";
+        await SavePurchaseCoreAsync(); showPurchaseForm = true; ShowPurchase();
+        message = "Correct the proposal or link a known product, then queue a new draft. The original remains visible for review.";
+    });
+    private Task SavePurchaseCoreAsync() => store!.InvokeVoidAsync("saveWorking", "purchase", purchase).AsTask();
+    private Task SavePurchaseAsync() => RunAsync("Saving purchase form…", async () => { await SavePurchaseCoreAsync(); message = "Form saved on device."; });
+    private string CurrencyCode()
+    {
+        if (device is null || snapshot is null) throw new InvalidOperationException("Download location details before queuing a purchase.");
+        foreach (BaselineItem item in snapshot.Baseline.Items.Where(item => item.Type == "LocationChanged"))
+        {
+            if (item.Payload.TryGetProperty("locationId", out System.Text.Json.JsonElement id) && id.GetGuid() == device.LocationId &&
+                item.Payload.TryGetProperty("currencyCode", out System.Text.Json.JsonElement code) &&
+                code.GetString() is { Length: > 0 } currency)
+                return currency;
+        }
+        throw new InvalidOperationException("This location has no downloaded currency. Refresh the snapshot before queuing.");
+    }
+    private Task QueuePurchaseAsync() => RunAsync("Queueing purchase draft…", async () =>
+    {
+        if (!CanPurchase) throw new InvalidOperationException("This employee cannot create purchase drafts.");
+        if (device is null || purchase.Lines.Count == 0 || (purchase.SupplierId is null && string.IsNullOrWhiteSpace(purchase.CustomSupplierName)) || purchase.Lines.Any(l => l.OrderedQuantity <= 0 || l.UnitCost < 0)) throw new InvalidOperationException("Choose a supplier and add valid order lines.");
+        var payload = new { purchase.SupplierId, purchase.CustomSupplierName, DestinationLocationId = device.LocationId, CurrencyCode = CurrencyCode(), ExpectedAtUtc = (DateTimeOffset?)null, ProposedProducts = purchase.Proposals, Lines = purchase.Lines.Select(l => new { l.ProductId, l.ProposedProductClientId, l.UnitOfMeasureId, l.OrderedQuantity, l.UnitCost }).ToArray() };
+        await store!.InvokeAsync<string>("queue", "PwaPurchaseDraft", payload, $"Purchase draft · {purchase.Lines.Count} lines");
+        purchase = new(); showPurchaseForm = false; await SavePurchaseCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Purchase draft saved on device and queued for confirmation.";
+    });
+    private Task SelectOrderAsync(ChangeEventArgs args) => RunAsync("Opening cached order…", async () =>
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out Guid orderId)) return;
+        OfflineOrder? order = orders.FirstOrDefault(o => o.Id == orderId);
+        receiving = new ReceivingWorking { PurchaseOrderId = orderId, Lines = order?.Lines.Select(l => new ReceivingWorkingLine { PurchaseOrderLineId = l.Id, Name = l.ProductName ?? l.ProductSku ?? l.ProductId.ToString("D"), UnitCost = l.UnitCost }).ToList() ?? [] };
+        await SaveReceivingCoreAsync();
+    });
+    private async Task OnReceivingScanAsync(string code)
+    {
+        OfflineProduct? product = FindProduct(code); OfflineOrder? order = orders.FirstOrDefault(o => o.Id == receiving.PurchaseOrderId);
+        OfflineOrderLine? ordered = order?.Lines.FirstOrDefault(l => l.ProductId == product?.Id);
+        ReceivingWorkingLine? line = receiving.Lines.FirstOrDefault(l => l.PurchaseOrderLineId == ordered?.Id);
+        if (line is not null) { line.QuantityReceived++; scanMessage = $"Counted one {line.Name}."; }
+        else { UnexpectedGood? unexpected = receiving.UnexpectedGoods.FirstOrDefault(g => g.Barcode.Equals(code, StringComparison.OrdinalIgnoreCase)); if (unexpected is null) receiving.UnexpectedGoods.Add(new UnexpectedGood { Barcode = code, Description = product?.Name ?? string.Empty }); else unexpected.Quantity++; scanMessage = $"{code} needs quarantine review."; }
+        await SaveReceivingCoreAsync(); StateHasChanged();
+    }
+    private Task SaveReceivingCoreAsync() => store!.InvokeVoidAsync("saveWorking", "receiving", receiving).AsTask();
+    private Task SaveReceivingAsync() => RunAsync("Saving count…", async () => { await SaveReceivingCoreAsync(); message = "Physical count saved on device."; });
+    private Task QueueReceivingAsync() => RunAsync("Queueing count…", async () =>
+    {
+        if (!CanReceive) throw new InvalidOperationException("This employee cannot record receiving.");
+        if (receiving.PurchaseOrderId == Guid.Empty || (receiving.Lines.All(l => l.QuantityReceived <= 0) && receiving.UnexpectedGoods.Count == 0)) throw new InvalidOperationException("Count at least one item.");
+        if (receiving.Lines.Any(l => l.QuantityReceived < 0 || l.QuantityDamaged < 0 || l.QuantityWrongItem < 0 || l.QuantityExpired < 0 || l.UnitCost < 0)) throw new InvalidOperationException("Quantities and costs cannot be negative.");
+        await store!.InvokeAsync<string>("queue", "PwaReceivingCount", new { receiving.PurchaseOrderId, receiving.Lines, receiving.UnexpectedGoods, receiving.DocumentsMissing }, $"Receiving count · {receiving.PurchaseOrderId:D}");
+        receiving = new(); await SaveReceivingCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Count saved on device. Stock remains pending server confirmation.";
+    });
+    private async Task RefreshOperationsAsync() => operations = await store!.InvokeAsync<List<OfflineOperation>>("operations") ?? [];
+    private Task SyncAsync() => RunAsync("Synchronizing…", async () => { await SyncCoreAsync(); message = "Sync attempt finished. Review each operation status."; });
+    private async Task SyncCoreAsync() { await store!.InvokeVoidAsync("synchronize"); await RefreshOperationsAsync(); }
+    private Task DownloadAsync() => RunAsync("Refreshing data…", async () => { snapshot = await store!.InvokeAsync<OfflineSnapshot>("download"); PrepareSnapshot(); message = "Downloaded data refreshed."; });
+    [JSInvokable]
+    public async Task OnBrowserResume()
+    {
+        if (busy || store is null) return;
+        try
+        {
+            await RefreshStateAsync();
+            if (unlocked) await SyncCoreAsync();
+        }
+        catch (JSException) { }
+        StateHasChanged();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        if (store is not null) { await store.InvokeVoidAsync("unwatchLifecycle"); await store.DisposeAsync(); }
+        lifecycle?.Dispose();
+    }
+    private sealed class InitialView { public DeviceView? Device { get; set; } public List<ProfileView>? Profiles { get; set; } public bool CacheReady { get; set; } public bool Online { get; set; } public bool Persisted { get; set; } public long StorageUsed { get; set; } public long StorageQuota { get; set; } }
+    private sealed class DeviceView { public Guid DeviceId { get; set; } public Guid LocationId { get; set; } public string? LocationName { get; set; } }
+    private sealed class ProfileView { public string Scope { get; set; } = string.Empty; public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string UnlockMethod { get; set; } = "password"; public DateTimeOffset LastOnlineUtc { get; set; } }
+    private sealed class LoginView { public LoginUser User { get; set; } = new(); }
+    private sealed class LoginUser { public string DisplayName { get; set; } = string.Empty; public List<string> Permissions { get; set; } = []; }
+    private sealed class UnlockView { public string DisplayName { get; set; } = string.Empty; public List<string> Permissions { get; set; } = []; public OfflineSnapshot? Snapshot { get; set; } }
+    private sealed class StaffView { public Guid UserId { get; set; } public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string? Pin { get; set; } public string? Error { get; set; } }
+}

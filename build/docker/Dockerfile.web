@@ -9,6 +9,7 @@ COPY src/Pos.Shared/Pos.Shared.csproj src/Pos.Shared/
 COPY src/Pos.Application/Pos.Application.csproj src/Pos.Application/
 COPY src/Pos.Infrastructure/Pos.Infrastructure.csproj src/Pos.Infrastructure/
 COPY src/Pos.SharedUI/Pos.SharedUI.csproj src/Pos.SharedUI/
+COPY src/Pos.Web.Client/Pos.Web.Client.csproj src/Pos.Web.Client/
 COPY src/Pos.Web/Pos.Web.csproj src/Pos.Web/
 
 RUN dotnet restore src/Pos.Web/Pos.Web.csproj
@@ -18,6 +19,7 @@ COPY src/Pos.Shared/ src/Pos.Shared/
 COPY src/Pos.Application/ src/Pos.Application/
 COPY src/Pos.Infrastructure/ src/Pos.Infrastructure/
 COPY src/Pos.SharedUI/ src/Pos.SharedUI/
+COPY src/Pos.Web.Client/ src/Pos.Web.Client/
 COPY src/Pos.Web/ src/Pos.Web/
 
 RUN dotnet publish src/Pos.Web/Pos.Web.csproj --no-restore --configuration Release --output /app/publish

@@ -1,0 +1,78 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@if (open)
+{
+    <div class="camera-card">
+        <video @ref="video" autoplay muted playsinline aria-label="Live barcode camera"></video>
+        <div class="actions">
+            <button type="button" @onclick="CloseAsync">Stop camera</button>
+            @if (lastCode is not null)
+            {
+                <button type="button" @onclick="RepeatAsync">Scan same again</button>
+            }
+        </div>
+        <p>@(lastCode is null ? "Hold a barcode in view." : $"Scanned {lastCode}")</p>
+    </div>
+}
+else
+{
+    <button type="button" @onclick="Open">Scan with camera</button>
+}
+@if (error is not null) { <p role="alert" class="error">@error</p> }
+
+@code {
+    [Parameter] public EventCallback<string> OnScan { get; set; }
+    private ElementReference video;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<BarcodeCamera>? callback;
+    private bool open;
+    private bool starting;
+    private string? lastCode;
+    private string? error;
+
+    private void Open() { open = true; starting = true; error = null; lastCode = null; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!starting) return;
+        starting = false;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/offline/js/camera-scanner.js");
+            callback ??= DotNetObjectReference.Create(this);
+            CameraStart? result = await module.InvokeAsync<CameraStart>("start", video, callback, null);
+            if (result?.Error is { } message) { error = message; open = false; StateHasChanged(); }
+        }
+        catch (JSException ex) { error = UiError.Message(ex); open = false; StateHasChanged(); }
+    }
+
+    [JSInvokable]
+    public async Task OnCameraBarcode(string code)
+    {
+        lastCode = code;
+        await OnScan.InvokeAsync(code);
+        StateHasChanged();
+    }
+
+    private async Task RepeatAsync()
+    {
+        if (module is not null) await module.InvokeVoidAsync("rearm", video);
+        lastCode = null;
+    }
+
+    private async Task CloseAsync()
+    {
+        if (module is not null) await module.InvokeVoidAsync("stop", video);
+        open = false;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { if (module is not null) { await module.InvokeVoidAsync("stop", video); await module.DisposeAsync(); } }
+        catch (JSDisconnectedException) { }
+        callback?.Dispose();
+    }
+
+    private sealed class CameraStart { public string? Error { get; set; } }
+}

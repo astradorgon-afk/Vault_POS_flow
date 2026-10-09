@@ -10,6 +10,8 @@ using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
 using Pos.Application.Sales;
+using Pos.Application.Catalog;
+using Pos.Application.Purchasing;
 using NSubstitute;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
@@ -291,6 +293,12 @@ public sealed class SyncPushServiceTests
         response.Results.Single().ErrorCode.Should().Be("shift.already_open");
         response.NextCursor.Should().Be(1);
 
+        SyncPushResponse duplicate = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+        duplicate.Results.Single().Outcome.Should().Be("RequiresReview");
+        duplicate.Results.Single().ErrorCode.Should().Be("shift.already_open");
+        duplicate.Results.Single().Message.Should().Be("The shift is already open.");
+
         await using PosDbContext context = host.CreateContext();
         (await context.ProcessedSyncEvents.SingleAsync()).Outcome.Should().Be(SyncProcessingOutcome.RequiresReview);
         (await context.SyncFailures.SingleAsync()).ErrorCode.Should().Be("shift.already_open");
@@ -534,6 +542,61 @@ public sealed class SyncPushServiceTests
         response.LastAcceptedSequence.Should().Be(1);
         response.OpenFailureCount.Should().Be(1);
         response.CurrentFeedCursor.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PwaPurchaseDraft_CreatesProposedProductsAndOrderAsOneEvent()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        Guid proposalId = Guid.NewGuid();
+        ProductId productId = ProductId.New();
+        PurchaseOrderId orderId = PurchaseOrderId.New();
+        UnitOfMeasureId unitId = UnitOfMeasureId.New();
+        PurchaseDraftSyncPayload payload = new(
+            null, "New supplier", host.Location.Value, "PHP", null,
+            [new PwaProposedProduct(proposalId, "PWA-1", "New product",
+                CategoryId.New().Value, unitId.Value, "5901234123457", 10m)],
+            [new PwaPurchaseLine(null, proposalId, unitId.Value, 2m, 10m)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaPurchaseDraft");
+
+        host.Dispatcher.SendAsync<ProductId>(Arg.Any<CreateProductCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<ProductId>.Success(productId));
+        host.Dispatcher.SendAsync<PurchaseOrderId>(Arg.Any<CreatePurchaseOrderCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PurchaseOrderId>.Success(orderId));
+
+        SyncPushResponse first = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+        SyncPushResponse duplicate = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        first.Results.Single().Outcome.Should().Be("Accepted");
+        first.Results.Single().EntityId.Should().Be(orderId.Value);
+        duplicate.Results.Single().EntityId.Should().Be(orderId.Value);
+        await host.Dispatcher.Received(1).SendAsync<PurchaseOrderId>(
+            Arg.Is<CreatePurchaseOrderCommand>(command =>
+                command.DestinationLocationId == host.Location &&
+                command.Lines.Single().ProductId == productId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PwaUnexpectedGoods_AreRetainedForReviewWithoutPostingStock()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        PwaReceivingSyncPayload payload = new(
+            Guid.NewGuid(),
+            [new PwaReceivingLine(Guid.NewGuid(), 1m, 0m, 0m, 0m, 10m, null, null, null)],
+            [new PwaUnexpectedGood("UNKNOWN", "Extra box", 1m)],
+            false);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaReceivingCount");
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("RequiresReview");
+        response.Results.Single().ErrorCode.Should().Be("sync.unexpected_goods");
+        await host.Dispatcher.DidNotReceive().SendAsync<GoodsReceiptId>(
+            Arg.Any<CreateGoodsReceiptCommand>(), Arg.Any<CancellationToken>());
     }
 
     private sealed class TestHost : IAsyncDisposable

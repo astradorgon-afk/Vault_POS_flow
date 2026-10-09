@@ -105,6 +105,9 @@ public static class AuditActions
 
         /// <summary>A device reported a clock far from the server's.</summary>
         public const string ClockSkewDetected = "device.clock_skew";
+
+        /// <summary>An administrator requested an employee-scoped PWA snapshot.</summary>
+        public const string PwaEmployeeProvisioned = "device.pwa_employee.provisioned";
     }
 
     /// <summary>Catalog changes.</summary>

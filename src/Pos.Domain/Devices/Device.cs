@@ -23,6 +23,9 @@ public enum DevicePlatform
     /// keyed by this device's short code (docs/DECISIONS.md, web-terminal note).
     /// </summary>
     Web = 3,
+
+    /// <summary>Installed offline browser client, enrolled per installation.</summary>
+    Pwa = 4,
 }
 
 /// <summary>Determines whether a platform activates without an enrolment code.</summary>

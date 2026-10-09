@@ -7,6 +7,7 @@ using Pos.SharedUI.Scanning;
 using Pos.Web.Components;
 using Pos.Web.Security;
 using Pos.Web.Services;
+using Pos.Web.Pwa;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +37,10 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<UserSession>();
 builder.Services.AddScoped<NotificationStore>();
 builder.Services.AddScoped<PageTrail>();
+builder.Services.AddSingleton<PwaSessions>();
+builder.Services.AddSingleton<PwaLoginHandoffs>();
+builder.Services.AddHttpClient("pwa-api", (services, client) =>
+    client.BaseAddress = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ApiOptions>>().Value.BaseAddress);
 builder.Services.AddBarcodeScanning(perSession: true);
 builder.Services.AddScoped<VaultFlowAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(services =>
@@ -53,14 +58,14 @@ builder.Services.AddOptions<ApiOptions>()
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+var forwarded = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedProto
+};
 if (app.Environment.IsDevelopment())
 {
     // Docker Desktop forwards local ngrok/Caddy requests from an address owned
     // by this host. Trust only those local proxy addresses for the HTTPS scheme.
-    var forwarded = new ForwardedHeadersOptions
-    {
-        ForwardedHeaders = ForwardedHeaders.XForwardedProto
-    };
     foreach (IPAddress address in Dns.GetHostAddresses(Dns.GetHostName()))
     {
         if (IPAddress.IsLoopback(address))
@@ -73,8 +78,11 @@ if (app.Environment.IsDevelopment())
             forwarded.KnownProxies.Add(address.MapToIPv6());
         }
     }
-    app.UseForwardedHeaders(forwarded);
 }
+// Published phone pilots are exposed through a local ngrok agent, which also
+// connects from loopback. The framework's default loopback trust applies
+// outside Development; never trust arbitrary peers.
+app.UseForwardedHeaders(forwarded);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -84,12 +92,15 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+app.MapPwaGateway();
+app.MapFallbackToFile("/offline/{*path:nonfile}", "offline/index.html");
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700&display=swap');
+@font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 400 800; font-display: swap; src: url('/fonts/dm-sans-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Manrope'; font-style: normal; font-weight: 400 800; font-display: swap; src: url('/fonts/manrope-latin.woff2') format('woff2'); }
 
 :root {
     --ink: #17211c;
@@ -44,6 +45,8 @@ h1:focus { outline: none; }
 .top-row > div:first-child { display: grid; gap: 2px; }
 .operator { display: flex; align-items: center; gap: 10px; }
 .top-actions { display: flex; align-items: center; gap: 16px; }
+.app-install-link { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 14px; border-radius:9px; background:var(--forest); color:#fff; font-size:.76rem; font-weight:800; text-decoration:none; white-space:nowrap; }
+.app-install-link:hover,.app-install-link:focus-visible { background:var(--forest-bright); color:#fff; }
 .notification-bell { text-decoration: none; font: 700 .82rem "Manrope"; position: relative; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: var(--forest); }
 .notification-bell.has-unread { color: #8c4d12; background: var(--amber-soft); border-color: #ebce83; }
 .notification-bell b { position: absolute; top: -7px; right: -7px; min-width: 21px; height: 21px; padding: 0 5px; display: grid; place-items: center; border: 2px solid var(--paper); border-radius: 99px; background: var(--danger); color: #fff; font-size: .61rem; }
@@ -84,7 +87,7 @@ h1:focus { outline: none; }
 .login-story > small { color: #88a495; }
 .login-panel { display: grid; place-items: center; padding: 40px; }
 .login-panel form { width: min(100%, 430px); display: grid; }
-.login-panel h2 { margin: 8px 0; font: 700 2.4rem 'Manrope'; letter-spacing: -.04em; }
+.login-panel h2 { margin: 8px 0; font: 700 2.4rem 'Manrope',system-ui,sans-serif; letter-spacing: -.04em; }
 .login-panel header p { margin: 0 0 30px; color: var(--muted); }
 .login-panel label { margin: 17px 0 7px; font-size: .78rem; font-weight: 700; }
 .login-panel label span { color: var(--muted); font-weight: 400; }
@@ -93,6 +96,7 @@ h1:focus { outline: none; }
 .login-panel button { height: 52px; margin-top: 28px; border: 0; border-radius: 9px; background: var(--forest); color: white; font-weight: 700; cursor: pointer; }
 .login-panel button:hover { background: var(--forest-bright); }
 .login-panel button:disabled { opacity: .6; cursor: wait; }
+.login-install-link { display:block; margin-top:18px; color:var(--forest); font-size:.85rem; font-weight:800; text-align:center; text-underline-offset:3px; }
 .login-location { margin-top: 20px; }
 .login-panel .login-location-trigger { display:flex; align-items:center; gap:8px; width:100%; height:auto; min-height:42px; margin:0; padding:9px 12px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--forest); font-size:.84rem; font-weight:700; text-align:left; }
 .login-panel .login-location-trigger:hover { border-color:#9db9a5; background:var(--mint-soft); }
@@ -366,6 +370,7 @@ select.qr-field{cursor:pointer}
 
 @media(max-width:900px){.app-shell{grid-template-columns:1fr}.sidebar.is-open{transform:translateX(0)}.sidebar-close,.menu-button{display:grid}.nav-scrim{position:fixed;inset:0;z-index:25;display:block;border:0;background:rgba(8,20,14,.52);backdrop-filter:blur(2px)}.nav-heading{display:block}.workspace-context{margin-right:auto}.operator>span:last-child{display:none}}
 @media(max-width:650px){.top-row{min-height:68px}.top-actions{gap:8px}.workspace-context span{display:none}.section-heading{align-items:flex-start;flex-direction:column}.ledger-head{display:none}.ledger-row{grid-template-columns:1fr auto;padding:14px}.ledger-row .store-bar{grid-column:1/-1;grid-row:2}.ledger-row>span{display:none}.attention-list .ledger-head{display:none}.attention-row{grid-template-columns:1fr auto}.attention-row>span{grid-column:1/-1}}
+@media(max-width:650px){.top-row .app-install-link{max-width:104px;padding:5px 9px;line-height:1.15;text-align:center;white-space:normal}.top-row .operator{display:none}}
 
 .quiet-link { color:var(--forest); font-weight:800; text-decoration:none; white-space:nowrap; }
 .sync-page-head { display:flex; justify-content:space-between; gap:24px; align-items:end; margin-bottom:26px; }

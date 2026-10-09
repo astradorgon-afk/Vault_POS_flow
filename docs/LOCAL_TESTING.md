@@ -312,6 +312,22 @@ appear in the web **Sales ledger** once they sync.
 Use a disposable local database for the restore rehearsal. Do not use these
 commands against a shared or production database.
 
+## Install and test the offline browser app on a phone
+
+With the API running on port 5177:
+
+```powershell
+.\scripts\start-phone-pwa.ps1
+```
+
+This publishes the web host in Release, starts it on local port 5321, and prints an ngrok HTTPS URL ending in `/login`. Open that link in Android Chrome and click through ngrok's one-time notice. Sign in online with a work location; enter the one-time installation enrollment code if this browser has not been enrolled. Wait until the page says **Offline access is ready on this device** before leaving it. Enable airplane mode, reopen the same `/login` URL, sign in with the account password, and test purchasing, receiving, and downloaded inventory. Reconnect and review each queued operation's confirmation.
+
+The script saves host/tunnel process IDs and the URL in ignored `artifacts/phone-pwa/pilot.json`; its output includes the stop command. Use `-SkipPublish` to reuse an already published build. Use `-ReuseTunnel` to publish a replacement and restart only the web host while keeping the existing phone address. Keep the tunnel running during the pilot. Free ngrok tunnel URLs change on restart, and device enrollment/data are origin-bound: use a permanent HTTPS domain before real deployment. Do not clear the old origin's storage while it holds pending work.
+
+To issue the code, open the website's **Administration → Devices**, register **Offline browser app (PWA)** for the work location, and enter its one-time enrollment code in the installed app. A browser lane is a different device type and does not provide this offline enrollment.
+
+Do not use a `dotnet run` development worker to verify installation/offline behavior, and do not rely on a temporary free tunnel address for real deployment. A shortcut alone does not prove offline readiness. The existing server-rendered website still needs a connection; the browser-run PWA currently provides purchasing, receiving and downloaded inventory. Cash sales and shifts remain outside its scope.
+
 ## Deferred for now
 
 - GHCR image publishing and deployment-host verification

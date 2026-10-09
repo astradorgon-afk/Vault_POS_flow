@@ -1,14 +1,14 @@
 {
   "context": {
     "lastMatchedPatterns": [
-      "mem-second-vaultflow-checkout-----0",
+      "mem-hook-stray-redirect-files-----0",
       "mem-bash-heredoc-unreliable-----0",
-      "mem-docker-desktop-stale-sockets-----0",
-      "insight-1790842201511-0xbe",
-      "mem-hook-stray-redirect-files-----0"
+      "mem-MEMORY----bash-heredocs-are-unreliabl-0",
+      "mem-second-vaultflow-checkout-----0",
+      "mem-docker-desktop-stale-sockets-----0"
     ]
   },
-  "updatedAt": "2026-10-05T06:38:59.558Z",
-  "endedAt": "2026-10-05T06:46:51.355Z",
+  "updatedAt": "2026-10-07T17:21:43.425Z",
+  "endedAt": "2026-10-07T17:36:31.198Z",
   "duration": null
 }

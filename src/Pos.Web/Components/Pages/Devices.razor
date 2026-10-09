@@ -34,13 +34,13 @@ else
         <section class="fleet-create" aria-labelledby="register-device-title">
             <header>
                 <div><span>New trust record</span><h2 id="register-device-title">Register a terminal</h2></div>
-                <p>Physical terminals receive a one-time enrolment code. Browser lanes activate immediately.</p>
+                <p>Physical terminals and offline browser apps receive a one-time enrolment code. Browser lanes activate immediately.</p>
             </header>
             <div class="fleet-form-grid">
                 <label><span>Short code</span><input maxlength="6" autocomplete="off" @bind="newShortCode" placeholder="T03" /></label>
                 <label><span>Device name</span><input maxlength="80" @bind="newName" placeholder="Front counter 3" /></label>
                 <label><span>Default location</span><select value="@newLocationId" @onchange="OnHomeLocationChanged"><option value="">Select location</option>@foreach (PosLocation location in locations.Where(l => l.IsActive && l.Kind != 2)){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
-                <label><span>Platform</span><select @bind="newPlatform"><option value="1">Windows register</option><option value="2">Android terminal</option><option value="3">Browser lane</option></select></label>
+                <label><span>Platform</span><select @bind="newPlatform"><option value="1">Windows register</option><option value="2">Android terminal</option><option value="3">Browser lane</option><option value="4">Offline browser app (PWA)</option></select></label>
             </div>
             <fieldset class="fleet-location-access">
                 <legend>Locations this device can open</legend>
@@ -449,7 +449,7 @@ else
     private void CancelAction() { actionDevice = null; actionReason = string.Empty; }
     private void OnLocationFilterChanged(ChangeEventArgs e) => filterLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
     private string LocationName(Guid id) => locations.FirstOrDefault(location => location.Id == id) is { } location ? location.Code : id.ToString()[..8];
-    private static string PlatformName(int platform) => platform switch { 1 => "Windows", 2 => "Android", 3 => "Web", _ => "Unknown" };
+    private static string PlatformName(int platform) => platform switch { 1 => "Windows", 2 => "Android", 3 => "Web", 4 => "Offline PWA", _ => "Unknown" };
     private static string StatusName(int status) => status switch { StatusPending => "Awaiting enrolment", StatusActive => "Active", StatusSuspended => "Suspended", StatusRevoked => "Revoked", _ => "Unknown" };
     private static string StatusSlug(int status) => status switch { StatusPending => "pending", StatusActive => "active", StatusSuspended => "suspended", StatusRevoked => "revoked", _ => "unknown" };
     private static string ClockLabel(decimal? seconds) => seconds is null ? "no clock reading" : $"{seconds:+0.##;-0.##;0}s skew";

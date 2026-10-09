@@ -5,9 +5,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Pos.Web.Client\Pos.Web.Client.csproj" />
     <ProjectReference Include="..\Pos.SharedUI\Pos.SharedUI.csproj" />
     <ProjectReference Include="..\Pos.Infrastructure\Pos.Infrastructure.csproj" />
   </ItemGroup>
+
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

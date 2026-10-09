@@ -223,6 +223,28 @@ try
     }));
 
     app.UseAuthentication();
+    app.Use(async (context, next) =>
+    {
+        if (context.User.FindFirst(Pos.Infrastructure.Identity.PosClaimTypes.AuthenticationMethod)?.Value == "pwa-provision")
+        {
+            string path = context.Request.Path.Value ?? string.Empty;
+            bool allowed = HttpMethods.IsGet(context.Request.Method) && (
+                path.Equals("/api/v1/sync/baseline", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/categories", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/units", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/suppliers", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/products", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/inventory/stock-levels", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/purchasing/orders", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/api/v1/purchasing/orders/", StringComparison.OrdinalIgnoreCase));
+            if (!allowed)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+        }
+        await next(context);
+    });
     app.UseRateLimiter();
     app.UseAuthorization();
 
@@ -252,6 +274,7 @@ try
 
     app.MapAuthEndpoints();
     app.MapDeviceEndpoints();
+    app.MapPwaProvisionEndpoints();
     app.MapSyncEndpoints();
     app.MapLocationEndpoints();
     app.MapCatalogEndpoints();
@@ -332,7 +355,8 @@ internal static class DatabaseStartup
 
         PosDbContext context = scope.ServiceProvider.GetRequiredService<PosDbContext>();
 
-        if (database.ApplyMigrationsOnStartup && app.Environment.IsDevelopment())
+        if (database.ApplyMigrationsOnStartup &&
+            (app.Environment.IsDevelopment() || database.AllowProductionStartupMigration))
         {
             await context.Database.MigrateAsync().ConfigureAwait(false);
         }

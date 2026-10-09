@@ -2,23 +2,21 @@
 @attribute [AllowAnonymous]
 @layout AuthLayout
 @rendermode InteractiveServer
+@implements IAsyncDisposable
 @inject VaultFlowApiClient Api
 @inject VaultFlowAuthenticationStateProvider Authentication
 @inject UserSession Session
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject Pos.Web.Pwa.PwaLoginHandoffs Handoffs
 
 <PageTitle>Sign in · VaultFlow</PageTitle>
 
-<main class="login-page">
-    <section class="login-story" aria-label="VaultFlow introduction">
-        <a class="login-brand" href="/"><span>V</span> VaultFlow</a>
-        <div><span class="eyebrow">Inventory command system</span><h1>Know where every unit went.</h1><p>Sales, transfers, returns and stock decisions share one traceable operational record.</p></div>
-        <small>Built for accountable retail operations.</small>
-    </section>
-    <section class="login-panel">
+<LoginSurface>
         <form @onsubmit="SignInAsync" @onsubmit:preventDefault="true">
             <header><span class="eyebrow">Secure workspace</span><h2>Welcome back</h2><p>Use your VaultFlow account to open the operations console.</p></header>
-            @if (!string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
+            @if (!showOfflineSetupModal && !string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
+            @if (offlineReady) { <div class="login-ready" role="status">Offline access is ready on this device. Your saved workspace can open from this same login page without a connection.</div> }
             <label for="username">Username or email</label>
             <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" disabled="@busy" />
             <label for="password">Password</label>
@@ -26,8 +24,25 @@
                 <input id="password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" autocapitalize="off" spellcheck="false" required @bind="password" disabled="@busy" />
                 <button type="button" class="password-toggle" title="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@showPassword" aria-label="@(showPassword ? "Hide password" : "Show password")" @onclick="() => showPassword = !showPassword">@(showPassword ? "Hide" : "Show")</button>
             </div>
-            <label for="two-factor">Two-factor code <span>if required</span></label>
-            <input id="two-factor" name="two-factor" inputmode="numeric" autocomplete="one-time-code" @bind="twoFactorCode" disabled="@busy" />
+            <div class="login-otp">
+                <button type="button" class="login-otp-trigger" aria-expanded="@otpOpen" aria-controls="login-otp-field" @onclick="() => otpOpen = !otpOpen" disabled="@busy">
+                    <span aria-hidden="true">@(otpOpen ? "▾" : "▸")</span> Have a two-factor code?
+                </button>
+                @if (otpOpen)
+                {
+                    <div id="login-otp-field">
+                        <label for="two-factor">Two-factor code</label>
+                        <input id="two-factor" name="two-factor" inputmode="numeric" autocomplete="one-time-code" @bind="twoFactorCode" disabled="@busy" />
+                    </div>
+                }
+            </div>
+            @if (awaitingOldSecret)
+            {
+                <label for="previous-offline-key">@(oldSecretKind == "pin" ? "Previous offline PIN" : "Previous account password")</label>
+                <input id="previous-offline-key" type="password" autocomplete="off" @bind="oldSecret" />
+                <p class="login-help">Enter this once to keep saved drafts and pending work while switching to your current account password.</p>
+                <button type="button" class="login-continue" @onclick="ContinueOnline">Continue online without migrating now</button>
+            }
 
             <div class="login-location">
                 <button type="button" class="login-location-trigger" aria-expanded="@locationOpen" aria-controls="login-location-options" @onclick="ToggleLocationAsync" disabled="@busy">
@@ -72,19 +87,61 @@
                 }
             </div>
 
-            <button type="submit" disabled="@busy">@(busy ? "Signing in…" : "Open workspace")</button>
+            <button type="submit" disabled="@busy">@(busy ? "Preparing workspace…" : awaitingOldSecret ? "Move saved work" : offlineReady ? "Open workspace" : onlineAuthenticated ? offlineDataPrepared ? "Check offline files" : "Prepare offline access" : "Open workspace")</button>
+            @if (!onlineAuthenticated) { <p class="login-help">VaultFlow will confirm when this device is ready for offline use.</p> }
         </form>
-    </section>
-</main>
+        @if (showOfflineSetupModal)
+        {
+            <div class="offline-setup-backdrop" style="position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;overflow-y:auto;padding:12px;background:rgba(13,35,24,.64)">
+                <section class="offline-setup-dialog" style="box-sizing:border-box;width:min(100%,480px);max-height:calc(100dvh - 24px);overflow-y:auto;padding:24px;border:1px solid #dce3dc;border-radius:18px;background:#f7f8f5;color:#17211c;box-shadow:0 24px 80px rgba(10,27,18,.26)" role="dialog" aria-modal="true" aria-labelledby="offline-setup-title" aria-describedby="offline-setup-description">
+                    <span class="eyebrow">Login successful</span>
+                    <h2 id="offline-setup-title">@(offlineReady ? "Offline access is ready" : deviceEnrolled ? "Offline setup needs attention" : "Set up offline access")</h2>
+                    <p id="offline-setup-description">@(offlineReady ? "Your offline data and app files are saved on this device. Install VaultFlow to open it from your home screen." : "You can use your online workspace now. Offline use is unavailable until this device is registered and prepared.")</p>
+                    @if (!string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
+                    <button type="button" class="offline-setup-continue" @onclick="ContinueOnline" disabled="@busy">@(offlineReady ? "Continue to workspace" : deviceEnrolled ? "Continue online" : "Continue online without enrolling")</button>
+                    <div class="offline-setup-enrollment">
+                        @if (offlineReady)
+                        {
+                            <h3>Install on this device</h3>
+                            <button type="button" class="offline-setup-submit" data-vaultflow-install>Install VaultFlow</button>
+                            <p id="offline-install-status" role="status"></p>
+                            <p id="offline-install-steps">If no install prompt opens, use your browser menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+                        }
+                        else
+                        {
+                            @if (!deviceEnrolled)
+                            {
+                                <label for="enrol-installation">Installation enrollment code</label>
+                                <p>Ask an administrator for the one-time PWA code for this device.</p>
+                                <input id="enrol-installation" name="enrol-installation" autocomplete="off" @bind="enrolmentCode" @bind:event="oninput" disabled="@busy" />
+                            }
+                            <button type="button" class="offline-setup-submit" @onclick="PrepareOfflineAsync" disabled="@(busy || (!deviceEnrolled && string.IsNullOrWhiteSpace(enrolmentCode)))">@(busy ? "Preparing offline access…" : deviceEnrolled ? "Retry offline setup" : "Enroll and prepare offline access")</button>
+                        }
+                    </div>
+                </section>
+            </div>
+        }
+</LoginSurface>
 
 @code {
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
 
     private bool showPassword;
+    private bool otpOpen;
     private bool busy;
     private bool locationOpen;
     private bool loadingLocations;
     private bool locationsLoaded;
+    private bool deviceEnrolled;
+    private bool awaitingOldSecret;
+    private bool onlineAuthenticated;
+    private bool offlineDataPrepared;
+    private bool offlineReady;
+    private bool showOfflineSetupModal;
+    private string? oldSecretKind;
+    private string oldSecret = string.Empty;
+    private string enrolmentCode = string.Empty;
+    private IJSObjectReference? offlineStore;
     private string userName = string.Empty;
     private string password = string.Empty;
     private string? twoFactorCode;
@@ -92,6 +149,28 @@
     private string? locationMessage;
     private Guid? selectedLocationId;
     private readonly List<PosSignInLocation> locationChoices = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await InitializeOfflineStoreAsync();
+        StateHasChanged();
+    }
+
+    private async Task<bool> InitializeOfflineStoreAsync()
+    {
+        try
+        {
+            offlineStore ??= await JS.InvokeAsync<IJSObjectReference>("import", "/offline/js/offline-store.js");
+            PwaState state = await offlineStore.InvokeAsync<PwaState>("initialize");
+            deviceEnrolled = state.Device is not null;
+            return true;
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            return false;
+        }
+    }
 
     private async Task ToggleLocationAsync()
     {
@@ -147,6 +226,17 @@
         {
             return;
         }
+        if (awaitingOldSecret)
+        {
+            await FinishOfflinePreparationAsync();
+            return;
+        }
+        if (onlineAuthenticated)
+        {
+            if (offlineReady) ContinueOnline();
+            else await PrepareOfflineAsync();
+            return;
+        }
 
         error = null;
         if (!locationsLoaded)
@@ -160,6 +250,8 @@
             if (!result.IsSuccess)
             {
                 error = result.Error;
+                if (error?.Contains("two-factor", StringComparison.OrdinalIgnoreCase) == true)
+                    otpOpen = true;
                 return;
             }
 
@@ -186,8 +278,8 @@
                 return;
             }
 
-            Authentication.NotifySignedIn();
-            Navigation.NavigateTo(SafeReturnUrl(ReturnUrl));
+            onlineAuthenticated = true;
+            await PrepareOfflineAsync();
         }
         catch (HttpRequestException)
         {
@@ -198,6 +290,122 @@
             busy = false;
         }
     }
+
+    private async Task PrepareOfflineAsync()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            if (!await InitializeOfflineStoreAsync() || offlineStore is null)
+            {
+                error = "Online sign-in succeeded, but this browser could not open device storage. Offline access is not ready here.";
+                showOfflineSetupModal = true;
+                return;
+            }
+            if (!deviceEnrolled)
+            {
+                if (string.IsNullOrWhiteSpace(enrolmentCode))
+                {
+                    showOfflineSetupModal = true;
+                    return;
+                }
+                await offlineStore.InvokeAsync<PwaDevice>("enrol", enrolmentCode.Trim());
+                deviceEnrolled = true;
+                enrolmentCode = string.Empty;
+            }
+            if (!offlineDataPrepared)
+            {
+                if (Session.Current is not { } credentials)
+                {
+                    error = "The online session ended. Sign in again to prepare offline access.";
+                    onlineAuthenticated = false;
+                    return;
+                }
+                string token = Handoffs.Issue(credentials, selectedLocationId);
+                PwaPreparation preparation = await offlineStore.InvokeAsync<PwaPreparation>(
+                    "prepareFromHandoff", token, userName.Trim(), password, "");
+                if (preparation.Status == "old-secret-required")
+                {
+                    awaitingOldSecret = true;
+                    oldSecretKind = preparation.SecretKind;
+                    showOfflineSetupModal = false;
+                    return;
+                }
+                if (preparation.Status != "prepared")
+                {
+                    error = "Offline data was not saved. Keep this page open and try again.";
+                    showOfflineSetupModal = true;
+                    return;
+                }
+                offlineDataPrepared = true;
+            }
+            await CheckOfflineFilesAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            error = $"Online sign-in succeeded, but offline setup did not finish: {ex.Message}. Your saved work was kept. Try again while connected.";
+            showOfflineSetupModal = true;
+        }
+        finally { busy = false; }
+    }
+
+    private async Task CheckOfflineFilesAsync()
+    {
+        offlineReady = await offlineStore!.InvokeAsync<bool>("waitForAppFiles");
+        bool installed = false;
+        try { installed = await JS.InvokeAsync<bool>("vaultFlowInstall.isInstalled"); }
+        catch (JSException) { }
+        showOfflineSetupModal = !offlineReady || !installed;
+        if (!offlineReady)
+            error = "Your account data is saved, but the offline app files are still downloading. Keep this page open, then tap Check offline files.";
+    }
+
+    private async Task FinishOfflinePreparationAsync()
+    {
+        if (offlineStore is null) { ContinueOnline(); return; }
+        busy = true;
+        error = null;
+        try
+        {
+            PwaPreparation result = await offlineStore.InvokeAsync<PwaPreparation>(
+                "prepareFromHandoff", "", userName.Trim(), password, oldSecret);
+            if (result.Status != "prepared")
+            {
+                error = "Saved work still needs the previous offline PIN or password.";
+                return;
+            }
+            oldSecret = string.Empty;
+            awaitingOldSecret = false;
+            offlineDataPrepared = true;
+            await CheckOfflineFilesAsync();
+        }
+        catch (JSException)
+        {
+            error = offlineDataPrepared
+                ? "Saved data was moved, but the offline app files could not be confirmed. Keep this page open and tap Check offline files."
+                : "Saved work could not be moved. It remains on this device under the previous offline PIN or password.";
+        }
+        finally { busy = false; }
+    }
+
+    private void ContinueOnline()
+    {
+        showOfflineSetupModal = false;
+        Authentication.NotifySignedIn();
+        Navigation.NavigateTo(SafeReturnUrl(ReturnUrl));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (offlineStore is null) return;
+        try { await offlineStore.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+
+    private sealed class PwaState { public PwaDevice? Device { get; set; } }
+    private sealed class PwaDevice { public Guid DeviceId { get; set; } public Guid LocationId { get; set; } }
+    private sealed class PwaPreparation { public string Status { get; set; } = string.Empty; public string? SecretKind { get; set; } }
 
     private static string SafeReturnUrl(string? value)
         => !string.IsNullOrWhiteSpace(value) && value.StartsWith("/", StringComparison.Ordinal) && !value.StartsWith("//", StringComparison.Ordinal) ? value : "/";

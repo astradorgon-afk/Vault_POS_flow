@@ -264,6 +264,12 @@ public sealed class DatabaseOptions
     /// </remarks>
     public bool ApplyMigrationsOnStartup { get; set; }
 
+    /// <summary>
+    /// Allows one production instance to run startup migrations for a temporary
+    /// preview host that has no pre-deploy command. Never enable for replicas.
+    /// </summary>
+    public bool AllowProductionStartupMigration { get; set; }
+
     /// <summary>Gets or sets whether development seed data is loaded at start-up.</summary>
     public bool SeedDevelopmentData { get; set; }
 

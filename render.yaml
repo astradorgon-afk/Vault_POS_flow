@@ -1,0 +1,62 @@
+# Temporary preview only. Free Render Postgres expires after 30 days.
+# The API is public because free web services cannot receive private traffic.
+services:
+  - type: web
+    name: vaultflow-preview-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./build/docker/Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /health/live
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vaultflow-preview-db
+          property: connectionString
+      - key: Database__ApplyMigrationsOnStartup
+        value: "true"
+      - key: Database__AllowProductionStartupMigration
+        value: "true"
+      - key: Jwt__Issuer
+        value: vaultflow-render-preview
+      - key: Jwt__Audience
+        value: vaultflow-api
+      - key: Jwt__SigningKeyPem
+        sync: false
+      - key: BootstrapOwner__Enabled
+        value: "true"
+      - key: BootstrapOwner__UserName
+        value: owner
+      - key: BootstrapOwner__Password
+        sync: false
+
+  - type: web
+    name: vaultflow-preview-web
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./build/docker/Dockerfile.web
+    dockerContext: .
+    healthCheckPath: /offline/manifest.webmanifest
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: Api__BaseAddress
+        fromService:
+          type: web
+          name: vaultflow-preview-api
+          envVarKey: RENDER_EXTERNAL_URL
+
+databases:
+  - name: vaultflow-preview-db
+    databaseName: vaultflow
+    user: vaultflow
+    plan: free
+    region: singapore

@@ -1,8 +1,9 @@
 {
   "name": "VaultFlow",
   "short_name": "VaultFlow",
+  "id": "/",
   "description": "Sales, stock and purchasing across your stores.",
-  "start_url": "/",
+  "start_url": "/login",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
