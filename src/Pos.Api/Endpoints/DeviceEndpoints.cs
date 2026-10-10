@@ -223,11 +223,19 @@ public static class DeviceEndpoints
             .SingleAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        Pos.Domain.Organizations.Location? home = await context.Locations.AsNoTracking()
+            .FirstOrDefaultAsync(location => location.Id == enrolled.LocationId, cancellationToken)
+            .ConfigureAwait(false);
+
         return TypedResults.Ok(new
         {
             deviceId = id.Value,
             shortCode = enrolled.ShortCode,
             locationId = enrolled.LocationId.Value,
+
+            // Recorded with the location so an offline drawer can tell a
+            // warehouse device from a store device without another round trip.
+            locationKind = home is null ? (short?)null : (short)home.Kind,
             allowedLocationIds = enrolled.AllowedLocationIds.Select(locationId => locationId.Value).ToArray(),
         });
     }
@@ -306,12 +314,21 @@ public static class DeviceEndpoints
             .Where(location => locationIds.Contains(location.Id.Value))
             .OrderBy(location => location.Id == device.LocationId ? 0 : 1)
             .ThenBy(location => location.Code)
-            .Select(location => new LocationChoice(location.Id.Value, location.Code, location.Name))
+            .Select(location => new LocationChoice(
+                location.Id.Value, location.Code, location.Name, (short)location.Kind))
         ];
+
+        Pos.Domain.Organizations.Location? enrolled = availableLocations
+            .FirstOrDefault(location => location.Id == device.LocationId);
 
         return TypedResults.Ok(new
         {
             defaultLocationId = device.LocationId.Value,
+
+            // The offline workspace decides which restock workflows a role may see
+            // by the kind of its work location (0 warehouse, 1 store), so the
+            // client must persist this alongside the location it enrolled with.
+            defaultLocationKind = enrolled is null ? (short?)null : (short)enrolled.Kind,
             locations,
         });
     }
@@ -349,5 +366,5 @@ public static class DeviceEndpoints
             allowedLocationIds = registration.AllowedLocationIds.Select(id => id.Value).ToArray(),
         };
 
-    private sealed record LocationChoice(Guid Id, string Code, string Name);
+    private sealed record LocationChoice(Guid Id, string Code, string Name, short Kind);
 }

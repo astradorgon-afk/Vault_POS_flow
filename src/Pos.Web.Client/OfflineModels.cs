@@ -159,6 +159,18 @@ public sealed class UnexpectedGood
     public decimal Quantity { get; set; } = 1;
 }
 
+public sealed class RestockWorking
+{
+    public List<RestockWorkingLine> Lines { get; set; } = [];
+}
+
+public sealed class RestockWorkingLine
+{
+    public Guid ProductId { get; set; }
+    public decimal Quantity { get; set; } = 1;
+    public string Name { get; set; } = string.Empty;
+}
+
 public sealed class OfflineOperation
 {
     public Guid EventId { get; set; }

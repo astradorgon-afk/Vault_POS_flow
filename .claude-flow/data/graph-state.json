@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updatedAt": 1791569303058,
+  "updatedAt": 1791572484285,
   "nodeCount": 6,
   "nodes": {
     "mem-bash-heredoc-unreliable-----0": {
       "id": "mem-bash-heredoc-unreliable-----0",
       "category": "bash-heredoc-unreliable",
-      "confidence": 0.5,
+      "confidence": 0.455,
       "accessCount": 0,
       "createdAt": 1790790810893
     },
@@ -27,21 +27,21 @@
     "mem-MEMORY----bash-heredocs-are-unreliabl-0": {
       "id": "mem-MEMORY----bash-heredocs-are-unreliabl-0",
       "category": "core",
-      "confidence": 0.5,
+      "confidence": 0.455,
       "accessCount": 0,
       "createdAt": 1790790810919
     },
     "mem-second-vaultflow-checkout-----0": {
       "id": "mem-second-vaultflow-checkout-----0",
       "category": "second-vaultflow-checkout",
-      "confidence": 0.5,
+      "confidence": 0.455,
       "accessCount": 0,
       "createdAt": 1790790810930
     },
     "insight-1790842201511-0xbe": {
       "id": "insight-1790842201511-0xbe",
       "category": "insights",
-      "confidence": 0.5,
+      "confidence": 0.46,
       "accessCount": 0,
       "createdAt": 1790842201511
     }

@@ -96,6 +96,10 @@ public static class PwaProvisionEndpoints
         return Results.Ok(new { accessToken = access.Token, accessTokenExpiresAtUtc = access.ExpiresAtUtc,
             userId = target.Id, userName = target.UserName, target.DisplayName,
             permissions = authority.Permissions.Where(permission => Permissions.Find(permission)?.IsOfflineCapable == true),
+
+            // The offline drawer decides which workflows a role may open, so a
+            // prepared employee keeps the same roles the online nav reads.
+            roles = authority.Roles,
             deviceId = device.Id.Value, locationId = device.LocationId.Value });
     }
 

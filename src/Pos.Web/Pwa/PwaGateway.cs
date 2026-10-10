@@ -82,8 +82,16 @@ public static class PwaGateway
         }
 
         SetSession(context, sessions, body.DeviceId, body.LocationId, signIn);
-        return Results.Ok(new { signIn.User, body.DeviceId, body.LocationId });
+        return Results.Ok(new { signIn.User, body.DeviceId, body.LocationId,
+            locationKind = LocationKindOf(deviceLocations) });
     }
+
+    /// <summary>Reads the kind of the device's home location (0 warehouse, 1 store).</summary>
+    private static short? LocationKindOf(JsonElement deviceLocations)
+        => deviceLocations.TryGetProperty("defaultLocationKind", out JsonElement kind) &&
+           kind.ValueKind == JsonValueKind.Number && kind.TryGetInt16(out short value)
+            ? value
+            : null;
 
     private static async Task<IResult> HandoffAsync(
         HttpContext context, IHttpClientFactory clients, PwaSessions sessions,
@@ -108,7 +116,8 @@ public static class PwaGateway
         if (!locations.TryGetProperty("defaultLocationId", out JsonElement defaultLocation) ||
             defaultLocation.GetGuid() != body.LocationId) return Results.Forbid();
         SetSession(context, sessions, body.DeviceId, body.LocationId, credentials);
-        return Results.Ok(new { credentials.User, body.DeviceId, body.LocationId });
+        return Results.Ok(new { credentials.User, body.DeviceId, body.LocationId,
+            locationKind = LocationKindOf(locations) });
     }
 
     private static void SetSession(HttpContext context, PwaSessions sessions,
@@ -168,14 +177,14 @@ public static class PwaGateway
         if (token is null || token.UserId != body.UserId || token.DeviceId != administrator.DeviceId ||
             token.LocationId != administrator.LocationId) return Results.StatusCode(502);
 
-        SignedInUser user = new(token.UserId, token.DisplayName, [], token.Permissions, [token.LocationId],
-            false, 0);
+        SignedInUser user = new(token.UserId, token.DisplayName, token.Roles ?? [], token.Permissions ?? [],
+            [token.LocationId], false, 0);
         SignInResponse credentials = new(token.AccessToken, token.AccessTokenExpiresAtUtc,
             string.Empty, token.AccessTokenExpiresAtUtc, user);
         PwaSession employee = new(token.DeviceId, token.LocationId, credentials);
         SnapshotOutcome result = await FetchSnapshotAsync(client, employee, ct);
         return result.Error ?? Results.Json(new { employee = new { token.UserId, token.UserName,
-            token.DisplayName, token.Permissions }, snapshot = result.Snapshot });
+            token.DisplayName, token.Permissions, token.Roles }, snapshot = result.Snapshot });
     }
 
     private static async Task<IResult> SnapshotAsync(
@@ -309,7 +318,7 @@ public static class PwaGateway
         if (session is null) return Results.Unauthorized();
         if (body.Events is null || body.Events.Count > 100 || body.Events.Any(item =>
             item.EventId == Guid.Empty || item.DeviceSequence <= 0 ||
-            item.EventType is not ("PwaPurchaseDraft" or "PwaReceivingCount") ||
+            item.EventType is not ("PwaPurchaseDraft" or "PwaReceivingCount" or "PwaRestockDraft") ||
             item.Payload.ValueKind != JsonValueKind.Object || item.Payload.GetRawText().Length > 1_000_000))
             return Results.BadRequest(new { message = "The PWA event batch is invalid." });
         HttpClient client = clients.CreateClient("pwa-api");
@@ -394,7 +403,7 @@ public sealed record PwaHandoff(string Token, Guid DeviceId, Guid LocationId);
 public sealed record PwaProvisionRequest(Guid UserId);
 public sealed record PwaProvisionToken(string AccessToken, DateTimeOffset AccessTokenExpiresAtUtc,
     Guid UserId, string UserName, string DisplayName, IReadOnlyList<string> Permissions,
-    Guid DeviceId, Guid LocationId);
+    IReadOnlyList<string> Roles, Guid DeviceId, Guid LocationId);
 public sealed record SnapshotOutcome(IResult? Error, object? Snapshot);
 public sealed record PwaPush(IReadOnlyList<PwaEvent> Events);
 public sealed record PwaEvent(Guid EventId, long DeviceSequence, string EventType, JsonElement Payload,

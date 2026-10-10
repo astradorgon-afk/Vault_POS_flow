@@ -4,6 +4,7 @@
 @page "/purchasing"
 @page "/receiving"
 @page "/inventory/stock"
+@page "/restock"
 @page "/stores"
 @page "/sync"
 @page "/team"
@@ -53,16 +54,16 @@ else
         <div class="nav-group"><span class="nav-heading">Workspace</span>
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All" @onclick="CloseNavigation"><AppIcon Name="home" /> <span>Overview</span></NavLink>
             <OnlineFeatureLink Href="/notifications" Icon="bell" Label="Notifications" Connected="@connected" />
-            @if (HasPermission("audit.view")) { <OnlineFeatureLink Href="/admin/audit" Icon="ledger" Label="Activity log" Connected="@connected" /> }
+            @if (CanViewAudit) { <OnlineFeatureLink Href="/admin/audit" Icon="ledger" Label="Activity log" Connected="@connected" /> }
         </div>
         @if (unlocked)
         {
             <div class="nav-group"><span class="nav-heading">Inventory</span>
                 @if (CanInventory) { <NavLink class="nav-link" href="inventory/stock" @onclick="CloseNavigation"><AppIcon Name="box" /> <span>Stock levels</span></NavLink><OnlineFeatureLink Href="/inventory/counts" Icon="ledger" Label="Stock counts" Connected="@connected" /> }
                 @if (CanViewStores) { <OnlineFeatureLink Href="/transfers" Icon="location" Label="Transfers" Connected="@connected" /> }
-                @if (HasPermission("transfer.approve")) { <OnlineFeatureLink Href="/restock/approvals" Icon="ledger" Label="Restock approvals" Connected="@connected" /> }
-                @if (HasPermission("transfer.pick") && HasPermission("transfer.dispatch")) { <OnlineFeatureLink Href="/restock/fulfillment" Icon="box" Label="Restock fulfillment" Connected="@connected" /> }
-                @if (HasPermission("transfer.request") && CanViewStores) { <OnlineFeatureLink Href="/restock" Icon="ledger" Label="Restock requests" Connected="@connected" /> }
+                @if (CanApproveRestock) { <OnlineFeatureLink Href="/restock/approvals" Icon="ledger" Label="Restock approvals" Connected="@connected" /> }
+                @if (CanFulfillRestock) { <OnlineFeatureLink Href="/restock/fulfillment" Icon="box" Label="Restock fulfillment" Connected="@connected" /> }
+                @if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock) { <NavLink class="nav-link" href="restock" @onclick="CloseNavigation"><AppIcon Name="ledger" /> <span>Restock requests</span></NavLink> }
                 @if (CanReceive) { <NavLink class="nav-link" href="receiving" @onclick="CloseNavigation"><AppIcon Name="receipt" /> <span>Goods receiving</span></NavLink> }
                 @if (HasPermission("inventory.view.all")) { <OnlineFeatureLink Href="/inventory/exceptions" Icon="alert" Label="Exceptions" Connected="@connected" /> }
             </div>
@@ -71,9 +72,8 @@ else
                 @if (HasPermission("sale.view")) { <OnlineFeatureLink Href="/sales" Icon="ledger" Label="Sales ledger" Connected="@connected" /><OnlineFeatureLink Href="/analytics/products" Icon="trend-up" Label="Product analytics" Connected="@connected" /> }
                 @if (HasPermission("report.view")) { <OnlineFeatureLink Href="/reports" Icon="report" Label="Daily reports" Connected="@connected" /> }
             </div> }
-            @if (CanPurchase || HasPermission("purchase.view")) { <div class="nav-group"><span class="nav-heading">Purchasing</span>
-                @if (CanPurchase) { <NavLink class="nav-link" href="purchasing" @onclick="CloseNavigation"><AppIcon Name="receipt" /> <span>Purchase orders</span></NavLink> }
-                else { <OnlineFeatureLink Href="/purchasing" Icon="receipt" Label="Purchase orders" Connected="@connected" /> }
+            @if (CanViewPurchasing) { <div class="nav-group"><span class="nav-heading">Purchasing</span>
+                <NavLink class="nav-link" href="purchasing" @onclick="CloseNavigation"><AppIcon Name="receipt" /> <span>Purchase orders</span></NavLink>
             </div> }
             @if (HasPermission("location.manage") || HasPermission("user.manage") || HasPermission("role.manage") || HasPermission("device.manage") || HasPermission("sync.manage")) { <div class="nav-group"><span class="nav-heading">Administration</span>
                 @if (HasPermission("location.manage")) { <OnlineFeatureLink Href="/admin/locations" Icon="location" Label="Locations" Connected="@connected" /> }
@@ -227,6 +227,23 @@ else
             }
             else { <section class="qr-card"><p>Inventory data was not available for this employee or location at the last download.</p></section> }
         }
+        else if (section == "restock" && CanRestock)
+        {
+            <header class="qr-head po-head"><div><span class="eyebrow">Inventory · store supplies</span><h1>Restock requests</h1><p>Ask the main warehouse for the products your store needs. The draft is held on this device and sent for approval when Wi-Fi returns.</p></div></header>
+            <section class="qr-card"><h2>New request</h2><p>Deliver to <strong>@(device?.LocationName ?? "this store")</strong>. Your request is saved on this device until the server confirms it.</p>
+                <label>Search catalog<input @bind="productSearch" @bind:event="oninput" /></label>
+                @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button disabled="@(restock.Lines.Any(line => line.ProductId == product.Id))" @onclick="() => AddRestockLine(product)">Add</button></li> }</ul> }
+                <div class="scanner-row"><BarcodeCamera OnScan="OnRestockScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnRestockScanAsync(manualCode)">Find on device</button></div>
+                @if (scanMessage is not null) { <p role="status">@scanMessage</p> }
+                <h3>Request lines</h3>@if (restock.Lines.Count == 0) { <p>Search or scan to begin.</p> }
+                @foreach (RestockWorkingLine line in restock.Lines) { <div class="line-row" @key="line"><strong>@line.Name</strong><label>Quantity<input type="number" min="0.001" step="0.001" @bind="line.Quantity" /></label><button @onclick="() => RemoveRestockLine(line)">Remove</button></div> }
+                <div class="actions"><button @onclick="SaveRestockAsync">Save form on device</button><button class="primary" disabled="@busy" @onclick="QueueRestockAsync">Queue restock draft</button></div>
+            </section>
+            <section class="qr-card"><h2>Drafts from this device</h2><p>Sent for approval the next time this device has Wi-Fi.</p>
+                @foreach (OfflineOperation operation in operations.Where(item => item.EventType == "PwaRestockDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
+                @if (!operations.Any(item => item.EventType == "PwaRestockDraft")) { <p>No restock drafts on this device.</p> }
+            </section>
+        }
         else if (section == "stores" && CanViewStores)
         {
             <header class="qr-head"><div><span class="eyebrow">Stores</span><h1>Store movement</h1><p>Track stock and movement across your stores.</p></div></header>
@@ -276,7 +293,8 @@ else
     private string section = "overview", productSearch = string.Empty, stockSearch = string.Empty, stockFilter = string.Empty, purchaseStage = "all", manualCode = string.Empty, displayName = string.Empty;
     private int PendingCount => operations.Count(o => o.Status != "Confirmed");
     private int SavedFormCount => (purchase.Lines.Count > 0 || purchase.Proposals.Count > 0 || purchase.SupplierId is not null || !string.IsNullOrWhiteSpace(purchase.CustomSupplierName) ? 1 : 0)
-        + (receiving.PurchaseOrderId != Guid.Empty || receiving.UnexpectedGoods.Count > 0 ? 1 : 0);
+        + (receiving.PurchaseOrderId != Guid.Empty || receiving.UnexpectedGoods.Count > 0 ? 1 : 0)
+        + (restock.Lines.Count > 0 ? 1 : 0);
     private bool HasDeviceOnlyWork => PendingCount > 0 || SavedFormCount > 0;
     private string DeviceWorkWarning => $"Saved only on this device: {PendingCount} unconfirmed {(PendingCount == 1 ? "edit" : "edits")} and {SavedFormCount} saved {(SavedFormCount == 1 ? "form" : "forms")}. Queue saved forms, then sync and confirm edits before clearing browser or VaultFlow site data.";
     private string Initials => string.Concat((displayName.Length > 0 ? displayName : "VaultFlow").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => char.ToUpperInvariant(part[0])));
@@ -295,11 +313,11 @@ else
             if (CanViewStores) tabs.Add(new("/stores", "location", "Movement", false));
             if (HasPermission("sale.view")) tabs.Add(new("/analytics/products", "trend-up", "Analytics", false));
             if (CanInventory) tabs.Add(new("inventory/stock", "box", "Stock", true));
-            if (HasPermission("transfer.approve")) tabs.Add(new("/restock/approvals", "ledger", "Approvals", false));
-            else if (HasPermission("transfer.pick") && HasPermission("transfer.dispatch")) tabs.Add(new("/restock/fulfillment", "box", "Fulfill", false));
-            else if (HasPermission("transfer.request") && CanViewStores) tabs.Add(new("/restock", "ledger", "Restock", false));
+            if (CanApproveRestock) tabs.Add(new("/restock/approvals", "ledger", "Approvals", false));
+            else if (CanFulfillRestock) tabs.Add(new("/restock/fulfillment", "box", "Fulfill", false));
+            else if (CanRequestRestock) tabs.Add(new("restock", "ledger", "Restock", true));
             if (CanReceive) tabs.Add(new("receiving", "receipt", "Receiving", true));
-            if (CanPurchase) tabs.Add(new("purchasing", "receipt", "Orders", true));
+            if (CanViewPurchasing) tabs.Add(new("purchasing", "receipt", "Orders", true));
             if (HasPermission("user.manage") || HasPermission("role.manage")) tabs.Add(new("/admin/users", "people", "People", false));
             tabs.Add(new("/notifications", "bell", "Alerts", false));
             return tabs.Take(4);
@@ -313,11 +331,11 @@ else
             List<OfflineAction> actions = [];
             if (CanInventory) { actions.Add(new("box", "Stock levels", "View downloaded quantities for your location.", "/inventory/stock", true)); actions.Add(new("ledger", "Stock counts", "Count and submit physical stock.", "/inventory/counts", false)); }
             if (CanViewStores) { actions.Add(new("location", "Transfers", "Request and track stock moving between locations.", "/transfers", false)); }
-            if (HasPermission("transfer.approve")) actions.Add(new("ledger", "Restock approvals", "Decide store supply requests.", "/restock/approvals", false));
-            if (HasPermission("transfer.pick") && HasPermission("transfer.dispatch")) actions.Add(new("box", "Restock fulfillment", "Pick and dispatch approved requests.", "/restock/fulfillment", false));
-            if (HasPermission("transfer.request") && CanViewStores) actions.Add(new("ledger", "Restock requests", "Ask the main warehouse to supply your store.", "/restock", false));
+            if (CanApproveRestock) actions.Add(new("ledger", "Restock approvals", "Decide store supply requests.", "/restock/approvals", false));
+            if (CanFulfillRestock) actions.Add(new("box", "Restock fulfillment", "Pick and dispatch approved requests.", "/restock/fulfillment", false));
+            if (CanRequestRestock) actions.Add(new("ledger", "Restock requests", "Ask the main warehouse to supply your store. Drafts wait for Wi-Fi.", "/restock", true));
             if (CanReceive) actions.Add(new("receipt", "Goods receiving", "Count a downloaded supplier delivery.", "/receiving", true));
-            if (CanPurchase) actions.Add(new("receipt", "Purchase orders", "Create a draft saved on this device.", "/purchasing", true));
+            if (CanViewPurchasing) actions.Add(new("receipt", "Purchase orders", "Create a draft saved on this device.", "/purchasing", true));
             if (HasPermission("sale.view")) { actions.Add(new("coins", "Store performance", "See sales and best sellers.", "/stores", false)); actions.Add(new("trend-up", "Best & worst sellers", "Review product performance.", "/analytics/products", false)); actions.Add(new("ledger", "Review sales", "Browse transactions and returns.", "/sales", false)); }
             if (HasPermission("report.view")) actions.Add(new("report", "Open daily reports", "Reconcile trade and payments.", "/reports", false));
             if (HasPermission("user.manage") || HasPermission("role.manage")) actions.Add(new("people", "Manage people & roles", "Control accounts and access.", "/admin/users", false));
@@ -327,8 +345,8 @@ else
             return actions;
         }
     }
-    private string PageTitleText => section switch { "purchase" => "Purchase orders", "receiving" => "Goods receiving", "inventory" => "Store inventory", "stores" => "Store movement", "queue" => "Pending work", "prepare" => "Offline access", _ => "Overview" };
-    private string PageSection => section switch { "purchase" => "Purchasing", "receiving" or "inventory" => "Inventory", "stores" => "Stores", "prepare" => "Administration", _ => "Workspace" };
+    private string PageTitleText => section switch { "purchase" => "Purchase orders", "receiving" => "Goods receiving", "inventory" => "Store inventory", "restock" => "Restock requests", "stores" => "Store movement", "queue" => "Pending work", "prepare" => "Offline access", _ => "Overview" };
+    private string PageSection => section switch { "purchase" => "Purchasing", "receiving" or "inventory" or "restock" => "Inventory", "stores" => "Stores", "prepare" => "Administration", _ => "Workspace" };
     protected override void OnInitialized()
     {
         SetSectionFromUri();
@@ -345,17 +363,34 @@ else
     private void SetSectionFromUri()
     {
         string path = Navigation.ToBaseRelativePath(Navigation.Uri).TrimEnd('/');
-        section = path switch { "purchasing" => "purchase", "receiving" => "receiving", "inventory/stock" => "inventory", "stores" => "stores", "sync" => "queue", "team" => "prepare", _ => "overview" };
+        section = path switch { "purchasing" => "purchase", "receiving" => "receiving", "inventory/stock" => "inventory", "restock" => "restock", "stores" => "stores", "sync" => "queue", "team" => "prepare", _ => "overview" };
     }
     private DeviceView? device;
     private List<ProfileView> profiles = [];
     private List<StaffView> staff = [];
     private bool canProvision;
     private List<string> currentPermissions = [];
-    private bool CanPurchase => currentPermissions.Contains("purchase.create");
-    private bool CanReceive => currentPermissions.Contains("purchase.receive");
+    private List<string> currentRoles = [];
+    private bool CanPurchase => HasPermission("purchase.create");
+    private bool CanReceive => currentPermissions.Contains("purchase.view") && currentPermissions.Contains("purchase.receive");
     private bool CanInventory => currentPermissions.Contains("inventory.view");
     private bool CanViewStores => currentPermissions.Contains("transfer.view");
+
+    // The drawer mirrors NavMenu.razor, which decides these by the employee's
+    // roles and by the kind of the work location (0 warehouse, 1 store).
+    private bool HasRole(string role) => currentRoles.Contains(role, StringComparer.Ordinal);
+
+    /// <summary>Mirrors NavMenu.CanViewAudit: permission, or Owner/Administrator by role.</summary>
+    private bool CanViewAudit => HasPermission("audit.view") || HasRole("Owner") || HasRole("Administrator");
+    private short? DeviceLocationKind => device?.LocationKind;
+    private bool IsWarehouse => DeviceLocationKind == 0;
+    private bool IsStore => DeviceLocationKind == 1;
+    private bool CanApproveRestock => HasPermission("transfer.approve") && HasRole("Owner");
+    private bool CanFulfillRestock => IsWarehouse && HasPermission("transfer.pick") &&
+        HasPermission("transfer.dispatch") && (HasRole("MainInventoryManager") || HasRole("InventoryStaff"));
+    private bool CanRequestRestock => IsStore && HasPermission("transfer.request") && CanViewStores;
+    private bool CanRestock => CanRequestRestock;
+    private bool CanViewPurchasing => HasPermission("purchase.view") && HasRole("Owner");
     private ProfileView? SelectedPinProfile => profiles.FirstOrDefault(profile =>
         profile.Scope == selectedScope && profile.UnlockMethod == "pin");
     private ProfileView? MatchedPinProfile => profiles.FirstOrDefault(profile =>
@@ -366,6 +401,7 @@ else
     private List<OfflineOperation> operations = [];
     private PurchaseWorking purchase = new();
     private ReceivingWorking receiving = new();
+    private RestockWorking restock = new();
     private ProposedProduct proposal = new();
     private IEnumerable<OfflineProduct> ProductMatches => products.Where(p => p.IsActive && (p.Name.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Sku.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Barcodes.Any(b => b.Contains(productSearch, StringComparison.OrdinalIgnoreCase))));
     private List<OfflineOrder> FilteredOrders => purchaseStage == "all" ? orders : orders.Where(order => order.Status == purchaseStage).ToList();
@@ -456,6 +492,7 @@ else
         LoginView login = await store!.InvokeAsync<LoginView>("login", userName.Trim(), password, twoFactorCode.Trim(), offlinePin);
         displayName = login.User.DisplayName; unlocked = true; password = offlinePin = string.Empty;
         currentPermissions = login.User.Permissions;
+        currentRoles = login.User.Roles;
         canProvision = CanProvision(login.User.Permissions);
         ChooseFirstWorkflow();
         await LoadWorkingAsync();
@@ -468,6 +505,7 @@ else
         UnlockView result = await store!.InvokeAsync<UnlockView>("unlock", selectedScope, password);
         displayName = result.DisplayName; snapshot = result.Snapshot; unlocked = true; password = string.Empty;
         currentPermissions = result.Permissions;
+        currentRoles = result.Roles;
         canProvision = CanProvision(result.Permissions);
         ChooseFirstWorkflow();
         PrepareSnapshot(); await LoadWorkingAsync(); await RefreshOperationsAsync();
@@ -478,6 +516,7 @@ else
     {
         purchase = await store!.InvokeAsync<PurchaseWorking?>("loadWorking", "purchase") ?? new();
         receiving = await store!.InvokeAsync<ReceivingWorking?>("loadWorking", "receiving") ?? new();
+        restock = await store!.InvokeAsync<RestockWorking?>("loadWorking", "restock") ?? new();
         showPurchaseForm = purchase.Lines.Count > 0 || purchase.SupplierId is not null || !string.IsNullOrWhiteSpace(purchase.CustomSupplierName);
     }
     private void PrepareSnapshot()
@@ -492,9 +531,9 @@ else
         await store!.InvokeVoidAsync("lock");
         unlocked = false; snapshot = null; displayName = string.Empty;
         products.Clear(); orders.Clear(); operations.Clear();
-        purchase = new(); receiving = new(); proposal = new(); showProposal = showPurchaseForm = false;
+        purchase = new(); receiving = new(); restock = new(); proposal = new(); showProposal = showPurchaseForm = false;
         section = "overview"; productSearch = stockSearch = stockFilter = manualCode = offlinePin = string.Empty; purchaseStage = "all";
-        canProvision = false; currentPermissions.Clear(); staff.Clear();
+        canProvision = false; currentPermissions.Clear(); currentRoles.Clear(); staff.Clear();
         scanMessage = null; selectedScope = userName = password = twoFactorCode = string.Empty;
         await RefreshStateAsync();
         if (pendingAtLock > 0 || formsAtLock > 0) message = $"Still saved only on this device: {pendingAtLock} unconfirmed {(pendingAtLock == 1 ? "edit" : "edits")} and {formsAtLock} saved {(formsAtLock == 1 ? "form" : "forms")}. Sign in, queue saved forms, and sync before clearing browser data.";
@@ -663,8 +702,33 @@ else
         await store!.InvokeAsync<string>("queue", "PwaReceivingCount", new { receiving.PurchaseOrderId, receiving.Lines, receiving.UnexpectedGoods, receiving.DocumentsMissing }, $"Receiving count · {receiving.PurchaseOrderId:D}");
         receiving = new(); await SaveReceivingCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Count saved on device. Stock remains pending server confirmation.";
     });
-    private async Task RefreshOperationsAsync() => operations = await store!.InvokeAsync<List<OfflineOperation>>("operations") ?? [];
-    private Task SyncAsync() => RunAsync("Synchronizing…", async () => { await SyncCoreAsync(); message = "Sync attempt finished. Review each operation status."; });
+    private async Task AddRestockLine(OfflineProduct product)
+    {
+        if (restock.Lines.All(line => line.ProductId != product.Id))
+        {
+            restock.Lines.Add(new RestockWorkingLine { ProductId = product.Id, Name = product.Name });
+        }
+        productSearch = string.Empty; await SaveRestockCoreAsync();
+    }
+    private async Task RemoveRestockLine(RestockWorkingLine line) { restock.Lines.Remove(line); await SaveRestockCoreAsync(); }
+    private async Task OnRestockScanAsync(string code)
+    {
+        OfflineProduct? product = FindProduct(code);
+        if (product is not null) { await AddRestockLine(product); scanMessage = $"{product.Name} added."; }
+        else { scanMessage = $"{code} is not a downloaded product. Search for it by name instead."; }
+        StateHasChanged();
+    }
+    private Task SaveRestockCoreAsync() => store!.InvokeVoidAsync("saveWorking", "restock", restock).AsTask();
+    private Task SaveRestockAsync() => RunAsync("Saving restock form…", async () => { await SaveRestockCoreAsync(); message = "Form saved on device."; });
+    private Task QueueRestockAsync() => RunAsync("Queueing restock draft…", async () =>
+    {
+        if (!CanRestock) throw new InvalidOperationException("This employee cannot raise restock requests.");
+        if (device is null || restock.Lines.Count == 0 || restock.Lines.Any(line => line.Quantity <= 0)) throw new InvalidOperationException("Add at least one product with a positive quantity.");
+        var payload = new { DestinationLocationId = device.LocationId, Lines = restock.Lines.Select(line => new { line.ProductId, line.Quantity }).ToArray() };
+        await store!.InvokeAsync<string>("queue", "PwaRestockDraft", payload, $"Restock request · {restock.Lines.Count} lines");
+        restock = new(); await SaveRestockCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Restock draft saved on device. It is sent for approval when Wi-Fi returns.";
+    });
+    private async Task RefreshOperationsAsync() => operations = await store!.InvokeAsync<List<OfflineOperation>>("operations") ?? [];    private Task SyncAsync() => RunAsync("Synchronizing…", async () => { await SyncCoreAsync(); message = "Sync attempt finished. Review each operation status."; });
     private async Task SyncCoreAsync() { await store!.InvokeVoidAsync("synchronize"); await RefreshOperationsAsync(); }
     private Task DownloadAsync() => RunAsync("Refreshing data…", async () => { snapshot = await store!.InvokeAsync<OfflineSnapshot>("download"); PrepareSnapshot(); message = "Downloaded data refreshed."; });
     [JSInvokable]
@@ -686,10 +750,23 @@ else
         lifecycle?.Dispose();
     }
     private sealed class InitialView { public DeviceView? Device { get; set; } public List<ProfileView>? Profiles { get; set; } public bool CacheReady { get; set; } public bool Online { get; set; } public bool Persisted { get; set; } public long StorageUsed { get; set; } public long StorageQuota { get; set; } }
-    private sealed class DeviceView { public Guid DeviceId { get; set; } public Guid LocationId { get; set; } public string? LocationName { get; set; } }
+    private sealed class DeviceView { public Guid DeviceId { get; set; } public Guid LocationId { get; set; }
+        public string? LocationName { get; set; }
+
+        /// <summary>0 main warehouse, 1 store. Null until enrolment or sign-in supplies it.</summary>
+        public short? LocationKind { get; set; } }
     private sealed class ProfileView { public string Scope { get; set; } = string.Empty; public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string UnlockMethod { get; set; } = "password"; public DateTimeOffset LastOnlineUtc { get; set; } }
     private sealed class LoginView { public LoginUser User { get; set; } = new(); }
-    private sealed class LoginUser { public string DisplayName { get; set; } = string.Empty; public List<string> Permissions { get; set; } = []; }
-    private sealed class UnlockView { public string DisplayName { get; set; } = string.Empty; public List<string> Permissions { get; set; } = []; public OfflineSnapshot? Snapshot { get; set; } }
+    private sealed class LoginUser { public string DisplayName { get; set; } = string.Empty;
+        public List<string> Permissions { get; set; } = [];
+
+        /// <summary>Roles drive the same restock and purchasing gates the online nav uses.</summary>
+        public List<string> Roles { get; set; } = []; }
+    private sealed class UnlockView { public string DisplayName { get; set; } = string.Empty;
+        public List<string> Permissions { get; set; } = [];
+
+        /// <summary>Roles recorded when this profile was prepared online.</summary>
+        public List<string> Roles { get; set; } = [];
+        public OfflineSnapshot? Snapshot { get; set; } }
     private sealed class StaffView { public Guid UserId { get; set; } public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string? Pin { get; set; } public string? Error { get; set; } }
 }

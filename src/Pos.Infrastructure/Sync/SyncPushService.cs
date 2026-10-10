@@ -10,6 +10,8 @@ using Pos.Application.Purchasing;
 using Pos.Application.Transfers;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
+using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
 using Pos.Domain.Transfers;
 using Pos.Domain.Purchasing;
 using Pos.Infrastructure.Offline;
@@ -333,7 +335,8 @@ public sealed class SyncPushService(
             string? remediation = RemediationForReplayFailure(replay.Error);
             bool hardConflict = replay.Error.Type == ErrorType.Conflict &&
                 replay.Error.Code != "sync.unexpected_goods" &&
-                (item.EventType is "TransferReceived" or "PwaPurchaseDraft" or "PwaReceivingCount");
+                (item.EventType is "TransferReceived" or "PwaPurchaseDraft" or "PwaReceivingCount"
+                    or "PwaRestockDraft");
             SyncProcessingOutcome failedOutcome = hardConflict
                 ? SyncProcessingOutcome.Conflict
                 : RequiresReviewAfterReplayFailure(replay.Error)
@@ -440,6 +443,12 @@ public sealed class SyncPushService(
         {
             return await ReplayPwaReceivingAsync(item, cancellationToken).ConfigureAwait(false);
         }
+
+        if (item.EventType == "PwaRestockDraft")
+        {
+            return await ReplayPwaRestockAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+
 
         return Result<Guid>.Failure(Error.Validation(
             "sync.event_type_unknown", "The event type is not supported by the replay handler."));
@@ -570,6 +579,74 @@ public sealed class SyncPushService(
             payload.DocumentsMissing), cancellationToken).ConfigureAwait(false);
 
         return receipt.IsSuccess ? Result<Guid>.Success(receipt.Value.Value) : Result<Guid>.Failure(receipt.Errors);
+    }
+
+    /// <summary>
+    /// Replays a restock request drafted while offline. The draft is raised and
+    /// submitted in one event, so it reaches the owner's approval queue the
+    /// moment the device reconnects instead of waiting for someone to open the
+    /// online page and press submit.
+    /// </summary>
+    private async Task<Result<Guid>> ReplayPwaRestockAsync(
+        SyncPushEvent item,
+        CancellationToken cancellationToken)
+    {
+        PwaRestockSyncPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<PwaRestockSyncPayload>(item.PayloadJson, PwaJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.payload_invalid", "The restock request is invalid."));
+        }
+
+        if (payload is null || payload.DestinationLocationId != item.LocationId ||
+            payload.Lines is null || payload.Lines.Count == 0 || payload.Lines.Count > 200)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.restock_scope", "The restock request or location is invalid."));
+        }
+
+        HashSet<Guid> products = [];
+        foreach (PwaRestockLine line in payload.Lines)
+        {
+            if (line.ProductId == Guid.Empty || !products.Add(line.ProductId) || line.Quantity <= 0m)
+            {
+                return Result<Guid>.Failure(Error.Validation(
+                    "sync.restock_line_invalid",
+                    "Every restock line needs a distinct product and a positive quantity."));
+            }
+        }
+
+        Location? warehouse = await context.Locations.AsNoTracking()
+            .Where(location => location.Kind == LocationKind.MainWarehouse && location.IsActive)
+            .OrderBy(location => location.Code)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (warehouse is null)
+        {
+            return Result<Guid>.Failure(Error.NotFound(
+                "restock.warehouse_unavailable", "No active main warehouse is available."));
+        }
+
+        Result<TransferOrderId> created = await dispatcher.SendAsync(
+            new CreateTransferCommand(
+                warehouse.Id,
+                new LocationId(payload.DestinationLocationId),
+                [.. payload.Lines.Select(line => new TransferLineSpec(
+                    new ProductId(line.ProductId), line.Quantity))],
+                Mode: TransferMode.StoreRestock),
+            cancellationToken).ConfigureAwait(false);
+        if (created.IsFailure)
+        {
+            return Result<Guid>.Failure(created.Errors);
+        }
+
+        Result<TransferOrderId> submitted = await dispatcher.SendAsync(
+            new SubmitTransferCommand(created.Value), cancellationToken).ConfigureAwait(false);
+        return submitted.IsSuccess
+            ? Result<Guid>.Success(created.Value.Value)
+            : Result<Guid>.Failure(submitted.Errors);
     }
 
     private async Task<Result<Guid>> ReplayTransferReceiptAsync(
@@ -785,7 +862,7 @@ public sealed class SyncPushService(
 
     private static bool IsReplayableEvent(string eventType)
         => IsShiftEvent(eventType) || eventType is "SaleCompleted" or "TransferReceived"
-            or "PwaPurchaseDraft" or "PwaReceivingCount";
+            or "PwaPurchaseDraft" or "PwaReceivingCount" or "PwaRestockDraft";
 }
 
 public sealed record SyncPushRequest(Guid DeviceId, DateTimeOffset ClientSentAtUtc, long DeviceUptimeTicks, IReadOnlyList<SyncPushEvent> Events);

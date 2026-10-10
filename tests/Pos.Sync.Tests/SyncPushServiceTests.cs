@@ -12,10 +12,14 @@ using Pos.Application.Identity;
 using Pos.Application.Sales;
 using Pos.Application.Catalog;
 using Pos.Application.Purchasing;
+using Pos.Application.Transfers;
 using NSubstitute;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
+using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
 using Pos.Domain.Sales;
+using Pos.Domain.Transfers;
 using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
@@ -577,6 +581,58 @@ public sealed class SyncPushServiceTests
                 command.DestinationLocationId == host.Location &&
                 command.Lines.Single().ProductId == productId),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PwaRestockDraft_CreatesTheRequestAndSubmitsItForApproval()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        await using PosDbContext seed = host.CreateContext();
+        seed.Locations.Add(Location.Create(
+            Organization.DefaultId, "MAIN", "Main Warehouse", LocationKind.MainWarehouse, "Asia/Manila").Value);
+        await seed.SaveChangesAsync();
+
+        ProductId productId = ProductId.New();
+        TransferOrderId transferId = TransferOrderId.New();
+        PwaRestockSyncPayload payload = new(host.Location.Value, [new PwaRestockLine(productId.Value, 3m)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaRestockDraft");
+
+        host.Dispatcher.SendAsync<TransferOrderId>(Arg.Any<CreateTransferCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<TransferOrderId>.Success(transferId));
+        host.Dispatcher.SendAsync<TransferOrderId>(Arg.Any<SubmitTransferCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<TransferOrderId>.Success(transferId));
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("Accepted");
+        response.Results.Single().EntityId.Should().Be(transferId.Value);
+        await host.Dispatcher.Received(1).SendAsync<TransferOrderId>(
+            Arg.Is<CreateTransferCommand>(command =>
+                command.DestinationLocationId == host.Location &&
+                command.Mode == TransferMode.StoreRestock &&
+                command.Lines.Single().ProductId == productId &&
+                command.Lines.Single().RequestedQuantity == 3m),
+            Arg.Any<CancellationToken>());
+        await host.Dispatcher.Received(1).SendAsync<TransferOrderId>(
+            Arg.Is<SubmitTransferCommand>(command => command.TransferId == transferId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PwaRestockDraft_ForAnotherLocation_IsRejectedForScope()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        PwaRestockSyncPayload payload = new(LocationId.New().Value, [new PwaRestockLine(ProductId.New().Value, 1m)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaRestockDraft");
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("Rejected");
+        response.Results.Single().ErrorCode.Should().Be("sync.restock_scope");
+        await host.Dispatcher.DidNotReceive().SendAsync<TransferOrderId>(
+            Arg.Any<CreateTransferCommand>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

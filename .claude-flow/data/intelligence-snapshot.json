@@ -3157,5 +3157,71 @@
         "accessCount": 0
       }
     ]
+  },
+  {
+    "timestamp": 1791572484301,
+    "nodes": 6,
+    "edges": 0,
+    "pageRankSum": 0.9999999999999999,
+    "confidences": [
+      0.455,
+      0.53,
+      0.53,
+      0.455,
+      0.455,
+      0.46
+    ],
+    "accessCounts": [
+      0,
+      1,
+      1,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "mem-docker-desktop-stale-sockets-----0",
+        "summary": "---",
+        "confidence": 0.53,
+        "pageRank": 0.16666666666666666,
+        "accessCount": 1
+      },
+      {
+        "id": "mem-hook-stray-redirect-files-----0",
+        "summary": "---",
+        "confidence": 0.53,
+        "pageRank": 0.16666666666666666,
+        "accessCount": 1
+      },
+      {
+        "id": "insight-1790842201511-0xbe",
+        "summary": "Frequently edited: unknown (13x)",
+        "confidence": 0.46,
+        "pageRank": 0.16666666666666666,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-bash-heredoc-unreliable-----0",
+        "summary": "---",
+        "confidence": 0.455,
+        "pageRank": 0.16666666666666666,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-MEMORY----bash-heredocs-are-unreliabl-0",
+        "summary": "- [Bash heredocs are unreliable here](bash-heredoc-unreliabl",
+        "confidence": 0.455,
+        "pageRank": 0.16666666666666666,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-second-vaultflow-checkout-----0",
+        "summary": "---",
+        "confidence": 0.455,
+        "pageRank": 0.16666666666666666,
+        "accessCount": 0
+      }
+    ]
   }
 ]

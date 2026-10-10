@@ -45,3 +45,13 @@ public sealed record PwaReceivingLine(
     DateOnly? ExpiresOn);
 
 public sealed record PwaUnexpectedGood(string Barcode, string Description, decimal Quantity);
+
+/// <summary>
+/// A store restock request drafted while offline. The destination is always the
+/// device's own store; the server resolves the main warehouse itself.
+/// </summary>
+public sealed record PwaRestockSyncPayload(
+    Guid DestinationLocationId,
+    IReadOnlyList<PwaRestockLine> Lines);
+
+public sealed record PwaRestockLine(Guid ProductId, decimal Quantity);

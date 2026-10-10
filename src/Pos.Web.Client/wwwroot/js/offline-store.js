@@ -156,7 +156,8 @@ export async function enrol(enrolmentCode) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enrolmentCode, publicKeyThumbprint: thumbprint,
             platform: 4, appVersion: 'PWA 1', osVersion: navigator.userAgent.slice(0, 64) }) });
-    const device = { deviceId: result.deviceId, locationId: result.locationId };
+    const device = { deviceId: result.deviceId, locationId: result.locationId,
+        locationKind: result.locationKind ?? null };
     await setMeta('device', device);
     await setMeta('deviceKey', pair.privateKey);
     return device;
@@ -184,11 +185,19 @@ export async function login(userName, password, twoFactorCode, offlinePin) {
     const userId = result.user.userId;
     const scope = scopeOf(userId, device.locationId);
     const db = await database();
+
+    // The drawer mirrors the online one, which keys restock and purchasing
+    // entries on the employee's roles and on the kind of this work location.
+    if (result.locationKind !== undefined) {
+        device.locationKind = result.locationKind ?? null;
+        await setMeta('device', device);
+    }
     let profile = await req(db.transaction('profiles').objectStore('profiles').get(scope));
     if (!profile) {
         profile = { scope, userId, locationId: device.locationId,
             displayName: result.user.displayName,
             userName, unlockMethod: 'password', permissions: result.user.permissions,
+            roles: result.user.roles ?? [],
             salt: b64(crypto.getRandomValues(new Uint8Array(16))),
             lastOnlineUtc: new Date().toISOString() };
         const key = await keyFor(password, profile.salt);
@@ -203,6 +212,7 @@ export async function login(userName, password, twoFactorCode, offlinePin) {
         profile.displayName = result.user.displayName;
         profile.userName = userName;
         profile.permissions = result.user.permissions;
+        profile.roles = result.user.roles ?? [];
     }
     const tx = db.transaction('profiles', 'readwrite');
     tx.objectStore('profiles').put(profile);
@@ -266,13 +276,15 @@ export async function prepareFromHandoff(token, userName, password, oldSecret = 
             profile = await rewrapProfile(profile, oldKey, password);
         }
         profile = { ...profile, userName, displayName: user.displayName,
-            permissions: user.permissions, lastOnlineUtc: new Date().toISOString() };
+            permissions: user.permissions, roles: user.roles ?? [],
+            lastOnlineUtc: new Date().toISOString() };
     } else {
         const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
         const key = await keyFor(password, salt);
         profile = { scope, userId: user.userId, locationId: device.locationId,
             displayName: user.displayName, userName, unlockMethod: 'password',
-            permissions: user.permissions, salt, lastOnlineUtc: new Date().toISOString(),
+            permissions: user.permissions, roles: user.roles ?? [], salt,
+            lastOnlineUtc: new Date().toISOString(),
             verifier: await sealFor(scope, key) };
         active = { scope, userId: user.userId, locationId: device.locationId,
             displayName: user.displayName, key };
@@ -300,7 +312,7 @@ export async function unlock(scope, password) {
         throw new Error('Offline data has not finished downloading. Connect and prepare this account again.');
     }
     return { scope, displayName: profile.displayName, permissions: profile.permissions ?? [],
-        snapshot };
+        roles: profile.roles ?? [], snapshot };
 }
 
 export async function employees() {
@@ -333,6 +345,7 @@ export async function provision(userId, pin) {
     const profile = { scope, userId, locationId: device.locationId,
         userName: result.employee.userName, displayName: result.employee.displayName,
         unlockMethod: 'pin', permissions: result.employee.permissions,
+        roles: result.employee.roles ?? [],
         salt, lastOnlineUtc: new Date().toISOString(),
         verifier: await sealFor(scope, key) };
     const snapshot = await sealFor(result.snapshot, key);

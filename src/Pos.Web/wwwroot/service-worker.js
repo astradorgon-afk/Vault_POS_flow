@@ -5,7 +5,7 @@ const cachePrefix = 'vaultflow-root-shell-';
 const cacheName = cachePrefix + self.assetsManifest.version;
 const shell = '/offline/index.html';
 const readyMarker = '/offline/cache-ready';
-const routes = new Set(['/login', '/', '/purchasing', '/receiving', '/inventory/stock', '/stores', '/sync', '/team', '/offline', '/offline/']);
+const routes = new Set(['/login', '/', '/purchasing', '/receiving', '/inventory/stock', '/restock', '/stores', '/sync', '/team', '/offline', '/offline/']);
 const cacheable = /\.(?:dll|pdb|wasm|html|js|json|css|woff2?|png|jpe?g|gif|ico|blat|dat|webmanifest)$/i;
 
 let cacheDownload;
