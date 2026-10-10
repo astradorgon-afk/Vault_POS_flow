@@ -164,11 +164,11 @@ else if (report is not null)
                             @if (CanRequestForSelectedStore)
                             {
                                 <td class="sk-restock-cell">
-                                    @if (row.Status == "Out" && row.InTransit <= 0m)
+                                    @if (NeedsRequest(row) && row.InTransit <= 0m)
                                     {
                                         <button type="button" class="sk-restock-button" @onclick="() => BeginReplenishment(row)">Request stock</button>
                                     }
-                                    else if (row.Status == "Out")
+                                    else if (NeedsRequest(row))
                                     {
                                         <span class="sk-restock-pending">Already on the way</span>
                                     }
@@ -195,7 +195,7 @@ else if (report is not null)
                         <span>@CoverLabel(row)</span>
                         @if (row.DailySales > 0) { <span>@row.DailySales.ToString("0.#", CultureInfo.InvariantCulture)/day</span> }
                         @if (row.InTransit > 0m) { <span>+@Qty(row.InTransit) coming</span> }
-                        @if (CanRequestForSelectedStore && row.Status == "Out" && row.InTransit <= 0m)
+                        @if (CanRequestForSelectedStore && NeedsRequest(row) && row.InTransit <= 0m)
                         {
                             <button type="button" class="sk-restock-button" @onclick="() => BeginReplenishment(row)">Request stock</button>
                         }
@@ -391,17 +391,18 @@ else if (report is not null)
         page = 1;
     }
 
+    /// <summary>Out of stock or at the reorder point: the products worth asking
+    /// the warehouse for.</summary>
+    private static bool NeedsRequest(PosStockLevel row) => row.Status is "Out" or "Low";
+
     private void BeginReplenishment(PosStockLevel row)
     {
-        if (!CanRequestForSelectedStore || selectedId is not { } storeId || row.Status != "Out" || row.InTransit > 0m)
+        if (!CanRequestForSelectedStore || selectedId is not { } storeId || !NeedsRequest(row) || row.InTransit > 0m)
         {
             return;
         }
 
-        decimal stockGoal = row.TargetStock is > 0m and { } target
-            ? target
-            : row.ReorderPoint is > 0m and { } reorderPoint ? reorderPoint : 1m;
-        decimal quantity = Math.Max(0.001m, stockGoal - row.Available - row.InTransit);
+        decimal quantity = ReplenishmentQuantity.Suggest(row.Available, row.InTransit, row.TargetStock, row.ReorderPoint);
         Navigation.NavigateTo(FormattableString.Invariant($"/restock?store={storeId:D}&product={row.ProductId:D}&quantity={quantity}&sku={Uri.EscapeDataString(row.Sku)}"));
     }
 

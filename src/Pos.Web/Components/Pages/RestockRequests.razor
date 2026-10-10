@@ -30,7 +30,41 @@
         else
         {
             <div class="restock-form">
-                <label class="restock-field"><span>Deliver to</span><select @bind="selectedStoreId"><option value="">Select a store</option>@foreach (PosLocation store in stores) { <option value="@store.Id">@store.Code · @store.Name</option> }</select></label>
+                <label class="restock-field"><span>Deliver to</span><select value="@selectedStoreId" @onchange="OnStoreChanged"><option value="">Select a store</option>@foreach (PosLocation store in stores) { <option value="@store.Id">@store.Code · @store.Name</option> }</select></label>
+                @if (loadingLowStock)
+                {
+                    <p class="restock-empty">Checking this store's stock…</p>
+                }
+                else if (lowStockError is not null)
+                {
+                    <p class="restock-empty" role="alert">@lowStockError</p>
+                }
+                else if (LowStock.Count > 0 && selectedStoreId is { } lowStoreId)
+                {
+                    <div class="restock-low">
+                        <header>
+                            <div><strong>Low stock at @StoreName(lowStoreId)</strong><small>@LowStock.Count product@(LowStock.Count == 1 ? "" : "s") at or below the reorder point</small></div>
+                            <label class="restock-low-all"><input type="checkbox" checked="@(selectedLow.Count == LowStock.Count && LowStock.Count > 0)" @onchange="ToggleAllLow" /> Select all</label>
+                        </header>
+                        <div class="restock-low-list">
+                            @foreach (PosStockLevel row in LowStock)
+                            {
+                                <div class="restock-low-row" @key="row.ProductId">
+                                    <input type="checkbox" aria-label="Request @row.Name" checked="@selectedLow.Contains(row.ProductId)" @onchange="() => ToggleLow(row.ProductId)" />
+                                    <div class="restock-low-product"><strong>@row.Name</strong><small>@row.Sku</small></div>
+                                    <span class="restock-low-status @(row.Status == "Out" ? "is-out" : "is-low")">@(row.Status == "Out" ? "Out of stock" : "Low")</span>
+                                    <span class="restock-low-avail"><strong>@row.Available</strong><small>available</small></span>
+                                    <span class="restock-low-suggest"><strong>@SuggestQuantity(row).ToString(CultureInfo.InvariantCulture)</strong><small>suggested</small></span>
+                                </div>
+                            }
+                        </div>
+                        <footer><button type="button" class="restock-primary" disabled="@(selectedLow.Count == 0)" @onclick="AddSelectedLow">@(selectedLow.Count == 0 ? "Select products to add" : $"Add {selectedLow.Count} to request")</button></footer>
+                    </div>
+                }
+                else if (selectedStoreId is not null)
+                {
+                    <p class="restock-low-none">Nothing is below its reorder point at this store.</p>
+                }
                 <div class="restock-product-search">
                     <label class="restock-field"><span>Add products</span><input type="search" placeholder="Search product name or SKU" @bind="search" @bind:event="oninput" /></label>
                     @if (!string.IsNullOrWhiteSpace(search))
@@ -99,13 +133,17 @@
     private readonly List<PosProductSummary> products = [];
     private readonly List<PosTransferSummary> requests = [];
     private readonly List<DraftLine> draft = [];
+    private readonly HashSet<Guid> selectedLow = [];
+    private PosStockLevelReport? stockLevels;
     private Guid? selectedStoreId;
     private Guid? warehouseLocationId;
     private Guid? savedDraftId;
     private string search = string.Empty;
     private string? message;
+    private string? lowStockError;
     private bool loading = true;
     private bool loadingRequests;
+    private bool loadingLowStock;
     private bool sending;
 
     [SupplyParameterFromQuery(Name = "store")]
@@ -128,6 +166,14 @@
 
     private bool CanSend => !sending && warehouseLocationId is not null && selectedStoreId is { } id &&
         stores.Any(store => store.Id == id) && draft.Count > 0 && draft.All(line => line.Quantity > 0m);
+
+    /// <summary>Everything at the chosen store that is out of stock or at its
+    /// reorder point and not already on this request. Ordered so the emptiest
+    /// products lead.</summary>
+    private List<PosStockLevel> LowStock => [.. (stockLevels?.Products ?? [])
+        .Where(row => row.Status is "Out" or "Low" && draft.All(line => line.Product.Id != row.ProductId))
+        .OrderBy(row => row.Status == "Out" ? 0 : 1)
+        .ThenBy(row => row.Available)];
 
     protected override async Task OnInitializedAsync()
     {
@@ -154,6 +200,7 @@
             {
                 selectedStoreId = storeId;
             }
+            await LoadLowStockAsync();
             if (PrefillProductId is { } productId && !products.Any(product => product.Id == productId) && !string.IsNullOrWhiteSpace(PrefillSku))
             {
                 ApiResult<List<PosProductSummary>> match = await Api.GetProductsAsync(PrefillSku, 0, 20, CancellationToken.None);
@@ -180,7 +227,81 @@
     private void AddProduct(PosProductSummary product)
     {
         if (draft.All(line => line.Product.Id != product.Id)) { draft.Add(new DraftLine(product)); }
+        selectedLow.Remove(product.Id);
         search = string.Empty;
+    }
+
+    private async Task OnStoreChanged(ChangeEventArgs args)
+    {
+        selectedStoreId = Guid.TryParse(args.Value?.ToString(), out Guid parsed) ? parsed : null;
+        await LoadLowStockAsync();
+    }
+
+    private async Task LoadLowStockAsync()
+    {
+        selectedLow.Clear();
+        if (selectedStoreId is not { } storeId)
+        {
+            stockLevels = null;
+            lowStockError = null;
+            return;
+        }
+
+        loadingLowStock = true;
+        lowStockError = null;
+        StateHasChanged();
+        try
+        {
+            ApiResult<PosStockLevelReport> report = await Api.GetStockLevelsAsync(storeId, CancellationToken.None);
+            if (report.IsSuccess && report.Value is not null) { stockLevels = report.Value; }
+            else { stockLevels = null; lowStockError = report.Error ?? "This store's stock levels could not be loaded."; }
+        }
+        catch (HttpRequestException) { stockLevels = null; lowStockError = "The inventory service is unavailable. Try again shortly."; }
+        finally { loadingLowStock = false; }
+    }
+
+    private void ToggleLow(Guid productId)
+    {
+        if (!selectedLow.Remove(productId)) { selectedLow.Add(productId); }
+    }
+
+    private void ToggleAllLow(ChangeEventArgs _)
+    {
+        List<PosStockLevel> rows = LowStock;
+        bool allSelected = rows.Count > 0 && rows.All(row => selectedLow.Contains(row.ProductId));
+        selectedLow.Clear();
+        if (!allSelected)
+        {
+            foreach (PosStockLevel row in rows) { selectedLow.Add(row.ProductId); }
+        }
+    }
+
+    /// <summary>Same goal the inventory page uses: reach the target level, or
+    /// the reorder point, minus anything already on the way.</summary>
+    private static decimal SuggestQuantity(PosStockLevel row)
+        => ReplenishmentQuantity.Suggest(row.Available, row.InTransit, row.TargetStock, row.ReorderPoint);
+
+    private void AddSelectedLow()
+    {
+        if (selectedStoreId is not { } storeId || stockLevels is null) { return; }
+        int added = 0;
+        foreach (PosStockLevel row in LowStock.Where(row => selectedLow.Contains(row.ProductId)))
+        {
+            PosProductSummary? product = products.FirstOrDefault(p => p.Id == row.ProductId)
+                ?? products.FirstOrDefault(p => p.Sku.Equals(row.Sku, StringComparison.OrdinalIgnoreCase));
+            if (product is null || !product.IsActive) { continue; }
+
+            if (draft.All(line => line.Product.Id != product.Id))
+            {
+                draft.Add(new DraftLine(product) { Quantity = SuggestQuantity(row) });
+                added++;
+            }
+        }
+
+        selectedLow.Clear();
+        message = added == 0
+            ? "None of those products are available to add."
+            : $"{added} product{(added == 1 ? "" : "s")} added to this request for {StoreName(storeId)}.";
     }
 
     private async Task SendAsync()

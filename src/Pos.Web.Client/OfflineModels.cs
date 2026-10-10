@@ -29,6 +29,8 @@ public sealed class OfflineStockRow
     public decimal Available { get; set; }
     public decimal InTransit { get; set; }
     public decimal OnHold { get; set; }
+    public decimal? ReorderPoint { get; set; }
+    public decimal? TargetStock { get; set; }
     public string Status { get; set; } = string.Empty;
 }
 

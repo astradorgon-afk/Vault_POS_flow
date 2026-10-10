@@ -231,6 +231,29 @@ else
         {
             <header class="qr-head po-head"><div><span class="eyebrow">Inventory · store supplies</span><h1>Restock requests</h1><p>Ask the main warehouse for the products your store needs. The draft is held on this device and sent for approval when Wi-Fi returns.</p></div></header>
             <section class="qr-card"><h2>New request</h2><p>Deliver to <strong>@(device?.LocationName ?? "this store")</strong>. Your request is saved on this device until the server confirms it.</p>
+                @if (RestockLowStock.Count > 0)
+                {
+                    <div class="restock-low">
+                        <header>
+                            <div><strong>Low stock on this device</strong><small>@RestockLowStock.Count product@(RestockLowStock.Count == 1 ? "" : "s") at or below the reorder point</small></div>
+                            <label class="restock-low-all"><input type="checkbox" checked="@(restockLowSelected.Count == RestockLowStock.Count)" @onchange="ToggleAllRestockLow" /> Select all</label>
+                        </header>
+                        <div class="restock-low-list">
+                            @foreach (OfflineStockRow row in RestockLowStock)
+                            {
+                                <div class="restock-low-row" @key="row.ProductId">
+                                    <input type="checkbox" aria-label="Request @row.Name" checked="@restockLowSelected.Contains(row.ProductId)" @onchange="() => ToggleRestockLow(row.ProductId)" />
+                                    <div class="restock-low-product"><strong>@row.Name</strong><small>@row.Sku</small></div>
+                                    <span class="restock-low-status @(StockBand(row) == "Out" ? "is-out" : "is-low")">@(StockBand(row) == "Out" ? "Out of stock" : "Low")</span>
+                                    <span class="restock-low-avail"><strong>@row.Available</strong><small>available</small></span>
+                                    <span class="restock-low-suggest"><strong>@SuggestRestockQuantity(row)</strong><small>suggested</small></span>
+                                </div>
+                            }
+                        </div>
+                        <footer><button type="button" class="primary" disabled="@(restockLowSelected.Count == 0)" @onclick="AddSelectedRestockLow">@(restockLowSelected.Count == 0 ? "Select products to add" : $"Add {restockLowSelected.Count} to request")</button></footer>
+                    </div>
+                }
+                else { <p class="restock-low-none">Nothing on this device is below its reorder point.</p> }
                 <label>Search catalog<input @bind="productSearch" @bind:event="oninput" /></label>
                 @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button disabled="@(restock.Lines.Any(line => line.ProductId == product.Id))" @onclick="() => AddRestockLine(product)">Add</button></li> }</ul> }
                 <div class="scanner-row"><BarcodeCamera OnScan="OnRestockScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnRestockScanAsync(manualCode)">Find on device</button></div>
@@ -402,6 +425,7 @@ else
     private PurchaseWorking purchase = new();
     private ReceivingWorking receiving = new();
     private RestockWorking restock = new();
+    private readonly HashSet<Guid> restockLowSelected = [];
     private ProposedProduct proposal = new();
     private IEnumerable<OfflineProduct> ProductMatches => products.Where(p => p.IsActive && (p.Name.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Sku.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Barcodes.Any(b => b.Contains(productSearch, StringComparison.OrdinalIgnoreCase))));
     private List<OfflineOrder> FilteredOrders => purchaseStage == "all" ? orders : orders.Where(order => order.Status == purchaseStage).ToList();
@@ -414,6 +438,58 @@ else
         row.Status.Contains("Over", StringComparison.OrdinalIgnoreCase) ? "Over" : "Healthy";
     private int StockCount(string band) => StockRows.Count(row => StockBand(row) == band);
     private void ToggleStockFilter(string band) => stockFilter = stockFilter == band ? string.Empty : band;
+
+    /// <summary>Everything on this device that is out of stock or at its reorder
+    /// point and not already on the request. The emptiest products lead.</summary>
+    private List<OfflineStockRow> RestockLowStock => [.. StockRows
+        .Where(row => StockBand(row) is "Out" or "Low" && restock.Lines.All(line => line.ProductId != row.ProductId))
+        .OrderBy(row => StockBand(row) == "Out" ? 0 : 1)
+        .ThenBy(row => row.Available)];
+
+    /// <summary>Same goal the inventory page uses: reach the target level, or
+    /// the reorder point, minus anything already on the way.</summary>
+    private static decimal SuggestRestockQuantity(OfflineStockRow row)
+        => ReplenishmentQuantity.Suggest(row.Available, row.InTransit, row.TargetStock, row.ReorderPoint);
+
+    private void ToggleRestockLow(Guid productId)
+    {
+        if (!restockLowSelected.Remove(productId)) { restockLowSelected.Add(productId); }
+    }
+
+    private void ToggleAllRestockLow(ChangeEventArgs _)
+    {
+        List<OfflineStockRow> rows = RestockLowStock;
+        bool allSelected = rows.Count > 0 && rows.All(row => restockLowSelected.Contains(row.ProductId));
+        restockLowSelected.Clear();
+        if (!allSelected)
+        {
+            foreach (OfflineStockRow row in rows) { restockLowSelected.Add(row.ProductId); }
+        }
+    }
+
+    private async Task AddSelectedRestockLow()
+    {
+        int added = 0;
+        foreach (OfflineStockRow row in RestockLowStock.Where(row => restockLowSelected.Contains(row.ProductId)))
+        {
+            if (restock.Lines.All(line => line.ProductId != row.ProductId))
+            {
+                restock.Lines.Add(new RestockWorkingLine
+                {
+                    ProductId = row.ProductId,
+                    Name = row.Name,
+                    Quantity = SuggestRestockQuantity(row)
+                });
+                added++;
+            }
+        }
+
+        restockLowSelected.Clear();
+        await SaveRestockCoreAsync();
+        scanMessage = added == 0
+            ? "Those products are already on this request."
+            : $"{added} product{(added == 1 ? "" : "s")} added with the suggested quantity.";
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -531,7 +607,7 @@ else
         await store!.InvokeVoidAsync("lock");
         unlocked = false; snapshot = null; displayName = string.Empty;
         products.Clear(); orders.Clear(); operations.Clear();
-        purchase = new(); receiving = new(); restock = new(); proposal = new(); showProposal = showPurchaseForm = false;
+        purchase = new(); receiving = new(); restock = new(); restockLowSelected.Clear(); proposal = new(); showProposal = showPurchaseForm = false;
         section = "overview"; productSearch = stockSearch = stockFilter = manualCode = offlinePin = string.Empty; purchaseStage = "all";
         canProvision = false; currentPermissions.Clear(); currentRoles.Clear(); staff.Clear();
         scanMessage = null; selectedScope = userName = password = twoFactorCode = string.Empty;
@@ -708,6 +784,7 @@ else
         {
             restock.Lines.Add(new RestockWorkingLine { ProductId = product.Id, Name = product.Name });
         }
+        restockLowSelected.Remove(product.Id);
         productSearch = string.Empty; await SaveRestockCoreAsync();
     }
     private async Task RemoveRestockLine(RestockWorkingLine line) { restock.Lines.Remove(line); await SaveRestockCoreAsync(); }

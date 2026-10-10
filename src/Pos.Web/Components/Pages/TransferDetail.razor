@@ -62,6 +62,19 @@ else
         <div class="transfer-route-stop"><span>Deliver to</span><strong>@DestinationLabel</strong></div>
     </section>
 
+    @if (detail.Transfer.DispatchedAtUtc is not null && detail.Transfer.ReceivedAtUtc is null)
+    {
+        <section class="tr-notice" role="status">
+            <div class="tr-notice-row">
+                <span class="tr-notice-icon" aria-hidden="true">↗</span>
+                <div>
+                    <strong>Products have left the source</strong>
+                    <span>They are in transit. Destination staff can record what arrived.</span>
+                </div>
+            </div>
+        </section>
+    }
+
     <section class="transfer-summary">
         <div><span>Kind</span><strong>@KindLabel</strong></div>
         <div><span>Mode</span><strong>@ModeLabel</strong></div>
@@ -98,22 +111,14 @@ else
             <strong>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</strong>
             <span>Picked shows the warehouse count; Dispatched shows what actually left the source. The difference shows up as a discrepancy when you count the boxes.</span>
         </div>
-        <table class="sales-table counts-table">
-            <thead>
-                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Dispatched</th><th>Received</th><th>Damaged</th><th>State</th></tr>
-            </thead>
-            <tbody>
-                @foreach (PosTransferLineView line in detail.Lines)
-                {
-                    <tr>
-                        <td>@line.LineNo</td>
-                        <td><strong>@(line.ProductName ?? "Unknown product")</strong></td>
-                        <td>@Quantity(line.RequestedQuantity)</td>
-                        <td>@Quantity(line.PickedQuantity)</td>
-                        <td>@(detail.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity))</td>
-                        <td>@Quantity(line.ReceivedQuantity)</td>
-                        <td>@Quantity(line.DamagedQuantity)</td>
-                        <td>
+        <div class="line-item-cards">
+            @foreach (PosTransferLineView line in detail.Lines)
+            {
+                <article class="line-item">
+                    <div class="line-item-top">
+                        <div class="line-item-num">@line.LineNo.ToString("D2", CultureInfo.InvariantCulture)</div>
+                        <div class="line-item-name">
+                            <h3>@(line.ProductName ?? "Unknown product")</h3>
                             @if (line.DiscrepancyState is { Length: > 0 })
                             {
                                 <span class="status-chip sc-issue">@SplitWords(line.DiscrepancyState)</span>
@@ -130,11 +135,20 @@ else
                             {
                                 <span class="status-chip sc-dispatched">in transit</span>
                             }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+                        </div>
+                    </div>
+                    <div class="line-quantities">
+                        <div><small>Requested</small><strong>@Quantity(line.RequestedQuantity)</strong></div>
+                        <div><small>Picked</small><strong>@Quantity(line.PickedQuantity)</strong></div>
+                        <div><small>Dispatched</small><strong>@(detail.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity))</strong></div>
+                    </div>
+                    <div class="line-item-foot">
+                        <span>Received <b>@(line.ReceivedQuantity == 0m ? "—" : Quantity(line.ReceivedQuantity))</b></span>
+                        <span>Damaged <b>@(line.DamagedQuantity == 0m ? "—" : Quantity(line.DamagedQuantity))</b></span>
+                    </div>
+                </article>
+            }
+        </div>
     </section>
 
     @if (ShowSubmit)
@@ -334,9 +348,12 @@ else
                     @foreach (PosTransferCustodyEventSummary custodyEvent in custody)
                     {
                         <li>
-                            <span class="custody-kind">@SplitWords(custodyEvent.Kind)</span>
-                            <span class="custody-date">@custodyEvent.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
-                            <span class="custody-note">@(string.IsNullOrWhiteSpace(custodyEvent.Note) ? "—" : custodyEvent.Note)</span>
+                            <span class="custody-dot" aria-hidden="true"></span>
+                            <div class="custody-body">
+                                <span class="custody-kind">@SplitWords(custodyEvent.Kind)</span>
+                                <span class="custody-date">@custodyEvent.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
+                                <span class="custody-note">@(string.IsNullOrWhiteSpace(custodyEvent.Note) ? "—" : custodyEvent.Note)</span>
+                            </div>
                         </li>
                     }
                 </ol>

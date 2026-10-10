@@ -1,0 +1,130 @@
+/* Connected purchasing — the mobile prototype's design language, applied to the
+   real Owner pages.
+
+   Phone: matches the prototype (stacked cards, scrollable status chips, filters
+   behind a toggle).
+   >=768px: adapts to PC — filters always visible inline, chips wrap instead of
+   scrolling, and order cards become a multi-column grid.
+
+   Everything is scoped under .po-page so it cannot collide with the app shell
+   or the receiving/approval panels on the order detail page. */
+
+.po-page{display:flex;flex-direction:column;gap:16px;color:#1b3025}
+.po-page *{box-sizing:border-box}
+.po-page .po-hidden{display:none!important}
+.po-page button{cursor:pointer;font:inherit}
+
+/* ---- page heading ------------------------------------------------------ */
+.po-page .po-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.po-page .po-heading>div{min-width:0}
+.po-page .eyebrow{font-size:10px;letter-spacing:1.1px;font-weight:700;color:#537365;text-transform:uppercase}
+.po-page .po-heading h1{font-size:27px;letter-spacing:-1.1px;margin:7px 0 5px;line-height:1.15}
+.po-page .po-heading p{color:#68776e;font-size:12px;margin:0;line-height:1.6}
+
+/* ---- buttons ----------------------------------------------------------- */
+.po-page .po-primary,.po-page .po-outline{border-radius:9px;min-height:44px;padding:10px 14px;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;transition:background .15s,border-color .15s}
+.po-page .po-primary{border:1px solid #153c2c;background:#153c2c;color:#fff}
+.po-page .po-primary:hover{background:#20543f}
+.po-page .po-primary:disabled{opacity:.55;cursor:wait}
+.po-page .po-outline{border:1px solid #cddbd0;background:#fff;color:#153c2c}
+.po-page .po-outline:hover{border-color:#8db9a0}
+.po-page .po-wide{width:100%}
+
+/* ---- notice ------------------------------------------------------------ */
+.po-page .po-notice{background:#eef4f0;border:1px solid #cddbd0;border-radius:10px;padding:12px 14px;color:#28402f;font-size:12px;line-height:1.6}
+
+/* ---- approval banner --------------------------------------------------- */
+.po-page .po-banner{background:#fff7e4;border:1px solid #ebcb7a;color:#80530b;border-radius:10px;padding:14px 12px;display:flex;align-items:center;gap:12px;text-align:left;width:100%}
+.po-page .po-banner .banner-symbol{font-size:21px;line-height:1}
+.po-page .po-banner .banner-body{flex:1;min-width:0}
+.po-page .po-banner strong{font-size:13px;display:block}
+.po-page .po-banner small{display:block;font-size:11px;margin-top:5px}
+.po-page .po-banner .banner-chevron{font-size:22px;font-weight:400}
+.po-page .po-banner:hover{border-color:#d9b45c}
+
+/* ---- section heading --------------------------------------------------- */
+.po-page .po-section-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.po-page .po-section-head h2{font-size:16px;margin:0;letter-spacing:-.3px}
+.po-page .po-section-head span{font-size:12px;color:#728077}
+
+/* ---- status chips ------------------------------------------------------ */
+.po-page .po-chips{display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 9px;scrollbar-width:thin;scrollbar-color:#bdc8bf transparent;-webkit-overflow-scrolling:touch}
+.po-page .po-chips button{flex:0 0 auto;white-space:nowrap;display:inline-flex;align-items:center;gap:7px;min-height:37px;padding:7px 12px;background:#fff;border:1px solid #d7dfd8;border-radius:999px;color:#283c30;font-size:12px;font-weight:600;transition:background .15s,border-color .15s,color .15s}
+.po-page .po-chips button:hover{border-color:#8db9a0}
+.po-page .po-chips button.on{background:#153c2c;color:#fff;border-color:#153c2c}
+.po-page .po-chips .chip-count{background:#f0f3ef;color:#64776a;padding:2px 6px;border-radius:20px;font-size:10px}
+.po-page .po-chips button.on .chip-count{background:#31614b;color:#fff}
+
+/* ---- toolbar: search + filters ----------------------------------------- */
+.po-page .po-toolbar{display:flex;gap:8px}
+.po-page .po-search{height:44px;display:flex;align-items:center;gap:9px;flex:1;min-width:0;background:#fff;border:1px solid #d7dfd8;border-radius:9px;padding:0 12px;color:#63786a}
+.po-page .po-search svg{width:18px;height:18px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.po-page .po-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;font-size:16px;color:#19382b}
+.po-page .po-search:focus-within{border-color:#29744e;box-shadow:0 0 0 3px #29744e1f}
+.po-page .po-filter-toggle{min-width:44px;height:44px;border-radius:9px;background:#fff;border:1px solid #d7dfd8;color:#153c2c;display:inline-flex;align-items:center;justify-content:center}
+.po-page .po-filter-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
+.po-page .po-filter-toggle[aria-expanded="true"]{background:#e8f3ec;border-color:#8db9a0}
+.po-page .po-filter-panel{padding:14px;background:#fff;border:1px solid #dce5dc;border-radius:11px;display:grid;gap:12px}
+.po-page .po-filter-panel.po-collapsed{display:none}
+.po-page .po-filter-panel label{font-size:12px;font-weight:600;display:grid;gap:8px;color:#283c30}
+.po-page .po-filter-panel select{width:100%;border:1px solid #d7dfd8;border-radius:8px;background:#fff;padding:11px 12px;min-height:44px;font-size:14px;color:#19382b}
+
+/* ---- order cards ------------------------------------------------------- */
+.po-page .po-cards{display:grid;gap:12px}
+  .po-page .po-card{background:#fff;border:1px solid #dde5de;border-radius:13px;padding:16px;display:block;width:100%;color:inherit;text-align:left;text-decoration:none;transition:border-color .15s,box-shadow .15s}
+.po-page .po-card:hover{border-color:#8db9a0;box-shadow:0 2px 10px #0d28150f}
+.po-page .po-card.attention{border-color:#ebcb7a}
+.po-page .po-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.po-page .po-card-top .small-label{display:block;font-size:12px;color:#728378}
+.po-page .po-card-top strong{display:block;font-size:15px;color:#153c2c;margin-top:5px}
+.po-page .po-card .status-badge{background:#fff2d3;color:#91600b;font-size:10px;line-height:1.4;font-weight:700;padding:5px 8px;border-radius:99px;white-space:nowrap}
+.po-page .po-card .supplier-name{display:block;font-weight:700;font-size:17px;margin:20px 0 7px}
+.po-page .po-card .destination{font-size:12px;color:#66786d}
+.po-page .po-card hr{border:0;border-top:1px solid #edf0ec;margin:16px 0}
+.po-page .po-card-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.po-page .po-card-foot .amount{display:block;font-weight:800;font-size:22px;letter-spacing:-.5px;color:#153c2c}
+.po-page .po-card-foot .date{display:block;color:#819086;font-size:12px;margin-top:5px}
+.po-page .po-card-foot .next-icon{background:#e8f3ec;color:#153c2c;border-radius:10px;width:43px;height:43px;display:grid;place-items:center;font-size:23px;flex:0 0 auto}
+.po-page .po-card .short-note{display:block;font-size:11px;color:#91600b;margin-top:6px}
+
+/* ---- status pill (shared with the rest of the app) --------------------- */
+.po-page .po-card .ov-pill{font-size:10px;line-height:1.4;font-weight:700;padding:5px 8px;border-radius:99px;white-space:nowrap}
+
+/* ---- empty state + pagination ------------------------------------------ */
+.po-page .po-empty{padding:28px 14px;text-align:center;border:1px solid #dde5de;border-radius:13px;background:#fff}
+.po-page .po-empty strong{display:block;font-size:14px}
+.po-page .po-empty p{font-size:12px;color:#718078;margin:6px 0 0}
+.po-page .po-spinner{display:block;width:22px;height:22px;margin:0 auto 10px;border:2px solid #d7dfd8;border-top-color:#153c2c;border-radius:50%;animation:po-spin .8s linear infinite}
+@keyframes po-spin{to{transform:rotate(360deg)}}
+.po-page .po-pager{display:flex;justify-content:space-between;align-items:center;gap:8px;color:#77867a;font-size:11px}
+.po-page .po-pager .po-page-buttons{display:flex;align-items:center;gap:6px}
+.po-page .po-pager button{min-width:34px;height:34px;border:1px solid #d7dfd8;background:#fff;border-radius:8px;color:#153c2c}
+.po-page .po-pager button:disabled{opacity:.4;cursor:not-allowed}
+
+/* ---- PC adaptation ----------------------------------------------------- */
+@media (min-width:768px){
+    .po-page{gap:20px}
+    .po-page .po-heading h1{font-size:34px;letter-spacing:-1.4px}
+    .po-page .po-heading p{font-size:13px;max-width:62ch}
+
+    /* Chips stop scrolling and wrap — there is room now. */
+    .po-page .po-chips{flex-wrap:wrap;overflow-x:visible;padding-bottom:4px}
+
+    /* Filters are always visible; the mobile toggle is redundant. */
+    .po-page .po-filter-toggle{display:none}
+    .po-page .po-filter-panel.po-collapsed{display:grid}
+    .po-page .po-toolbar{gap:12px}
+    .po-page .po-filter-panel{grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;align-items:end;display:grid;padding:0;background:transparent;border:0;border-radius:0;gap:12px}
+    .po-page .po-filter-panel select{height:44px}
+
+    /* Cards fill the width as a grid instead of one narrow column. */
+    .po-page .po-cards{grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+}
+
+@media (min-width:1200px){
+    .po-page .po-cards{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+}
+
+@media (prefers-reduced-motion:reduce){
+    .po-page *{transition:none!important;animation:none!important}
+}

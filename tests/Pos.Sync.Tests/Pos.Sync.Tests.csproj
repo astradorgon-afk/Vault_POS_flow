@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Pos.Infrastructure\Pos.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Pos.Api\Pos.Api.csproj" />
+    <ProjectReference Include="..\..\src\Pos.SharedUI\Pos.SharedUI.csproj" />
   </ItemGroup>
 
 </Project>

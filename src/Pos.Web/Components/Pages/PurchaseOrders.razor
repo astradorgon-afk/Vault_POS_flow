@@ -5,125 +5,156 @@
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
-@inject NavigationManager Navigation
 
 <PageTitle>Purchase orders · VaultFlow</PageTitle>
 
-<header class="qr-head po-head">
-    <div>
-        <span class="eyebrow">Purchasing</span>
-        <h1>Purchase orders</h1>
-        <p>Order from suppliers, approve line by line, and check every delivery against what was ordered.</p>
-    </div>
-    @if (Session.HasPermission("purchase.create"))
+<div class="po-page">
+    <header class="po-heading">
+        <div>
+            <span class="eyebrow">▣ &nbsp; Purchasing</span>
+            <h1>Purchase orders</h1>
+            <p>Manage orders, approvals and deliveries.</p>
+        </div>
+        @if (Session.HasPermission("purchase.create"))
+        {
+            <a class="po-primary" href="purchasing/new">＋ &nbsp; New purchase order</a>
+        }
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message))
     {
-        <a class="po-btn primary" href="purchasing/new">+ New purchase order</a>
+        <div class="po-notice" role="status">@message</div>
     }
-</header>
 
-@if (!string.IsNullOrWhiteSpace(message))
-{
-    <div class="dashboard-notices" role="status"><p>@message</p></div>
-}
-
-@if (NeedsMyApproval.Count > 0)
-{
-    <button type="button" class="po-callout" @onclick='() => SetStage("PendingApproval")'>
-        <strong>@NeedsMyApproval.Count @(NeedsMyApproval.Count == 1 ? "order is" : "orders are") waiting for your approval</strong>
-        <span>@PurchasingText.Money(NeedsMyApproval.Sum(o => o.GrandTotal)) in total · Review →</span>
-    </button>
-}
-
-<nav class="po-stages" aria-label="Filter by stage">
-    @foreach ((string key, string label) in StageFilters)
+    @if (NeedsMyApproval.Count > 0)
     {
-        int count = CountFor(key);
-        <button type="button" class="@(stage == key ? "on" : null)" aria-pressed="@((stage == key) ? "true" : "false")" @onclick="() => SetStage(key)">
-            @label <span>@count</span>
+        <button type="button" class="po-banner" @onclick='() => SetStage("PendingApproval")'>
+            <span class="banner-symbol" aria-hidden="true">◷</span>
+            <span class="banner-body">
+                <strong>@NeedsMyApproval.Count order@(NeedsMyApproval.Count == 1 ? "" : "s") need@(NeedsMyApproval.Count == 1 ? "s" : "") your approval</strong>
+                <small>@PurchasingText.Money(NeedsMyApproval.Sum(o => o.GrandTotal)) awaiting review</small>
+            </span>
+            <b class="banner-chevron" aria-hidden="true">›</b>
         </button>
     }
-</nav>
 
-<section class="qr-card qr-results">
-    <div class="sk-toolbar po-toolbar" role="search">
-        <input class="sk-search" type="search" placeholder="Search order number or supplier" aria-label="Search orders"
-               @bind="search" @bind:event="oninput" @bind:after="FirstPage" />
-        <select aria-label="Supplier" @bind="supplierFilter" @bind:after="FirstPage">
-            <option value="">All suppliers</option>
-            @foreach (PosSupplier supplier in suppliers.Values.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+    <section>
+        <div class="po-section-head">
+            <h2>Orders</h2>
+            <span>@orders.Count total</span>
+        </div>
+
+        <nav class="po-chips" aria-label="Filter by order status">
+            @foreach ((string key, string label) in StageFilters)
             {
-                <option value="@supplier.Id">@supplier.Name</option>
+                int count = CountFor(key);
+                <button type="button" class="@(stage == key ? "on" : null)" aria-pressed="@((stage == key) ? "true" : "false")" @onclick="() => SetStage(key)">
+                    <span>@label</span><span class="chip-count">@count</span>
+                </button>
             }
-        </select>
-        <select aria-label="Deliver to" @bind="destinationFilter" @bind:after="FirstPage">
-            <option value="">All destinations</option>
-            @foreach (PosLocation location in locations.Values.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code))
-            {
-                <option value="@location.Id">@location.Code · @location.Name</option>
-            }
-        </select>
-    </div>
+        </nav>
 
-    @if (loading)
-    {
-        <div class="qr-empty"><span class="qr-spinner"></span><p>Loading purchase orders…</p></div>
-    }
-    else
-    {
-        List<PosPurchaseOrderSummary> visible = Visible;
-        int pageCount = Math.Max(1, (visible.Count + PageSize - 1) / PageSize);
-        int currentPage = Math.Clamp(page, 1, pageCount);
+        <div class="po-toolbar" role="search">
+            <label class="po-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                <input type="search" placeholder="Search orders..." aria-label="Search orders"
+                       @bind="search" @bind:event="oninput" @bind:after="FirstPage" />
+            </label>
+            <button type="button" class="po-filter-toggle" aria-expanded="@filtersOpen" aria-controls="po-filters"
+                    aria-label="Show advanced filters" @onclick="() => filtersOpen = !filtersOpen">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></svg>
+            </button>
+        </div>
 
-        @if (visible.Count == 0)
+        <div id="po-filters" class="po-filter-panel @(filtersOpen ? null : "po-collapsed")">
+            <label>
+                Supplier
+                <select aria-label="Supplier" @bind="supplierFilter" @bind:after="FirstPage">
+                    <option value="">All suppliers</option>
+                    @foreach (PosSupplier supplier in suppliers.Values.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <option value="@supplier.Id">@supplier.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Destination
+                <select aria-label="Deliver to" @bind="destinationFilter" @bind:after="FirstPage">
+                    <option value="">All destinations</option>
+                    @foreach (PosLocation location in locations.Values.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code))
+                    {
+                        <option value="@location.Id">@location.Code · @location.Name</option>
+                    }
+                </select>
+            </label>
+        </div>
+
+        @if (loading)
         {
-            <div class="qr-empty">
-                <p><strong>No purchase orders here</strong></p>
-                <p>@(orders.Count == 0 ? "Start with a new purchase order." : "Try another stage, supplier or search.")</p>
-            </div>
+            <div class="po-empty" role="status"><span class="po-spinner"></span><p>Loading purchase orders…</p></div>
         }
         else
         {
-            <div class="qr-table-wrap">
-                <table class="qr-table po-table">
-                    <thead>
-                        <tr><th>Order</th><th>Supplier</th><th>Deliver to</th><th>Status</th><th class="num">Total</th><th>Created</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (PosPurchaseOrderSummary order in visible.Skip((currentPage - 1) * PageSize).Take(PageSize))
-                        {
-                            <tr @onclick="() => Open(order.Id)" class="@(IsMineToApprove(order) ? "po-attention" : null)">
-                                <td>
-                                    <a href="@($"purchasing/{order.Id:D}")" @onclick:stopPropagation="true"><strong>@PurchasingText.OrderName(order.Number)</strong></a>
-                                    @if (order.CreatedByUserId == MyId) { <small>Raised by you</small> }
-                                </td>
-                                <td>@SupplierName(order.SupplierId)</td>
-                                <td>@LocationName(order.DestinationLocationId)</td>
-                                <td>
-                                    <span class="ov-pill tone-@PurchasingText.Tone(order.Status, order.OutstandingQuantity)">@PurchasingText.Label(order.Status, order.OutstandingQuantity)</span>
-                                    @if (PurchasingText.IsIncomplete(order.Status, order.OutstandingQuantity))
-                                    {
-                                        <small class="po-short">@PurchasingText.Quantity(order.OutstandingQuantity) unit@(order.OutstandingQuantity == 1 ? "" : "s") not delivered</small>
-                                    }
-                                </td>
-                                <td class="num"><strong>@PurchasingText.Money(order.GrandTotal)</strong></td>
-                                <td>@order.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+            List<PosPurchaseOrderSummary> visible = Visible;
+            int pageCount = Math.Max(1, (visible.Count + PageSize - 1) / PageSize);
+            int currentPage = Math.Clamp(page, 1, pageCount);
 
-            <nav class="sk-pager" aria-label="Order pages">
-                <span class="sk-pager-range">Showing @((currentPage - 1) * PageSize + 1)–@Math.Min(currentPage * PageSize, visible.Count) of @visible.Count</span>
-                <div class="sk-pages">
-                    <button type="button" aria-label="Previous page" disabled="@(currentPage == 1)" @onclick="() => page = currentPage - 1">‹</button>
-                    <span class="sk-gap">Page @currentPage of @pageCount</span>
-                    <button type="button" aria-label="Next page" disabled="@(currentPage == pageCount)" @onclick="() => page = currentPage + 1">›</button>
+            @if (visible.Count == 0)
+            {
+                <div class="po-empty">
+                    <strong>No purchase orders here</strong>
+                    <p>@(orders.Count == 0 ? "Start with a new purchase order." : "Try another stage, supplier or search.")</p>
                 </div>
-            </nav>
+            }
+            else
+            {
+                <div class="po-cards">
+                    @foreach (PosPurchaseOrderSummary order in visible.Skip((currentPage - 1) * PageSize).Take(PageSize))
+                    {
+                        <a class="po-card @(IsMineToApprove(order) ? "attention" : null)"
+                           href="@($"purchasing/{order.Id:D}")"
+                           aria-label="View purchase order @PurchasingText.OrderName(order.Number)">
+                            <div class="po-card-top">
+                                <div>
+                                    <span class="small-label">Purchase order</span>
+                                    <strong>@PurchasingText.OrderName(order.Number)</strong>
+                                </div>
+                                <span class="status-badge">@PurchasingText.Label(order.Status, order.OutstandingQuantity)</span>
+                            </div>
+                            <span class="supplier-name">@SupplierName(order.SupplierId)</span>
+                            <span class="destination">⌖ &nbsp; @LocationName(order.DestinationLocationId)</span>
+                            @if (order.CreatedByUserId == MyId)
+                            {
+                                <span class="short-note">Raised by you</span>
+                            }
+                            @if (PurchasingText.IsIncomplete(order.Status, order.OutstandingQuantity))
+                            {
+                                <span class="short-note">@PurchasingText.Quantity(order.OutstandingQuantity) unit@(order.OutstandingQuantity == 1 ? "" : "s") not delivered</span>
+                            }
+                            <hr />
+                            <div class="po-card-foot">
+                                <div>
+                                    <span class="amount">@PurchasingText.Money(order.GrandTotal)</span>
+                                    <span class="date">@order.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                </div>
+                                <span class="next-icon" aria-hidden="true">↗</span>
+                            </div>
+                        </a>
+                    }
+                </div>
+
+                <nav class="po-pager" aria-label="Order pages">
+                    <span>Showing @((currentPage - 1) * PageSize + 1)–@Math.Min(currentPage * PageSize, visible.Count) of @visible.Count</span>
+                    <span class="po-page-buttons">
+                        <button type="button" aria-label="Previous page" disabled="@(currentPage == 1)" @onclick="() => page = currentPage - 1">‹</button>
+                        <span>Page @currentPage of @pageCount</span>
+                        <button type="button" aria-label="Next page" disabled="@(currentPage == pageCount)" @onclick="() => page = currentPage + 1">›</button>
+                    </span>
+                </nav>
+            }
         }
-    }
-</section>
+    </section>
+</div>
 
 @code {
     private const int PageSize = 20;
@@ -144,6 +175,7 @@
     private readonly Dictionary<Guid, PosSupplier> suppliers = [];
     private readonly Dictionary<Guid, PosLocation> locations = [];
     private bool loading = true;
+    private bool filtersOpen;
     private string? message;
     private string stage = string.Empty;
     private string search = string.Empty;
@@ -235,8 +267,6 @@
     }
 
     private void FirstPage() => page = 1;
-
-    private void Open(Guid id) => Navigation.NavigateTo(FormattableString.Invariant($"purchasing/{id:D}"));
 
     private string SupplierName(Guid id) => suppliers.TryGetValue(id, out PosSupplier? supplier) ? supplier.Name : "Unknown supplier";
 
