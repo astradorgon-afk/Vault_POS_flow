@@ -61,6 +61,12 @@
                             {
                                 <p class="option-note">@locationMessage <button type="button" class="linkish" @onclick="LoadLocationChoicesAsync">Try again</button></p>
                             }
+                            <!-- Test button to diagnose API call -->
+                            <button type="button" class="linkish" @onclick="TestApiCallAsync" disabled="@busy || loadingLocations">Test API call</button>
+                            @if (testResult is not null)
+                            {
+                                <p class="option-note">@testResult</p>
+                            }
                         </div>
                     </div>
                 }
@@ -122,6 +128,7 @@
     private string? twoFactorCode;
     private string? error;
     private string? locationMessage;
+    private string? testResult;
     private Guid? selectedLocationId;
     private readonly List<PosSignInLocation> locationChoices = [];
 
@@ -159,6 +166,25 @@
     private void OnLocationChanged(ChangeEventArgs e)
         => selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid parsed) ? parsed : null;
 
+    private async Task TestApiCallAsync()
+    {
+        testResult = "Calling API...";
+        try
+        {
+            ApiResult<List<PosSignInLocation>> result = await Api.GetSignInLocationsAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                testResult = $"API Error: {result.Error}";
+                return;
+            }
+            testResult = $"Success! Got {result.Value.Count} locations: {string.Join(", ", result.Value.Select(l => l.Code))}";
+        }
+        catch (Exception ex)
+        {
+            testResult = $"Exception: {ex.GetType().Name}: {ex.Message}";
+        }
+    }
+
     private async Task LoadLocationChoicesAsync()
     {
         if (locationsLoaded || loadingLocations)
@@ -188,9 +214,17 @@
                 locationMessage = "No active work locations are available.";
             }
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            locationMessage = "Locations could not be loaded. Try again before signing in.";
+            locationMessage = $"Network error: {ex.Message}";
+        }
+        catch (TaskCanceledException ex)
+        {
+            locationMessage = $"Request timed out: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            locationMessage = $"Error loading locations: {ex.Message} ({ex.GetType().Name})";
         }
         finally
         {
