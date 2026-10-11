@@ -10,22 +10,18 @@
 <PageTitle>@(IsStoreRestock ? "Restock request" : "Transfer") · VaultFlow</PageTitle>
 <div class="inventory-workflow web-workflow">
 
-<div class="office-head">
-    <div>
+<div class="office-head tr-head">
+    <div class="tr-head-copy">
         <p class="office-kicker">@(IsStoreRestock ? "Store supplies" : "Transfer")</p>
-        <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferId.ToString("N")[..8].ToUpperInvariant()}" : "Transfer" : detail.Transfer.Number)</h1>
+        <div class="tr-title-row">
+            <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferId.ToString("N")[..8].ToUpperInvariant()}" : "Transfer" : detail.Transfer.Number)</h1>
+            <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
+            @if (IsEmergency)
+            {
+                <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
+            }
+        </div>
         <p class="office-lead">@(IsStoreRestock ? "The owner reviews the store request before the warehouse picks and dispatches it." : "Follow the stock from the source shelf to your receiving bay — and record every arrival honestly.")</p>
-    </div>
-    <div class="head-pickers">
-        <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
-        @if (IsEmergency)
-        {
-            <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
-        }
-        @if (detail is not null)
-        {
-            <WorkflowPrintButton Document="@BuildPrintReceipt()" />
-        }
     </div>
 </div>
 
@@ -56,10 +52,12 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
+    <div class="tr-layout">
+    <div class="tr-col-main">
     <section class="transfer-route" aria-label="Transfer route">
-        <div class="transfer-route-stop"><span>From</span><strong>@SourceLabel</strong></div>
+        <div class="transfer-route-stop"><span>From</span><strong>@SourceCode</strong><small>@SourceName</small></div>
         <span class="transfer-route-arrow" aria-hidden="true">→</span>
-        <div class="transfer-route-stop"><span>Deliver to</span><strong>@DestinationLabel</strong></div>
+        <div class="transfer-route-stop"><span>Deliver to</span><strong>@DestinationCode</strong><small>@DestinationName</small></div>
     </section>
 
     @if (detail.Transfer.DispatchedAtUtc is not null && detail.Transfer.ReceivedAtUtc is null)
@@ -68,30 +66,12 @@ else
             <div class="tr-notice-row">
                 <span class="tr-notice-icon" aria-hidden="true">↗</span>
                 <div>
-                    <strong>Products have left the source</strong>
-                    <span>They are in transit. Destination staff can record what arrived.</span>
+                    <strong>@DispatchedNoticeTitle</strong>
+                    <p>The products are in transit. @(IsStoreRestock ? "Store staff" : "Destination staff") can record what arrived.</p>
                 </div>
             </div>
         </section>
     }
-
-    <section class="transfer-summary">
-        <div><span>Kind</span><strong>@KindLabel</strong></div>
-        <div><span>Mode</span><strong>@ModeLabel</strong></div>
-        <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
-        <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
-        <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
-        <div>
-            <span>Approved by</span>
-            <strong>@(detail.ApprovedByDisplayName ?? (detail.ApprovedByUserId is null ? "Not approved" : "Unknown user"))</strong>
-            @if (detail.ApprovedAtUtc is { } approvedAt)
-            {
-                <small>@approvedAt.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</small>
-            }
-        </div>
-        <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
-        <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
-    </section>
 
     @if (IsStoreRestock && Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) && !string.IsNullOrWhiteSpace(WarehouseStepMessage))
     {
@@ -106,11 +86,24 @@ else
         <div class="note-box"><span>Review note</span>@detail.ReviewNote</div>
     }
 
-    <section class="lines-panel">
-        <div class="lines-title">
-            <strong>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</strong>
-            <span>Picked shows the warehouse count; Dispatched shows what actually left the source. The difference shows up as a discrepancy when you count the boxes.</span>
+    <section class="tr-section">
+        <div class="tr-section-title"><h2>Transfer overview</h2></div>
+        <div class="transfer-summary">
+            <div><span>Kind</span><strong>@KindLabel</strong></div>
+            <div><span>Mode</span><strong>@ModeLabel</strong></div>
+            <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
+            <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
         </div>
+    </section>
+
+    <section class="tr-section">
+        <div class="tr-section-title">
+            <h2>Items in transit</h2>
+            <span>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</span>
+        </div>
+        <p class="tr-hint">@(detail.Transfer.DispatchedAtUtc is null
+            ? "Follow each product from the request through picking and dispatch."
+            : "Compare dispatched quantities with what the store actually receives.")</p>
         <div class="line-item-cards">
             @foreach (PosTransferLineView line in detail.Lines)
             {
@@ -269,17 +262,6 @@ else
         </div>
     }
 
-    @if (ShowCancelDispatch)
-    {
-        <section class="action-panel">
-            <div class="action-title"><strong>Cancel the dispatch</strong><span>Only valid before the goods physically leave. Reverses the ledger movement.</span></div>
-            <input type="text" class="reason-input" placeholder="Reason (required)…" @bind="cancelReason" />
-            <div class="open-count-actions">
-                <button type="button" class="search-action danger" @onclick="CancelDispatchAsync" disabled="@(acting || string.IsNullOrWhiteSpace(cancelReason))">@(acting ? "Cancelling…" : "Cancel dispatch")</button>
-            </div>
-        </section>
-    }
-
     @if (ShowReceive)
     {
         <section class="action-panel receive-panel">
@@ -329,37 +311,49 @@ else
         </section>
     }
 
-    <section class="custody-panel">
-        <div class="custody-title">
-            <strong>Chain of custody</strong>
-            <button type="button" class="search-action" @onclick="ToggleCustodyAsync">
-                @(custodyShown ? "Hide timeline" : custodyLoading ? "Loading…" : "Show timeline")
-            </button>
+    </div><!-- /.tr-col-main -->
+
+    <aside class="tr-col-side">
+    <section class="tr-section panel tr-timeline">
+        <h2>Activity timeline</h2>
+        <div class="tr-events">
+            @{ List<TimelineEvent> timeline = TimelineEvents; }
+            @for (int index = 0; index < timeline.Count; index++)
+            {
+                TimelineEvent timelineEvent = timeline[index];
+                <div class="tr-event @timelineEvent.State" @key="index">
+                    <i aria-hidden="true"></i>
+                    <div>
+                        <strong>@timelineEvent.Title</strong>
+                        <span>@timelineEvent.Subtitle</span>
+                    </div>
+                </div>
+            }
         </div>
-        @if (custodyShown)
+    </section>
+
+    <section class="tr-section panel tr-actions">
+        <h2>Transfer actions</h2>
+        <div class="tr-print">
+            <WorkflowPrintButton Document="@BuildPrintReceipt()" />
+        </div>
+        @if (ShowCancelDispatch)
         {
-            @if (custody.Count == 0)
-            {
-                <div class="results-empty"><span>No custody events recorded for this transfer yet.</span></div>
-            }
-            else
-            {
-                <ol class="custody-list">
-                    @foreach (PosTransferCustodyEventSummary custodyEvent in custody)
-                    {
-                        <li>
-                            <span class="custody-dot" aria-hidden="true"></span>
-                            <div class="custody-body">
-                                <span class="custody-kind">@SplitWords(custodyEvent.Kind)</span>
-                                <span class="custody-date">@custodyEvent.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
-                                <span class="custody-note">@(string.IsNullOrWhiteSpace(custodyEvent.Note) ? "—" : custodyEvent.Note)</span>
-                            </div>
-                        </li>
-                    }
-                </ol>
-            }
+            <details class="tr-cancel">
+                <summary>Cancel the dispatch <span aria-hidden="true">⌄</span></summary>
+                <p>Only valid before the goods physically leave the source. Cancelling reverses the ledger movement when the backend permits it.</p>
+                <label for="tr-cancel-reason">Reason for cancellation</label>
+                <textarea id="tr-cancel-reason" rows="3" maxlength="500" placeholder="Explain the cancellation…"
+                          @bind="cancelReason" @bind:event="oninput"></textarea>
+                <button type="button" class="tr-cancel-submit" @onclick="CancelDispatchAsync"
+                        disabled="@(acting || string.IsNullOrWhiteSpace(cancelReason))">
+                    @(acting ? "Cancelling…" : "Request cancellation")
+                </button>
+            </details>
         }
     </section>
+    </aside><!-- /.tr-col-side -->
+    </div><!-- /.tr-layout -->
 }
 
 </div>
@@ -374,6 +368,9 @@ else
         decimal Remaining,
         decimal Received,
         decimal Damaged);
+
+    /// <summary>One milestone on the activity timeline; State is done, current or future.</summary>
+    private sealed record TimelineEvent(string Title, string Subtitle, string State);
 
     private readonly List<PosLocation> locations = [];
     private readonly List<PosTransferCustodyEventSummary> custody = [];
@@ -461,8 +458,6 @@ else
     private bool loading = true;
     private bool acting;
     private bool ownerDispatchConfirmation;
-    private bool custodyShown;
-    private bool custodyLoading;
 
     [Parameter] public Guid TransferId { get; set; }
 
@@ -537,6 +532,16 @@ else
 
     private string SourceLabel => LocationLabel(detail?.Transfer.SourceLocationId);
     private string DestinationLabel => LocationLabel(detail?.Transfer.DestinationLocationId);
+
+    // The route panel shows the short code over the full name, as in the design.
+    private string SourceCode => LocationCode(detail?.Transfer.SourceLocationId);
+    private string SourceName => LocationName(detail?.Transfer.SourceLocationId);
+    private string DestinationCode => LocationCode(detail?.Transfer.DestinationLocationId);
+    private string DestinationName => LocationName(detail?.Transfer.DestinationLocationId);
+
+    private string DispatchedNoticeTitle => detail is { Kind: "WarehouseToStore" }
+        ? "Products have left the main warehouse"
+        : "Products have left the source";
 
     private WorkflowReceipt BuildPrintReceipt()
     {
@@ -638,6 +643,7 @@ else
             BuildPickRows();
             BuildApprovalRows();
             BuildReceiveRows();
+            await LoadCustodyAsync();
         }
         catch (HttpRequestException)
         {
@@ -951,15 +957,11 @@ else
         return null;
     });
 
-    private async Task ToggleCustodyAsync()
+    // The custody log feeds the activity timeline. It is a convenience, so a
+    // failure here leaves the timeline to fall back to the transfer's own dates.
+    private async Task LoadCustodyAsync()
     {
-        if (custodyShown || custody.Count > 0)
-        {
-            custodyShown = !custodyShown;
-            return;
-        }
-
-        custodyLoading = true;
+        custody.Clear();
         try
         {
             ApiResult<List<PosTransferCustodyEventSummary>> response = await Api.GetTransferCustodyAsync(
@@ -968,23 +970,105 @@ else
             {
                 custody.AddRange(response.Value);
             }
-            else if (response.Error is { Length: > 0 })
-            {
-                message = response.Error;
-                return;
-            }
-
-            custodyShown = true;
         }
         catch (HttpRequestException)
         {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            custodyLoading = false;
+            // The timeline falls back to the transfer's own milestones below.
         }
     }
+
+    /// <summary>
+    /// The design's activity timeline: every custody event as a milestone, the
+    /// latest one marked current, plus a future "receiving" step while the
+    /// products are still in transit.
+    /// </summary>
+    private List<TimelineEvent> TimelineEvents
+    {
+        get
+        {
+            List<TimelineEvent> events = [];
+            List<(string Title, string Subtitle)> marks = [];
+
+            if (custody.Count > 0)
+            {
+                marks.AddRange(custody.Select(custodyEvent => (
+                    TimelineTitle(custodyEvent),
+                    TimelineSubtitle(custodyEvent))));
+            }
+            else if (detail is not null)
+            {
+                marks.Add(("Request created", FormatStamp(detail.Transfer.CreatedAtUtc)));
+                if (detail.ApprovedAtUtc is { } approvedAt)
+                {
+                    marks.Add((
+                        string.IsNullOrWhiteSpace(detail.ApprovedByDisplayName)
+                            ? "Approved"
+                            : $"Approved by {detail.ApprovedByDisplayName}",
+                        FormatStamp(approvedAt)));
+                }
+
+                if (detail.Transfer.DispatchedAtUtc is { } dispatchedAt)
+                {
+                    marks.Add(("Dispatched from source", FormatStamp(dispatchedAt)));
+                }
+
+                if (detail.Transfer.ReceivedAtUtc is { } receivedAt)
+                {
+                    marks.Add((IsStoreRestock ? "Store receiving" : "Received at destination", FormatStamp(receivedAt)));
+                }
+            }
+
+            for (int index = 0; index < marks.Count; index++)
+            {
+                events.Add(new TimelineEvent(
+                    marks[index].Title,
+                    marks[index].Subtitle,
+                    index == marks.Count - 1 ? "current" : "done"));
+            }
+
+            if (detail is { Transfer.DispatchedAtUtc: not null, Transfer.ReceivedAtUtc: null })
+            {
+                events.Add(new TimelineEvent(
+                    IsStoreRestock ? "Store receiving" : "Receiving at destination",
+                    "Not yet recorded",
+                    "future"));
+            }
+
+            return events;
+        }
+    }
+
+    private string TimelineTitle(PosTransferCustodyEventSummary custodyEvent) => custodyEvent.Kind switch
+    {
+        "Created" => "Request created",
+        "EmergencyCreated" => "Emergency transfer created",
+        "Submitted" => "Submitted for review",
+        "Reviewed" => "Review started",
+        "Approved" or "ApprovedWithAmendment" or "PreApprovedApproval"
+            => string.IsNullOrWhiteSpace(detail?.ApprovedByDisplayName)
+                ? "Approved"
+                : $"Approved by {detail!.ApprovedByDisplayName}",
+        "Rejected" => "Rejected",
+        "Picked" => "Picked at the source",
+        "Ready" => "Ready for dispatch",
+        "Dispatched" => "Dispatched from source",
+        "DispatchCancelled" => "Dispatch cancelled",
+        "Received" => IsStoreRestock ? "Store receiving" : "Received at destination",
+        "Resolved" => "Discrepancy resolved",
+        "Verified" => "Verified and closed",
+        "CentralReviewRatified" => "Emergency ratified centrally",
+        "CentralReviewRejected" => "Emergency rejected centrally",
+        _ => SplitWords(custodyEvent.Kind),
+    };
+
+    private static string TimelineSubtitle(PosTransferCustodyEventSummary custodyEvent)
+    {
+        string stamp = FormatStamp(custodyEvent.OccurredAtUtc);
+        return string.IsNullOrWhiteSpace(custodyEvent.Note) ? stamp : $"{stamp} · {custodyEvent.Note}";
+    }
+
+    private static string FormatStamp(DateTimeOffset at)
+        => at.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture);
 
     private async Task RunActionAsync(string working, Func<Task<string?>> action)
     {
@@ -1022,6 +1106,26 @@ else
 
         PosLocation? location = locations.FirstOrDefault(l => l.Id == id);
         return location?.Code ?? id.ToString("D", CultureInfo.InvariantCulture)[..8];
+    }
+
+    private string LocationCode(Guid? locationId)
+    {
+        if (locationId is not { } id)
+        {
+            return "—";
+        }
+
+        return locations.FirstOrDefault(l => l.Id == id)?.Code ?? id.ToString("D", CultureInfo.InvariantCulture)[..8];
+    }
+
+    private string LocationName(Guid? locationId)
+    {
+        if (locationId is not { } id)
+        {
+            return "—";
+        }
+
+        return locations.FirstOrDefault(l => l.Id == id)?.Name ?? "—";
     }
 
     private static string Quantity(decimal value)

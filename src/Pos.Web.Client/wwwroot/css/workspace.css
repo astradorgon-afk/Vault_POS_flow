@@ -82,3 +82,111 @@
     .line-row,.receiving-line,.stock-row { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .panel { padding:1rem; }
 }
+
+/* ---- offline purchasing ------------------------------------------------
+   The PWA does not load purchasing.css, so the offline "Purchase orders"
+   section mirrors the connected Owner pages from that stylesheet. Everything
+   stays scoped under .po-page (same scope as online) to avoid collisions. */
+.po-page{display:flex;flex-direction:column;gap:16px;color:#1b3025}
+.po-page *{box-sizing:border-box}
+.po-page button{cursor:pointer;font:inherit}
+.po-page .po-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.po-page .po-heading>div{min-width:0}
+.po-page .eyebrow{font-size:10px;letter-spacing:1.1px;font-weight:700;color:#537365;text-transform:uppercase}
+.po-page .po-heading h1{font-size:27px;letter-spacing:-1.1px;margin:7px 0 5px;line-height:1.15}
+.po-page .po-heading p{color:#68776e;font-size:12px;margin:0;line-height:1.6}
+.po-page .po-primary{border-radius:9px;min-height:44px;padding:10px 14px;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;border:1px solid #153c2c;background:#153c2c;color:#fff;transition:background .15s,border-color .15s}
+.po-page .po-primary:hover{background:#20543f}
+.po-page .po-primary:disabled{opacity:.55;cursor:wait}
+.po-page .po-section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px}
+.po-page .po-section-head h2{font-size:16px;margin:0;letter-spacing:-.3px}
+.po-page .po-section-head span{font-size:12px;color:#728077}
+.po-page .po-chips{display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 9px;scrollbar-width:thin;scrollbar-color:#bdc8bf transparent;-webkit-overflow-scrolling:touch}
+.po-page .po-chips button{flex:0 0 auto;white-space:nowrap;display:inline-flex;align-items:center;gap:7px;min-height:37px;padding:7px 12px;background:#fff;border:1px solid #d7dfd8;border-radius:999px;color:#283c30;font-size:12px;font-weight:600;transition:background .15s,border-color .15s,color .15s}
+.po-page .po-chips button:hover{border-color:#8db9a0}
+.po-page .po-chips button.on{background:#153c2c;color:#fff;border-color:#153c2c}
+.po-page .po-chips .chip-count{background:#f0f3ef;color:#64776a;padding:2px 6px;border-radius:20px;font-size:10px}
+.po-page .po-chips button.on .chip-count{background:#31614b;color:#fff}
+.po-page .po-cards{display:grid;gap:12px}
+.po-page .po-card{background:#fff;border:1px solid #dde5de;border-radius:13px;padding:16px;display:block;width:100%;color:inherit;text-align:left;text-decoration:none;transition:border-color .15s,box-shadow .15s}
+.po-page .po-card:hover{border-color:#8db9a0;box-shadow:0 2px 10px #0d28150f}
+.po-page .po-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.po-page .po-card-top .small-label{display:block;font-size:12px;color:#728378}
+.po-page .po-card-top strong{display:block;font-size:15px;color:#153c2c;margin-top:5px}
+.po-page .po-card .status-badge{background:#fff2d3;color:#91600b;font-size:10px;line-height:1.4;font-weight:700;padding:5px 8px;border-radius:99px;white-space:nowrap}
+.po-page .po-card .supplier-name{display:block;font-weight:700;font-size:17px;margin:20px 0 7px}
+.po-page .po-card .destination{font-size:12px;color:#66786d}
+.po-page .po-card hr{border:0;border-top:1px solid #edf0ec;margin:16px 0}
+.po-page .po-card-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.po-page .po-card-foot .date{display:block;color:#819086;font-size:12px;margin-top:5px}
+.po-page .po-empty{padding:28px 14px;text-align:center;border:1px solid #dde5de;border-radius:13px;background:#fff}
+.po-page .po-empty strong{display:block;font-size:14px}
+.po-page .po-empty p{font-size:12px;color:#718078;margin:6px 0 0}
+@media (min-width:768px){
+    .po-page{gap:20px}
+    .po-page .po-heading h1{font-size:34px;letter-spacing:-1.4px}
+    .po-page .po-heading p{font-size:13px;max-width:62ch}
+    .po-page .po-chips{flex-wrap:wrap;overflow-x:visible;padding-bottom:4px}
+    .po-page .po-cards{grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+}
+@media (min-width:1200px){
+    .po-page .po-cards{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+}
+
+/* ---- offline restock ---- mirrored from restock.css (token driven) ---- */
+.restock-page{display:grid;gap:18px;color:var(--ink)}
+.restock-head{display:flex;align-items:end;justify-content:space-between;gap:18px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.restock-head h1{margin:5px 0 7px;font:800 clamp(1.7rem,2.5vw,2.2rem)/1.12 'Manrope',sans-serif;letter-spacing:-.035em}
+.restock-head p{max-width:720px;margin:0;color:var(--muted);font-size:.9rem}
+.restock-card{overflow:hidden;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:var(--shadow-card)}
+.restock-card>header{display:flex;align-items:end;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line);background:#f7faf7}
+.restock-card h2{margin:4px 0 0;font:700 1.1rem 'Manrope',sans-serif}
+.restock-card header p{max-width:390px;margin:0;color:var(--muted);font-size:.79rem;text-align:right}
+.restock-form{display:grid;gap:18px;padding:20px}
+.restock-form>p{color:var(--muted);font-size:.84rem;margin:0}
+.restock-field{display:grid;min-width:0;gap:6px;margin:0;color:var(--muted);font-size:.7rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.restock-field>input{box-sizing:border-box;width:100%;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;color:var(--ink);font-size:.87rem;font-weight:600;letter-spacing:normal;text-transform:none}
+.restock-product-search{position:relative;max-width:700px}
+.restock-lines{display:grid;gap:8px;padding:0 20px 20px}
+.restock-lines h3{margin:0 0 2px;font-size:.94rem}
+.restock-lines>p{margin:0;color:var(--muted);font-size:.85rem}
+.restock-line{display:flex;align-items:end;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#f8faf8}
+.restock-line>div{display:grid;gap:3px;flex:1;min-width:0}
+.restock-line strong{font-size:.87rem}
+.restock-line small{color:var(--muted);font-size:.75rem}
+.restock-line label{display:grid;gap:5px;margin:0;color:var(--muted);font-size:.66rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.restock-line input{box-sizing:border-box;width:120px;height:42px;padding:0 10px;border:1px solid var(--line-strong);border-radius:8px;background:#fff;color:var(--ink);font-weight:700}
+.restock-line button{min-height:42px;padding:0 10px;border:0;background:transparent;color:#a63d35;font-size:.78rem;font-weight:800;cursor:pointer}
+.restock-card>footer{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px;border-top:1px solid var(--line);background:#f7faf7;color:var(--muted);font-size:.8rem}
+.restock-actions{display:flex;flex-wrap:wrap;gap:10px}
+.restock-primary,.restock-refresh{min-height:42px;padding:0 16px;border-radius:9px;font-weight:800;cursor:pointer}
+.restock-primary{border:0;background:var(--forest);color:#fff}
+.restock-primary:hover{background:var(--forest-bright)}
+.restock-refresh{border:1px solid var(--line-strong);background:#fff;color:var(--forest)}
+.restock-primary:disabled,.restock-refresh:disabled{opacity:.5;cursor:default}
+.restock-empty{margin:0;padding:24px 20px;color:var(--muted);font-size:.85rem}
+.restock-empty strong{display:block;color:var(--ink);font-size:.9rem;margin-bottom:4px}
+.restock-empty p{margin:0;font-size:.8rem}
+.restock-page :is(button,input,select,a):focus-visible{outline:3px solid rgba(36,90,66,.25);outline-offset:2px}
+@media (max-width:650px){
+    .restock-head,.restock-card>header,.restock-card>footer{align-items:stretch;flex-direction:column}
+    .restock-card header p{text-align:left}
+    .restock-line{align-items:stretch;flex-wrap:wrap}
+    .restock-line>div{flex-basis:100%}
+    .restock-line input{width:110px}
+    .restock-actions{width:100%}
+    .restock-actions button{flex:1}
+}
+
+/* ---- receiving drift: align offline rows with online GoodsReceiving ---- */
+.receiving-row{transition:border-color .15s,transform .15s}
+.receiving-row:hover,.receiving-row.selected{border-color:#9db9a5;background:#f8fcf9;transform:translateY(-1px)}
+.receiving-state.ready{border-color:#b8dbc4;background:var(--mint-soft);color:var(--forest)}
+.receiving-primary{min-height:42px;padding:0 17px;border:0;border-radius:9px;background:var(--forest);color:#fff;font-weight:800;cursor:pointer}
+.receiving-primary:hover{background:var(--forest-bright)}
+.receiving-primary:disabled{opacity:.5;cursor:default}
+.receiving-message{padding:12px 15px;border-left:3px solid var(--amber);border-radius:5px;background:var(--amber-soft);color:#75551e;font-size:.86rem}
+
+@media (prefers-reduced-motion:reduce){
+    .po-page *,.restock-page *,.receiving-row{transition:none!important;animation:none!important}
+}

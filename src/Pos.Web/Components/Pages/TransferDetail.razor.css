@@ -1,142 +1,209 @@
-/* Transfer detail — restyled to the VaultFlow Connected Transfer mobile prototype.
-   This page uses the LIGHT workflow theme (.inventory-workflow.web-workflow sets
-   --panel:#fff / --text:#17211c), so the dark-theme values that used to live here
-   (rgba(23,33,38,.72) panels, #0d1417 fields) rendered dark boxes and invisible
-   text. Everything below is token-driven so it follows the workflow theme. */
+/* Transfer detail — matches the VaultFlow Transfer / Restock Request mobile
+   prototype (VaultFlow_Transfer_Mobile_Design). This page runs on the LIGHT
+   workflow theme (.inventory-workflow.web-workflow), so everything below is
+   token-driven or uses the prototype's concrete values where the theme has no
+   equivalent (timeline dots, quantities tray, notice tint). */
 
-.head-pickers { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-.results-empty { min-height:200px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
+/* ---- Heading ------------------------------------------------------------- */
+.tr-head { display: block; }
+/* The prototype's heading has no rule under it; outrank the shared web theme. */
+.web-workflow .tr-head { padding-bottom: 4px; border-bottom: 0; }
+.tr-head-copy { display: grid; gap: 2px; min-width: 0; }
+.tr-title-row { display: flex; align-items: center; justify-content: space-between; gap: 9px; flex-wrap: wrap; }
+.tr-title-row .office-title { margin: 0.3rem 0 0; white-space: nowrap; letter-spacing: -.045em; }
+.tr-title-row .status-chip { flex: none; }
+.tr-head .office-lead { margin-top: 9px; font-size: .8rem; line-height: 1.65; }
 
-/* ---- Route ------------------------------------------------------------- */
-.transfer-route { display:grid; grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr); align-items:center; gap:12px; margin-bottom:14px; padding:16px 18px; border:1px solid var(--line); border-radius:13px; background:var(--panel); box-shadow:var(--shadow-card); }
-.transfer-route-stop { display:grid; min-width:0; gap:5px; }
-.transfer-route-stop>span { color:var(--muted); font-size:.63rem; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
-.transfer-route-stop>strong { overflow-wrap:anywhere; color:var(--ink); font:700 1rem 'DM Sans',sans-serif; }
-.transfer-route-arrow { display:grid; width:32px; height:32px; place-items:center; border-radius:50%; background:var(--signal-soft); color:var(--forest-bright); font-size:1.1rem; font-weight:800; }
+.results-empty { min-height: 200px; display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--muted); text-align: center; }
 
-/* ---- Overview stats ---------------------------------------------------- */
-.transfer-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
-.transfer-summary>div { padding:14px 16px; border:1px solid var(--line); border-radius:13px; background:var(--panel); display:grid; gap:4px; box-shadow:var(--shadow-card); }
-.transfer-summary span { color:var(--muted); font-size:.63rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }
-.transfer-summary strong { font:700 .92rem 'DM Sans'; color:var(--ink); overflow-wrap:anywhere; }
-.transfer-summary small { color:var(--muted); font-size:.75rem; }
-.transfer-summary .route { color:var(--forest-bright); }
+/* ---- Sections ------------------------------------------------------------ */
+.tr-section { display: grid; gap: 10px; margin-bottom: 17px; }
+.tr-section.panel { padding: 17px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
+.tr-section-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tr-section-title h2,
+.tr-timeline h2,
+.tr-actions h2 { margin: 0; color: var(--ink); font: 700 .98rem 'DM Sans', sans-serif; letter-spacing: -.02em; }
+.tr-section-title span { color: var(--muted); font-size: .72rem; }
+.tr-hint { margin: -4px 0 3px; color: var(--muted); font-size: .72rem; line-height: 1.6; }
 
-/* ---- Status notice (prototype .notice) --------------------------------- */
-.restock-warehouse-step,
-.tr-notice { display:grid; gap:4px; margin:0 0 18px; padding:14px 16px; border:1px solid var(--cyan-line); border-left:3px solid var(--cyan); border-radius:10px; background:var(--cyan-soft); color:var(--text-2); }
-.restock-warehouse-step strong,
-.tr-notice strong { font:700 .9rem 'DM Sans'; color:var(--ink); }
-.restock-warehouse-step span,
-.tr-notice span { color:var(--muted); font-size:.82rem; line-height:1.55; }
-.tr-notice-icon { color:var(--forest-bright); font-size:1.35rem; line-height:1; }
-.tr-notice-row { display:flex; gap:11px; align-items:flex-start; }
-.tr-notice-row>div { display:grid; gap:4px; }
+/* ---- Route --------------------------------------------------------------- */
+.transfer-route { display: grid; grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); align-items: center; gap: 7px; margin-bottom: 17px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
+.transfer-route-stop { display: grid; gap: 5px; min-width: 0; }
+.transfer-route-stop > span { color: var(--muted); font-size: .59rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.transfer-route-stop > strong { color: var(--ink); font: 700 .98rem 'DM Sans', sans-serif; overflow-wrap: anywhere; }
+.transfer-route-stop > small { color: var(--muted); font-size: .66rem; line-height: 1.4; overflow-wrap: anywhere; }
+.transfer-route-arrow { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: var(--signal-soft); color: var(--forest-bright); font-size: 1.05rem; font-weight: 800; }
 
-/* ---- Review note ------------------------------------------------------- */
-.note-box { margin:0 0 18px; padding:12px 14px; border-left:3px solid var(--cyan); border-radius:0 10px 10px 0; background:var(--cyan-soft); color:var(--text-2); font-size:.86rem; }
-.note-box span { display:block; margin-bottom:3px; color:var(--forest-bright); font-size:.63rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; }
+/* ---- In-transit notice --------------------------------------------------- */
+.tr-notice { display: flex; gap: 11px; margin-bottom: 17px; padding: 14px; border: 1px solid #c1e0d2; border-left: 3px solid #398a6d; border-radius: 10px; background: #e7f2ed; color: #617469; }
+.tr-notice-row { display: flex; gap: 11px; align-items: flex-start; width: 100%; }
+.tr-notice-row > div { display: grid; gap: 4px; min-width: 0; }
+.tr-notice-icon { color: #338268; font-size: 1.45rem; line-height: 1; }
+.tr-notice strong { color: var(--ink); font: 700 .78rem 'DM Sans', sans-serif; }
+.tr-notice p { margin: 0; color: #617469; font-size: .72rem; line-height: 1.6; }
 
-/* ---- Line items (prototype .item cards) -------------------------------- */
-.line-item-cards { display:grid; gap:12px; padding:16px; }
-.line-item { padding:14px; border:1px solid var(--line); border-radius:13px; background:var(--panel); box-shadow:var(--shadow-card); display:grid; gap:13px; }
-.line-item-top { display:flex; align-items:flex-start; gap:11px; }
-.line-item-num { display:grid; place-items:center; flex:none; width:28px; height:28px; border-radius:8px; background:var(--signal-soft); color:var(--forest); font-size:.7rem; font-weight:700; }
-.line-item-name { display:grid; gap:6px; min-width:0; justify-items:start; }
-.line-item-name h3 { margin:0; color:var(--ink); font:700 .84rem/1.45 'DM Sans',sans-serif; overflow-wrap:anywhere; }
-.line-quantities { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
-.line-quantities>div { display:grid; gap:5px; }
-.line-quantities small { color:var(--muted); font-size:.63rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
-.line-quantities strong { color:var(--ink); font:700 .95rem 'DM Sans'; }
-.line-item-foot { display:flex; justify-content:space-between; gap:12px; padding-top:2px; color:var(--muted); font-size:.72rem; }
-.line-item-foot b { color:var(--ink); }
+.restock-warehouse-step { display: grid; gap: 4px; margin-bottom: 17px; padding: 14px 16px; border: 1px solid var(--cyan-line); border-left: 3px solid var(--cyan); border-radius: 10px; background: var(--cyan-soft); }
+.restock-warehouse-step strong { color: var(--ink); font: 700 .78rem 'DM Sans'; }
+.restock-warehouse-step span { color: var(--muted); font-size: .72rem; line-height: 1.55; }
 
-/* ---- Chain of custody (prototype .timeline) ---------------------------- */
-.custody-panel { margin-bottom:18px; padding:17px 16px; border:1px solid var(--line); border-radius:16px; background:var(--panel); box-shadow:var(--shadow-card); }
-.custody-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
-.custody-title strong { font:700 1rem 'DM Sans'; color:var(--ink); }
-.custody-title .search-action { min-width:auto; padding:0 16px; height:38px; border:1px solid var(--line-strong); background:var(--field); color:var(--forest); }
-.custody-list { margin:0; padding:0; list-style:none; display:grid; gap:15px; }
-.custody-list li { position:relative; display:grid; grid-template-columns:12px minmax(0,1fr); gap:12px; align-items:start; }
-/* Connector between successive events. */
-.custody-list li:not(:last-child)::before { content:''; position:absolute; left:5px; top:17px; bottom:-15px; width:2px; background:var(--signal-line); }
-.custody-dot { grid-row:1; width:12px; height:12px; margin-top:4px; border-radius:50%; background:var(--field); border:2px solid var(--signal-line); }
-.custody-list li:last-child .custody-dot { background:var(--forest-bright); border-color:var(--forest-bright); }
-.custody-body { display:grid; gap:4px; min-width:0; }
-.custody-kind { color:var(--ink); font-weight:700; font-size:.86rem; }
-.custody-date { color:var(--muted); font-size:.75rem; }
-.custody-note { color:var(--muted); font-size:.82rem; overflow-wrap:anywhere; }
+/* ---- Review note --------------------------------------------------------- */
+.note-box { margin-bottom: 17px; padding: 12px 14px; border-left: 3px solid var(--cyan); border-radius: 0 10px 10px 0; background: var(--cyan-soft); color: var(--text-2); font-size: .82rem; }
+.note-box span { display: block; margin-bottom: 3px; color: var(--forest-bright); font-size: .59rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
 
-/* ---- Action panels ----------------------------------------------------- */
-.action-panel { margin:0 0 18px; padding:18px; border:1px solid var(--line); border-radius:16px; background:var(--panel); box-shadow:var(--shadow-card); }
-.action-title { display:grid; gap:3px; margin-bottom:13px; }
-.action-title strong { font:700 1rem 'DM Sans'; color:var(--ink); }
-.action-title span { color:var(--muted); font-size:.82rem; line-height:1.55; }
-.reason-input { height:46px; width:100%; max-width:460px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:var(--field); color:var(--ink); font-weight:600; }
-.open-count-actions { margin-top:14px; display:flex; justify-content:flex-end; gap:10px; }
-.search-action { min-width:130px; height:42px; border:0; border-radius:9px; background:var(--signal); color:var(--signal-ink); font-weight:700; }
-.search-action:disabled { opacity:.5; cursor:not-allowed; }
-.search-action.danger { background:var(--danger); color:#fff; }
+/* ---- Overview stats ------------------------------------------------------ */
+.transfer-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.transfer-summary > div { display: grid; gap: 7px; min-height: 73px; padding: 14px 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
+.transfer-summary span { color: var(--muted); font-size: .59rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.transfer-summary strong { color: var(--ink); font: 700 .78rem/1.5 'DM Sans'; overflow-wrap: anywhere; }
 
-/* ---- Pick / receive rows ----------------------------------------------- */
-.pick-rows { display:grid; gap:8px; }
-.pick-row { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface-2); }
-.pick-row .pick-name { flex:1 1 auto; font-weight:700; color:var(--ink); }
-.pick-row .pick-requested { color:var(--muted); font-size:.8rem; }
-.pick-row input { width:110px; height:40px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:var(--field); color:var(--ink); font-weight:700; }
-.receive-rows { display:grid; gap:8px; }
-.receive-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface-2); }
-.receive-row .receive-name { flex:1 1 auto; font-weight:700; color:var(--ink); }
-.receive-row .receive-batch { color:var(--muted); font-size:.78rem; }
-.receive-row .receive-awaiting { color:var(--muted); font-size:.78rem; white-space:nowrap; }
-.receive-row label { display:grid; gap:3px; color:var(--muted); font-size:.63rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
-.receive-row input { width:104px; height:40px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:var(--field); color:var(--ink); font-weight:700; }
+/* ---- Line items ---------------------------------------------------------- */
+.line-item-cards { display: grid; gap: 10px; }
+.line-item { display: grid; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
+.line-item-top { display: flex; align-items: flex-start; gap: 10px; }
+.line-item-num { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: #eff4ef; color: #446650; font-size: .7rem; font-weight: 700; }
+.line-item-name { display: grid; gap: 9px; justify-items: start; min-width: 0; }
+.line-item-name h3 { margin: 0; color: var(--ink); font: 700 .82rem/1.45 'DM Sans', sans-serif; overflow-wrap: anywhere; }
+/* The prototype trays the three movement counts on a soft tile. */
+.line-quantities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 12px 9px; border-radius: 9px; background: #f5f7f4; text-align: center; }
+.line-quantities > div { display: grid; gap: 5px; }
+.line-quantities small { color: var(--muted); font-size: .59rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.line-quantities strong { color: #163e2c; font: 700 1.06rem 'DM Sans'; }
+.line-item-foot { display: flex; justify-content: space-between; gap: 12px; color: #728176; font-size: .72rem; }
+.line-item-foot b { color: #293b2f; margin-left: 6px; }
 
-/* ---- Owner dispatch dialog --------------------------------------------- */
-.owner-dispatch-backdrop { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; padding:20px; background:rgba(12,29,21,.58); backdrop-filter:blur(2px); }
-.owner-dispatch-dialog { width:min(100%,540px); max-height:calc(100dvh - 40px); overflow:auto; padding:24px; border:1px solid var(--line); border-top:4px solid var(--forest-bright); border-radius:16px; background:var(--panel); color:var(--ink); box-shadow:0 24px 64px rgba(21,60,43,.22); }
-.owner-dispatch-dialog>.eyebrow { color:var(--forest-bright); }
-.owner-dispatch-dialog h2 { margin:7px 0 10px; color:var(--ink); font:800 1.25rem/1.2 'Manrope',sans-serif; letter-spacing:-.02em; }
-.owner-dispatch-dialog p { margin:0; color:var(--muted); font-size:.9rem; line-height:1.6; }
-.owner-dispatch-actions { flex-wrap:wrap; gap:10px; margin-top:20px; }
-.owner-dispatch-actions .search-action { min-width:auto; padding:0 16px; }
-.owner-dispatch-actions .owner-dispatch-cancel { border:1px solid var(--line-strong); background:var(--field); color:var(--forest); }
+/* ---- Activity timeline --------------------------------------------------- */
+.tr-events { display: grid; gap: 15px; }
+.tr-event { position: relative; display: flex; gap: 11px; margin-left: 4px; }
+.tr-event:not(:last-child)::before { content: ''; position: absolute; left: 5px; top: 17px; bottom: -18px; width: 2px; background: #d5e6d9; }
+.tr-event i { flex: none; width: 12px; height: 12px; margin-top: 2px; border: 2px solid #e7f4eb; border-radius: 50%; background: #2a8660; z-index: 1; }
+.tr-event.current i { background: #4279a1; border-color: #d8eaf9; }
+.tr-event.future i { background: #d8ded8; border-color: #fff; }
+.tr-event > div { display: grid; gap: 5px; min-width: 0; padding-bottom: 5px; }
+.tr-event strong { color: var(--ink); font-size: .78rem; }
+.tr-event span { color: #75857b; font-size: .66rem; overflow-wrap: anywhere; }
 
-/* ---- Restock approval rows --------------------------------------------- */
-.restock-approval-lines { display:grid; gap:8px; margin:0 0 12px; }
-.restock-approval-line { display:flex; align-items:center; gap:16px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--surface-2); }
-.restock-approval-line > div { display:grid; gap:3px; flex:1; min-width:0; }
-.restock-approval-line strong { color:var(--ink); font-size:.88rem; }
-.restock-approval-line small { color:var(--muted); font-size:.76rem; }
-.restock-approval-line label { display:grid; gap:5px; color:var(--muted); font-size:.65rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
-.restock-approval-line input { box-sizing:border-box; width:125px; height:40px; padding:0 10px; border:1px solid var(--line-strong); border-radius:8px; background:var(--field); color:var(--ink); font:700 .86rem 'DM Sans',sans-serif; }
-.restock-approval-hint { margin:0 0 12px; color:var(--muted); font-size:.78rem; }
+/* ---- Action panels ------------------------------------------------------- */
+.action-panel { margin-bottom: 17px; padding: 17px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
+.action-title { display: grid; gap: 3px; margin-bottom: 13px; }
+.action-title strong { color: var(--ink); font: 700 .95rem 'DM Sans'; }
+.action-title span { color: var(--muted); font-size: .75rem; line-height: 1.55; }
+.reason-input { height: 46px; width: 100%; max-width: 460px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--field); color: var(--ink); font-weight: 600; }
+.open-count-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+.action-panel .open-count-actions .search-action { min-width: 130px; min-height: 44px; border: 0; border-radius: 9px; font-size: .78rem; font-weight: 700; }
 
-/* ---- PC adaptation ------------------------------------------------------
-   The prototype is a single-column phone layout. On a desktop viewport we use
-   the available width: item cards pair up, and the overview stats stay 4-up. */
-@media(min-width:1000px){
-    .line-item-cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .transfer-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
+/* ---- Transfer actions (print + cancel dispatch) -------------------------- */
+.tr-print { display: grid; }
+.tr-actions summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; color: #753e39; font-size: .78rem; font-weight: 600; }
+.tr-actions summary::-webkit-details-marker { display: none; }
+.tr-cancel { border-top: 1px solid #e7ece7; padding-top: 14px; }
+.tr-cancel > p { margin: 8px 0 0; color: var(--muted); font-size: .72rem; line-height: 1.6; }
+.tr-cancel label { display: block; margin: 12px 0 8px; color: var(--ink); font-size: .72rem; font-weight: 700; }
+.tr-cancel textarea { display: block; width: 100%; resize: vertical; padding: 12px; border: 1px solid #cfd8cf; border-radius: 9px; background: var(--field); color: var(--ink); font-size: .82rem; }
+.tr-cancel-submit { width: 100%; min-height: 44px; margin-top: 10px; padding: 10px 14px; border: 0; border-radius: 9px; background: #b34e4e; color: #fff; font-size: .78rem; font-weight: 700; }
+.tr-cancel-submit:disabled { background: #f8eeee; color: #c9a4a4; cursor: not-allowed; }
+
+/* ---- Pick / receive / approval rows -------------------------------------- */
+.pick-rows { display: grid; gap: 8px; }
+.pick-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.pick-row .pick-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-weight: 700; }
+.pick-row .pick-requested { color: var(--muted); font-size: .78rem; }
+.pick-row input { width: 110px; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--field); color: var(--ink); font-weight: 700; }
+/* The row a barcode scan just counted. */
+.pick-row.scan-hit,
+.receive-row.scan-hit { border-color: var(--forest-bright); background: var(--signal-soft); }
+.receive-rows { display: grid; gap: 8px; }
+.receive-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.receive-row .receive-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-weight: 700; }
+.receive-row .receive-batch,
+.receive-row .receive-awaiting { color: var(--muted); font-size: .76rem; white-space: nowrap; }
+.receive-row label { display: grid; gap: 3px; color: var(--muted); font-size: .59rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.receive-row input { width: 104px; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--field); color: var(--ink); font-weight: 700; }
+
+/* ---- Restock approval rows ----------------------------------------------- */
+.restock-approval-lines { display: grid; gap: 8px; margin-bottom: 12px; }
+.restock-approval-line { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.restock-approval-line > div { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.restock-approval-line strong { color: var(--ink); font-size: .85rem; }
+.restock-approval-line small { color: var(--muted); font-size: .74rem; }
+.restock-approval-line label { display: grid; gap: 5px; color: var(--muted); font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.restock-approval-line input { box-sizing: border-box; width: 125px; height: 40px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--field); color: var(--ink); font: 700 .84rem 'DM Sans', sans-serif; }
+.restock-approval-hint { margin: 0 0 12px; color: var(--muted); font-size: .76rem; }
+
+/* ---- Owner dispatch dialog ----------------------------------------------- */
+.owner-dispatch-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(12, 29, 21, .58); backdrop-filter: blur(2px); }
+.owner-dispatch-dialog { width: min(100%, 540px); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-top: 4px solid var(--forest-bright); border-radius: 16px; background: var(--panel); color: var(--ink); box-shadow: 0 24px 64px rgba(21, 60, 43, .22); }
+.owner-dispatch-dialog > .eyebrow { color: var(--forest-bright); }
+.owner-dispatch-dialog h2 { margin: 7px 0 10px; color: var(--ink); font: 800 1.25rem/1.2 'Manrope', sans-serif; letter-spacing: -.02em; }
+.owner-dispatch-dialog p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.6; }
+.owner-dispatch-actions { flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.owner-dispatch-actions .search-action { min-width: auto; padding: 0 16px; }
+.owner-dispatch-actions .owner-dispatch-cancel { border: 1px solid var(--line-strong); background: var(--field); color: var(--forest); }
+
+/* ---- Focus --------------------------------------------------------------- */
+.tr-title-row .status-chip:focus-visible,
+.tr-actions summary:focus-visible,
+.tr-cancel textarea:focus-visible,
+.tr-cancel-submit:focus-visible { outline: 3px solid #65a687; outline-offset: 2px; }
+
+/* ---- PC adaptation -------------------------------------------------------
+   The phone design stays a single column. Below 1200px the wrappers collapse
+   (display: contents) so the page flows exactly like the prototype.
+   At 1200px+ the page splits into a wide main column (route, overview, items,
+   workflow forms) and a narrow sticky side column (timeline + transfer
+   actions) so the layout fills the monitor instead of a centered strip. */
+.tr-layout,
+.tr-col-side { display: contents; }
+
+@media (min-width: 1200px) {
+    .tr-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+        gap: 0 24px;
+        align-items: start;
+    }
+    /* Container queries tune the inner grids to the column width, not the
+       viewport, so cards never squeeze when the side column steals space. */
+    .tr-col-main { min-width: 0; container-type: inline-size; }
+    .tr-col-side {
+        display: grid;
+        gap: 17px;
+        position: sticky;
+        top: 84px;
+        max-height: calc(100dvh - 104px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+    .tr-col-side .tr-section { margin-bottom: 0; }
 }
-@media(min-width:1500px){
-    .line-item-cards { grid-template-columns:repeat(3,minmax(0,1fr)); }
+
+@container (min-width: 560px) {
+    .transfer-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .line-item-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (min-width: 940px) {
+    .line-item-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-@media(max-width:620px){
-    .office-head { align-items:stretch; flex-direction:column; }
-    .pick-row { flex-wrap:wrap; }
-    .receive-row { align-items:flex-start; }
-    .restock-approval-line { align-items:stretch; flex-wrap:wrap; }
-    .restock-approval-line > div { flex-basis:100%; }
+@media (max-width: 620px) {
+    .pick-row { flex-wrap: wrap; }
+    .receive-row { align-items: flex-start; }
+    .restock-approval-line { align-items: stretch; flex-wrap: wrap; }
+    .restock-approval-line > div { flex-basis: 100%; }
+    /* One decision at a time on a phone: the panel's buttons go full width. */
+    .open-count-actions { flex-direction: column-reverse; }
+    .action-panel .open-count-actions .search-action { width: 100%; }
 }
-@media(max-width:570px){
-    .transfer-route { grid-template-columns:1fr; padding:14px; }
-    .transfer-route-arrow { transform:rotate(90deg); }
+@media (max-width: 570px) {
+    .transfer-route { grid-template-columns: 1fr; padding: 14px; }
+    .transfer-route-arrow { transform: rotate(90deg); }
 }
-@media(max-width:520px){
-    .owner-dispatch-backdrop { padding:14px; }
-    .owner-dispatch-dialog { max-height:calc(100dvh - 28px); padding:20px 18px; }
-    .owner-dispatch-actions { flex-direction:column-reverse; }
-    .owner-dispatch-actions .search-action { width:100%; }
+@media (max-width: 520px) {
+    .tr-title-row .office-title { font-size: 1.35rem; }
+    .owner-dispatch-backdrop { padding: 14px; }
+    .owner-dispatch-dialog { max-height: calc(100dvh - 28px); padding: 20px 18px; }
+    .owner-dispatch-actions { flex-direction: column-reverse; }
+    .owner-dispatch-actions .search-action { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
 }

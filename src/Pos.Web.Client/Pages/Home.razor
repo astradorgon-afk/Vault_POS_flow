@@ -154,22 +154,62 @@ else
         }
         @if (section == "purchase" && CanPurchase)
         {
-            <header class="qr-head po-head"><div><span class="eyebrow">Purchasing</span><h1>Purchase orders</h1><p>Order from suppliers and check deliveries against downloaded orders. Drafts await server confirmation.</p></div><button class="po-btn primary" @onclick="() => showPurchaseForm = !showPurchaseForm">@(showPurchaseForm ? "Close form" : "+ New purchase order")</button></header>
-            <nav class="po-stages" aria-label="Filter by stage"><button type="button" class="@(purchaseStage == "all" ? "on" : null)" aria-pressed="@(purchaseStage == "all")" @onclick='() => purchaseStage = "all"'>All <span>@orders.Count</span></button><button type="button" class="@(purchaseStage == "Ordered" ? "on" : null)" aria-pressed="@(purchaseStage == "Ordered")" @onclick='() => purchaseStage = "Ordered"'>Ordered <span>@orders.Count(order => order.Status == "Ordered")</span></button><button type="button" class="@(purchaseStage == "PartiallyReceived" ? "on" : null)" aria-pressed="@(purchaseStage == "PartiallyReceived")" @onclick='() => purchaseStage = "PartiallyReceived"'>Partially received <span>@orders.Count(order => order.Status == "PartiallyReceived")</span></button><span class="po-stage-unavailable" aria-disabled="true">Approvals <small>Needs Wi-Fi</small></span></nav>
-            <section class="qr-card order-list"><h2>Downloaded orders</h2><p>Open orders from the last download. Status may have changed since then.</p>
-                @if (FilteredOrders.Count == 0) { <p>No downloaded orders at this stage.</p> }
-                else
-                {
-                    <div class="qr-table-wrap"><table class="qr-table po-table"><thead><tr><th>Order</th><th>Status at download</th><th>Lines</th></tr></thead><tbody>
-                        @foreach (OfflineOrder order in FilteredOrders) { <tr><td><strong>@(order.Number ?? order.Id.ToString("D"))</strong></td><td><span class="ov-pill tone-info">@order.Status</span></td><td>@order.Lines.Count</td></tr> }
-                    </tbody></table></div>
-                }
-                @if (operations.Any(o => o.EventType == "PwaPurchaseDraft"))
-                {
-                    <h3>Drafts from this device</h3>
-                    @foreach (OfflineOperation operation in operations.Where(o => o.EventType == "PwaPurchaseDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
-                }
-            </section>
+            <div class="po-page">
+                <header class="po-heading">
+                    <div>
+                        <span class="eyebrow">▣ &nbsp; Purchasing</span>
+                        <h1>Purchase orders</h1>
+                        <p>Order from suppliers and check deliveries against downloaded orders. Drafts await server confirmation.</p>
+                    </div>
+                    <button type="button" class="po-primary" @onclick="() => showPurchaseForm = !showPurchaseForm">@(showPurchaseForm ? "Close form" : "＋ &nbsp; New purchase order")</button>
+                </header>
+                <section>
+                    <div class="po-section-head">
+                        <h2>Downloaded orders</h2>
+                        <span>@FilteredOrders.Count of @orders.Count</span>
+                    </div>
+                    <nav class="po-chips" aria-label="Filter by stage">
+                        <button type="button" class="@(purchaseStage == "all" ? "on" : null)" aria-pressed="@(purchaseStage == "all")" @onclick='() => purchaseStage = "all"'><span>All</span><span class="chip-count">@orders.Count</span></button>
+                        <button type="button" class="@(purchaseStage == "Ordered" ? "on" : null)" aria-pressed="@(purchaseStage == "Ordered")" @onclick='() => purchaseStage = "Ordered"'><span>Ordered</span><span class="chip-count">@orders.Count(order => order.Status == "Ordered")</span></button>
+                        <button type="button" class="@(purchaseStage == "PartiallyReceived" ? "on" : null)" aria-pressed="@(purchaseStage == "PartiallyReceived")" @onclick='() => purchaseStage = "PartiallyReceived"'><span>Partially received</span><span class="chip-count">@orders.Count(order => order.Status == "PartiallyReceived")</span></button>
+                        <span class="po-stage-unavailable" aria-disabled="true">Approvals <small>Needs Wi-Fi</small></span>
+                    </nav>
+                    @if (FilteredOrders.Count == 0)
+                    {
+                        <div class="po-empty">
+                            <strong>No downloaded orders here</strong>
+                            <p>@(orders.Count == 0 ? "Download your orders, then return here to work offline." : "Try another stage for the orders saved on this device.")</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="po-cards">
+                            @foreach (OfflineOrder order in FilteredOrders)
+                            {
+                                <div class="po-card" @key="order.Id">
+                                    <div class="po-card-top">
+                                        <div>
+                                            <span class="small-label">Downloaded order</span>
+                                            <strong>@(order.Number ?? order.Id.ToString("D"))</strong>
+                                        </div>
+                                        <span class="status-badge">@StageLabel(order.Status)</span>
+                                    </div>
+                                    <span class="supplier-name">@(device?.LocationName ?? "Assigned location")</span>
+                                    <span class="destination">@order.Lines.Count line@(order.Lines.Count == 1 ? "" : "s") ready to count</span>
+                                    <hr />
+                                    <div class="po-card-foot">
+                                        <span class="date">Status at the last download</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (operations.Any(o => o.EventType == "PwaPurchaseDraft"))
+                    {
+                        <div class="po-section-head"><h2>Drafts from this device</h2><span>@operations.Count(o => o.EventType == "PwaPurchaseDraft") total</span></div>
+                        @foreach (OfflineOperation operation in operations.Where(o => o.EventType == "PwaPurchaseDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
+                    }
+                </section>
             @if (showPurchaseForm)
             {
             <section class="qr-card"><h2>New purchase order</h2><p>Your draft is saved on this device until the server confirms it.</p>
@@ -197,6 +237,7 @@ else
                 <div class="actions"><button @onclick="SavePurchaseAsync">Save form on device</button><button class="primary" disabled="@busy" @onclick="QueuePurchaseAsync">Queue purchase draft</button></div>
             </section>
             }
+            </div>
         }
         else if (section == "receiving" && CanReceive)
         {
@@ -229,43 +270,94 @@ else
         }
         else if (section == "restock" && CanRestock)
         {
-            <header class="qr-head po-head"><div><span class="eyebrow">Inventory · store supplies</span><h1>Restock requests</h1><p>Ask the main warehouse for the products your store needs. The draft is held on this device and sent for approval when Wi-Fi returns.</p></div></header>
-            <section class="qr-card"><h2>New request</h2><p>Deliver to <strong>@(device?.LocationName ?? "this store")</strong>. Your request is saved on this device until the server confirms it.</p>
-                @if (RestockLowStock.Count > 0)
-                {
-                    <div class="restock-low">
-                        <header>
-                            <div><strong>Low stock on this device</strong><small>@RestockLowStock.Count product@(RestockLowStock.Count == 1 ? "" : "s") at or below the reorder point</small></div>
-                            <label class="restock-low-all"><input type="checkbox" checked="@(restockLowSelected.Count == RestockLowStock.Count)" @onchange="ToggleAllRestockLow" /> Select all</label>
-                        </header>
-                        <div class="restock-low-list">
-                            @foreach (OfflineStockRow row in RestockLowStock)
-                            {
-                                <div class="restock-low-row" @key="row.ProductId">
-                                    <input type="checkbox" aria-label="Request @row.Name" checked="@restockLowSelected.Contains(row.ProductId)" @onchange="() => ToggleRestockLow(row.ProductId)" />
-                                    <div class="restock-low-product"><strong>@row.Name</strong><small>@row.Sku</small></div>
-                                    <span class="restock-low-status @(StockBand(row) == "Out" ? "is-out" : "is-low")">@(StockBand(row) == "Out" ? "Out of stock" : "Low")</span>
-                                    <span class="restock-low-avail"><strong>@row.Available</strong><small>available</small></span>
-                                    <span class="restock-low-suggest"><strong>@SuggestRestockQuantity(row)</strong><small>suggested</small></span>
-                                </div>
-                            }
-                        </div>
-                        <footer><button type="button" class="primary" disabled="@(restockLowSelected.Count == 0)" @onclick="AddSelectedRestockLow">@(restockLowSelected.Count == 0 ? "Select products to add" : $"Add {restockLowSelected.Count} to request")</button></footer>
+            <div class="restock-page">
+                <header class="restock-head">
+                    <div>
+                        <span class="eyebrow">Inventory · store supplies</span>
+                        <h1>Restock requests</h1>
+                        <p>Ask the main warehouse for the products your store needs. The draft is held on this device and sent for approval when Wi-Fi returns.</p>
                     </div>
-                }
-                else { <p class="restock-low-none">Nothing on this device is below its reorder point.</p> }
-                <label>Search catalog<input @bind="productSearch" @bind:event="oninput" /></label>
-                @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button disabled="@(restock.Lines.Any(line => line.ProductId == product.Id))" @onclick="() => AddRestockLine(product)">Add</button></li> }</ul> }
-                <div class="scanner-row"><BarcodeCamera OnScan="OnRestockScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnRestockScanAsync(manualCode)">Find on device</button></div>
-                @if (scanMessage is not null) { <p role="status">@scanMessage</p> }
-                <h3>Request lines</h3>@if (restock.Lines.Count == 0) { <p>Search or scan to begin.</p> }
-                @foreach (RestockWorkingLine line in restock.Lines) { <div class="line-row" @key="line"><strong>@line.Name</strong><label>Quantity<input type="number" min="0.001" step="0.001" @bind="line.Quantity" /></label><button @onclick="() => RemoveRestockLine(line)">Remove</button></div> }
-                <div class="actions"><button @onclick="SaveRestockAsync">Save form on device</button><button class="primary" disabled="@busy" @onclick="QueueRestockAsync">Queue restock draft</button></div>
-            </section>
-            <section class="qr-card"><h2>Drafts from this device</h2><p>Sent for approval the next time this device has Wi-Fi.</p>
-                @foreach (OfflineOperation operation in operations.Where(item => item.EventType == "PwaRestockDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
-                @if (!operations.Any(item => item.EventType == "PwaRestockDraft")) { <p>No restock drafts on this device.</p> }
-            </section>
+                </header>
+                <section class="restock-card">
+                    <header>
+                        <div>
+                            <span class="eyebrow">New request</span>
+                            <h2>Deliver to @(device?.LocationName ?? "this store")</h2>
+                        </div>
+                        <p>Your request is saved on this device until the server confirms it.</p>
+                    </header>
+                    <div class="restock-form">
+                        @if (RestockLowStock.Count > 0)
+                        {
+                            <div class="restock-low">
+                                <header>
+                                    <div><strong>Low stock on this device</strong><small>@RestockLowStock.Count product@(RestockLowStock.Count == 1 ? "" : "s") at or below the reorder point</small></div>
+                                    <label class="restock-low-all"><input type="checkbox" checked="@(restockLowSelected.Count == RestockLowStock.Count)" @onchange="ToggleAllRestockLow" /> Select all</label>
+                                </header>
+                                <div class="restock-low-list">
+                                    @foreach (OfflineStockRow row in RestockLowStock)
+                                    {
+                                        <div class="restock-low-row" @key="row.ProductId">
+                                            <input type="checkbox" aria-label="Request @row.Name" checked="@restockLowSelected.Contains(row.ProductId)" @onchange="() => ToggleRestockLow(row.ProductId)" />
+                                            <div class="restock-low-product"><strong>@row.Name</strong><small>@row.Sku</small></div>
+                                            <span class="restock-low-status @(StockBand(row) == "Out" ? "is-out" : "is-low")">@(StockBand(row) == "Out" ? "Out of stock" : "Low")</span>
+                                            <span class="restock-low-avail"><strong>@row.Available</strong><small>available</small></span>
+                                            <span class="restock-low-suggest"><strong>@SuggestRestockQuantity(row)</strong><small>suggested</small></span>
+                                        </div>
+                                    }
+                                </div>
+                                <footer><button type="button" class="restock-primary" disabled="@(restockLowSelected.Count == 0)" @onclick="AddSelectedRestockLow">@(restockLowSelected.Count == 0 ? "Select products to add" : $"Add {restockLowSelected.Count} to request")</button></footer>
+                            </div>
+                        }
+                        else { <p class="restock-low-none">Nothing on this device is below its reorder point.</p> }
+                        <div class="restock-product-search">
+                            <label class="restock-field">Search catalog<input @bind="productSearch" @bind:event="oninput" /></label>
+                            @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button disabled="@(restock.Lines.Any(line => line.ProductId == product.Id))" @onclick="() => AddRestockLine(product)">Add</button></li> }</ul> }
+                        </div>
+                        <div class="scanner-row"><BarcodeCamera OnScan="OnRestockScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnRestockScanAsync(manualCode)">Find on device</button></div>
+                        @if (scanMessage is not null) { <p role="status">@scanMessage</p> }
+                    </div>
+                    <div class="restock-lines">
+                        <h3>Request lines</h3>
+                        @if (restock.Lines.Count == 0) { <p>Search or scan to begin.</p> }
+                        @foreach (RestockWorkingLine line in restock.Lines)
+                        {
+                            <div class="restock-line" @key="line">
+                                <div><strong>@line.Name</strong><small>Quantity to request</small></div>
+                                <label>Quantity<input type="number" min="0.001" step="0.001" @bind="line.Quantity" /></label>
+                                <button @onclick="() => RemoveRestockLine(line)">Remove</button>
+                            </div>
+                        }
+                    </div>
+                    <footer>
+                        <span>@restock.Lines.Count line@(restock.Lines.Count == 1 ? "" : "s") in this request</span>
+                        <div class="restock-actions">
+                            <button type="button" class="restock-refresh" @onclick="SaveRestockAsync">Save form on device</button>
+                            <button type="button" class="restock-primary" disabled="@busy" @onclick="QueueRestockAsync">Queue restock draft</button>
+                        </div>
+                    </footer>
+                </section>
+                <section class="restock-card">
+                    <header>
+                        <div>
+                            <span class="eyebrow">From this device</span>
+                            <h2>Drafts</h2>
+                        </div>
+                        <p>Sent for approval the next time this device has Wi-Fi.</p>
+                    </header>
+                    @if (operations.Any(item => item.EventType == "PwaRestockDraft"))
+                    {
+                        @foreach (OfflineOperation operation in operations.Where(item => item.EventType == "PwaRestockDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
+                    }
+                    else
+                    {
+                        <div class="restock-empty">
+                            <strong>No restock drafts on this device</strong>
+                            <p>Queued requests appear here until the server confirms them.</p>
+                        </div>
+                    }
+                </section>
+            </div>
         }
         else if (section == "stores" && CanViewStores)
         {
@@ -436,6 +528,12 @@ else
     private static string StockBand(OfflineStockRow row) => row.Available <= 0 ? "Out" :
         row.Status.Contains("Low", StringComparison.OrdinalIgnoreCase) ? "Low" :
         row.Status.Contains("Over", StringComparison.OrdinalIgnoreCase) ? "Over" : "Healthy";
+    private static string StageLabel(string status) => status switch
+    {
+        "PartiallyReceived" => "Partially received",
+        "Ordered" => "Ordered",
+        _ => status,
+    };
     private int StockCount(string band) => StockRows.Count(row => StockBand(row) == band);
     private void ToggleStockFilter(string band) => stockFilter = stockFilter == band ? string.Empty : band;
 
