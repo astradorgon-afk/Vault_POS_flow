@@ -81,31 +81,38 @@ public static class AuditEndpoints
         string term = search?.Trim() ?? string.Empty;
         if (term.Length > 0)
         {
+            // ILike, not Like: PostgreSQL LIKE is case-sensitive, so "cheddar" would miss "Cheddar Cheese".
             string pattern = $"%{term.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal)}%";
+            // The UI shows actions as "Transfer Approved" but stores "transfer.approved"; also match the dotted form.
+            string dotted = string.Join('.', term.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+            string dottedPattern = $"%{dotted.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal)}%";
             query = query.Where(entry =>
-                EF.Functions.Like(entry.Action, pattern, "\\") ||
-                EF.Functions.Like(entry.EntityType, pattern, "\\") ||
-                (entry.Reason != null && EF.Functions.Like(entry.Reason, pattern, "\\")) ||
-                (entry.UserRoleSnapshot != null && EF.Functions.Like(entry.UserRoleSnapshot, pattern, "\\")) ||
-                (entry.PreviousValueJson != null && EF.Functions.Like(entry.PreviousValueJson, pattern, "\\")) ||
-                (entry.NewValueJson != null && EF.Functions.Like(entry.NewValueJson, pattern, "\\")));
+                EF.Functions.ILike(entry.Action, pattern, "\\") ||
+                (dotted != term && EF.Functions.ILike(entry.Action, dottedPattern, "\\")) ||
+                EF.Functions.ILike(entry.EntityType, pattern, "\\") ||
+                (entry.Reason != null && EF.Functions.ILike(entry.Reason, pattern, "\\")) ||
+                (entry.UserRoleSnapshot != null && EF.Functions.ILike(entry.UserRoleSnapshot, pattern, "\\")) ||
+                (entry.PreviousValueJson != null && EF.Functions.ILike(entry.PreviousValueJson, pattern, "\\")) ||
+                (entry.NewValueJson != null && EF.Functions.ILike(entry.NewValueJson, pattern, "\\")));
 
             TransferCustodyEventKind[] matchingKinds = Enum.GetValues<TransferCustodyEventKind>()
-                .Where(kind => TransferAction(kind).Contains(term, StringComparison.OrdinalIgnoreCase))
+                .Where(kind =>
+                    TransferAction(kind).Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                    (dotted != term && TransferAction(kind).Contains(dotted, StringComparison.OrdinalIgnoreCase)))
                 .ToArray();
             IQueryable<TransferOrderId> productMatches = context.TransferLines.AsNoTracking()
                 .Where(line => context.Products.AsNoTracking().Any(product =>
-                    product.Id == line.ProductId && EF.Functions.Like(product.Name, pattern, "\\")))
+                    product.Id == line.ProductId && EF.Functions.ILike(product.Name, pattern, "\\")))
                 .Select(line => line.TransferOrderId);
             transferEvents = transferEvents.Where(entry =>
-                (entry.Note != null && EF.Functions.Like(entry.Note, pattern, "\\")) ||
+                (entry.Note != null && EF.Functions.ILike(entry.Note, pattern, "\\")) ||
                 matchingKinds.Contains(entry.Kind) ||
                 productMatches.Contains(entry.TransferOrderId) ||
                 context.Transfers.AsNoTracking().Any(transfer =>
                     transfer.Id == entry.TransferOrderId &&
-                    (EF.Functions.Like(transfer.Number, pattern, "\\") ||
-                     (transfer.ShipmentNumber != null && EF.Functions.Like(transfer.ShipmentNumber, pattern, "\\")) ||
-                     (transfer.ReceiptNumber != null && EF.Functions.Like(transfer.ReceiptNumber, pattern, "\\")))));
+                    (EF.Functions.ILike(transfer.Number, pattern, "\\") ||
+                     (transfer.ShipmentNumber != null && EF.Functions.ILike(transfer.ShipmentNumber, pattern, "\\")) ||
+                     (transfer.ReceiptNumber != null && EF.Functions.ILike(transfer.ReceiptNumber, pattern, "\\")))));
         }
 
         int total = await query.CountAsync(cancellationToken).ConfigureAwait(false);

@@ -3,7 +3,8 @@ namespace Pos.Web.Services;
 /// <summary>
 /// Carries a one-time "offline access is ready" notice from the sign-in page
 /// into the workspace so the message appears after sign-in instead of
-/// interrupting the login form. Lives for the lifetime of the Blazor circuit.
+/// interrupting the login form. The notice is only shown when the app is not
+/// already installed on the device. Lives for the lifetime of the Blazor circuit.
 /// </summary>
 public sealed class OfflineReadinessNotice
 {
@@ -21,7 +22,7 @@ public sealed class OfflineReadinessNotice
     public void Announce(bool installed)
     {
         IsInstalled = installed;
-        IsVisible = true;
+        IsVisible = !installed;
         Changed?.Invoke();
     }
 

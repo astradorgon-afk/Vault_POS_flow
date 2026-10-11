@@ -24,7 +24,7 @@
         </NavLink>
         @if (CanViewAudit)
         {
-            <NavLink class="nav-link" href="admin/audit" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Activity log</span></NavLink>
+            <NavLink class="nav-link" href="admin/audit" @onclick="NotifyNavigation"><AppIcon Name="clock" /> <span>Activity log</span></NavLink>
         }
     </div>
 
@@ -35,23 +35,23 @@
             @if (CanViewInventory)
             {
                 <NavLink class="nav-link" href="inventory/stock" @onclick="NotifyNavigation"><AppIcon Name="box" /> <span>Stock levels</span></NavLink>
-                <NavLink class="nav-link" href="inventory/counts" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Stock counts</span></NavLink>
+                <NavLink class="nav-link" href="inventory/counts" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock counts</span></NavLink>
             }
             @if (CanViewTransfers)
             {
-                <NavLink class="nav-link" href="transfers" @onclick="NotifyNavigation"><AppIcon Name="location" /> <span>Transfers</span></NavLink>
+                <NavLink class="nav-link" href="transfers" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Transfers</span></NavLink>
             }
             @if (CanApproveRestock)
             {
-                <NavLink class="nav-link" href="restock/approvals" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Restock approvals</span></NavLink>
+                <NavLink class="nav-link" href="restock/approvals" @onclick="NotifyNavigation"><AppIcon Name="check" /> <span>Restock approvals</span></NavLink>
             }
             @if (CanFulfillRestock)
             {
-                <NavLink class="nav-link" href="restock/fulfillment" @onclick="NotifyNavigation"><AppIcon Name="box" /> <span>Restock fulfillment</span></NavLink>
+                <NavLink class="nav-link" href="restock/fulfillment" @onclick="NotifyNavigation"><AppIcon Name="box-out" /> <span>Restock fulfillment</span></NavLink>
             }
             @if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock)
             {
-                <NavLink class="nav-link" href="restock" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Restock requests</span></NavLink>
+                <NavLink class="nav-link" href="restock" @onclick="NotifyNavigation"><AppIcon Name="box-in" /> <span>Restock requests</span></NavLink>
             }
             @if (CanReceivePurchasing)
             {
@@ -88,7 +88,7 @@
     {
         <div class="nav-group">
             <span class="nav-heading">Purchasing</span>
-            <NavLink class="nav-link" href="purchasing" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Purchase orders</span></NavLink>
+            <NavLink class="nav-link" href="purchasing" @onclick="NotifyNavigation"><AppIcon Name="list" /> <span>Purchase orders</span></NavLink>
         </div>
     }
 

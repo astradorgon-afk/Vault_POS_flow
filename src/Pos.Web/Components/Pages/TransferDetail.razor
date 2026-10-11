@@ -479,7 +479,7 @@ else
     private bool ShowSubmit => Status == "Draft" && CanRequest && (!IsStoreRestock || detail?.Transfer.CreatedByUserId == Session.Current?.User.Id);
     private bool ShowReview => Status == "Submitted" && CanApprove && (!IsStoreRestock || IsOwner);
     private bool ShowApprove => Status == "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
-    private bool ShowReject => Status == "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
+    private bool ShowReject => Status is "Submitted" or "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
     private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId)) && pickRows.Any(row => row.Quantity > 0m);
     private bool ShowReady => Status == "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowDispatch => Status == "Ready" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));

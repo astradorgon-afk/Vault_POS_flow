@@ -10,9 +10,17 @@
 <section class="audit-page">
     <header class="audit-head">
         <div><span class="eyebrow">Business oversight</span><h1>Activity log</h1><p>Review recorded activity across sales, inventory, transfers, access, and more.</p></div>
+        <button type="button" class="audit-filter-toggle" aria-expanded="@(filtersOpen ? "true" : "false")" aria-controls="audit-filter-bar" @onclick="ToggleFilters">
+            Filters
+            @if (ActiveFilterCount > 0)
+            {
+                <b class="audit-filter-badge">@ActiveFilterCount</b>
+            }
+            <span class="audit-filter-caret" aria-hidden="true">@(filtersOpen ? "▴" : "▾")</span>
+        </button>
     </header>
 
-    <section class="audit-filters" aria-label="Filter activity">
+    <section id="audit-filter-bar" class="audit-filters" aria-label="Filter activity" hidden="@(!filtersOpen)">
         <label><span>Activity type</span>
             <select @bind="category">
                 <option value="">All activity</option>
@@ -75,12 +83,60 @@
                                             @if (!string.IsNullOrWhiteSpace(item.PreviousValueJson)) { <div><dt>Before</dt><dd><pre class="audit-json">@PrettyJson(item.PreviousValueJson)</pre></dd></div> }
                                             @if (!string.IsNullOrWhiteSpace(item.NewValueJson))
                                             {
+                                                bool isTransfer = item.Action.StartsWith("transfer.", StringComparison.OrdinalIgnoreCase);
+                                                TransferDetailRead? transfer = isTransfer ? ReadTransferDetails(item.NewValueJson) : null;
                                                 <div>
-                                                    <dt>@(item.Action.StartsWith("transfer.", StringComparison.OrdinalIgnoreCase) ? "Transfer details (current state)" : "Updated")</dt>
-                                                    <dd><pre class="audit-json">@PrettyJson(item.NewValueJson)</pre></dd>
+                                                    <dt>@(isTransfer ? "Transfer details (current state)" : "Updated")</dt>
+                                                    <dd>
+                                                        @if (transfer is not null)
+                                                        {
+                                                            <div class="audit-transfer">
+                                                                <dl class="audit-transfer-facts">
+                                                                    <div><dt>Status</dt><dd>@SplitWords(transfer.CurrentStatus)</dd></div>
+                                                                    <div><dt>Mode</dt><dd>@SplitWords(transfer.Mode)</dd></div>
+                                                                    <div><dt>Kind</dt><dd>@SplitWords(transfer.Kind)</dd></div>
+                                                                    <div><dt>Route</dt><dd>@transfer.Source <span aria-hidden="true">→</span> @transfer.Destination</dd></div>
+                                                                    @if (transfer.TransferNumber is not null) { <div><dt>Transfer no.</dt><dd>@transfer.TransferNumber</dd></div> }
+                                                                    @if (transfer.ShipmentNumber is not null) { <div><dt>Shipment</dt><dd>@transfer.ShipmentNumber</dd></div> }
+                                                                    @if (transfer.ReceiptNumber is not null) { <div><dt>Receipt</dt><dd>@transfer.ReceiptNumber</dd></div> }
+                                                                </dl>
+                                                                @if (transfer.Products.Count > 0)
+                                                                {
+                                                                    <table class="audit-transfer-lines">
+                                                                        <thead><tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th></tr></thead>
+                                                                        <tbody>
+                                                                            @foreach (TransferDetailLine line in transfer.Products)
+                                                                            {
+                                                                                <tr @key="line.LineNo">
+                                                                                    <td>@line.LineNo.ToString("D2", CultureInfo.InvariantCulture)</td>
+                                                                                    <td>@line.ProductName</td>
+                                                                                    <td>@FormatQuantity(line.Requested)</td>
+                                                                                    <td>@FormatQuantity(line.Picked)</td>
+                                                                                    <td>@FormatQuantity(line.Received)</td>
+                                                                                    <td>@FormatQuantity(line.Damaged)</td>
+                                                                                </tr>
+                                                                            }
+                                                                        </tbody>
+                                                                    </table>
+                                                                    <small class="audit-transfer-note">Quantities are the transfer's current totals, not the values at the time of this event.</small>
+                                                                }
+                                                            </div>
+                                                            <details class="audit-raw"><summary>Raw payload</summary><pre class="audit-json">@PrettyJson(item.NewValueJson)</pre></details>
+                                                        }
+                                                        else
+                                                        {
+                                                            <pre class="audit-json">@PrettyJson(item.NewValueJson)</pre>
+                                                        }
+                                                    </dd>
                                                 </div>
                                             }
-                                            @if (item.CorrelationId != Guid.Empty) { <div><dt>Correlation</dt><dd>@ShortId(item.CorrelationId)</dd></div> }
+                                            @if (item.CorrelationId != Guid.Empty)
+                                            {
+                                                <div>
+                                                    <dt>Related</dt>
+                                                    <dd>Recorded together with other entries from the same user action.<small class="audit-correlation-code" title="Correlation code for support">Code @ShortId(item.CorrelationId)</small></dd>
+                                                </div>
+                                            }
                                         </dl>
                                     </details>
                                 </td>
@@ -111,8 +167,17 @@
     private int total;
     private int offset;
     private bool loading = true;
+    private bool filtersOpen = true;
+
+    private int ActiveFilterCount =>
+        (category.Length > 0 ? 1 : 0) +
+        (string.IsNullOrWhiteSpace(search) ? 0 : 1) +
+        (fromDate is null ? 0 : 1) +
+        (toDate is null ? 0 : 1);
 
     protected override Task OnInitializedAsync() => LoadAsync(0);
+
+    private void ToggleFilters() => filtersOpen = !filtersOpen;
 
     private Task ApplyFiltersAsync() => LoadAsync(0);
     private Task PreviousAsync() => LoadAsync(Math.Max(0, offset - PageSize));
@@ -174,4 +239,109 @@
             return json;
         }
     }
+
+    private sealed record TransferDetailLine(int LineNo, string ProductName, decimal Requested, decimal Picked, decimal Received, decimal Damaged);
+
+    private sealed record TransferDetailRead(
+        string? TransferNumber,
+        string? ShipmentNumber,
+        string? ReceiptNumber,
+        string CurrentStatus,
+        string Mode,
+        string Kind,
+        string Source,
+        string Destination,
+        IReadOnlyList<TransferDetailLine> Products);
+
+    /// <summary>Reads the transfer audit payload built by the API; returns null for any other or older shape.</summary>
+    private static TransferDetailRead? ReadTransferDetails(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("currentStatus", out _))
+            {
+                return null;
+            }
+
+            return new TransferDetailRead(
+                OptionalString(root, "transferNumber"),
+                OptionalString(root, "shipmentNumber"),
+                OptionalString(root, "receiptNumber"),
+                OptionalString(root, "currentStatus") ?? "—",
+                OptionalString(root, "mode") ?? "—",
+                OptionalString(root, "kind") ?? "—",
+                NestedName(root, "source"),
+                NestedName(root, "destination"),
+                ReadProductLines(root));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        static string? OptionalString(JsonElement element, string name)
+            => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+                ? value.GetString()
+                : null;
+
+        static string NestedName(JsonElement element, string name)
+            => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Object
+                ? OptionalString(value, "name") ?? "Unknown"
+                : "Unknown";
+
+        static List<TransferDetailLine> ReadProductLines(JsonElement element)
+        {
+            List<TransferDetailLine> lines = [];
+            if (!element.TryGetProperty("products", out JsonElement products) || products.ValueKind != JsonValueKind.Array)
+            {
+                return lines;
+            }
+
+            foreach (JsonElement product in products.EnumerateArray())
+            {
+                lines.Add(new TransferDetailLine(
+                    product.TryGetProperty("lineNo", out JsonElement lineNo) && lineNo.TryGetInt32(out int number) ? number : 0,
+                    OptionalString(product, "productName") ?? "Unknown product",
+                    DecimalValue(product, "requestedQuantity"),
+                    DecimalValue(product, "pickedQuantity"),
+                    DecimalValue(product, "receivedQuantity"),
+                    DecimalValue(product, "damagedQuantity")));
+            }
+
+            return lines;
+        }
+
+        static decimal DecimalValue(JsonElement element, string name)
+            => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out decimal number) ? number : 0m;
+    }
+
+    /// <summary>"WarehouseToStore" → "Warehouse to store".</summary>
+    private static string SplitWords(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "—";
+        }
+
+        System.Text.StringBuilder builder = new(value.Length + 8);
+        for (int index = 0; index < value.Length; index++)
+        {
+            char current = value[index];
+            if (index > 0 && char.IsUpper(current) && !char.IsUpper(value[index - 1]))
+            {
+                builder.Append(' ');
+            }
+
+            builder.Append(current);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string FormatQuantity(decimal quantity)
+        => quantity % 1m == 0m
+            ? quantity.ToString("0", CultureInfo.InvariantCulture)
+            : quantity.ToString("0.###", CultureInfo.InvariantCulture);
 }

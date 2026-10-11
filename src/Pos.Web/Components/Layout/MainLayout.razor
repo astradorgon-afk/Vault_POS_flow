@@ -196,18 +196,18 @@
             if (Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true &&
                 Session.HasPermission("transfer.approve"))
             {
-                tabs.Add(new("restock/approvals", "ledger", "Approvals"));
+                tabs.Add(new("restock/approvals", "check", "Approvals"));
             }
             else if (Session.WorkLocationKind == 0 &&
                 Session.Current?.User.Roles.Any(role => role is "MainInventoryManager" or "InventoryStaff") == true &&
                 Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch"))
             {
-                tabs.Add(new("restock/fulfillment", "box", "Fulfill"));
+                tabs.Add(new("restock/fulfillment", "box-out", "Fulfill"));
             }
             else if (Session.WorkLocationKind == 1 &&
                 Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view"))
             {
-                tabs.Add(new("restock", "ledger", "Restock"));
+                tabs.Add(new("restock", "box-in", "Restock"));
             }
 
             if (Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive"))
@@ -218,7 +218,7 @@
             if (Session.HasPermission("purchase.view") &&
                 Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true)
             {
-                tabs.Add(new("purchasing", "receipt", "Orders"));
+                tabs.Add(new("purchasing", "list", "Orders"));
             }
 
             if (Session.HasAnyPermission("user.manage", "role.manage"))
