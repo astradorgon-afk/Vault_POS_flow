@@ -5,14 +5,14 @@
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 
-<PageTitle>Daily reports · VaultFlow</PageTitle>
+<PageTitle>Daily inventory operations · VaultFlow</PageTitle>
 
 <header class="report-page-head">
-    <div><span class="eyebrow">Close of trade</span><h1>Daily sales book</h1><p>Reconcile one business date from net sales and refunds through to every drawer that carried the day.</p></div>
+    <div><span class="eyebrow">Daily snapshot</span><h1>Inventory operations</h1><p>Review one business date: transfers in/out, restock requests, and stock movements for this store.</p></div>
     <div class="report-pickers">
         <label><span>Store</span><select @bind="selectedLocationId"><option value="">Select a store</option>@foreach (PosLocation location in ScopedStores){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
         <label><span>Business date</span><input type="date" @bind="selectedDate" /></label>
-        <button type="button" @onclick="LoadReportAsync" disabled="@(!CanLoad || loading)">@(loading ? "Reading…" : "Open report")</button>
+        <button type="button" @onclick="LoadReportAsync" disabled="@(!CanLoad || loading)">@(loading ? "Loading…" : "Open report")</button>
     </div>
 </header>
 
@@ -23,85 +23,112 @@
 
 @if (loading)
 {
-    <section class="report-empty" aria-live="polite"><span class="book-mark">VF</span><div><strong>Balancing the daily book</strong><small>Reading sales, payments and drawer shifts.</small></div></section>
+    <section class="report-empty" aria-live="polite"><span class="book-mark">VF</span><div><strong>Building the daily operations summary</strong><small>Reading transfers, restocks and stock movements.</small></div></section>
 }
 else if (report is null)
 {
-    <section class="report-empty"><span class="book-mark" aria-hidden="true">VF</span><div><strong>Choose a store and business date.</strong><small>The daily book is generated from committed sales and drawer activity.</small></div></section>
+    <section class="report-empty"><span class="book-mark" aria-hidden="true">VF</span><div><strong>Choose a store and business date.</strong><small>The daily operations report covers transfers, restocks and stock movements.</small></div></section>
 }
 else
 {
     <section class="report-title-block">
-        <div><span>Daily close · @report.BusinessDate.ToString("dddd", CultureInfo.InvariantCulture)</span><h2>@report.LocationName</h2><p>@report.BusinessDate.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)</p></div>
-        <div class="report-seal"><span>Transactions</span><strong>@report.SalesSummary.SalesCount</strong><small>@report.Shifts.Count drawer@(report.Shifts.Count == 1 ? "" : "s")</small></div>
+        <div><span>Daily operations · @selectedDate.ToString("dddd", CultureInfo.InvariantCulture)</span><h2>@report.Name</h2><p>@selectedDate.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture) <small class="period-note">(7-day window: @(fullReport?.From.ToString("MMM d", CultureInfo.InvariantCulture) ?? "–") – @(fullReport?.To.ToString("MMM d", CultureInfo.InvariantCulture) ?? "–"))</small></p></div>
+        <div class="report-seal"><span>Transfers</span><strong>@(fullReport?.DispatchedTransferCount ?? 0)</strong><small>dispatched in period</small></div>
     </section>
 
-    <section class="money-line" aria-label="Daily financial totals">
-        <article class="money-primary"><span>Net sales</span><strong>@Money(report.SalesSummary.NetTotal)</strong><small>after @Money(report.SalesSummary.DiscountTotal) discounts</small></article>
-        <article><span>Gross</span><strong>@Money(report.SalesSummary.GrossTotal)</strong><small>before discounts</small></article>
-        <article class="money-refund"><span>Refunds</span><strong>@Money(report.SalesSummary.RefundTotal)</strong><small>returned to customers</small></article>
-        <article><span>VAT</span><strong>@Money(report.SalesSummary.VatTotal)</strong><small>on @Money(report.SalesSummary.TaxableBaseTotal) base</small></article>
+    <section class="money-line" aria-label="Daily movement totals">
+        <article class="money-primary"><span>Incoming</span><strong>@Qty(report.IncomingUnits)</strong><small>@report.InboundTransfers inbound transfers</small></article>
+        <article><span>Outgoing</span><strong>@Qty(report.OutgoingUnits)</strong><small>@report.OutboundTransfers outbound transfers</small></article>
+        <article class="money-refund"><span>Restock requests</span><strong>@report.RestockRequests</strong><small>@report.PendingApprovalRequests pending, @report.AwaitingDispatchRequests awaiting dispatch</small></article>
+        <article><span>Net movement</span><strong class="@(report.IncomingUnits >= report.OutgoingUnits ? "positive" : "negative")">@Qty(report.IncomingUnits - report.OutgoingUnits)</strong><small>stock flow for the day</small></article>
     </section>
 
     <div class="report-grid">
-        <section class="report-panel" aria-labelledby="payment-breakdown-title">
-            <header><div><span>Settlement</span><h2 id="payment-breakdown-title">Payments by method</h2></div><strong>@Money(PaymentTotal)</strong></header>
-            @if (report.PaymentsByMethod.Count == 0)
+        <section class="report-panel" aria-labelledby="recent-activity-title">
+            <header><div><span>Activity log</span><h2 id="recent-activity-title">Recent movements</h2></div></header>
+            @if (fullReport?.RecentActivity.Count == 0)
             {
-                <div class="panel-empty">No payment activity was posted.</div>
+                <div class="panel-empty">No transfer activity recorded for this period.</div>
             }
             else
             {
-                <div class="payment-stack" aria-hidden="true">@foreach (PosDailyPaymentSummary payment in report.PaymentsByMethod){<i class="method-@MethodSlug(payment.Method)" style="width:@PaymentWidth(payment.Amount)%"></i>}</div>
-                <div class="payment-list">
-                    @foreach (PosDailyPaymentSummary payment in report.PaymentsByMethod)
-                    {
-                        <div><span><i class="method-@MethodSlug(payment.Method)"></i>@SplitWords(payment.Method)</span><strong>@Money(payment.Amount)</strong><small>@(payment.ChangeGiven > 0 ? $"{Money(payment.ChangeGiven)} change" : "No change recorded")</small></div>
-                    }
-                </div>
+                <table class="activity-table">
+                    <thead><tr><th>Time</th><th>Reference</th><th>Type</th><th>Direction</th><th>From → To</th><th>Units</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in fullReport?.RecentActivity ?? [])
+                        {
+                            <tr>
+                                <td>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm", CultureInfo.InvariantCulture)</td>
+                                <td>@item.Reference</td>
+                                <td>@SplitWords(item.Kind)</td>
+                                <td><span class="direction @(item.Kind.Contains("Incoming", StringComparison.OrdinalIgnoreCase) ? "incoming" : "outgoing")">@(item.Kind.Contains("Incoming", StringComparison.OrdinalIgnoreCase) ? "Incoming" : "Outgoing")</span></td>
+                                <td>@item.SourceLocationName → @item.DestinationLocationName</td>
+                                <td>@Qty(item.ProductUnits)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
             }
         </section>
 
-        <section class="report-panel tax-panel" aria-labelledby="tax-shape-title">
-            <header><div><span>Tax shape</span><h2 id="tax-shape-title">What made up the day</h2></div></header>
-            <dl>
-                <div><dt>Taxable base</dt><dd>@Money(report.SalesSummary.TaxableBaseTotal)</dd></div>
-                <div><dt>VAT collected</dt><dd>@Money(report.SalesSummary.VatTotal)</dd></div>
-                <div><dt>VAT-exempt sales</dt><dd>@Money(report.SalesSummary.VatExemptTotal)</dd></div>
-                <div><dt>Zero-rated sales</dt><dd>@Money(report.SalesSummary.ZeroRatedTotal)</dd></div>
-            </dl>
+        <section class="report-panel" aria-labelledby="daily-chart-title">
+            <header><div><span>Flow trend</span><h2 id="daily-chart-title">7-day movement</h2></div></header>
+            @if (report.DailyMovement.Count == 0)
+            {
+                <div class="panel-empty">No movement data for the period.</div>
+            }
+            else
+            {
+                <div class="movement-chart" aria-hidden="true">
+                    @foreach (var point in report.DailyMovement)
+                    {
+                        var max = report.DailyMovement.Max(p => Math.Max(p.IncomingUnits, p.OutgoingUnits));
+                        var inH = max > 0 ? (int)Math.Round(point.IncomingUnits / max * 100m) : 0;
+                        var outH = max > 0 ? (int)Math.Round(point.OutgoingUnits / max * 100m) : 0;
+                        <div class="chart-bar" title="Day @point.Bucket: In @Qty(point.IncomingUnits), Out @Qty(point.OutgoingUnits)">
+                            <div class="bar-in" style="height:@inH%"></div>
+                            <div class="bar-out" style="height:@outH%"></div>
+                        </div>
+                    }
+                </div>
+                <div class="chart-legend"><span class="legend-in">Incoming</span><span class="legend-out">Outgoing</span></div>
+            }
         </section>
     </div>
 
-    <section class="shift-book" aria-labelledby="shift-book-title">
-        <header><div><span>Drawer ledger</span><h2 id="shift-book-title">Shifts that carried this date</h2></div><small>Cash = sales less cash refunds</small></header>
-        @if (report.Shifts.Count == 0)
-        {
-            <div class="panel-empty">No shifts were opened for this business date.</div>
-        }
-        else
-        {
-            <div class="shift-table-wrap"><table><thead><tr><th>Shift</th><th>State</th><th>Time on drawer</th><th>Opening float</th><th>Sales</th><th>Net sales</th><th>Cash movement</th></tr></thead><tbody>
-                @foreach (PosDailyShiftSummary shift in report.Shifts)
-                {
-                    <tr><td><strong>@shift.ShiftNumber</strong><small>@shift.CashierUserId.ToString()[..8]</small></td><td><span class="shift-state state-@shift.Status.ToLowerInvariant()">@SplitWords(shift.Status)</span></td><td>@ShiftTime(shift)</td><td>@Money(shift.OpeningFloat)</td><td>@shift.SalesCount</td><td><strong>@Money(shift.NetTotal)</strong></td><td>@Money(shift.CashSalesTotal - shift.CashRefundsTotal)</td></tr>
-                }
-            </tbody></table></div>
-        }
-    </section>
+    @if (report.RecentItems.Count > 0)
+    {
+        <section class="report-panel" aria-labelledby="top-items-title">
+            <header><div><span>Top moved items</span><h2 id="top-items-title">Products with most movement in period</h2></div></header>
+            <table class="items-table">
+                <thead><tr><th>Product</th><th>Reference</th><th>Direction</th><th>Units</th></tr></thead>
+                <tbody>
+                    @foreach (var item in report.RecentItems)
+                    {
+                        <tr>
+                            <td>@item.ProductName</td>
+                            <td>@item.Reference</td>
+                            <td><span class="direction @item.Direction.ToLowerInvariant()">@item.Direction</span></td>
+                            <td>@Qty(item.Units)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
 }
 
 @code {
     private readonly List<PosLocation> locations = [];
     private string selectedLocationId = string.Empty;
     private DateOnly selectedDate = StoreClock.Today;
-    private PosDailySalesReport? report;
+    private PosStoreMovementReport? fullReport;
+    private PosStoreMovement? report;
     private bool loading;
     private string? message;
 
     private bool CanLoad => Guid.TryParse(selectedLocationId, out Guid id) && ScopedStores.Any(store => store.Id == id);
     private List<PosLocation> ScopedStores => [.. locations.Where(location => location.Kind == 1 && Session.CanUseInventoryLocation(location.Id))];
-    private decimal PaymentTotal => report?.PaymentsByMethod.Sum(item => item.Amount) ?? 0m;
 
     protected override async Task OnInitializedAsync()
     {
@@ -117,21 +144,38 @@ else
 
     private async Task LoadReportAsync()
     {
-        if (!Guid.TryParse(selectedLocationId, out Guid locationId) || !ScopedStores.Any(store => store.Id == locationId)) { message = "Select an assigned store before opening the report."; return; }
-        loading = true; message = null; report = null;
+        if (!Guid.TryParse(selectedLocationId, out Guid locationId) || !ScopedStores.Any(store => store.Id == locationId))
+        {
+            message = "Select an assigned store before opening the report.";
+            return;
+        }
+        loading = true;
+        message = null;
+        report = null;
+        fullReport = null;
         try
         {
-            ApiResult<PosDailySalesReport> result = await Api.GetDailySalesReportAsync(locationId, selectedDate, CancellationToken.None);
+            // Request a 7-day window ending on the selected date for the chart, but filter to the single day for the main numbers
+            DateOnly from = selectedDate.AddDays(-6);
+            ApiResult<PosStoreMovementReport> result = await Api.GetStoreMovementsAsync(from, selectedDate, CancellationToken.None);
             if (!result.IsSuccess || result.Value is null) { message = result.Error; return; }
-            report = result.Value;
+            fullReport = result.Value;
+            report = fullReport.Stores.FirstOrDefault(s => s.LocationId == locationId);
+            if (report is null)
+            {
+                // Create a blank report for the selected store if no data
+                report = new PosStoreMovement(
+                    locationId,
+                    ScopedStores.First(s => s.Id == locationId).Code,
+                    ScopedStores.First(s => s.Id == locationId).Name,
+                    0, 0, 0, 0, 0, 0, 0, null, null, [], []);
+            }
         }
         catch (HttpRequestException) { message = "The reporting service is unavailable. Try again shortly."; }
         finally { loading = false; }
     }
 
-    private int PaymentWidth(decimal amount) => PaymentTotal <= 0 ? 0 : Math.Max(2, (int)Math.Round(amount / PaymentTotal * 100m));
-    private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
-    private static string MethodSlug(string method) => method.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+    private static string Qty(decimal qty) => qty % 1m == 0m ? qty.ToString("0", CultureInfo.InvariantCulture) : qty.ToString("0.###", CultureInfo.InvariantCulture);
+
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
-    private static string ShiftTime(PosDailyShiftSummary shift) => $"{shift.OpenedAtUtc.InStoreTime():h:mm tt} – {shift.ClosedAtUtc?.InStoreTime().ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "still open"}";
 }
