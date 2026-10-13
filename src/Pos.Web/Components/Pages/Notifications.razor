@@ -4,7 +4,6 @@
 @implements IDisposable
 @using System.Globalization
 @inject NotificationStore Store
-@inject UserSession Session
 @inject VaultFlowApiClient Api
 @inject NavigationManager Navigation
 
@@ -69,6 +68,14 @@
         }
         else
         {
+            @if (Store.UnreadCount > Store.Items.Count)
+            {
+                <p class="nt-more">
+                    Newest first — this list holds the @(Store.Items.Count.ToString("N0")) most recent alerts.
+                    @Store.UnreadCount.ToString("N0") are still unread overall, so the badge also counts older
+                    alerts beyond this list.
+                </p>
+            }
             @foreach (PosNotification item in Visible)
             {
                 bool unread = item.ReadAtUtc is null;
@@ -163,7 +170,13 @@
                 DateRange.Month => DateTimeOffset.UtcNow.AddDays(-30),
                 _ => null,
             };
-            return Store.Items.Where(item => item.LocationId == Session.WorkLocationId && (since is null || item.CreatedAtUtc >= since));
+
+            // The API already returns only the alerts this account may see, and
+            // the bell and sidebar badges count that same feed. Filtering again
+            // by the chosen work location hid the whole list from an owner
+            // working across locations: the badge read 1,274 while every tab
+            // here read 0. Each row names its location instead.
+            return Store.Items.Where(item => since is null || item.CreatedAtUtc >= since);
         }
     }
 

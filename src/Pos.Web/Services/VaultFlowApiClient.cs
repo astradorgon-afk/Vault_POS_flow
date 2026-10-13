@@ -509,6 +509,31 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
         PosCreateLocationRequest request, CancellationToken cancellationToken)
         => PostAsync<PosReference>("/api/v1/locations", request, cancellationToken);
 
+    /// <summary>Gets one location, including one that has been closed.</summary>
+    public Task<ApiResult<PosLocationAdmin>> GetLocationAsync(
+        Guid locationId, CancellationToken cancellationToken)
+        => GetAsync<PosLocationAdmin>(
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}"),
+            cancellationToken);
+
+    /// <summary>Changes a location's code, name, kind and timezone.</summary>
+    public Task<ApiResult<string>> UpdateLocationAsync(
+        Guid locationId, PosUpdateLocationRequest request, CancellationToken cancellationToken)
+        => SendCommandAsync(
+            HttpMethod.Put,
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}"),
+            request,
+            cancellationToken);
+
+    /// <summary>Closes a location; locations are retired, never deleted.</summary>
+    public Task<ApiResult<string>> CloseLocationAsync(
+        Guid locationId, DateOnly closingDate, CancellationToken cancellationToken)
+        => SendCommandAsync(
+            HttpMethod.Post,
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}/close"),
+            new PosCloseLocationRequest(closingDate),
+            cancellationToken);
+
     /// <summary>Replaces a location's operational policy.</summary>
     public Task<ApiResult<string>> UpdateLocationSettingsAsync(
         Guid locationId, PosLocationSettings settings, CancellationToken cancellationToken)

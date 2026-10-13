@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics;
 using Pos.Web.Services;
 
 #pragma warning disable IDE0011 // Endpoint guards are intentionally concise.
@@ -18,6 +19,22 @@ public static class PwaGateway
     public static IEndpointRouteBuilder MapPwaGateway(this IEndpointRouteBuilder app)
     {
         RouteGroupBuilder group = app.MapGroup("/offline/api");
+
+        // The status-code pages middleware re-executes any response that reaches
+        // it without a body. For a POST to this gateway that turns a rejected
+        // 401/403 into the HTML not-found handler, which answers 400 "The request
+        // has an incorrect Content-type." — so the PWA can only report a
+        // meaningless "Server returned 400". API routes keep their real status.
+        group.AddEndpointFilter(async (filterContext, next) =>
+        {
+            if (filterContext.HttpContext.Features.Get<IStatusCodePagesFeature>() is { } statusCodes)
+            {
+                statusCodes.Enabled = false;
+            }
+
+            return await next(filterContext);
+        });
+
         group.MapPost("/enrol", EnrolAsync);
         group.MapPost("/login", LoginAsync);
         group.MapPost("/handoff", HandoffAsync);
@@ -56,11 +73,11 @@ public static class PwaGateway
         using HttpResponseMessage response = await clients.CreateClient("pwa-api").SendAsync(request, ct);
         if (!response.IsSuccessStatusCode) return await ForwardAsync(response, ct);
         SignInResponse? signIn = await response.Content.ReadFromJsonAsync<SignInResponse>(JsonOptions, ct);
-        if (signIn is null) return Results.StatusCode(502);
+        if (signIn is null) return PwaProblem(502, "The server signed you in but returned no account details. Try again.");
         if (!signIn.User.HasAllLocations && !signIn.User.Locations.Contains(body.LocationId))
         {
             await RevokeAsync(clients, signIn.RefreshToken, ct);
-            return Results.Forbid();
+            return PwaProblem(403, "That work location is not assigned to your account.");
         }
 
         using HttpRequestMessage deviceRequest = new(HttpMethod.Get,
@@ -78,7 +95,7 @@ public static class PwaGateway
             defaultLocation.GetGuid() != body.LocationId)
         {
             await RevokeAsync(clients, signIn.RefreshToken, ct);
-            return Results.Forbid();
+            return PwaProblem(403, "This browser is enrolled for a different work location than the one you chose.");
         }
 
         SetSession(context, sessions, body.DeviceId, body.LocationId, signIn);
@@ -97,15 +114,32 @@ public static class PwaGateway
         HttpContext context, IHttpClientFactory clients, PwaSessions sessions,
         PwaLoginHandoffs handoffs, PwaHandoff body, CancellationToken ct)
     {
-        if (!SafeMutation(context)) return Results.StatusCode(403);
+        if (!SafeMutation(context)) return PwaProblem(403, "This request was refused. Reload the page and try again.");
+        if (string.IsNullOrEmpty(body.Token))
+        {
+            return PwaProblem(401, "This sign-in attempt was not completed. Sign in again to prepare offline access.");
+        }
+        if (body.DeviceId == Guid.Empty || body.LocationId == Guid.Empty)
+        {
+            return PwaProblem(401, "This installation is not set up for offline access yet. Enrol it before signing in.");
+        }
+
         PwaLoginHandoffs.Entry? entry = handoffs.Take(body.Token);
-        if (entry is null || body.DeviceId == Guid.Empty || body.LocationId == Guid.Empty)
-            return Results.Unauthorized();
+        if (entry is null)
+        {
+            return PwaProblem(401, "This sign-in attempt expired or was already used. Sign in again to prepare offline access.");
+        }
+
         SignInResponse credentials = entry.Credentials;
         if (entry.WorkLocationId is { } chosen && chosen != body.LocationId)
-            return Results.Forbid();
+        {
+            return PwaProblem(403, "The work location chosen at sign-in does not match the one this browser is enrolled for. " +
+                "Choose the location this browser is set up for, or enrol it for another one.");
+        }
         if (!credentials.User.HasAllLocations && !credentials.User.Locations.Contains(body.LocationId))
-            return Results.Forbid();
+        {
+            return PwaProblem(403, "That work location is not assigned to your account.");
+        }
         using HttpRequestMessage deviceRequest = new(HttpMethod.Get,
             $"/api/v1/devices/{body.DeviceId:D}/locations");
         deviceRequest.Headers.Add("X-Device-Id", body.DeviceId.ToString("D"));
@@ -114,7 +148,11 @@ public static class PwaGateway
         if (!deviceResponse.IsSuccessStatusCode) return await ForwardAsync(deviceResponse, ct);
         JsonElement locations = await deviceResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
         if (!locations.TryGetProperty("defaultLocationId", out JsonElement defaultLocation) ||
-            defaultLocation.GetGuid() != body.LocationId) return Results.Forbid();
+            defaultLocation.GetGuid() != body.LocationId)
+        {
+            return PwaProblem(403, "This browser's enrolment no longer matches its work location. " +
+                "Enrol it again from Administration, Devices.");
+        }
         SetSession(context, sessions, body.DeviceId, body.LocationId, credentials);
         return Results.Ok(new { credentials.User, body.DeviceId, body.LocationId,
             locationKind = LocationKindOf(locations) });
@@ -345,6 +383,10 @@ public static class PwaGateway
 
     private static PwaSession? FindSession(HttpContext context, PwaSessions sessions)
         => context.Request.Cookies.TryGetValue(Cookie, out string? key) ? sessions.Get(key) : null;
+
+    /// <summary>An error body the PWA can show: the offline store reads <c>detail</c>, <c>message</c> or <c>title</c>.</summary>
+    private static IResult PwaProblem(int statusCode, string message)
+        => Results.Json(new { message }, statusCode: statusCode);
 
     private static bool SafeMutation(HttpContext context)
     {

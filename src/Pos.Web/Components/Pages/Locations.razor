@@ -85,6 +85,23 @@ else
                         <span class="location-kind-badge">@KindName(selected.Kind)</span>
                     </header>
 
+                    @if (CanManageLocations)
+                    {
+                        <div class="policy-section">
+                            <div class="policy-section-title"><span>Details</span><div><strong>Identity</strong><small>The code, name, kind and timezone reports, receipts and transfers refer to.</small></div></div>
+                            <div class="policy-fields two-columns">
+                                <label><span>Code</span><input maxlength="16" @bind="editCode" placeholder="STORE3" /></label>
+                                <label><span>Name</span><input maxlength="64" @bind="editName" placeholder="Quezon Avenue" /></label>
+                                <label><span>Kind</span><select @bind="editKind"><option value="1">Retail store</option><option value="0">Main warehouse</option></select></label>
+                                <label><span>IANA timezone</span><input @bind="editTimeZone" placeholder="Asia/Manila" /></label>
+                            </div>
+                            <footer class="policy-actions">
+                                <span>@(CanSaveDetails ? "Details save across the whole organization." : "Enter a code, name and IANA timezone to save.")</span>
+                                <button class="location-primary" type="button" @onclick="SaveDetailsAsync" disabled="@(!CanSaveDetails || working)">@(working ? "Saving…" : "Save details")</button>
+                            </footer>
+                        </div>
+                    }
+
                     <div class="policy-section">
                         <div class="policy-section-title"><span>Stock</span><div><strong>Inventory rules</strong><small>Control negative stock, expiry alerts, and direct deliveries.</small></div></div>
                         <div class="policy-fields two-columns">
@@ -92,15 +109,39 @@ else
                             <label><span>Expiry warning</span><div class="unit-input"><input type="number" min="0" max="3650" @bind="editExpiryDays" disabled="@(!CanManageSettings)" /><i>days</i></div></label>
                             <label class="policy-check"><input type="checkbox" @bind="editDirectDelivery" disabled="@(!CanManageSettings)" /><span><strong>Allow direct supplier delivery</strong><small>Stock may arrive at this location without first passing through MAIN.</small></span></label>
                         </div>
+                        <footer class="policy-actions">
+                            <span>@(CanManageSettings ? "Changes to stock rules take effect for this location after saving." : "You can review this location's inventory rules.")</span>
+                            @if (CanManageSettings)
+                            {
+                                <button class="location-primary" type="button" @onclick="SaveSettingsAsync" disabled="@working">@(working ? "Saving…" : "Save stock rules")</button>
+                            }
+                        </footer>
                     </div>
 
-                    <footer>
-                        <span>@(CanManageSettings ? "Changes to stock rules take effect for this location after saving." : "You can review this location's inventory rules.")</span>
-                        @if (CanManageSettings)
-                        {
-                            <button class="location-primary" type="button" @onclick="SaveSettingsAsync" disabled="@working">@(working ? "Saving…" : "Save stock rules")</button>
-                        }
-                    </footer>
+                    @if (CanManageLocations)
+                    {
+                        <div class="policy-section location-danger">
+                            <div class="policy-section-title"><span>Close</span><div><strong>Retire this location</strong><small>Closing stops new sales, transfers and receipts here. History stays intact.</small></div></div>
+                            @if (!showCloseConfirm)
+                            {
+                                <footer class="policy-actions">
+                                    <span>Close @selected.Name to stop new operations here. Existing stock and documents stay on the record.</span>
+                                    <button class="location-danger-button" type="button" @onclick="ToggleCloseConfirm">Close location</button>
+                                </footer>
+                            }
+                            else
+                            {
+                                <div class="close-confirm" role="alertdialog" aria-label="Confirm closing this location">
+                                    <label><span>Effective closing date</span><input type="date" value="@closeDate" @onchange="OnCloseDateChanged" /></label>
+                                    <p>@selected.Name stops accepting operations from that date. Locations are retired rather than deleted, so their ledger history remains.</p>
+                                    <div>
+                                        <button class="location-secondary" type="button" @onclick="ToggleCloseConfirm" disabled="@working">Cancel</button>
+                                        <button class="location-danger-button" type="button" @onclick="CloseLocationAsync" disabled="@(working || !CanClose)">@(working ? "Closing…" : "Close this location")</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
                 </section>
             }
         </div>
@@ -121,11 +162,19 @@ else
     private int editNegativePolicy;
     private bool editDirectDelivery;
     private int editExpiryDays;
+    private string editCode = string.Empty;
+    private string editName = string.Empty;
+    private int editKind = 1;
+    private string editTimeZone = "Asia/Manila";
+    private bool showCloseConfirm;
+    private string closeDate = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     private bool CanViewLocations => Session.HasPermission("location.manage");
     private bool CanManageLocations => Session.Current?.User.Permissions.Contains("location.manage", StringComparer.Ordinal) == true;
     private bool CanManageSettings => Session.Current?.User.Permissions.Contains("settings.manage", StringComparer.Ordinal) == true;
     private bool CanCreate => !string.IsNullOrWhiteSpace(newCode) && !string.IsNullOrWhiteSpace(newName) && !string.IsNullOrWhiteSpace(newTimeZone);
+    private bool CanSaveDetails => !string.IsNullOrWhiteSpace(editCode) && !string.IsNullOrWhiteSpace(editName) && !string.IsNullOrWhiteSpace(editTimeZone);
+    private bool CanClose => DateOnly.TryParse(closeDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
 
     protected override async Task OnInitializedAsync()
     {
@@ -257,16 +306,113 @@ else
         }
     }
 
+    private async Task SaveDetailsAsync()
+    {
+        if (!CanManageLocations || selected is not { } location)
+        {
+            return;
+        }
+
+        if (!CanSaveDetails)
+        {
+            message = "Enter a code, name and IANA timezone.";
+            return;
+        }
+
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<string> result = await Api.UpdateLocationAsync(
+                location.Id,
+                new PosUpdateLocationRequest(
+                    editCode.Trim().ToUpperInvariant(),
+                    editName.Trim(),
+                    editKind,
+                    editTimeZone.Trim()),
+                CancellationToken.None);
+
+            if (!result.IsSuccess)
+            {
+                message = result.Error;
+                return;
+            }
+
+            // LoadLocationsAsync re-runs SelectLocation, which clears message,
+            // so set the success text AFTER the reload.
+            await LoadLocationsAsync(location.Id);
+            message ??= $"Details saved for {editName.Trim()}.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "The location service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private async Task CloseLocationAsync()
+    {
+        if (!CanManageLocations || selected is not { } location)
+        {
+            return;
+        }
+
+        if (!DateOnly.TryParse(closeDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly effective))
+        {
+            message = "Choose the effective closing date.";
+            return;
+        }
+
+        working = true;
+        message = null;
+        try
+        {
+            ApiResult<string> result = await Api.CloseLocationAsync(location.Id, effective, CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                message = result.Error;
+                return;
+            }
+
+            showCloseConfirm = false;
+            // A closed location leaves the directory, so clear the selection
+            // before reloading rather than leaving the panel pointed at a row
+            // the list no longer returns.
+            selected = null;
+            await LoadLocationsAsync();
+            message ??= $"{location.Name} was closed. It no longer appears in the directory.";
+        }
+        catch (HttpRequestException)
+        {
+            message = "The location service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
     private void SelectLocation(PosLocationAdmin location)
     {
         selected = location;
         editNegativePolicy = location.Settings.NegativeStockPolicy;
         editDirectDelivery = location.Settings.AllowsDirectSupplierDelivery;
         editExpiryDays = location.Settings.ExpiryWarningDays;
+        editCode = location.Code;
+        editName = location.Name;
+        editKind = location.Kind;
+        editTimeZone = location.TimeZoneId;
+        showCloseConfirm = false;
+        closeDate = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         message = null;
     }
 
     private void ToggleCreate() { showCreate = !showCreate; message = null; }
+    private void ToggleCloseConfirm() { showCloseConfirm = !showCloseConfirm; message = null; }
+    private void OnCloseDateChanged(ChangeEventArgs e) => closeDate = e.Value?.ToString() ?? string.Empty;
     private static string KindName(int kind) => kind == 0 ? "Main warehouse" : "Retail store";
     private static string PolicyName(int policy) => policy switch { 0 => "Negative stock prohibited", 1 => "Permission override", 2 => "Offline review", _ => "Custom policy" };
 }

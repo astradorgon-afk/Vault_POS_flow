@@ -542,6 +542,16 @@ public sealed record PosCreateLocationRequest(
     string TimeZoneId,
     PosLocationSettings? Settings = null);
 
+/// <summary>The descriptive details that replace a location's own.</summary>
+public sealed record PosUpdateLocationRequest(
+    string Code,
+    string Name,
+    int Kind,
+    string TimeZoneId);
+
+/// <summary>The business date a location stops operating.</summary>
+public sealed record PosCloseLocationRequest(DateOnly ClosingDate);
+
 // ---- Reports ----
 
 /// <summary>The daily close-of-trade report for a store.</summary>

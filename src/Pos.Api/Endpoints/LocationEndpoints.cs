@@ -26,6 +26,21 @@ public sealed record CreateLocationBody(
     string TimeZoneId,
     LocationSettings? Settings = null);
 
+/// <summary>The descriptive details a caller replaces on a location.</summary>
+/// <param name="Code">The short unique code.</param>
+/// <param name="Name">The human-readable name.</param>
+/// <param name="Kind">The kind; not external.</param>
+/// <param name="TimeZoneId">The IANA timezone identifier.</param>
+public sealed record UpdateLocationBody(
+    string Code,
+    string Name,
+    LocationKind Kind,
+    string TimeZoneId);
+
+/// <summary>The business date a location stops operating.</summary>
+/// <param name="ClosingDate">The effective closing business date.</param>
+public sealed record CloseLocationBody(DateOnly ClosingDate);
+
 /// <summary>A location as listed for the organization.</summary>
 /// <param name="Id">The location identifier.</param>
 /// <param name="Code">Its short unique code.</param>
@@ -104,6 +119,30 @@ public static class LocationEndpoints
             })
             .WithName("CreateLocation")
             .WithSummary("Creates a physical location (Main Warehouse or Store).");
+
+        group.MapGet("/{id:guid}", GetAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageLocations)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("GetLocation")
+            .WithSummary("Gets one location, including one that has been closed.");
+
+        group.MapPut("/{id:guid}", UpdateAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageLocations)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("UpdateLocation")
+            .WithSummary("Replaces a location's code, name, kind and timezone.");
+
+        group.MapPost("/{id:guid}/close", CloseAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageLocations)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("CloseLocation")
+            .WithSummary("Closes a location so it can no longer hold stock or open work.");
 
         group.MapPut("/{id:guid}/settings", UpdateSettingsAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageSettings)
@@ -193,6 +232,72 @@ public static class LocationEndpoints
             ? TypedResults.Created(
                 FormattableString.Invariant($"/api/v1/locations/{result.Value.Value}"),
                 new { id = result.Value.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> GetAsync(
+        Guid id,
+        PosDbContext context,
+        CancellationToken cancellationToken)
+    {
+        LocationId locationId = new(id);
+
+        LocationSummary? location = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Id == locationId)
+            .Select(l => new LocationSummary(
+                l.Id.Value,
+                l.Code,
+                l.Name,
+                l.Kind,
+                l.TimeZoneId,
+                l.IsActive,
+                l.IsSystemCreated,
+                l.OpenedOn,
+                l.ClosedOn,
+                l.Settings))
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return location is null ? TypedResults.NotFound() : TypedResults.Ok(location);
+    }
+
+    private static async Task<IResult> UpdateAsync(
+        Guid id,
+        [FromBody] UpdateLocationBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<LocationId> result = await dispatcher
+            .SendAsync(
+                new UpdateLocationCommand(
+                    new LocationId(id),
+                    body.Code,
+                    body.Name,
+                    body.Kind,
+                    body.TimeZoneId),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.NoContent()
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> CloseAsync(
+        Guid id,
+        [FromBody] CloseLocationBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result<LocationId> result = await dispatcher
+            .SendAsync(new CloseLocationCommand(new LocationId(id), body.ClosingDate), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.NoContent()
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 

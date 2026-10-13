@@ -16,9 +16,9 @@ public sealed class PwaLoginHandoffs
         return token;
     }
 
-    public Entry? Take(string token)
+    public Entry? Take(string? token)
     {
-        if (!entries.TryRemove(token, out Entry? entry))
+        if (string.IsNullOrEmpty(token) || !entries.TryRemove(token, out Entry? entry))
         {
             return null;
         }

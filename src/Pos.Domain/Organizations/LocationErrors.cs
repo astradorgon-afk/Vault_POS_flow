@@ -15,10 +15,10 @@ public static class LocationErrors
         "location.cannot_close_system_location",
         "A system counterparty location cannot be closed by a user.");
 
-    /// <summary>A closing was requested while stock or open documents remain.</summary>
-    public static Error CannotCloseWithOpenWork { get; } = Error.Conflict(
-        "location.cannot_close_with_open_work",
-        "A location with outstanding stock or open documents cannot be closed.");
+    /// <summary>A system external counterparty's descriptive details were edited by a user.</summary>
+    public static Error CannotEditSystemLocation { get; } = Error.Conflict(
+        "location.cannot_edit_system_location",
+        "A system counterparty location cannot be edited by a user.");
 
     /// <summary>Exactly one active main warehouse may exist.</summary>
     public static Error MultipleActiveMainWarehouses { get; } = Error.Conflict(

@@ -480,7 +480,10 @@ else
     private bool ShowReview => Status == "Submitted" && CanApprove && (!IsStoreRestock || IsOwner);
     private bool ShowApprove => Status == "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
     private bool ShowReject => Status is "Submitted" or "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
-    private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId)) && pickRows.Any(row => row.Quantity > 0m);
+    // The pick panel stays visible for the source side from the moment the        // request is approved; its rows start at zero, so the quantity inputs must
+    // be on screen before any picking can be recorded. The "Record picking"
+    // button itself stays disabled until a quantity is entered (CanPickNow).
+    private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowReady => Status == "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowDispatch => Status == "Ready" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowCancelDispatch => Status == "Dispatched" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));

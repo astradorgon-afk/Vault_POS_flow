@@ -22,6 +22,9 @@ public sealed class NotificationHub(
     /// <summary>Carries the locations whose stock just changed; clients reload what they show.</summary>
     public const string InventoryChangedEvent = "inventoryChanged";
 
+    /// <summary>Carries the locations whose transfer documents just changed state; clients reload what they show.</summary>
+    public const string TransfersChangedEvent = "transfersChanged";
+
     public override async Task OnConnectedAsync()
     {
         if (!Guid.TryParse(Context.User?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out Guid rawUserId))
@@ -137,6 +140,37 @@ public sealed class SignalRInventoryChangePublisher(
         {
             await hub.Clients.Group(NotificationGroups.Location(location))
                 .SendAsync(NotificationHub.InventoryChangedEvent, new[] { location.Value }, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>
+/// Tells people watching a location that a transfer document there changed
+/// state. Sent to the same groups as that location's notifications, so nobody
+/// hears about a store they cannot see.
+/// </summary>
+public sealed class SignalRTransferChangePublisher(
+    IHubContext<NotificationHub> hub) : ITransferChangePublisher
+{
+    public async Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(locations);
+
+        Guid[] ids = [.. locations.Select(location => location.Value)];
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        await hub.Clients.Group(NotificationGroups.AllLocations)
+            .SendAsync(NotificationHub.TransfersChangedEvent, ids, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (LocationId location in locations)
+        {
+            await hub.Clients.Group(NotificationGroups.Location(location))
+                .SendAsync(NotificationHub.TransfersChangedEvent, new[] { location.Value }, cancellationToken)
                 .ConfigureAwait(false);
         }
     }

@@ -70,3 +70,15 @@ public interface IInventoryChangePublisher
     /// <summary>Announces that stock at these locations has changed.</summary>
     Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Tells connected clients that a transfer document changed state at some
+/// locations — submitted, approved, picked, dispatched, received — once the
+/// change is committed. It carries no details: clients reload the lists they
+/// show, which is how a store's request history stays current without polling.
+/// </summary>
+public interface ITransferChangePublisher
+{
+    /// <summary>Announces that transfers touching these locations have changed.</summary>
+    Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken);
+}

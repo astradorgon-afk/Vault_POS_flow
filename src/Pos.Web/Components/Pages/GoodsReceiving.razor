@@ -2,15 +2,17 @@
 @attribute [Authorize(Policy = "purchase.view")]
 @attribute [Authorize(Policy = "purchase.receive")]
 @rendermode InteractiveServer
+@implements IDisposable
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
+@inject NotificationStore Notifications
 
 <PageTitle>Goods receiving · VaultFlow</PageTitle>
 
 <section class="receiving-page">
     <header class="receiving-head">
-        <div><span class="eyebrow">Inventory · inbound stock</span><h1>Goods receiving</h1><p>Record deliveries for orders headed to your assigned locations.</p></div>
+        <div><span class="eyebrow">Inventory · inbound stock</span><h1>Goods receiving</h1><p>Record deliveries headed to your assigned locations — from suppliers and from other locations.</p></div>
         <button type="button" class="receiving-secondary" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
 
@@ -23,34 +25,74 @@
     {
         <div class="receiving-empty">Loading deliveries…</div>
     }
-    else if (orders.Count == 0)
+    else if (orders.Count == 0 && transfers.Count == 0)
     {
-        <div class="receiving-empty"><strong>No deliveries to show.</strong><span>Orders for your assigned locations appear here when they are sent to suppliers.</span></div>
+        <div class="receiving-empty"><strong>No deliveries to show.</strong><span>Supplier orders and incoming transfers for your assigned locations appear here.</span></div>
     }
     else
     {
-        <div class="receiving-list">
-            @foreach (PosPurchaseOrderSummary order in orders)
-            {
-                bool ready = order.Status is "Ordered" or "PartiallyReceived";
-                <a class="receiving-row" href="@($"/receiving/{order.Id:D}")" @key="order.Id">
-                    <span class="receiving-row-mark" aria-hidden="true">↘</span>
-                    <span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@LocationName(order.DestinationLocationId) · @order.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></span>
-                    <span class="receiving-state @(ready ? "ready" : "")">@(ready ? "Ready to receive" : SplitWords(order.Status))</span>
-                    <span class="receiving-row-arrow" aria-hidden="true">→</span>
-                </a>
-            }
-        </div>
+        @if (transfers.Count > 0)
+        {
+            <div class="receiving-section">
+                @if (orders.Count > 0)
+                {
+                    <header class="receiving-section-head"><strong>Incoming transfers</strong><span>Stock on its way from the warehouse or another store</span></header>
+                }
+                <div class="receiving-list">
+                    @foreach (PosTransferSummary transfer in transfers)
+                    {
+                        <a class="receiving-row" href="@($"/transfers/{transfer.Id:D}")" @key="transfer.Id">
+                            <span class="receiving-row-mark" aria-hidden="true">⇄</span>
+                            <span class="receiving-row-main"><strong>@TransferLabel(transfer)</strong><small>From @LocationName(transfer.SourceLocationId) · @transfer.LineCount line@(transfer.LineCount == 1 ? "" : "s") · @transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></span>
+                            <span class="receiving-state @(TransferStateClass(transfer.Status))">@TransferState(transfer.Status)</span>
+                            <span class="receiving-row-arrow" aria-hidden="true">→</span>
+                        </a>
+                    }
+                </div>
+            </div>
+        }
+        @if (orders.Count > 0)
+        {
+            <div class="receiving-section">
+                @if (transfers.Count > 0)
+                {
+                    <header class="receiving-section-head"><strong>Supplier deliveries</strong><span>Purchase orders on their way from suppliers</span></header>
+                }
+                <div class="receiving-list">
+                    @foreach (PosPurchaseOrderSummary order in orders)
+                    {
+                        bool ready = order.Status is "Ordered" or "PartiallyReceived";
+                        <a class="receiving-row" href="@($"/receiving/{order.Id:D}")" @key="order.Id">
+                            <span class="receiving-row-mark" aria-hidden="true">↘</span>
+                            <span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@LocationName(order.DestinationLocationId) · @order.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></span>
+                            <span class="receiving-state @(ready ? "ready" : "")">@(ready ? "Ready to receive" : SplitWords(order.Status))</span>
+                            <span class="receiving-row-arrow" aria-hidden="true">→</span>
+                        </a>
+                    }
+                </div>
+            </div>
+        }
     }
 </section>
 
 @code {
     private readonly List<PosLocation> locations = [];
     private readonly List<PosPurchaseOrderSummary> orders = [];
+    private readonly List<PosTransferSummary> transfers = [];
     private bool loading = true;
     private string? message;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    /// <summary>Folds live transfer events into one quiet reload a moment later.</summary>
+    private RefreshThrottle? liveRefresh;
+
+    protected override Task OnInitializedAsync()
+    {
+        // A dispatched transfer appears here the moment the warehouse sends
+        // it, so receiving follows along without anyone pressing Refresh.
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadTransfersQuietlyAsync));
+        Notifications.TransfersChanged += OnTransfersChanged;
+        return LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -75,6 +117,8 @@
                     order.Status is "Ordered" or "PartiallyReceived" or "FullyReceived" or "Closed")
                 .OrderBy(order => order.Status is "Ordered" or "PartiallyReceived" ? 0 : 1)
                 .ThenByDescending(order => order.CreatedAtUtc));
+
+            await ReloadTransfersAsync();
         }
         catch (HttpRequestException)
         {
@@ -86,6 +130,68 @@
         }
     }
 
+    /// <summary>Inbound transfers for the caller's locations: anything approved
+    /// or further along, most actionable first — the ones waiting on this
+    /// location's count lead.</summary>
+    private async Task ReloadTransfersAsync()
+    {
+        ApiResult<List<PosTransferSummary>> transferResult = await Api.GetTransfersAsync(CancellationToken.None);
+        if (!transferResult.IsSuccess || transferResult.Value is null)
+        {
+            message ??= transferResult.Error ?? "Incoming transfers could not be loaded.";
+            return;
+        }
+
+        transfers.Clear();
+        transfers.AddRange(transferResult.Value
+            .Where(transfer => Session.CanUseInventoryLocation(transfer.DestinationLocationId) &&
+                transfer.Status is "Approved" or "Picking" or "Ready" or "Dispatched" or "PartiallyReceived" or "Received")
+            .OrderBy(IncomingRank)
+            .ThenByDescending(transfer => transfer.CreatedAtUtc));
+    }
+
+    private static int IncomingRank(PosTransferSummary transfer) => transfer.Status switch
+    {
+        "Dispatched" or "PartiallyReceived" => 0,
+        "Approved" or "Picking" or "Ready" => 1,
+        _ => 2,
+    };
+
+    /// <summary>The live signal: reload the inbound list without touching the
+    /// button, the message, or anything already on screen.</summary>
+    private void OnTransfersChanged(IReadOnlyList<Guid> _) => liveRefresh?.Request();
+
+    private async Task ReloadTransfersQuietlyAsync()
+    {
+        try
+        {
+            await ReloadTransfersAsync();
+            StateHasChanged();
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the rows on screen; the next change tries again.
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Notifications.TransfersChanged -= OnTransfersChanged;
+        liveRefresh?.Dispose();
+    }
+
     private string LocationName(Guid id) => locations.FirstOrDefault(location => location.Id == id)?.Name ?? "Location";
+    private static string TransferLabel(PosTransferSummary transfer) => string.IsNullOrWhiteSpace(transfer.Number)
+        ? $"Transfer {transfer.Id.ToString("N")[..8].ToUpperInvariant()}"
+        : transfer.Number;
+    private static string TransferState(string status) => status switch
+    {
+        "Approved" or "Picking" or "Ready" => "Being prepared",
+        "Dispatched" or "PartiallyReceived" => "Ready to receive",
+        "Received" => "Received",
+        _ => SplitWords(status),
+    };
+    private static string TransferStateClass(string status) => status is "Dispatched" or "PartiallyReceived" ? "ready" : string.Empty;
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 }

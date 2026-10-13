@@ -45,6 +45,9 @@
 .restock-row-action { color: var(--forest); font-size: .76rem; font-weight: 800; white-space: nowrap; }
 .restock-status { padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 99px; background: #f1f3ef; color: #53635a; font-size: .72rem; font-weight: 800; white-space: nowrap; }
 .restock-status.pending { border-color: #ebd3a0; background: #fff6dc; color: #8a5a16; }
+.restock-status.approved { border-color: #b6d6c1; background: #e8f5ec; color: #24603f; }
+.restock-status.transit { border-color: #a9c6e8; background: #eaf3fd; color: #1f5f9e; }
+.restock-status.cancelled { border-color: #e5b3ae; background: #fdecea; color: #a63d35; }
 .restock-message { padding: 12px 15px; border-left: 3px solid var(--forest); border-radius: 5px; background: var(--mint-soft); color: var(--forest); font-size: .86rem; }
 .restock-draft-link { color: var(--forest); font-size: .85rem; font-weight: 800; }
 .restock-filters { display: flex; flex-wrap: wrap; gap: 8px; }

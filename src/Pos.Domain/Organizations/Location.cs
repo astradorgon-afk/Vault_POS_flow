@@ -154,6 +154,51 @@ public sealed class Location : AggregateRoot<LocationId>
     }
 
     /// <summary>
+    /// Changes the descriptive details: code, name, kind and timezone. The kind
+    /// may move between <see cref="LocationKind.MainWarehouse"/> and
+    /// <see cref="LocationKind.Store"/>; <see cref="LocationKind.External"/>
+    /// stays system-only, because those rows are ledger counterparties rather
+    /// than places a person works.
+    /// </summary>
+    /// <param name="code">The short unique code.</param>
+    /// <param name="name">The human-readable name.</param>
+    /// <param name="kind">The kind; not <see cref="LocationKind.External"/>.</param>
+    /// <param name="timeZoneId">IANA timezone identifier.</param>
+    /// <returns>A success result, or a failure when the location cannot change or the values are invalid.</returns>
+    public Result UpdateDetails(string? code, string? name, LocationKind kind, string? timeZoneId)
+    {
+        if (IsSystemCreated)
+        {
+            return Result.Failure(LocationErrors.CannotEditSystemLocation);
+        }
+
+        if (!IsActive)
+        {
+            return Result.Failure(LocationErrors.AlreadyClosed);
+        }
+
+        if (kind == LocationKind.External)
+        {
+            return Result.Failure(Error.Validation(
+                "location.external_not_user_creatable",
+                "External locations are created by the system, not by users."));
+        }
+
+        Result<LocationDetails> normalised = Normalise(code, name, timeZoneId);
+
+        if (normalised.IsFailure)
+        {
+            return Result.Failure(normalised.Errors);
+        }
+
+        Code = normalised.Value.Code;
+        Name = normalised.Value.Name;
+        Kind = kind;
+        TimeZoneId = normalised.Value.TimeZoneId;
+        return Result.Success();
+    }
+
+    /// <summary>
     /// Replaces the operational settings. Settings on a system counterparty or a
     /// closed location are meaningless: one has no operations and the other
     /// cannot have any more, so both are refused.
@@ -210,11 +255,47 @@ public sealed class Location : AggregateRoot<LocationId>
                 Error.Validation("location.organization_required", "A location must belong to an organization."));
         }
 
+        Result<LocationDetails> normalised = Normalise(code, name, timeZoneId);
+
+        if (normalised.IsFailure)
+        {
+            return Result<Location>.Failure(normalised.Errors);
+        }
+
+        Location location = new(
+            LocationId.New(),
+            organizationId,
+            normalised.Value.Code,
+            normalised.Value.Name,
+            kind,
+            normalised.Value.TimeZoneId,
+            settings ?? LocationSettings.Default);
+
+        return Result<Location>.Success(location);
+    }
+
+    /// <summary>The trimmed, upper-cased identity a location is stored under.</summary>
+    /// <param name="Code">The normalised code.</param>
+    /// <param name="Name">The trimmed name.</param>
+    /// <param name="TimeZoneId">The trimmed timezone identifier.</param>
+    private sealed record LocationDetails(string Code, string Name, string TimeZoneId);
+
+    /// <summary>
+    /// Normalises and validates the descriptive fields. Creation and editing
+    /// share it so a value that could be created can also be edited into place,
+    /// and vice versa.
+    /// </summary>
+    /// <param name="code">The short unique code.</param>
+    /// <param name="name">The human-readable name.</param>
+    /// <param name="timeZoneId">IANA timezone identifier.</param>
+    /// <returns>The normalised details, or the first validation failure.</returns>
+    private static Result<LocationDetails> Normalise(string? code, string? name, string? timeZoneId)
+    {
         string normalisedCode = code?.Trim().ToUpperInvariant() ?? string.Empty;
 
         if (normalisedCode.Length == 0 || normalisedCode.Length > CodeMaxLength)
         {
-            return Result<Location>.Failure(Error.Validation(
+            return Result<LocationDetails>.Failure(Error.Validation(
                 "location.code_invalid",
                 FormattableString.Invariant(
                     $"A location code is required and may be at most {CodeMaxLength} characters.")));
@@ -222,7 +303,7 @@ public sealed class Location : AggregateRoot<LocationId>
 
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > NameMaxLength)
         {
-            return Result<Location>.Failure(Error.Validation(
+            return Result<LocationDetails>.Failure(Error.Validation(
                 "location.name_invalid",
                 FormattableString.Invariant(
                     $"A location name is required and may be at most {NameMaxLength} characters.")));
@@ -230,19 +311,11 @@ public sealed class Location : AggregateRoot<LocationId>
 
         if (string.IsNullOrWhiteSpace(timeZoneId))
         {
-            return Result<Location>.Failure(
+            return Result<LocationDetails>.Failure(
                 Error.Validation("location.timezone_required", "A location must specify a timezone."));
         }
 
-        Location location = new(
-            LocationId.New(),
-            organizationId,
-            normalisedCode,
-            name.Trim(),
-            kind,
-            timeZoneId.Trim(),
-            settings ?? LocationSettings.Default);
-
-        return Result<Location>.Success(location);
+        return Result<LocationDetails>.Success(
+            new LocationDetails(normalisedCode, name.Trim(), timeZoneId.Trim()));
     }
 }

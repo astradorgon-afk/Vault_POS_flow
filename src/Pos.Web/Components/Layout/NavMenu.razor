@@ -2,6 +2,7 @@
 @inject NavigationManager Navigation
 @inject NotificationStore Notifications
 @inject UserSession Session
+@implements IDisposable
 
 <div class="brand-block">
     <a class="brand" href="" @onclick="NotifyNavigation">
@@ -130,6 +131,16 @@
     [Parameter]
     public EventCallback OnNavigate { get; set; }
 
+    /// <summary>
+    /// The unread pill reads the shared feed, so this menu has to repaint when
+    /// the feed refreshes. Without the subscription the pill renders once at
+    /// first paint — before the feed loads — and then either stays missing or
+    /// keeps a stale number until something else happens to re-render it.
+    /// </summary>
+    protected override void OnInitialized() => Notifications.Changed += OnNotificationsChanged;
+
+    private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
+
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
@@ -161,4 +172,6 @@
         await OnNavigate.InvokeAsync();
         Navigation.NavigateTo("/login");
     }
+
+    public void Dispose() => Notifications.Changed -= OnNotificationsChanged;
 }

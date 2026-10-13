@@ -88,6 +88,7 @@ try
     builder.Services.AddSignalR();
     builder.Services.AddSingleton<INotificationPublisher, SignalRNotificationPublisher>();
     builder.Services.AddSingleton<IInventoryChangePublisher, SignalRInventoryChangePublisher>();
+    builder.Services.AddSingleton<ITransferChangePublisher, SignalRTransferChangePublisher>();
     builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
     builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 

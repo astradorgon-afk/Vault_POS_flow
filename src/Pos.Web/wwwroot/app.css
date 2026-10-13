@@ -162,6 +162,12 @@ h1:focus { outline: none; }
 .nav-group { display:grid; gap:2px; margin-bottom:10px; }
 .nav-link svg { width:19px; height:19px; flex:0 0 19px; color:#9db7aa; }
 .nav-link:hover { background:rgba(255,255,255,.07); color:#fff; transform:translateX(2px); }.nav-link.active{background:var(--mint);color:var(--forest);}.nav-link.active svg{color:var(--forest)}
+
+/* The count pill keeps the sidebar's pale text by default, which all but
+   disappears against the mint highlight of the current page. Invert it there
+   so the unread number stays readable in both states. */
+.nav-link small{background:rgba(255,255,255,.14);border-color:#6b8a7a;color:#eaf3ee}
+.nav-link.active small{background:var(--forest);border-color:var(--forest);color:#fff}
 .sidebar-footer { padding:12px 18px 16px; border-top:1px solid rgba(255,255,255,.1); }.sidebar-footer>div{display:grid;gap:2px;margin-bottom:11px}.sidebar-footer span{color:#8eaa9b;font-size:.65rem;text-transform:uppercase;letter-spacing:.1em}.sidebar-footer strong{overflow:hidden;color:#e8f0eb;font-size:.8rem;text-overflow:ellipsis;white-space:nowrap}
 .sign-out { display: flex; }.sign-out:hover{background:rgba(255,255,255,.07);color:#fff}.sign-out svg{width:17px}
 .workspace-context { display:grid; gap:2px; }.workspace-context span{color:var(--muted);font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.workspace-context strong { font: 700 .95rem "Manrope"; font-family: "Manrope", sans-serif; font-weight: 700; letter-spacing: -.01em; }
@@ -233,6 +239,7 @@ h1:focus { outline: none; }
 .nt-live{display:inline-flex;align-items:center;gap:6px;margin-right:4px;color:var(--muted);font-size:.72rem;font-weight:700}.nt-live i{width:7px;height:7px;border-radius:50%;background:#a3aca6}.nt-live.is-live{color:var(--forest-bright)}.nt-live.is-live i{background:#2fa564;box-shadow:0 0 0 3px rgba(47,165,100,.18)}
 .nt-layout{margin-top:16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,300px);gap:16px;align-items:start}
 .nt-list{min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:14px;background:#fff}
+.nt-more{margin:0;padding:12px 18px;border-bottom:1px solid var(--line);background:#f6faf7;color:var(--muted);font-size:.76rem;line-height:1.55}
 .nt-item{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto 18px;align-items:start;gap:14px;padding:16px 18px;transition:background .15s}.nt-item+.nt-item{border-top:1px solid var(--line)}.nt-item:hover{background:#f8fbf9}
 .nt-item-hit{position:absolute;inset:0;z-index:1;width:100%;border:0;background:transparent;cursor:pointer}.nt-item-hit:disabled{cursor:default}.nt-item-hit:focus-visible{outline-offset:-3px}
 .nt-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:50%}.nt-icon svg{width:20px}.nt-icon.tone-info{background:#e6eefb;color:#2f5fb4}.nt-icon.tone-warn{background:#fdf0d6;color:#9a6a0c}.nt-icon.tone-bad{background:#fbe4e2;color:var(--danger)}

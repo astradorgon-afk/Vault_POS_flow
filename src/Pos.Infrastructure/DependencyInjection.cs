@@ -292,6 +292,10 @@ public static class DependencyInjection
         services.AddSingleton(sp => new InventoryChangeInterceptor(
             sp.GetRequiredService<IInventoryChangePublisher>(),
             sp.GetService<ILogger<InventoryChangeInterceptor>>() ?? NullLogger<InventoryChangeInterceptor>.Instance));
+        services.TryAddSingleton<ITransferChangePublisher, NoTransferChangePublisher>();
+        services.AddSingleton(sp => new TransferChangeInterceptor(
+            sp.GetRequiredService<ITransferChangePublisher>(),
+            sp.GetService<ILogger<TransferChangeInterceptor>>() ?? NullLogger<TransferChangeInterceptor>.Instance));
 
         services.AddDbContext<PosDbContext>((sp, options) =>
         {
@@ -313,7 +317,8 @@ public static class DependencyInjection
 
             options.AddInterceptors(
                 sp.GetRequiredService<AppendOnlyInterceptor>(),
-                sp.GetRequiredService<InventoryChangeInterceptor>());
+                sp.GetRequiredService<InventoryChangeInterceptor>(),
+                sp.GetRequiredService<TransferChangeInterceptor>());
 
             // Tracked entities are the exception, not the rule: reads are
             // projections and should never accidentally write back.

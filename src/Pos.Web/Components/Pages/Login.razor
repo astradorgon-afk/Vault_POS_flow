@@ -50,7 +50,7 @@
                         </div>
                         <div class="field">
                             <label for="work-location">Work location</label>
-                            <select id="work-location" name="work-location" value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChanged" disabled="@busy || loadingLocations">
+                            <select id="work-location" name="work-location" value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChanged" disabled="@(busy || loadingLocations)">
                                 <option value="">@(loadingLocations ? "Loading locations…" : "Select work location")</option>
                                 @foreach (PosSignInLocation location in locationChoices)
                                 {
@@ -326,10 +326,23 @@
         }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException)
         {
-            error = $"Online sign-in succeeded, but offline setup did not finish: {ex.Message}. Your saved work was kept. Try again while connected.";
+            error = $"Online sign-in succeeded, but offline setup did not finish: {CleanJsMessage(ex.Message)}. Your saved work was kept. Try again while connected.";
             showOfflineSetupModal = true;
         }
         finally { busy = false; }
+    }
+
+    /// <summary>Strips the JS "Error: " prefix and stack trace Blazor appends to a thrown message.</summary>
+    private static string CleanJsMessage(string message)
+    {
+        int lineBreak = message.IndexOfAny(['\r', '\n']);
+        string firstLine = (lineBreak >= 0 ? message[..lineBreak] : message).Trim();
+        if (firstLine.StartsWith("Error: ", StringComparison.Ordinal))
+        {
+            firstLine = firstLine[7..];
+        }
+        firstLine = firstLine.Trim().TrimEnd('.');
+        return firstLine.Length == 0 ? "the request was refused" : firstLine;
     }
 
     private async Task CheckOfflineFilesAsync()

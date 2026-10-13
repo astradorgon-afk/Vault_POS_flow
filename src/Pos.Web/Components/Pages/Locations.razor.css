@@ -33,3 +33,22 @@
 .policy-editor>footer{border-top:1px solid var(--line);background:#f7faf7}
 @media(max-width:760px){.location-workspace{grid-template-columns:1fr}.location-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:500px){.location-list{grid-template-columns:1fr}.policy-editor>header{flex-wrap:wrap}}
+
+/* Identity editing and closing: the owner's create, edit and retire controls. */
+.policy-section+.policy-section{border-top:1px solid var(--line)}
+.policy-section footer.policy-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px}
+.policy-section footer.policy-actions>span{color:var(--muted);font-size:.76rem}
+.location-danger-button{min-height:42px;padding:0 17px;border:1px solid #d8a6a0;border-radius:9px;background:#fff5f4;color:#9a4039;font-weight:800;cursor:pointer}
+.location-danger-button:hover{background:#ffedeb}
+.location-danger-button:disabled{opacity:.5;cursor:default}
+.location-secondary{min-height:42px;padding:0 17px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font-weight:800;cursor:pointer}
+.location-secondary:hover{border-color:#9ebbaa}
+.location-secondary:disabled{opacity:.5;cursor:default}
+.location-secondary:focus-visible,.location-danger-button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.close-confirm{display:grid;gap:12px;margin-top:16px;padding:16px;border:1px solid #e7c1bd;border-radius:12px;background:#fff8f7}
+.close-confirm label{display:grid;gap:6px;max-width:260px}
+.close-confirm label>span{color:var(--muted);font-size:.67rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.close-confirm input{height:43px;padding:0 11px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font-weight:600}
+.close-confirm p{margin:0;color:#7a3a34;font-size:.84rem}
+.close-confirm>div{display:flex;gap:10px;justify-content:flex-end}
+@media(max-width:760px){.policy-section footer.policy-actions{align-items:stretch;flex-direction:column}.close-confirm>div{justify-content:stretch}.close-confirm>div button{flex:1}}

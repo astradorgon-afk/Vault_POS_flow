@@ -1,9 +1,11 @@
 @page "/restock"
 @attribute [Authorize(Policy = "transfer.request")]
 @rendermode InteractiveServer
+@implements IDisposable
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
+@inject NotificationStore Notifications
 
 <PageTitle>Restock requests · VaultFlow</PageTitle>
 
@@ -114,7 +116,7 @@
                 {
                     <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
                         <div><strong>@RequestLabel(request)</strong><small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small></div>
-                        <span class="restock-status">@SplitWords(request.Status)</span><span aria-hidden="true">→</span>
+                        <span class="restock-status @StatusClass(request.Status)">@StatusLabel(request.Status)</span><span aria-hidden="true">→</span>
                     </a>
                 }
             </div>
@@ -175,8 +177,17 @@
         .OrderBy(row => row.Status == "Out" ? 0 : 1)
         .ThenBy(row => row.Available)];
 
+    /// <summary>Folds live transfer events into one quiet reload a moment later.</summary>
+    private RefreshThrottle? liveRefresh;
+
     protected override async Task OnInitializedAsync()
     {
+        // A request's status moves when the owner decides and when the
+        // warehouse acts; both ends announce the change, so the history
+        // follows along without anyone pressing Refresh.
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadRequestsQuietlyAsync));
+        Notifications.TransfersChanged += OnTransfersChanged;
+
         try
         {
             ApiResult<List<PosLocation>> locations = await Api.GetLocationsAsync(CancellationToken.None);
@@ -351,9 +362,72 @@
         finally { loadingRequests = false; }
     }
 
+    /// <summary>The live signal: reload the history without touching the
+    /// button, the message, or anything the staff member is typing.</summary>
+    private void OnTransfersChanged(IReadOnlyList<Guid> changed) => liveRefresh?.Request();
+
+    private async Task ReloadRequestsQuietlyAsync()
+    {
+        try
+        {
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                // Keep the rows on screen; the next change tries again.
+                return;
+            }
+
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock" &&
+                stores.Any(store => store.Id == request.DestinationLocationId))
+                .OrderByDescending(request => request.CreatedAtUtc));
+            StateHasChanged();
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the rows on screen; the next change tries again.
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Notifications.TransfersChanged -= OnTransfersChanged;
+        liveRefresh?.Dispose();
+    }
+
     private string StoreName(Guid id) => stores.FirstOrDefault(store => store.Id == id)?.Name ?? "Store";
     private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
         ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
         : request.Number;
+
+    /// <summary>The stage of a request told the way the store experiences it:
+    /// the owner decides (pending), then the warehouse picks and delivers.</summary>
+    private static string StatusLabel(string status) => status switch
+    {
+        "Submitted" or "InReview" => "Pending approval",
+        "Approved" => "Approved",
+        "Picking" => "Being picked",
+        "Ready" => "Ready to deliver",
+        "Dispatched" => "On the way",
+        "PartiallyReceived" => "Partly received",
+        "Received" => "Received",
+        "Closed" => "Delivered",
+        "Cancelled" => "Cancelled",
+        "PendingCentralReview" => "Pending review",
+        _ => SplitWords(status),
+    };
+
+    /// <summary>Badge colour that matches the stage: amber while waiting, green
+    /// once approved or delivered, blue while the warehouse holds or moves it.</summary>
+    private static string StatusClass(string status) => status switch
+    {
+        "Submitted" or "InReview" or "PartiallyReceived" or "PendingCentralReview" => "pending",
+        "Approved" or "Picking" or "Received" or "Closed" => "approved",
+        "Ready" or "Dispatched" => "transit",
+        "Cancelled" => "cancelled",
+        _ => string.Empty,
+    };
+
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 }
