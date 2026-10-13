@@ -14,7 +14,7 @@
     <div class="tr-head-copy">
         <p class="office-kicker">@(IsStoreRestock ? "Store supplies" : "Transfer")</p>
         <div class="tr-title-row">
-            <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferId.ToString("N")[..8].ToUpperInvariant()}" : "Transfer" : detail.Transfer.Number)</h1>
+            <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferLabels.ShortId(TransferId)}" : "Transfer" : detail.Transfer.Number)</h1>
             <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
             @if (IsEmergency)
             {
@@ -222,7 +222,7 @@ else
                 }
             </div>
             <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="PickAsync" disabled="@(!CanPickNow || acting)">@(acting ? "Recording…" : "Record picking")</button>
+                <button type="button" class="search-action" @onclick="PickAsync" disabled="@(!CanPickNow || acting)">@(acting ? "Accepting…" : "Accept request")</button>
             </div>
         </section>
     }
@@ -481,7 +481,7 @@ else
     private bool ShowApprove => Status == "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
     private bool ShowReject => Status is "Submitted" or "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
     // The pick panel stays visible for the source side from the moment the        // request is approved; its rows start at zero, so the quantity inputs must
-    // be on screen before any picking can be recorded. The "Record picking"
+    // be on screen before any picking can be recorded. The "Accept request"
     // button itself stays disabled until a quantity is entered (CanPickNow).
     private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowReady => Status == "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
@@ -505,8 +505,8 @@ else
     {
         "Submitted" => "The owner must review and approve this request before warehouse staff can pick or dispatch its products.",
         "InReview" => "The owner is reviewing this request. Once approved, it will appear under To fulfill here.",
-        "Approved" => "Enter the quantities picked from main warehouse stock and select Record picking. Then mark the request ready and dispatch it to the store.",
-        "Picking" => "Enter any remaining quantities and select Record picking. When picking is complete, mark the request ready and dispatch it.",
+        "Approved" => "Enter the quantities picked from main warehouse stock and select Accept request. Then mark the request ready and dispatch it to the store.",
+        "Picking" => "Enter any remaining quantities and select Accept request. When picking is complete, mark the request ready and dispatch it.",
         "Ready" => "Select Dispatch transfer below to move the picked products out of main warehouse stock and send them to the store.",
         "Dispatched" => "The products are in transit. Store staff can open this request and record what arrived.",
         _ => string.Empty,
@@ -566,7 +566,7 @@ else
         return new WorkflowReceipt(
             IsStoreRestock ? "Product request" : "Inventory transfer",
             string.IsNullOrWhiteSpace(transfer.Transfer.Number)
-                ? $"Transfer {TransferId.ToString("N", CultureInfo.InvariantCulture)[..8].ToUpperInvariant()}"
+                ? $"Transfer {TransferLabels.ShortId(TransferId)}"
                 : transfer.Transfer.Number,
             SplitWords(transfer.Transfer.Status),
             "From",

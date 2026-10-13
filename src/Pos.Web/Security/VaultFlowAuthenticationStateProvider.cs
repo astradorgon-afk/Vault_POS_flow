@@ -5,12 +5,35 @@ using Pos.Web.Services;
 namespace Pos.Web.Security;
 
 /// <summary>Projects the API session into Blazor authorization state.</summary>
-public sealed class VaultFlowAuthenticationStateProvider(UserSession session) : AuthenticationStateProvider
+public sealed class VaultFlowAuthenticationStateProvider(UserSession session, VaultFlowApiClient api) : AuthenticationStateProvider
 {
     private static readonly AuthenticationState Anonymous = new(new ClaimsPrincipal(new ClaimsIdentity()));
 
     /// <inheritdoc />
-    public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(CreateState());
+    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
+    {
+        try
+        {
+            // A circuit that idled past its access-token window refreshes the
+            // session here instead of bouncing the operator to the sign-in page.
+            await api.EnsureFreshSessionAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (HttpRequestException)
+        {
+            // The API is unreachable: keep the current state; the next API call
+            // reports the connectivity problem on its own.
+        }
+        catch (TaskCanceledException)
+        {
+            // The refresh timed out: handled like an unreachable API.
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // An unreadable refresh response: the next API call reports it.
+        }
+
+        return CreateState();
+    }
 
     /// <summary>Notifies the component tree that sign-in succeeded.</summary>
     public void NotifySignedIn() => NotifyAuthenticationStateChanged(Task.FromResult(CreateState()));

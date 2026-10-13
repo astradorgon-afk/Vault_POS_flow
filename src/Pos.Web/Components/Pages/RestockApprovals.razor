@@ -82,7 +82,7 @@
 
     private string StoreName(Guid id) => storeNames.GetValueOrDefault(id, "Store");
     private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
-        ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
+        ? $"Restock request {TransferLabels.ShortId(request.Id)}"
         : request.Number;
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 }

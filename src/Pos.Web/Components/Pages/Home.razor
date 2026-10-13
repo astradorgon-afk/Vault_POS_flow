@@ -240,11 +240,11 @@ else
     {
         <section class="dashboard-section" aria-labelledby="exceptions-title">
             <div class="section-heading">
-                <div><span class="eyebrow">Last 30 days</span><h2 id="exceptions-title">Stock exceptions</h2></div>
-                <a class="text-link" href="inventory/exceptions">Review exceptions <AppIcon Name="arrow" /></a>
+                <div><span class="eyebrow">Last 30 days</span><h2 id="exceptions-title">Failed stock attempts</h2></div>
+                <a class="text-link" href="inventory/exceptions">Review failed attempts <AppIcon Name="arrow" /></a>
             </div>
             <div class="attention-list">
-                <div class="ledger-head"><span>Exception</span><span>Location</span><span>Signal</span></div>
+                <div class="ledger-head"><span>Attempt</span><span>Location</span><span>Signal</span></div>
                 @foreach (PosNegativeStockSummary row in negativeStockRows.Take(3))
                 {
                     <div class="attention-row"><div><strong>@(row.ProductName ?? row.Sku ?? "Unknown product")</strong><small>@row.Sku</small></div><span>@(row.LocationCode ?? "Assigned scope")</span><strong>@row.Attempts attempts</strong></div>

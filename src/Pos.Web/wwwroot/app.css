@@ -48,8 +48,11 @@ h1:focus { outline: none; }
 .app-install-link { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 14px; border-radius:9px; background:var(--forest); color:#fff; font-size:.76rem; font-weight:800; text-decoration:none; white-space:nowrap; }
 .app-install-link:hover,.app-install-link:focus-visible { background:var(--forest-bright); color:#fff; }
 .notification-bell { text-decoration: none; font: 700 .82rem "Manrope"; position: relative; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: var(--forest); }
-.notification-bell.has-unread { color: #8c4d12; background: var(--amber-soft); border-color: #ebce83; }
+.notification-bell.has-unread { color: #fff; background: var(--danger); border-color: #8f332c; box-shadow: 0 0 0 3px rgba(166, 61, 53, .18); }
+.notification-bell.has-unread:hover, .notification-bell.has-unread:focus-visible { background: #8f332c; border-color: #7c2d27; color: #fff; }
 .notification-bell b { position: absolute; top: -7px; right: -7px; min-width: 21px; height: 21px; padding: 0 5px; display: grid; place-items: center; border: 2px solid var(--paper); border-radius: 99px; background: var(--danger); color: #fff; font-size: .61rem; }
+/* Unread count on the red bell face: white pill with red digits stays readable. */
+.notification-bell.has-unread b { background: #fff; color: var(--danger); border-color: var(--danger); }
 .operator-mark { width: 39px; height: 39px; border-radius: 50%; display: grid; place-items: center; background: var(--forest); color: #fff; font-size: .72rem; font-weight: 800; }
 .operator > span:last-child { display: grid; line-height: 1.25; }
 .operator small { color: var(--muted); font-size: .7rem; }
@@ -79,7 +82,7 @@ h1:focus { outline: none; }
 .nav-heading { margin: 8px 12px 4px; font-size: .65rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #8fb3a1; }
 .nav-link { min-height: 38px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border-radius: 9px; color: #dbe8e1; text-decoration: none; font-size: .85rem; font-weight: 600; transition: background .15s,color .15s,transform .15s; }
 .nav-link > span { width: auto; min-width: 0; overflow: hidden; font-size: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.nav-link small { border: 1px solid #557363; text-transform: uppercase; margin-left: auto; min-width: 22px; padding: 2px 7px; border-radius: 99px; background: rgba(255,255,255,.1); color: #dbe8e1; text-align: center; font-size: .65rem; }
+.nav-link small { border: 1px solid #8f332c; text-transform: uppercase; margin-left: auto; min-width: 22px; padding: 2px 7px; border-radius: 99px; background: var(--danger); color: #fff; text-align: center; font-size: .65rem; }
 .nav-link.active { font-weight: 800; box-shadow: inset 3px 0 0 var(--forest-bright), 0 6px 16px -10px rgba(0, 0, 0, .5); }
 .nav-link.disabled { opacity: .56; }
 .sign-out { border-top: 1px solid #3b5d4b; text-align: left; width: 100%; min-height: 40px; margin: 0; padding: 0 10px; align-items: center; gap: 9px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: transparent; color: #cfe0d7; font-weight: 700; cursor: pointer; }
@@ -163,11 +166,10 @@ h1:focus { outline: none; }
 .nav-link svg { width:19px; height:19px; flex:0 0 19px; color:#9db7aa; }
 .nav-link:hover { background:rgba(255,255,255,.07); color:#fff; transform:translateX(2px); }.nav-link.active{background:var(--mint);color:var(--forest);}.nav-link.active svg{color:var(--forest)}
 
-/* The count pill keeps the sidebar's pale text by default, which all but
-   disappears against the mint highlight of the current page. Invert it there
-   so the unread number stays readable in both states. */
-.nav-link small{background:rgba(255,255,255,.14);border-color:#6b8a7a;color:#eaf3ee}
-.nav-link.active small{background:var(--forest);border-color:var(--forest);color:#fff}
+/* The unread pill is red in both states: it flags "notice waiting" against the
+   dark sidebar and stays loud on the mint highlight of the current page. */
+.nav-link small{background:var(--danger);border-color:#8f332c;color:#fff}
+.nav-link.active small{background:var(--danger);border-color:#7c2d27;color:#fff}
 .sidebar-footer { padding:12px 18px 16px; border-top:1px solid rgba(255,255,255,.1); }.sidebar-footer>div{display:grid;gap:2px;margin-bottom:11px}.sidebar-footer span{color:#8eaa9b;font-size:.65rem;text-transform:uppercase;letter-spacing:.1em}.sidebar-footer strong{overflow:hidden;color:#e8f0eb;font-size:.8rem;text-overflow:ellipsis;white-space:nowrap}
 .sign-out { display: flex; }.sign-out:hover{background:rgba(255,255,255,.07);color:#fff}.sign-out svg{width:17px}
 .workspace-context { display:grid; gap:2px; }.workspace-context span{color:var(--muted);font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.workspace-context strong { font: 700 .95rem "Manrope"; font-family: "Manrope", sans-serif; font-weight: 700; letter-spacing: -.01em; }
@@ -870,7 +872,7 @@ select.qr-field{cursor:pointer}
   .tab-item.active { color: var(--forest); }
   .tab-item.active::before { content: ""; position: absolute; top: 4px; width: 46px; height: 30px; border-radius: 99px; background: var(--mint-soft); z-index: -1; }
   .tab-item:active { transform: scale(.94); }
-  .tab-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: #c44a3f; color: #fff; font-size: .62rem; line-height: 18px; }
+  .tab-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--danger); color: #fff; font-size: .62rem; line-height: 18px; }
 
   /* "More": the full menu slides up from the bottom. */
   .sidebar { inset: auto 0 0 0 !important; width: 100% !important; height: min(82dvh, 720px) !important; border-radius: 22px 22px 0 0;

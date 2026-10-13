@@ -44,15 +44,24 @@ public sealed partial class VaultFlowApiClient
     /// <summary>Discards a draft that was never submitted.</summary>
     public async Task<ApiResult<bool>> WithdrawPurchaseOrderAsync(Guid orderId, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, OrderPath(orderId));
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Delete, OrderPath(orderId)), cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<bool>.Failure(SessionExpiredText);
+        }
+
         if (response.IsSuccessStatusCode)
         {
             return ApiResult<bool>.Success(true);
         }
 
         ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
-        return ApiResult<bool>.Failure(problem?.Detail ?? "VaultFlow could not discard that draft.", problem?.ErrorCode);
+        return ApiResult<bool>.Failure(
+            problem?.Detail ?? (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                ? SessionExpiredText
+                : "VaultFlow could not discard that draft."),
+            problem?.ErrorCode);
     }
 
     /// <summary>Records one delivery against an ordered purchase order.</summary>

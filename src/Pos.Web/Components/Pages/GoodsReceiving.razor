@@ -183,7 +183,7 @@
 
     private string LocationName(Guid id) => locations.FirstOrDefault(location => location.Id == id)?.Name ?? "Location";
     private static string TransferLabel(PosTransferSummary transfer) => string.IsNullOrWhiteSpace(transfer.Number)
-        ? $"Transfer {transfer.Id.ToString("N")[..8].ToUpperInvariant()}"
+        ? $"Transfer {TransferLabels.ShortId(transfer.Id)}"
         : transfer.Number;
     private static string TransferState(string status) => status switch
     {

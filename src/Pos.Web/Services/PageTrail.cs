@@ -77,7 +77,7 @@ public sealed class PageTrail(NavigationManager navigation)
         _ when path.StartsWith("transfers/", StringComparison.Ordinal) => new("Inventory", "Transfer", new NavCrumb("Transfers", "transfers")),
         _ when path.StartsWith("inventory/timeline/", StringComparison.Ordinal) => new("Inventory", "Movement chain", new NavCrumb("Stock levels", "inventory/stock")),
         "reports" => new("Stores", "Daily reports", null),
-        "inventory/exceptions" => new("Inventory", "Inventory exceptions", null),
+        "inventory/exceptions" => new("Inventory", "Failed attempts", null),
         "purchasing" => new("Purchasing", "Purchase orders", null),
         "receiving" => new("Inventory", "Goods receiving", null),
         _ when path.StartsWith("receiving/", StringComparison.Ordinal) => new("Inventory", "Receive delivery", new("Goods receiving", "receiving")),

@@ -50,6 +50,19 @@ public sealed class UserSession
         WorkLocationKind = null;
     }
 
+    /// <summary>Serializes access-token refreshes for this circuit. Refresh
+    /// tokens rotate on every exchange, so only one caller may use it while
+    /// the rest wait and adopt the token the winner installed.</summary>
+    internal SemaphoreSlim RefreshGate { get; } = new(1, 1);
+
+    /// <summary>Replaces the credentials after a token refresh, keeping the
+    /// chosen work location untouched.</summary>
+    public void UpdateCredentials(SignInResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        Current = response;
+    }
+
     /// <summary>Sets an optional starting location within the signed-in user's scope.</summary>
     public bool SetWorkLocation(Guid? locationId, string? name = null, int? kind = null)
     {

@@ -112,7 +112,7 @@
     {
         "Submitted" => "Waiting for the owner to review this request.",
         "InReview" => "The owner is reviewing this request.",
-        "Approved" => "Approved. Open to record the products picked from stock.",
+        "Approved" => "Approved. Open to accept the request and record the picked quantities.",
         "Picking" => "Picking in progress. Open to finish picking and mark ready.",
         "Ready" => "Picking is complete. Open to dispatch the products to the store.",
         "Dispatched" => "Dispatched from the main warehouse. The store can now receive it.",
@@ -121,13 +121,13 @@
     };
     private static string ActionLabel(PosTransferSummary request) => request.Status switch
     {
-        "Approved" => "Open to pick →",
-        "Picking" => "Continue picking →",
+        "Approved" => "Accept request →",
+        "Picking" => "Accept request →",
         "Ready" => "Open to dispatch →",
         _ => "View request →",
     };
     private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
-        ? $"Restock request {request.Id.ToString("N")[..8].ToUpperInvariant()}"
+        ? $"Restock request {TransferLabels.ShortId(request.Id)}"
         : request.Number;
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 }

@@ -52,17 +52,137 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
         return request;
     }
 
+    private const string SessionExpiredText = "Your session has expired. Reload the page to sign in again.";
+
+    /// <summary>Sends an authorized request, refreshing the circuit's access
+    /// token shortly before it expires and retrying once when the API rejects
+    /// it. Returns <see langword="null"/> when the session has expired and
+    /// cannot be renewed; the caller reports <see cref="SessionExpiredText"/>.</summary>
+    private async Task<HttpResponseMessage?> SendAuthorizedAsync(
+        Func<HttpRequestMessage> createRequest,
+        CancellationToken cancellationToken)
+    {
+        // Best effort: a fresh session skips this without touching the network.
+        _ = await RefreshSessionAsync(force: false, cancellationToken).ConfigureAwait(false);
+
+        HttpResponseMessage response = await http
+            .SendAsync(createRequest(), cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized || session.Current is null)
+        {
+            return response;
+        }
+
+        // The access token was rejected; exchange the refresh token once and retry.
+        response.Dispose();
+        if (!await RefreshSessionAsync(force: true, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return await http.SendAsync(createRequest(), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Keeps the session alive by refreshing the access token before
+    /// it expires. Safe to call from anywhere; concurrent callers share one
+    /// exchange through the session gate, so a single-use refresh token is
+    /// never spent twice.</summary>
+    public Task<bool> EnsureFreshSessionAsync(CancellationToken cancellationToken)
+        => RefreshSessionAsync(force: false, cancellationToken);
+
+    private async Task<bool> RefreshSessionAsync(bool force, CancellationToken cancellationToken)
+    {
+        if (session.Current is not { } requested)
+        {
+            return false;
+        }
+
+        if (!force && requested.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddSeconds(60))
+        {
+            return true;
+        }
+
+        if (requested.RefreshTokenExpiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            return false;
+        }
+
+        await session.RefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Another caller may have refreshed while this one waited.
+            if (session.Current is not { } current)
+            {
+                return false;
+            }
+
+            if (!string.Equals(current.AccessToken, requested.AccessToken, StringComparison.Ordinal)
+                && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddSeconds(30))
+            {
+                return true;
+            }
+
+            if (!force && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddSeconds(60))
+            {
+                return true;
+            }
+
+            using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/api/v1/auth/refresh", UriKind.Relative));
+            request.Content = JsonContent.Create(new { current.RefreshToken });
+            using HttpResponseMessage response = await http
+                .SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            SignInResponse? refreshed = await response.Content
+                .ReadFromJsonAsync<SignInResponse>(cancellationToken).ConfigureAwait(false);
+            if (refreshed is null || refreshed.User.Id != current.User.Id)
+            {
+                return false;
+            }
+
+            // Only the credentials rotate; the chosen work location survives.
+            session.UpdateCredentials(refreshed);
+            return true;
+        }
+        finally
+        {
+            session.RefreshGate.Release();
+        }
+    }
+
+    /// <summary>Builds the message for a failed load: the API's own detail when
+    /// it sent one, a session-expired hint for a 401, the generic fallback else.</summary>
+    private static string LoadFailureText(HttpResponseMessage response, ApiProblem? problem)
+        => problem?.Detail
+        ?? (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+            ? SessionExpiredText
+            : "VaultFlow could not load the requested information.");
+
+    /// <summary>Builds the message for a failed action, mirroring
+    /// <see cref="LoadFailureText"/> with the action's fallback wording.</summary>
+    private static string ActionFailureText(HttpResponseMessage response, ApiProblem? problem)
+        => problem?.Detail
+        ?? (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+            ? SessionExpiredText
+            : "VaultFlow could not complete that operation.");
+
     /// <summary>Gets and deserializes an authenticated API resource.</summary>
     public async Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<T>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<T>.Failure(
-                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                LoadFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -75,15 +195,23 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     /// <summary>Posts a JSON body through the register and reads the response.</summary>
     public async Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
-        request.Content = JsonContent.Create(body);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () =>
+            {
+                HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
+                request.Content = JsonContent.Create(body);
+                return request;
+            }, cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<T>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<T>.Failure(
-                problem?.Detail ?? "VaultFlow could not complete that operation.",
+                ActionFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -121,14 +249,18 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     /// <summary>Gets a plain-text body from an authenticated API resource.</summary>
     public async Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<string>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<string>.Failure(
-                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                LoadFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -168,13 +300,18 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
             path += FormattableString.Invariant($"&to={toDate:yyyy-MM-dd}");
         }
 
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<PosSalePage>.Failure(SessionExpiredText);
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<PosSalePage>.Failure(
-                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                LoadFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -283,19 +420,27 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     public async Task<ApiResult<string>> SendCommandAsync(
         HttpMethod method, string path, object? body, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(method, path);
-        if (body is not null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () =>
+            {
+                HttpRequestMessage request = CreateRequest(method, path);
+                if (body is not null)
+                {
+                    request.Content = JsonContent.Create(body);
+                }
 
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                return request;
+            }, cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<string>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<string>.Failure(
-                problem?.Detail ?? "VaultFlow could not complete that operation.",
+                ActionFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
