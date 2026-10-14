@@ -20,4 +20,23 @@ public static class StoreClock
     /// sale rung up at 21:57 in Makati reads 21:57 whatever zone the web server
     /// runs in.</summary>
     public static DateTimeOffset InStoreTime(this DateTimeOffset instant) => TimeZoneInfo.ConvertTime(instant, StoreZone);
+
+    /// <summary>
+    /// Resolves a wall-clock time typed on a screen — the receiving form's
+    /// "released by supplier" — as the stores' own local time, so the instant
+    /// it lands on does not depend on which zone the browser or the server
+    /// happens to run in.
+    /// </summary>
+    /// <param name="localTime">The clock reading as typed, with no offset.</param>
+    /// <returns>The instant that reading represents in Asia/Manila.</returns>
+    public static DateTimeOffset FromStoreLocal(DateTime localTime)
+    {
+        DateTime utc = localTime.Kind == DateTimeKind.Utc
+            ? localTime
+            : TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified),
+                StoreZone);
+
+        return new DateTimeOffset(utc);
+    }
 }

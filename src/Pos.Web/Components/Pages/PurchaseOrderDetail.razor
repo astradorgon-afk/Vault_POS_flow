@@ -253,6 +253,10 @@ else if (order is { } o)
                         @if (receipt.DocumentsMissing) { <span class="ov-pill tone-warn">Documents missing</span> }
                         @if (receipt.CostVariancePendingApproval) { <span class="ov-pill tone-warn">Cost change awaiting approval</span> }
                     </div>
+                    @if (PurchasingText.SupplierPaperwork(receipt) is { } paperwork)
+                    {
+                        <p class="po-issue">@paperwork</p>
+                    }
                     <ul>
                         @foreach (PosGoodsReceiptLine line in receipt.Lines)
                         {
@@ -371,6 +375,20 @@ else if (order is { } o)
             </div>
 
             <label class="switch-label"><input type="checkbox" @bind="documentsMissing" /><span>The delivery note or invoice is missing</span></label>
+            <div class="po-lines-grid po-supplier-docs">
+                <label>
+                    <span>Supplier DR number <em>optional</em></span>
+                    <input type="text" maxlength="40" @bind="supplierDrNumber" placeholder="As printed on their delivery receipt" />
+                </label>
+                <label>
+                    <span>Supplier OR number <em>optional</em></span>
+                    <input type="text" maxlength="40" @bind="supplierOrNumber" placeholder="As printed on their official receipt" />
+                </label>
+                <label>
+                    <span>Released by supplier <em>optional</em></span>
+                    <input type="datetime-local" @bind="supplierReleasedAt" />
+                </label>
+            </div>
             <label class="switch-label arrival-confirmation"><input type="checkbox" @bind="arrivalConfirmed" /><span>@(IsSameDayDelivery ? "I confirm this is a genuine same-day delivery: the goods have physically arrived and I have checked the quantities." : "I confirm these goods have physically arrived and the quantities above have been checked.")</span></label>
             <div class="po-buttons">
                 <span class="po-hint">@ReceiveSummary</span>

@@ -96,7 +96,11 @@ public sealed record PosTransferSummary(
     DateTimeOffset? ReceivedAtUtc,
     decimal TotalValue,
     int LineCount,
-    string Mode = "Normal");
+    string Mode = "Normal")
+{
+    /// <summary>The DR number issued when the goods were released.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>A store's request for supplies from the main warehouse.</summary>
 public sealed record PosCreateRestockRequest(

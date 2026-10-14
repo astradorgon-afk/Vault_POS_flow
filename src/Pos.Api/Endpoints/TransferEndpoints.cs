@@ -185,7 +185,11 @@ public sealed record TransferSummary(
     DateTimeOffset? ReceivedAtUtc,
     decimal TotalValue,
     int LineCount,
-    string Mode = "Normal");
+    string Mode = "Normal")
+{
+    /// <summary>The DR number issued when the goods were released.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>One step in a transfer's custody timeline.</summary>
 public sealed record TransferCustodyEventSummary(
@@ -442,7 +446,10 @@ public static class TransferEndpoints
         t.ReceivedAtUtc,
         t.TotalValue,
         t.Lines.Count,
-        t.Mode.ToString());
+        t.Mode.ToString())
+    {
+        DeliveryReceiptNumber = t.DeliveryReceiptNumber,
+    };
 
     private static async Task<IResult> ListTransfersAsync(
         PosDbContext context,
@@ -853,7 +860,10 @@ public static class TransferEndpoints
                 transfer.ReceivedAtUtc,
                 transfer.TotalValue,
                 transfer.Lines.Count,
-                transfer.Mode.ToString()),
+                transfer.Mode.ToString())
+            {
+                DeliveryReceiptNumber = transfer.DeliveryReceiptNumber,
+            },
             transfer.Kind.ToString(),
             transfer.Mode.ToString(),
             transfer.ReviewNote,
@@ -1011,7 +1021,8 @@ public static class TransferEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind == LocationKind.Store && (everyStore || assignedLocations.Contains(l.Id)))
+            .Where(l => l.Kind == LocationKind.Store && l.IsActive
+                && (everyStore || assignedLocations.Contains(l.Id)))
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1023,7 +1034,7 @@ public static class TransferEndpoints
 
         List<Location> sources = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind != LocationKind.External)
+            .Where(l => l.Kind != LocationKind.External && l.IsActive)
             .OrderBy(l => l.Kind == LocationKind.MainWarehouse ? 0 : 1)
             .ThenBy(l => l.Code)
             .ToListAsync(cancellationToken)

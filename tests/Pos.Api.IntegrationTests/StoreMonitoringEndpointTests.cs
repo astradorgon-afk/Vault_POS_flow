@@ -266,6 +266,54 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
             .Should().Contain(["Store request", "Dispatched transfer"]);
     }
 
+    [Fact]
+    public async Task ClosedStore_LeavesTheDailyReports()
+    {
+        LocationId retired = await factory.CreateLocationAsync("SM-CLOSED", "Retired Store");
+        await factory.CreateUserAsync("sm-closed-admin", Roles.Administrator, tier: ApprovalTier.Tier3);
+        await factory.CreateUserAsync("sm-closed-owner", Roles.Owner, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string admin = await SignInAsync(client, "sm-closed-admin");
+        string owner = await SignInAsync(client, "sm-closed-owner");
+
+        const string Period = "from=2026-03-01&to=2026-03-07";
+
+        // Before closing, the store is a row of the daily reports like any other.
+        using (HttpResponseMessage before = await GetAsync(client, $"/api/v1/dashboard/store-performance?{Period}", owner))
+        {
+            before.StatusCode.Should().Be(HttpStatusCode.OK, await before.Content.ReadAsStringAsync());
+            StoreLocationIds(before).Should().Contain(retired.Value);
+        }
+
+        using HttpResponseMessage closed = await PostJsonWithTokenAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{retired.Value}/close"),
+            new { closingDate = "2026-03-01" },
+            admin);
+        closed.StatusCode.Should().Be(HttpStatusCode.NoContent, await closed.Content.ReadAsStringAsync());
+
+        // A closed store stops being reported: it holds no stock and opens no
+        // work, so it must not add an empty card or drag down the totals.
+        using (HttpResponseMessage performance = await GetAsync(client, $"/api/v1/dashboard/store-performance?{Period}", owner))
+        {
+            performance.StatusCode.Should().Be(HttpStatusCode.OK, await performance.Content.ReadAsStringAsync());
+            StoreLocationIds(performance).Should().NotContain(retired.Value);
+        }
+
+        using (HttpResponseMessage movements = await GetAsync(client, "/api/v1/dashboard/store-movements", owner))
+        {
+            movements.StatusCode.Should().Be(HttpStatusCode.OK, await movements.Content.ReadAsStringAsync());
+            StoreLocationIds(movements).Should().NotContain(retired.Value);
+        }
+    }
+
+    private static HashSet<Guid> StoreLocationIds(HttpResponseMessage response)
+    {
+        using JsonDocument document = JsonDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+        return [.. document.RootElement.GetProperty("stores").EnumerateArray()
+            .Select(store => store.GetProperty("locationId").GetGuid())];
+    }
+
     private Task<ProductId> ProductAsync(string sku)
         => factory.CreateProductAsync(
             sku,

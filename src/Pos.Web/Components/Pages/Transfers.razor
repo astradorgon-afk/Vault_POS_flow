@@ -192,7 +192,7 @@ else
         {
             <table class="sales-table counts-table">
                 <thead>
-                    <tr><th>NUMBER</th><th>Status</th><th>Route</th><th>Lines</th><th>Value</th><th>Created</th><th>Dispatched</th><th>Received</th></tr>
+                    <tr><th>NUMBER</th><th>Status</th><th>Route</th><th>Lines</th><th>Value</th><th>Created</th><th>Released</th><th>DR</th><th>Received</th></tr>
                 </thead>
                 <tbody>
                     @foreach (PosTransferSummary transfer in visibleTransfers)
@@ -211,6 +211,7 @@ else
                             <td>@Money(transfer.TotalValue)</td>
                             <td>@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@(transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td>@(transfer.DeliveryReceiptNumber ?? "—")</td>
                             <td>@(transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                         </tr>
                     }

@@ -70,7 +70,7 @@ public static class ProductAnalyticsEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind == LocationKind.Store)
+            .Where(l => l.Kind == LocationKind.Store && l.IsActive)
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);

@@ -27,6 +27,7 @@ public sealed class TransferTests
 
     private static readonly DocumentNumber TrfNumber = DocumentNumber.Create(DocumentType.TransferOrder, 2026, 7);
     private static readonly DocumentNumber ShpNumber = DocumentNumber.Create(DocumentType.TransferShipment, 2026, 3);
+    private static readonly DocumentNumber DrNumber = DocumentNumber.Create(DocumentType.DeliveryReceipt, 2026, 5);
     private static readonly DocumentNumber TrcNumber = DocumentNumber.Create(DocumentType.TransferReceipt, 2026, 11);
 
     [Fact]
@@ -298,12 +299,14 @@ public sealed class TransferTests
             TrfNumber,
             TransferShipmentId.New(),
             ShpNumber.Value,
+            DrNumber.Value,
             Picker);
 
         dispatch.IsSuccess.Should().BeTrue(because: string.Join("; ", dispatch.Errors.Select(e => e.Code)));
         transfer.Status.Should().Be(TransferStatus.Dispatched);
         transfer.Number.Should().Be(TrfNumber.Value);
         transfer.ShipmentNumber.Should().Be(ShpNumber.Value);
+        transfer.DeliveryReceiptNumber.Should().Be(DrNumber.Value);
         transfer.DispatchedByUserId.Should().Be(Picker);
         transfer.CustodyEvents.Select(e => e.Kind).Should().Contain(TransferCustodyEventKind.Dispatched);
     }
@@ -314,7 +317,7 @@ public sealed class TransferTests
         Result<Transfer> result = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now);
         Transfer transfer = result.Value;
 
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker)
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker)
             .Error.Code.Should().Be("transfer.invalid_state");
 
         transfer.Submit(Requester, Now);
@@ -323,8 +326,8 @@ public sealed class TransferTests
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
         transfer.Ready(Picker, Now);
 
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker).IsSuccess.Should().BeTrue();
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker)
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker).IsSuccess.Should().BeTrue();
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker)
             .Error.Code.Should().Be("transfer.already_numbered");
     }
 
@@ -503,7 +506,7 @@ public sealed class TransferTests
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
         transfer.Ready(Picker, Now);
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker);
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker);
     }
 
     private static TransferLineSpec Spec(ProductId productId, decimal quantity, string? note = null)

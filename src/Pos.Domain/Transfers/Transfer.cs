@@ -1006,14 +1006,16 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
     }
 
     /// <summary>
-    /// Dispatches the transfer: records the TRF number, the SHP shipment number
-    /// and opens the ledger's in-transit buckets. The handler posts the ledger
-    /// group after this succeeds; a failed post rolls the whole transaction back.
+    /// Dispatches the transfer: records the TRF number, the SHP shipment number,
+    /// the DR delivery receipt number and opens the ledger's in-transit buckets.
+    /// The handler posts the ledger group after this succeeds; a failed post
+    /// rolls the whole transaction back.
     /// </summary>
     /// <param name="now">The current instant.</param>
     /// <param name="number">The allocated TRF number.</param>
     /// <param name="shipmentId">The shipment identifier used as the ledger reference.</param>
     /// <param name="shipmentNumber">The human-readable SHP number.</param>
+    /// <param name="deliveryReceiptNumber">The DR number issued with the dispatch.</param>
     /// <param name="dispatcher">The user dispatching the stock.</param>
     /// <returns>Success, or a state or conflict error.</returns>
     public Result Dispatch(
@@ -1021,6 +1023,7 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         DocumentNumber number,
         TransferShipmentId shipmentId,
         string shipmentNumber,
+        string deliveryReceiptNumber,
         UserId dispatcher)
     {
         // The number guard precedes the state guard: a transfer that already
@@ -1038,6 +1041,7 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         Number = number.Value;
         ShipmentId = shipmentId;
         ShipmentNumber = shipmentNumber;
+        DeliveryReceiptNumber = deliveryReceiptNumber;
         DispatchedByUserId = dispatcher;
         DispatchedAtUtc = now;
         Status = TransferStatus.Dispatched;
@@ -1299,6 +1303,12 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
 
     /// <summary>Gets the human-readable SHP shipment number.</summary>
     public string? ShipmentNumber { get; private set; }
+
+    /// <summary>
+    /// Gets the DR delivery receipt number issued when the goods were released,
+    /// allocated alongside the shipment at dispatch.
+    /// </summary>
+    public string? DeliveryReceiptNumber { get; private set; }
 
     /// <summary>Gets who cancelled the dispatch, when cancelled.</summary>
     public UserId? CancelledByUserId { get; private set; }

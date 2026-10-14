@@ -121,7 +121,7 @@ public static class StoreMonitoringEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind == LocationKind.Store)
+            .Where(l => l.Kind == LocationKind.Store && l.IsActive)
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -275,7 +275,7 @@ public static class StoreMonitoringEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(location => location.Kind == LocationKind.Store)
+            .Where(location => location.Kind == LocationKind.Store && location.IsActive)
             .OrderBy(location => location.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -410,7 +410,10 @@ public static class StoreMonitoringEndpoints
                 locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
                 locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
                 dispatchedUnits,
-                actualDispatchedAt));
+                actualDispatchedAt)
+            {
+                DeliveryReceiptNumber = transfer.DeliveryReceiptNumber,
+            });
         }
 
         List<StoreMovement> storeResults = [.. movements.Values.Select(movement => new StoreMovement(
@@ -738,7 +741,11 @@ public sealed record StoreMovementActivity(
     string SourceLocationName,
     string DestinationLocationName,
     decimal ProductUnits,
-    DateTimeOffset OccurredAtUtc);
+    DateTimeOffset OccurredAtUtc)
+{
+    /// <summary>The DR number issued when the stock was released, when dispatched.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>A location's stock per product; the daily sales rate averages the
 /// last <c>SalesRateDays</c> days.</summary>

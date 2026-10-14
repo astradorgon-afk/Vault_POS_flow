@@ -68,6 +68,11 @@
                     }
                 </div>
                 <footer>
+                    <div class="receiving-supplier-docs">
+                        <label><span>Supplier DR number <em>optional</em></span><input type="text" maxlength="40" @bind="supplierDrNumber" placeholder="As printed on their delivery receipt" /></label>
+                        <label><span>Supplier OR number <em>optional</em></span><input type="text" maxlength="40" @bind="supplierOrNumber" placeholder="As printed on their official receipt" /></label>
+                        <label><span>Released by supplier <em>optional</em></span><input type="datetime-local" @bind="supplierReleasedAt" /></label>
+                    </div>
                     <label class="receiving-check"><input type="checkbox" @bind="documentsMissing" /><span>Delivery documents are missing</span></label>
                     <button type="button" class="receiving-primary" @onclick="RecordAsync" disabled="@(saving || !CanRecord)">@(saving ? "Recording…" : "Record delivery")</button>
                 </footer>
@@ -92,6 +97,10 @@
                         <div><strong>@receipt.Number</strong><small>@receipt.ReceivedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
                         <span>@Quantity(receipt.Lines.Sum(line => line.QuantityAccepted)) accepted</span>
                         @if (receipt.DocumentsMissing) { <span class="receiving-state">Documents missing</span> }
+                        @if (PurchasingText.SupplierPaperwork(receipt) is { } paperwork)
+                        {
+                            <span class="receiving-state">@paperwork</span>
+                        }
                     </article>
                 }
             }
@@ -111,6 +120,9 @@
     private bool loading = true;
     private bool saving;
     private bool documentsMissing;
+    private string supplierDrNumber = string.Empty;
+    private string supplierOrNumber = string.Empty;
+    private DateTime? supplierReleasedAt;
     private bool historyLoaded;
     private ScanLine? scanQueue;
 
@@ -212,7 +224,10 @@
                     line.OrderLine.Id, line.Received, line.Damaged, line.WrongItem, line.Expired,
                     line.OrderLine.UnitCost, string.IsNullOrWhiteSpace(line.LotNumber) ? null : line.LotNumber.Trim(),
                     line.ManufacturedOn, line.ExpiresOn))],
-                documentsMissing);
+                documentsMissing,
+                NullIfBlank(supplierDrNumber),
+                NullIfBlank(supplierOrNumber),
+                ReleasedAtOrNull());
             ApiResult<PosReference> result = await Api.CreateGoodsReceiptAsync(OrderId, body, CancellationToken.None);
             if (!result.IsSuccess)
             {
@@ -225,6 +240,9 @@
             {
                 message = "Delivery recorded. Accepted stock is ready for inventory inspection.";
                 documentsMissing = false;
+                supplierDrNumber = string.Empty;
+                supplierOrNumber = string.Empty;
+                supplierReleasedAt = null;
             }
         }
         catch (HttpRequestException)
@@ -296,5 +314,16 @@
     }
 
     private static string Quantity(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static string? NullIfBlank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>
+    /// Reads the supplier's release time as typed in the receiving store's own
+    /// clock. The picker gives a wall reading with no offset, so it is resolved
+    /// against Asia/Manila rather than against wherever this server runs.
+    /// </summary>
+    private DateTimeOffset? ReleasedAtOrNull()
+        => supplierReleasedAt is { } local ? StoreClock.FromStoreLocal(local) : null;
+
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 }

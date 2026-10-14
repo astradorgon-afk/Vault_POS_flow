@@ -53,13 +53,14 @@ else
             else
             {
                 <table class="activity-table">
-                    <thead><tr><th>Time</th><th>Reference</th><th>Type</th><th>Direction</th><th>From → To</th><th>Units</th></tr></thead>
+                    <thead><tr><th>Time</th><th>Reference</th><th>DR</th><th>Type</th><th>Direction</th><th>From → To</th><th>Units</th></tr></thead>
                     <tbody>
                         @foreach (var item in fullReport?.RecentActivity ?? [])
                         {
                             <tr>
                                 <td>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm", CultureInfo.InvariantCulture)</td>
                                 <td>@item.Reference</td>
+                                <td>@(item.DeliveryReceiptNumber ?? "—")</td>
                                 <td>@SplitWords(item.Kind)</td>
                                 <td><span class="direction @(item.Kind.Contains("Incoming", StringComparison.OrdinalIgnoreCase) ? "incoming" : "outgoing")">@(item.Kind.Contains("Incoming", StringComparison.OrdinalIgnoreCase) ? "Incoming" : "Outgoing")</span></td>
                                 <td>@item.SourceLocationName → @item.DestinationLocationName</td>

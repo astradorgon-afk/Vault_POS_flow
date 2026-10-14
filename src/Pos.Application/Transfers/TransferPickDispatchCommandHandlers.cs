@@ -340,11 +340,18 @@ public sealed class DispatchTransferCommandHandler(
             .NextAsync(DocumentType.TransferShipment, cancellationToken)
             .ConfigureAwait(false);
 
+        // The DR is the document that accompanies the goods out of the door, so
+        // it is issued at the same instant as the shipment it travels with.
+        DocumentNumber deliveryReceiptNumber = await numbers
+            .NextAsync(DocumentType.DeliveryReceipt, cancellationToken)
+            .ConfigureAwait(false);
+
         Result dispatched = transfer.Dispatch(
             clock.UtcNow,
             number,
             TransferShipmentId.New(),
             shipmentNumber.Value,
+            deliveryReceiptNumber.Value,
             dispatcher);
 
         if (dispatched.IsFailure)

@@ -192,6 +192,7 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         afterDispatch.Status.Should().Be(TransferStatus.Dispatched);
         afterDispatch.Number.Should().MatchRegex(@"^TRF-\d{4}-\d{6}$");
         afterDispatch.ShipmentNumber.Should().MatchRegex(@"^SHP-\d{4}-\d{6}$");
+        afterDispatch.DeliveryReceiptNumber.Should().MatchRegex(@"^DR-\d{4}-\d{6}$");
         afterDispatch.ShipmentId.Should().NotBeNull();
 
         using HttpResponseMessage detailResponse = await GetAsync(
@@ -1006,6 +1007,7 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
                 transfer.Number,
                 transfer.ShipmentId?.Value,
                 transfer.ShipmentNumber,
+                transfer.DeliveryReceiptNumber,
                 transfer.ReceiptId?.Value,
                 transfer.ReceiptNumber,
                 [.. transfer.Discrepancies.Select(d => d.Id.Value)],
@@ -1128,6 +1130,7 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         string Number,
         Guid? ShipmentId,
         string? ShipmentNumber,
+        string? DeliveryReceiptNumber,
         Guid? ReceiptId,
         string? ReceiptNumber,
         IReadOnlyList<Guid> DiscrepancyIds,

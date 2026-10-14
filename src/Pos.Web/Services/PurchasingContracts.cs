@@ -105,7 +105,10 @@ public sealed record PosCreatePurchaseOrderLine(
 /// <summary>The body that records one delivery against an order.</summary>
 public sealed record PosCreateGoodsReceipt(
     IReadOnlyList<PosCreateGoodsReceiptLine> Lines,
-    bool DocumentsMissing = false);
+    bool DocumentsMissing = false,
+    string? SupplierDeliveryReceiptNumber = null,
+    string? SupplierOfficialReceiptNumber = null,
+    DateTimeOffset? SupplierReleasedAtUtc = null);
 
 /// <summary>What arrived for one order line in this delivery.</summary>
 public sealed record PosCreateGoodsReceiptLine(
@@ -132,7 +135,17 @@ public sealed record PosGoodsReceiptSummary(
     DateTimeOffset ReceivedAtUtc,
     Guid ReceivedByUserId,
     bool CostVariancePendingApproval,
-    decimal CostVarianceValueAtStake);
+    decimal CostVarianceValueAtStake)
+{
+    /// <summary>The supplier's Delivery Receipt number, as they printed it.</summary>
+    public string? SupplierDeliveryReceiptNumber { get; init; }
+
+    /// <summary>The supplier's Official Receipt number, as they printed it.</summary>
+    public string? SupplierOfficialReceiptNumber { get; init; }
+
+    /// <summary>When the supplier released the goods, which may precede arrival.</summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; init; }
+}
 
 /// <summary>One line of a recorded delivery.</summary>
 public sealed record PosGoodsReceiptLine(
@@ -183,7 +196,17 @@ public sealed record PosGoodsReceipt(
     bool CostVariancePendingApproval,
     decimal CostVarianceValueAtStake,
     IReadOnlyList<PosGoodsReceiptLine> Lines,
-    IReadOnlyList<PosReceivingDiscrepancy> Discrepancies);
+    IReadOnlyList<PosReceivingDiscrepancy> Discrepancies)
+{
+    /// <summary>The supplier's Delivery Receipt number, as they printed it.</summary>
+    public string? SupplierDeliveryReceiptNumber { get; init; }
+
+    /// <summary>The supplier's Official Receipt number, as they printed it.</summary>
+    public string? SupplierOfficialReceiptNumber { get; init; }
+
+    /// <summary>When the supplier released the goods, which may precede arrival.</summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; init; }
+}
 
 /// <summary>Best- and worst-selling products over a period.</summary>
 public sealed record PosProductPerformanceReport(

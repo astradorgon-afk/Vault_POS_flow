@@ -23,6 +23,9 @@ public partial class PurchaseOrderDetail
     private bool busy;
     private bool confirmDiscard;
     private bool documentsMissing;
+    private string supplierDrNumber = string.Empty;
+    private string supplierOrNumber = string.Empty;
+    private DateTime? supplierReleasedAt;
     private bool receivingOpen;
     private bool arrivalConfirmed;
     private bool receiptsLoaded;
@@ -67,6 +70,27 @@ public partial class PurchaseOrderDetail
                 receiptsLoaded ? $"{PurchasingText.Quantity(Due(line))} {UnitName(line.UnitOfMeasureId)}" : "Not loaded",
             ]))];
 
+        // The supplier's paperwork arrived with a delivery, so the printed
+        // order carries it — the latest one, when they presented any.
+        List<WorkflowReceiptDetail> details = [];
+        if (receiptsLoaded && receipts.Count > 0 && receipts.MaxBy(r => r.ReceivedAtUtc) is { } latest)
+        {
+            if (latest.SupplierDeliveryReceiptNumber is { } deliveryReceipt)
+            {
+                details.Add(new WorkflowReceiptDetail("Supplier DR", deliveryReceipt));
+            }
+
+            if (latest.SupplierOfficialReceiptNumber is { } officialReceipt)
+            {
+                details.Add(new WorkflowReceiptDetail("Supplier OR", officialReceipt));
+            }
+
+            if (latest.SupplierReleasedAtUtc is { } releasedAt)
+            {
+                details.Add(new WorkflowReceiptDetail("Released by supplier", When(releasedAt)));
+            }
+        }
+
         return new WorkflowReceipt(
             "Purchase order",
             PurchasingText.OrderName(value.Number),
@@ -80,7 +104,8 @@ public partial class PurchaseOrderDetail
             "Expected delivery",
             ExpectedDate,
             ["Ordered", "Received good", "Still due"],
-            lines);
+            lines,
+            details);
     }
 
     private DateOnly ReceivingToday => DateOnly.FromDateTime(ReceivingTime(DateTimeOffset.UtcNow).DateTime);
@@ -230,6 +255,9 @@ public partial class PurchaseOrderDetail
             .Where(line => Due(line) > 0)
             .Select(line => new ReceiveLine(line, Due(line))));
         documentsMissing = false;
+        supplierDrNumber = string.Empty;
+        supplierOrNumber = string.Empty;
+        supplierReleasedAt = null;
         receivingOpen = false;
         arrivalConfirmed = false;
     }
@@ -430,7 +458,10 @@ public partial class PurchaseOrderDetail
             new PosCreateGoodsReceipt(
                 [.. receiving.Where(line => line.ArrivingQuantity > 0 || line.Mode == ReceiveMode.Counted && line.IssueQuantity > 0)
                     .Select(line => line.ToRequest())],
-                documentsMissing),
+                documentsMissing,
+                NullIfBlank(supplierDrNumber),
+                NullIfBlank(supplierOrNumber),
+                ReleasedAtOrNull()),
             CancellationToken.None),
         "Delivery recorded. Accepted goods are awaiting inventory inspection.");
 
@@ -511,6 +542,14 @@ public partial class PurchaseOrderDetail
             : "Line";
 
     private static string? NullIfBlank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>
+    /// Reads the supplier's release time as typed in the receiving store's own
+    /// clock. The picker gives a wall reading with no offset, so it is resolved
+    /// against Asia/Manila rather than against wherever this server runs.
+    /// </summary>
+    private DateTimeOffset? ReleasedAtOrNull()
+        => supplierReleasedAt is { } local ? StoreClock.FromStoreLocal(local) : null;
 
     private static string SplitWords(string value) => Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 

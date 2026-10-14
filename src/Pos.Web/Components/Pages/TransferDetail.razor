@@ -93,6 +93,14 @@ else
             <div><span>Mode</span><strong>@ModeLabel</strong></div>
             <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
             <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
+            @if (detail.Transfer.DispatchedAtUtc is { } released)
+            {
+                <div><span>Released</span><strong>@released.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</strong></div>
+            }
+            @if (detail.Transfer.DeliveryReceiptNumber is { } deliveryReceipt)
+            {
+                <div><span>Delivery receipt</span><strong>@deliveryReceipt</strong></div>
+            }
         </div>
     </section>
 
@@ -563,6 +571,14 @@ else
                 Quantity(line.DamagedQuantity),
             ]))];
 
+        // The DR is the paper the driver signs for, so it heads the printed
+        // copy rather than being buried in a table column.
+        List<WorkflowReceiptDetail> details = [];
+        if (transfer.Transfer.DeliveryReceiptNumber is { } deliveryReceipt)
+        {
+            details.Add(new WorkflowReceiptDetail("Delivery receipt (DR)", deliveryReceipt));
+        }
+
         return new WorkflowReceipt(
             IsStoreRestock ? "Product request" : "Inventory transfer",
             string.IsNullOrWhiteSpace(transfer.Transfer.Number)
@@ -575,10 +591,11 @@ else
             DestinationLabel,
             IsStoreRestock ? "Requested" : "Created",
             transfer.Transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture),
-            "Dispatched",
-            dispatchedAt ?? "Not yet dispatched",
-            [IsStoreRestock ? "Needed / approved" : "Requested", "Dispatched", "Received", "Damaged"],
-            lines);
+            "Released",
+            dispatchedAt ?? "Not yet released",
+            [IsStoreRestock ? "Needed / approved" : "Requested", "Released", "Received", "Damaged"],
+            lines,
+            details);
     }
 
     protected override async Task OnInitializedAsync()

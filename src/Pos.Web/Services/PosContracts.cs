@@ -710,7 +710,11 @@ public sealed record PosStoreMovementActivity(
     string SourceLocationName,
     string DestinationLocationName,
     decimal ProductUnits,
-    DateTimeOffset OccurredAtUtc);
+    DateTimeOffset OccurredAtUtc)
+{
+    /// <summary>The DR number issued when the stock was released, when dispatched.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>A location's stock per product, scarcest first.</summary>
 public sealed record PosStockLevelReport(

@@ -136,6 +136,19 @@ public sealed class ReceivingWorking
 {
     public Guid PurchaseOrderId { get; set; }
     public bool DocumentsMissing { get; set; }
+
+    /// <summary>The supplier's DR number, as printed on their paperwork.</summary>
+    public string SupplierDeliveryReceiptNumber { get; set; } = string.Empty;
+
+    /// <summary>The supplier's OR number, as printed on their paperwork.</summary>
+    public string SupplierOfficialReceiptNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When the supplier released the goods, as a wall reading in the store's
+    /// own clock. Resolved to UTC only when the count is pushed, so the value
+    /// survives being saved and reopened on the same device.
+    /// </summary>
+    public DateTime? SupplierReleasedAt { get; set; }
     public List<ReceivingWorkingLine> Lines { get; set; } = [];
     public List<UnexpectedGood> UnexpectedGoods { get; set; } = [];
 }

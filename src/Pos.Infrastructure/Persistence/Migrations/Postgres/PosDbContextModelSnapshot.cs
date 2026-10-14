@@ -2115,9 +2115,23 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasColumnType("smallint")
                         .HasColumnName("status");
 
+                    b.Property<string>("SupplierDeliveryReceiptNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("supplier_delivery_receipt_number");
+
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid")
                         .HasColumnName("supplier_id");
+
+                    b.Property<string>("SupplierOfficialReceiptNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("supplier_official_receipt_number");
+
+                    b.Property<DateTimeOffset?>("SupplierReleasedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("supplier_released_at_utc");
 
                     b.HasKey("Id");
 
@@ -3792,6 +3806,11 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("created_by_user_id");
+
+                    b.Property<string>("DeliveryReceiptNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("delivery_receipt_number");
 
                     b.Property<Guid>("DestinationLocationId")
                         .HasColumnType("uuid")

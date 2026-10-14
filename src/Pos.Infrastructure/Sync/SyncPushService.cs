@@ -576,7 +576,10 @@ public sealed class SyncPushService(
                 new PurchaseOrderLineId(line.PurchaseOrderLineId), line.QuantityReceived,
                 line.QuantityDamaged, line.QuantityWrongItem, line.QuantityExpired,
                 line.UnitCost, line.LotNumber, line.ManufacturedOn, line.ExpiresOn))],
-            payload.DocumentsMissing), cancellationToken).ConfigureAwait(false);
+            payload.DocumentsMissing,
+            payload.SupplierDeliveryReceiptNumber,
+            payload.SupplierOfficialReceiptNumber,
+            payload.SupplierReleasedAtUtc), cancellationToken).ConfigureAwait(false);
 
         return receipt.IsSuccess ? Result<Guid>.Success(receipt.Value.Value) : Result<Guid>.Failure(receipt.Errors);
     }

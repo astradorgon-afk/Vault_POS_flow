@@ -31,7 +31,10 @@ public sealed record PwaReceivingSyncPayload(
     Guid PurchaseOrderId,
     IReadOnlyList<PwaReceivingLine> Lines,
     IReadOnlyList<PwaUnexpectedGood> UnexpectedGoods,
-    bool DocumentsMissing);
+    bool DocumentsMissing,
+    string? SupplierDeliveryReceiptNumber = null,
+    string? SupplierOfficialReceiptNumber = null,
+    DateTimeOffset? SupplierReleasedAtUtc = null);
 
 public sealed record PwaReceivingLine(
     Guid PurchaseOrderLineId,

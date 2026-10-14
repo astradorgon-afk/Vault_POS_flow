@@ -91,6 +91,61 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task Receipt_CarriesTheSuppliersPaperwork_AndReturnsItOnRead()
+    {
+        string prefix = "grn-supdocs";
+        Seed seed = await SeedAsync(prefix);
+        await factory.CreateUserAsync(prefix + "-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync(prefix + "-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, prefix + "-rec");
+        string approver = await SignInAsync(client, prefix + "-app");
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        // The supplier's paperwork is transcribed, not issued: we keep whatever
+        // they printed, including the moment they released the goods, which can
+        // be well before we counted them at the door.
+        DateTimeOffset released = DateTimeOffset.UtcNow.AddDays(-1).AddHours(-2);
+        object body = new
+        {
+            lines = new object[]
+            {
+                new
+                {
+                    purchaseOrderLineId = lineId,
+                    quantityReceived = 10m,
+                    quantityDamaged = 0m,
+                    quantityWrongItem = 0m,
+                    quantityExpired = 0m,
+                    unitCost = 100m,
+                },
+            },
+            supplierDeliveryReceiptNumber = "  DR-8841  ",
+            supplierOfficialReceiptNumber = "OR-2026-0777",
+            supplierReleasedAtUtc = released,
+        };
+
+        using HttpResponseMessage response = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            body,
+            receiver);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using JsonDocument created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Guid receiptId = created.RootElement.GetProperty("id").GetGuid();
+
+        (HttpStatusCode status, JsonElement receipt) = await GetReceiptAsync(client, receiver, orderId, receiptId);
+        status.Should().Be(HttpStatusCode.OK);
+        receipt.GetProperty("supplierDeliveryReceiptNumber").GetString().Should().Be("DR-8841");
+        receipt.GetProperty("supplierOfficialReceiptNumber").GetString().Should().Be("OR-2026-0777");
+        receipt.GetProperty("supplierReleasedAtUtc").GetDateTimeOffset()
+            .Should().BeCloseTo(released, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
     public async Task FullReceipt_PostsTheGrn_AndCompletesTheOrder()
     {
         Seed seed = await SeedAsync("grnf");

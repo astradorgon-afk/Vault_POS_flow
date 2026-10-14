@@ -141,7 +141,10 @@ public sealed class CreateGoodsReceiptCommandHandler(
             command.DocumentsMissing,
             clock.BusinessDateFor(context.DestinationTimeZoneId),
             receiver,
-            clock.UtcNow);
+            clock.UtcNow,
+            command.SupplierDeliveryReceiptNumber,
+            command.SupplierOfficialReceiptNumber,
+            command.SupplierReleasedAtUtc);
 
         if (planned.IsFailure)
         {

@@ -38,6 +38,8 @@ public sealed class TransferConfiguration : IEntityTypeConfiguration<Transfer>
         builder.Property(t => t.ShipmentId).HasColumnName("shipment_id");
         builder.Property(t => t.ShipmentNumber).HasColumnName("shipment_number").HasMaxLength(64);
 
+        builder.Property(t => t.DeliveryReceiptNumber).HasColumnName("delivery_receipt_number").HasMaxLength(64);
+
         builder.Property(t => t.CancelledByUserId).HasColumnName("cancelled_by_user_id");
         builder.Property(t => t.CancelledAtUtc).HasColumnName("cancelled_at_utc");
         builder.Property(t => t.CancelReason).HasColumnName("cancel_reason").HasMaxLength(512);

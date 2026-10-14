@@ -53,6 +53,9 @@ public enum DocumentType
 
     /// <summary>Expiry quarantine run, prefix <c>EXP</c>.</summary>
     ExpiryRun = 15,
+
+    /// <summary>Delivery Receipt, prefix <c>DR</c>.</summary>
+    DeliveryReceipt = 16,
 }
 
 /// <summary>
@@ -116,6 +119,7 @@ public readonly partial record struct DocumentNumber
         DocumentType.PreApprovalToken => "PAT",
         DocumentType.Receipt => "RCT",
         DocumentType.ExpiryRun => "EXP",
+        DocumentType.DeliveryReceipt => "DR",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown document type."),
     };
 

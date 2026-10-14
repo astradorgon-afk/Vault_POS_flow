@@ -147,6 +147,16 @@ public sealed class GoodsReceiptConfiguration : IEntityTypeConfiguration<GoodsRe
         builder.Property(r => r.SupplierId).HasColumnName("supplier_id").IsRequired();
         builder.Property(r => r.DestinationLocationId).HasColumnName("destination_location_id").IsRequired();
         builder.Property(r => r.DocumentsMissing).HasColumnName("documents_missing").IsRequired();
+
+        builder.Property(r => r.SupplierDeliveryReceiptNumber)
+            .HasColumnName("supplier_delivery_receipt_number")
+            .HasMaxLength(GoodsReceipt.SupplierDocumentNumberMaxLength);
+
+        builder.Property(r => r.SupplierOfficialReceiptNumber)
+            .HasColumnName("supplier_official_receipt_number")
+            .HasMaxLength(GoodsReceipt.SupplierDocumentNumberMaxLength);
+
+        builder.Property(r => r.SupplierReleasedAtUtc).HasColumnName("supplier_released_at_utc");
         builder.Property(r => r.BusinessDate).HasColumnName("business_date").IsRequired();
         builder.Property(r => r.ReceivedAtUtc).HasColumnName("received_at_utc").IsRequired();
         builder.Property(r => r.ReceivedByUserId).HasColumnName("received_by_user_id").IsRequired();

@@ -113,9 +113,15 @@ public sealed record PurchaseOrderDetail(
 /// <summary>The body of a goods receipt creation.</summary>
 /// <param name="Lines">The received lines with their disposition plans.</param>
 /// <param name="DocumentsMissing">Whether the delivery arrived without the expected documents.</param>
+/// <param name="SupplierDeliveryReceiptNumber">The supplier's DR number, transcribed from their paperwork.</param>
+/// <param name="SupplierOfficialReceiptNumber">The supplier's OR number, transcribed from their paperwork.</param>
+/// <param name="SupplierReleasedAtUtc">When the supplier released the goods to us.</param>
 public sealed record CreateGoodsReceiptBody(
     IReadOnlyList<CreateGoodsReceiptLineBody> Lines,
-    bool DocumentsMissing = false);
+    bool DocumentsMissing = false,
+    string? SupplierDeliveryReceiptNumber = null,
+    string? SupplierOfficialReceiptNumber = null,
+    DateTimeOffset? SupplierReleasedAtUtc = null);
 
 /// <summary>One line of a goods receipt creation.</summary>
 /// <param name="PurchaseOrderLineId">The purchase order line being received against.</param>
@@ -151,7 +157,17 @@ public sealed record GoodsReceiptSummary(
     DateTimeOffset ReceivedAtUtc,
     Guid ReceivedByUserId,
     bool CostVariancePendingApproval,
-    decimal CostVarianceValueAtStake);
+    decimal CostVarianceValueAtStake)
+{
+    /// <summary>The supplier's Delivery Receipt number, as they printed it.</summary>
+    public string? SupplierDeliveryReceiptNumber { get; init; }
+
+    /// <summary>The supplier's Official Receipt number, as they printed it.</summary>
+    public string? SupplierOfficialReceiptNumber { get; init; }
+
+    /// <summary>When the supplier released the goods, which may precede arrival.</summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; init; }
+}
 
 /// <summary>A goods receipt line.</summary>
 public sealed record GoodsReceiptLineSummary(
@@ -202,7 +218,17 @@ public sealed record GoodsReceiptDetail(
     bool CostVariancePendingApproval,
     decimal CostVarianceValueAtStake,
     IReadOnlyList<GoodsReceiptLineSummary> Lines,
-    IReadOnlyList<ReceivingDiscrepancySummary> Discrepancies);
+    IReadOnlyList<ReceivingDiscrepancySummary> Discrepancies)
+{
+    /// <summary>The supplier's Delivery Receipt number, as they printed it.</summary>
+    public string? SupplierDeliveryReceiptNumber { get; init; }
+
+    /// <summary>The supplier's Official Receipt number, as they printed it.</summary>
+    public string? SupplierOfficialReceiptNumber { get; init; }
+
+    /// <summary>When the supplier released the goods, which may precede arrival.</summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; init; }
+}
 
 /// <summary>Purchase order lifecycle endpoints.</summary>
 public static class PurchaseEndpoints
@@ -634,7 +660,10 @@ public static class PurchaseEndpoints
                         l.LotNumber,
                         l.ManufacturedOn,
                         l.ExpiresOn))],
-                    body.DocumentsMissing),
+                    body.DocumentsMissing,
+                    body.SupplierDeliveryReceiptNumber,
+                    body.SupplierOfficialReceiptNumber,
+                    body.SupplierReleasedAtUtc),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -664,7 +693,12 @@ public static class PurchaseEndpoints
                 r.ReceivedAtUtc,
                 r.ReceivedByUserId.Value,
                 r.CostVariancePendingApproval,
-                r.CostVarianceValueAtStake))
+                r.CostVarianceValueAtStake)
+            {
+                SupplierDeliveryReceiptNumber = r.SupplierDeliveryReceiptNumber,
+                SupplierOfficialReceiptNumber = r.SupplierOfficialReceiptNumber,
+                SupplierReleasedAtUtc = r.SupplierReleasedAtUtc,
+            })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -730,7 +764,12 @@ public static class PurchaseEndpoints
                         d.ResolutionNote,
                         d.ResolvedByUserId != null ? d.ResolvedByUserId.Value.Value : null,
                         d.ResolvedAtUtc))
-                    .ToList()))
+                    .ToList())
+            {
+                SupplierDeliveryReceiptNumber = r.SupplierDeliveryReceiptNumber,
+                SupplierOfficialReceiptNumber = r.SupplierOfficialReceiptNumber,
+                SupplierReleasedAtUtc = r.SupplierReleasedAtUtc,
+            })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 

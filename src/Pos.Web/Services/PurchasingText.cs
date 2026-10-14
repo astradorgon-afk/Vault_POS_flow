@@ -72,4 +72,37 @@ public static class PurchasingText
 
     /// <summary>Names an order for people: its number once issued, otherwise a draft label.</summary>
     public static string OrderName(string? number) => string.IsNullOrWhiteSpace(number) ? "Draft order" : number;
+
+    /// <summary>
+    /// Reads a delivery's supplier paperwork: their DR and OR numbers exactly
+    /// as they printed them, plus when they released the goods. Returns null
+    /// when nothing was presented, so the screen stays quiet instead of
+    /// showing three empty labels.
+    /// </summary>
+    /// <param name="receipt">The recorded delivery.</param>
+    /// <returns>The line to show, or null when the supplier gave us nothing.</returns>
+    public static string? SupplierPaperwork(PosGoodsReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+
+        List<string> parts = [];
+
+        if (!string.IsNullOrWhiteSpace(receipt.SupplierDeliveryReceiptNumber))
+        {
+            parts.Add($"DR {receipt.SupplierDeliveryReceiptNumber}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(receipt.SupplierOfficialReceiptNumber))
+        {
+            parts.Add($"OR {receipt.SupplierOfficialReceiptNumber}");
+        }
+
+        if (receipt.SupplierReleasedAtUtc is { } released)
+        {
+            parts.Add(FormattableString.Invariant(
+                $"Released {released.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)}"));
+        }
+
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
 }
