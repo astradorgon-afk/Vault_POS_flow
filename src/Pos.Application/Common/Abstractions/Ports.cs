@@ -303,6 +303,15 @@ public interface IAuditWriter
 /// <param name="ReferenceDocumentType">The related document type, if any.</param>
 /// <param name="ReferenceDocumentId">The related document identifier, if any.</param>
 /// <param name="LocationId">The location the action applies to, if any.</param>
+/// <param name="ActorUserId">
+/// Who acted, for an action taken before the caller is authenticated. Ignored
+/// once there is an authenticated caller, so it can never be used to record
+/// someone else as having acted.
+/// </param>
+/// <param name="ActorRoleSnapshot">
+/// The authority that actor held, comma separated, on the same terms as
+/// <paramref name="ActorUserId"/>.
+/// </param>
 public sealed record AuditEntry(
     string Action,
     string EntityType,
@@ -312,4 +321,6 @@ public sealed record AuditEntry(
     string? Reason = null,
     ReferenceDocumentType? ReferenceDocumentType = null,
     Guid? ReferenceDocumentId = null,
-    LocationId? LocationId = null);
+    LocationId? LocationId = null,
+    UserId? ActorUserId = null,
+    string? ActorRoleSnapshot = null);

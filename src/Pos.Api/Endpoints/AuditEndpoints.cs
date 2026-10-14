@@ -14,7 +14,27 @@ namespace Pos.Api.Endpoints;
 public static class AuditEndpoints
 {
     private const int MaxPageSize = 100;
+    private const string UserAccountEntity = "AppUser";
+    private const string AuthenticationPrefix = "auth.";
     private static readonly JsonSerializerOptions TransferDetailsJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeZoneInfo BusinessZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila");
+
+    /// <summary>
+    /// The instant a business day begins.
+    /// </summary>
+    /// <remarks>
+    /// A date typed into the filter means a day in the store, not a day in UTC.
+    /// Reading it as UTC put the window eight hours out: "today" began at 08:00
+    /// store time, so the morning's activity was missing from a search that had
+    /// asked for it, and the rows that did come back grouped under two headings.
+    /// </remarks>
+    /// <param name="day">The business date as the operator chose it.</param>
+    /// <returns>Midnight of that date where the stores trade.</returns>
+    private static DateTimeOffset StartOfBusinessDay(DateOnly day)
+    {
+        DateTime local = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, BusinessZone.GetUtcOffset(local));
+    }
 
     public static IEndpointRouteBuilder MapAuditEndpoints(this IEndpointRouteBuilder app)
     {
@@ -48,27 +68,29 @@ public static class AuditEndpoints
         IQueryable<TransferCustodyEvent> transferEvents = context.TransferCustodyEvents.AsNoTracking();
         if (from is { } fromDate)
         {
-            DateTimeOffset start = new(fromDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+            DateTimeOffset start = StartOfBusinessDay(fromDate);
             query = query.Where(entry => entry.OccurredAtUtc >= start);
+            transferEvents = transferEvents.Where(entry => entry.OccurredAtUtc >= start);
         }
 
         if (to is { } toDate)
         {
-            DateTimeOffset exclusiveEnd = new(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+            DateTimeOffset exclusiveEnd = StartOfBusinessDay(toDate.AddDays(1));
             query = query.Where(entry => entry.OccurredAtUtc < exclusiveEnd);
             transferEvents = transferEvents.Where(entry => entry.OccurredAtUtc < exclusiveEnd);
-        }
-
-        if (from is { } transferFromDate)
-        {
-            DateTimeOffset transferStart = new(transferFromDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
-            transferEvents = transferEvents.Where(entry => entry.OccurredAtUtc >= transferStart);
         }
 
         if (userId is { } actorId)
         {
             UserId actor = new(actorId);
-            query = query.Where(entry => entry.UserId == actor);
+            // Entries written before this account authenticated carry no actor
+            // and name it only as the record. Matching those as well is what
+            // keeps a person's own sign-ins inside a filter on that person.
+            query = query.Where(entry => entry.UserId == actor ||
+                (entry.UserId == null &&
+                 entry.EntityType == UserAccountEntity &&
+                 entry.EntityId == actorId &&
+                 entry.Action.StartsWith(AuthenticationPrefix)));
             transferEvents = transferEvents.Where(entry => entry.ActorUserId == actor);
         }
 
@@ -156,11 +178,17 @@ public static class AuditEndpoints
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+        // Accounts are looked up whether they acted or were acted upon: the
+        // first names the "who" column, the second lets "AppUser" and a bare
+        // identifier read as the person the entry is about.
         Guid[] actorIds = [.. entries.Where(entry => entry.UserId is not null)
             .Select(entry => entry.UserId!.Value.Value)
+            .Concat(entries
+                .Where(entry => entry.EntityType == UserAccountEntity && entry.EntityId is not null)
+                .Select(entry => entry.EntityId!.Value))
             .Concat(selectedTransferEvents.Select(entry => entry.ActorUserId.Value)).Distinct()];
-        Guid[] locationIds = [.. entries.Where(entry => entry.LocationId is not null)
-            .Select(entry => entry.LocationId!.Value.Value).Distinct()];
+        LocationId[] locationIds = [.. entries.Where(entry => entry.LocationId is not null)
+            .Select(entry => entry.LocationId!.Value).Distinct()];
         Dictionary<Guid, string> actorNames = actorIds.Length == 0
             ? []
             : await context.Users.AsNoTracking()
@@ -168,17 +196,14 @@ public static class AuditEndpoints
                 .Select(user => new { user.Id, user.DisplayName })
                 .ToDictionaryAsync(user => user.Id, user => user.DisplayName, cancellationToken)
                 .ConfigureAwait(false);
-        Dictionary<Guid, string> locationNames = [];
-        if (locationIds.Length > 0)
-        {
-            HashSet<Guid> requestedLocations = [.. locationIds];
-            List<Pos.Domain.Organizations.Location> locations = await context.Locations.AsNoTracking()
-                .ToListAsync(cancellationToken)
+        // Asked for by id. This used to read the whole locations table and
+        // filter it here, which is a table scan per page of the activity log.
+        Dictionary<Guid, string> locationNames = locationIds.Length == 0
+            ? []
+            : await context.Locations.AsNoTracking()
+                .Where(location => locationIds.Contains(location.Id))
+                .ToDictionaryAsync(location => location.Id.Value, location => location.Name, cancellationToken)
                 .ConfigureAwait(false);
-            locationNames = locations
-                .Where(location => requestedLocations.Contains(location.Id.Value))
-                .ToDictionary(location => location.Id.Value, location => location.Name);
-        }
 
         Dictionary<Guid, AuditLogEntry> entriesById = entries.ToDictionary(entry => entry.Id.Value);
         Dictionary<Guid, TransferCustodyEvent> transferEventsById = selectedTransferEvents.ToDictionary(entry => entry.Id.Value);
@@ -265,15 +290,27 @@ public static class AuditEndpoints
         AuditLogEntry entry,
         IReadOnlyDictionary<Guid, string> actorNames,
         IReadOnlyDictionary<Guid, string> locationNames)
-        => new(
+    {
+        bool isAccountRecord = entry.EntityType == UserAccountEntity && entry.EntityId is not null;
+
+        // A sign-in is decided before the caller is authenticated, so entries
+        // recorded before the writer learned to name that account hold no actor
+        // at all and read back as "System". For an authentication event the
+        // account the entry is about is the one who acted, so say so.
+        Guid? actorId = entry.UserId?.Value ??
+            (isAccountRecord && entry.Action.StartsWith(AuthenticationPrefix, StringComparison.Ordinal)
+                ? entry.EntityId
+                : null);
+
+        return new AuditLogItem(
             entry.Id.Value,
             entry.OccurredAtUtc,
             entry.Action,
             entry.EntityType,
-            null,
+            isAccountRecord ? actorNames.GetValueOrDefault(entry.EntityId!.Value) : null,
             entry.EntityId,
-            entry.UserId?.Value,
-            entry.UserId is { } id ? actorNames.GetValueOrDefault(id.Value, "Unknown user") : "System",
+            actorId,
+            actorId is { } id ? actorNames.GetValueOrDefault(id, "Unknown user") : "System",
             entry.UserRoleSnapshot,
             entry.LocationId is { } location ? locationNames.GetValueOrDefault(location.Value, "Unknown location") : null,
             entry.Reason,
@@ -282,6 +319,7 @@ public static class AuditEndpoints
             entry.PreviousValueJson,
             entry.NewValueJson,
             entry.CorrelationId.Value);
+    }
 
     private static AuditLogItem CreateTransferItem(
         TransferCustodyEvent custodyEvent,

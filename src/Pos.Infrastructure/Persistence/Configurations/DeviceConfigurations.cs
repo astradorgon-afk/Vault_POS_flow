@@ -153,5 +153,10 @@ public sealed class AuditLogEntryConfiguration : IEntityTypeConfiguration<AuditL
         builder.HasIndex(a => new { a.UserId, a.OccurredAtUtc }).HasDatabaseName("ix_audit_log_user");
         builder.HasIndex(a => a.CorrelationId).HasDatabaseName("ix_audit_log_correlation");
         builder.HasIndex(a => new { a.Action, a.OccurredAtUtc }).HasDatabaseName("ix_audit_log_action");
+
+        // "What happened lately", the activity log's default and its every
+        // page. The indexes above all lead with something else, so without
+        // this the newest-first ordering is a scan and sort of the whole table.
+        builder.HasIndex(a => a.OccurredAtUtc).HasDatabaseName("ix_audit_log_occurred");
     }
 }

@@ -2,6 +2,7 @@
 @inject NavigationManager Navigation
 @inject NotificationStore Notifications
 @inject UserSession Session
+@inject IJSRuntime JS
 @implements IDisposable
 
 <div class="brand-block">
@@ -85,6 +86,14 @@
         </div>
     }
 
+    @if (CanViewCatalog)
+    {
+        <div class="nav-group">
+            <span class="nav-heading">Catalogue</span>
+            <NavLink class="nav-link" href="catalog" @onclick="NotifyNavigation"><AppIcon Name="list" /> <span>Products &amp; barcodes</span></NavLink>
+        </div>
+    }
+
     @if (CanViewPurchasing)
     {
         <div class="nav-group">
@@ -144,6 +153,8 @@
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
+
+    private bool CanViewCatalog => Session.HasPermission("product.view");
     private bool CanApproveRestock => Session.HasPermission("transfer.approve") &&
         Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
     private bool CanRequestRestock => Session.WorkLocationKind == 1 &&
@@ -160,8 +171,9 @@
     private bool CanManageDevices => Session.HasPermission("device.manage");
     private bool CanManageSync => Session.HasPermission("sync.manage");
     private bool CanViewAdministration => Session.HasAnyPermission("user.manage", "role.manage");
-    private bool CanViewAudit => Session.HasPermission("audit.view") ||
-        Session.Current?.User.Roles.Any(role => role is "Owner" or "Administrator") == true;
+    // The permission alone, matching the page policy and the API. A role
+    // shortcut here would show a link that the audit endpoint then refuses.
+    private bool CanViewAudit => Session.HasPermission("audit.view");
 
     private Task NotifyNavigation() => OnNavigate.InvokeAsync();
 
@@ -169,6 +181,18 @@
     {
         await Notifications.StopAsync();
         Authentication.SignOut();
+        try
+        {
+            // Drops the cookie too; the server session is already gone.
+            await JS.InvokeVoidAsync("vaultflowSession.end");
+        }
+        catch (JSException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
         await OnNavigate.InvokeAsync();
         Navigation.NavigateTo("/login");
     }

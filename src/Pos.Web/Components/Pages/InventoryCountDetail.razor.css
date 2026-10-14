@@ -1,9 +1,46 @@
 .loading-card { padding:60px 16px; text-align:center; color:var(--muted); }
-.count-note { margin:0 0 12px; padding:10px 13px; border-left:3px solid #69b49a; background:rgba(105,180,154,0.12); color:#a8d9c8; font-size:.84rem; }
+.count-note { margin:0 0 12px; padding:11px 14px; border-left:3px solid var(--forest); background:var(--mint-soft); color:#2c4a3b; font-size:.84rem; }
 .count-meta { display:flex; gap:18px; flex-wrap:wrap; margin:0 0 16px; padding:12px 16px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
 .count-meta span { display:grid; justify-items:start; color:var(--muted); font-size:.74rem; }
 .count-meta strong { color:var(--text); font-weight:800; text-transform:uppercase; font-size:.62rem; letter-spacing:.08em; }
+.count-back { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+.count-sent-back { display:grid; gap:3px; margin:0 0 12px; padding:12px 15px; border-left:3px solid var(--danger); background:#fff5f4; border-radius:0 10px 10px 0; }
+.count-sent-back strong { color:#9a4039; font-size:.86rem; }
+.count-sent-back span { color:var(--muted); font-size:.82rem; }
+
+/* How much is left, and what posting would do — the two figures the page is
+   really about, kept above the sheet so neither needs hunting for. */
+.count-progress { margin:0 0 12px; padding:14px 18px; border:1px solid var(--line); border-radius:14px; background:#fff; box-shadow:var(--shadow-card); }
+.count-progress-bar { height:6px; border-radius:99px; background:#ecefec; overflow:hidden; }
+.count-progress-fill { height:100%; border-radius:99px; background:var(--forest); transition:width .2s ease; }
+.count-progress-facts { display:flex; flex-wrap:wrap; gap:7px 18px; margin-top:10px; color:var(--muted); font-size:.78rem; align-items:baseline; }
+.count-progress-facts b { font-variant-numeric:tabular-nums; }
+.cp-strong { color:var(--text); font-weight:700; }
+.cp-warn { color:#8a6a1f; font-weight:700; }
+.cp-done { color:var(--forest); font-weight:700; }
+.cp-unsaved { margin-left:auto; padding:3px 10px; border-radius:99px; background:var(--amber-soft); color:#6d5420; font-weight:800; font-size:.72rem; }
+
+.sheet-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin:0 0 12px; }
+.sheet-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.sheet-search { flex:1 1 230px; }
+.sheet-search input { width:100%; height:42px; padding:0 13px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); font-size:.88rem; }
+.sheet-filters { display:flex; flex-wrap:wrap; gap:6px; }
+.sheet-filter { display:inline-flex; align-items:center; gap:7px; height:42px; padding:0 14px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--muted); font-weight:800; font-size:.78rem; cursor:pointer; }
+.sheet-filter:hover { border-color:var(--forest-bright); color:var(--ink); }
+.sheet-filter.is-on { border-color:var(--forest); background:var(--mint-soft); color:var(--forest); }
+.sheet-filter b { padding:2px 8px; border-radius:99px; background:#f1f4f1; font-variant-numeric:tabular-nums; font-size:.72rem; }
+
+.repeat-flag { display:inline-block; margin-top:4px; padding:2px 8px; border-radius:99px; background:#fdeceb; color:var(--danger); font-weight:800; font-size:.65rem; letter-spacing:.05em; text-transform:uppercase; }
+.row-dirty td { background:var(--amber-soft); }
+.row-repeat td:first-child { box-shadow:inset 3px 0 0 var(--danger); }
+.sheet-input.is-dirty { border-color:var(--forest-bright); background:#fff; }
+.sheet-hint { align-self:center; color:var(--muted); font-size:.78rem; }
+.confirm-post p { margin:0; color:var(--muted); font-size:.84rem; line-height:1.55; }
+.confirm-post strong { color:var(--ink); font-size:.95rem; }
+
 .results-panel { border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; min-height:220px; }
+.results-empty { min-height:220px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
+.results-empty span { margin-top:5px; font-size:.82rem; }
 .sheet-table { width:100%; border-collapse:collapse; }
 .sheet-table th { padding:13px 16px; text-align:left; color:var(--muted); font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; border-bottom:1px solid var(--line); }
 .sheet-table td { padding:13px 16px; border-bottom:1px solid var(--line); font-size:.9rem; vertical-align:middle; color:var(--text); }
@@ -12,22 +49,29 @@
 .product-name { font-weight:600; color:var(--text); }
 .product-sku { color:var(--muted); font-size:.74rem; letter-spacing:.04em; }
 .sheet-number { font-variant-numeric:tabular-nums; color:var(--text); }
-.sheet-gain { color:#69b49a; font-weight:700; font-variant-numeric:tabular-nums; }
-.sheet-loss { color:#ee837a; font-weight:700; font-variant-numeric:tabular-nums; }
+.sheet-gain { color:var(--forest); font-weight:700; font-variant-numeric:tabular-nums; }
+.sheet-loss { color:var(--danger); font-weight:700; font-variant-numeric:tabular-nums; }
 .sheet-muted { color:var(--muted); font-size:.8rem; }
-.sheet-input { width:96px; height:38px; padding:0 10px; border:1px solid rgba(230,224,209,0.17); border-radius:8px; background:#0d1417; color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+.sheet-input { width:96px; height:40px; padding:0 10px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
 .sheet-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; justify-content:flex-end; }
-.action-button { min-width:120px; height:42px; padding:0 16px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); font-weight:700; cursor:pointer; }
-.action-button:hover { border-color:rgba(230,224,209,0.3); }
-.action-button.primary { border:0; background:var(--signal); color:#1d170d; }
-.action-button.primary:hover { background:var(--signal-bright); }
-.action-button.danger { border:1px solid rgba(238,131,122,0.45); background:rgba(104,37,34,0.25); color:#ffd9d2; }
-.action-button.danger:hover { border-color:rgba(238,131,122,0.7); }
+.action-button { min-width:120px; height:42px; padding:0 16px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--ink); font-weight:800; cursor:pointer; }
+.action-button:hover { border-color:var(--forest-bright); color:var(--forest); }
+.action-button.primary { border:0; background:var(--forest); color:#fff; }
+.action-button.primary:hover { background:var(--forest-bright); }
+.action-button.danger { border:1px solid #e7c1bd; background:#fff5f4; color:var(--danger); }
+.action-button.danger:hover { border-color:var(--danger); }
 .action-button.subtle { border:0; background:transparent; color:var(--muted); }
-.action-button.subtle:hover { color:var(--text); }
+.action-button.subtle:hover { color:var(--ink); }
 .action-button:disabled { opacity:.5; cursor:default; }
 .reason-editor { display:grid; gap:8px; margin-top:12px; padding:14px 16px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
 .reason-label { color:var(--muted); font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
-.reason-input { height:42px; padding:0 12px; border:1px solid var(--line); border-radius:8px; background:#0d1417; color:var(--text); font-weight:600; }
+.reason-input { height:44px; padding:0 12px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); font-weight:600; }
 .reason-actions { display:flex; gap:10px; justify-content:flex-end; }
-@media(max-width:620px){.office-head{align-items:stretch;flex-direction:column}.sheet-table{display:block;overflow-x:auto}}
+@media(max-width:620px){
+    .office-head{align-items:stretch;flex-direction:column}
+    .sheet-table{display:block;overflow-x:auto}
+    .sheet-toolbar{flex-direction:column;align-items:stretch}
+    .cp-unsaved{margin-left:0}
+    .sheet-actions{justify-content:stretch}
+    .action-button{flex:1 1 140px}
+}

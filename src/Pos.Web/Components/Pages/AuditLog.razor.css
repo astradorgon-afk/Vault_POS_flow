@@ -1,52 +1,87 @@
-.audit-page { display:grid; gap:18px; }
-.audit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.audit-page { display:grid; gap:14px; }
 .audit-head h1 { margin:4px 0 5px; color:var(--text); font:700 clamp(1.65rem,3vw,2.2rem) 'DM Sans'; letter-spacing:-.04em; }
 .audit-head p { margin:0; color:var(--muted); }
-.audit-filter-toggle { display:inline-flex; align-items:center; gap:7px; flex:none; margin-top:4px; height:38px; padding:0 14px; border:1px solid var(--line-strong); border-radius:8px; background:#fff; color:var(--text); font-weight:800; font-size:.82rem; cursor:pointer; }
-.audit-filter-toggle .audit-filter-badge { display:inline-grid; place-content:center; min-width:20px; height:20px; padding:0 6px; border-radius:99px; background:var(--forest); color:#fff; font-size:.68rem; }
+.audit-sr { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+
+/* Toolbar: the three moves a manager makes most — pick a period, type a word,
+   open the rest. All visible without expanding anything. */
+.audit-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.audit-ranges { display:flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+.audit-range { height:32px; padding:0 11px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:800 .78rem 'DM Sans'; white-space:nowrap; cursor:pointer; }
+.audit-range:hover:not(:disabled) { background:var(--mint-soft); color:var(--forest); }
+.audit-range.is-on { background:var(--forest); color:#fff; }
+span.audit-range { display:inline-grid; place-content:center; cursor:default; }
+.audit-range:disabled { cursor:default; }
+.audit-search { flex:1 1 240px; min-width:0; }
+.audit-search input { width:100%; height:40px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--text); font:600 .84rem 'DM Sans'; }
+.audit-filter-toggle { display:inline-flex; align-items:center; gap:7px; flex:none; height:40px; padding:0 14px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--text); font-weight:800; font-size:.82rem; cursor:pointer; }
+.audit-filter-badge { display:inline-grid; place-content:center; min-width:20px; height:20px; padding:0 6px; border-radius:99px; background:var(--forest); color:#fff; font-size:.68rem; }
 .audit-filter-caret { color:var(--muted); font-size:.72rem; }
-.audit-correlation-code { font-family:ui-monospace,Consolas,monospace; }
+
 .audit-filters { display:flex; align-items:end; gap:10px; flex-wrap:wrap; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
 .audit-filters label { display:grid; gap:6px; min-width:150px; color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
-.audit-filters label.audit-search { flex:1 1 210px; }
 .audit-filters input,.audit-filters select { height:42px; min-width:0; padding:0 10px; border:1px solid var(--line-strong); border-radius:8px; background:#fff; color:var(--text); font:600 .84rem 'DM Sans'; letter-spacing:normal; text-transform:none; }
-.audit-apply,.audit-pager button { height:42px; padding:0 16px; border:0; border-radius:8px; background:var(--forest); color:#fff; font-weight:800; cursor:pointer; }
-.audit-apply:disabled,.audit-pager button:disabled { opacity:.45; cursor:default; }
+
+/* What is being shown right now, and one click to drop any part of it. */
+.audit-chips { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.audit-chips-label { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
+.audit-chip { display:inline-flex; align-items:center; gap:6px; max-width:320px; height:28px; padding:0 4px 0 10px; border:1px solid #bcd8c7; border-radius:99px; background:var(--mint-soft); color:var(--forest); font-size:.78rem; font-weight:700; white-space:nowrap; overflow:hidden; }
+.audit-chip button { width:20px; height:20px; display:grid; place-content:center; border:0; border-radius:50%; background:transparent; color:var(--forest); font-size:1rem; line-height:1; cursor:pointer; }
+.audit-chip button:hover { background:#cdeada; }
+.audit-chip-clear { height:28px; padding:0 10px; border:0; border-radius:99px; background:transparent; color:var(--muted); font-size:.78rem; font-weight:800; text-decoration:underline; cursor:pointer; }
+.audit-chip-clear:hover { color:var(--text); }
+
 .audit-message { padding:12px 14px; border-left:3px solid var(--signal); background:var(--amber-soft); color:#715416; }
 .audit-results { overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
-.audit-results-head,.audit-pager { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; color:var(--muted); font-size:.82rem; }
+/* A reload keeps the rows readable instead of blanking the card. */
+.audit-results.is-loading { opacity:.55; pointer-events:none; }
+.audit-results-head,.audit-pager { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; color:var(--muted); font-size:.82rem; }
 .audit-results-head { border-bottom:1px solid var(--line); }
 .audit-results-head strong { color:var(--text); }
-.audit-table-scroll { overflow-x:auto; }
+
+/* The rows scroll inside the card, so the filters above and the pager below
+   stay put however deep into a day you read. */
+.audit-table-scroll { max-height:clamp(380px,64vh,880px); overflow:auto; }
 .audit-table-scroll table { width:100%; border-collapse:collapse; text-align:left; }
-.audit-table-scroll th { padding:11px 14px; background:#f5f8f5; color:var(--muted); font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
-.audit-table-scroll td { padding:13px 14px; border-top:1px solid var(--line); color:var(--text); font-size:.82rem; vertical-align:top; }
-.audit-table-scroll td small { display:block; margin-top:4px; color:var(--muted); font-size:.72rem; }
-.audit-when { min-width:135px; white-space:nowrap; }
-.audit-when small { font-variant-numeric:tabular-nums; }
+.audit-table-scroll thead th { position:sticky; top:0; z-index:2; padding:10px 14px; background:#f5f8f5; box-shadow:inset 0 -1px 0 var(--line); color:var(--muted); font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
+.audit-table-scroll td { padding:11px 14px; border-top:1px solid var(--line); color:var(--text); font-size:.82rem; vertical-align:top; }
+.audit-table-scroll td small { display:block; margin-top:3px; color:var(--muted); font-size:.72rem; }
+
+.audit-day th { position:sticky; top:33px; z-index:1; display:flex; align-items:baseline; gap:9px; padding:8px 14px; border-top:1px solid var(--line); background:#eef3ee; text-transform:none; letter-spacing:normal; }
+.audit-day strong { color:var(--text); font-size:.82rem; }
+.audit-day span { color:var(--muted); font-size:.76rem; font-weight:600; }
+.audit-day small { margin-left:auto; color:var(--muted); font-size:.7rem; font-weight:600; }
+
+.audit-row { cursor:pointer; }
+.audit-row:hover { background:#f7faf7; }
+.audit-row.is-selected { background:var(--mint-soft); box-shadow:inset 3px 0 0 var(--forest); }
+.audit-when { min-width:96px; white-space:nowrap; }
+.audit-when strong { font-variant-numeric:tabular-nums; }
 .audit-action { font-weight:800; }
 .audit-code { font-family:ui-monospace,Consolas,monospace; }
-.audit-record-summary { max-width:260px; overflow-wrap:anywhere; }
-.audit-details { margin-top:6px; color:var(--muted); font-size:.72rem; }
-.audit-details summary { cursor:pointer; color:var(--forest-bright); font-weight:800; }
-.audit-details dl { display:grid; gap:5px; margin:7px 0 0; }
-.audit-details dl div { display:grid; grid-template-columns:75px minmax(140px,1fr); gap:7px; }
-.audit-details dt { font-weight:800; }
-.audit-details dd { margin:0; overflow-wrap:anywhere; }
-.audit-json { max-width:min(560px,65vw); max-height:280px; overflow:auto; margin:0; padding:9px; border-radius:7px; background:#f5f8f5; color:var(--text); font: .7rem/1.45 ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
-/* Readable transfer details. The container must outrank .audit-details dl div,
-   which would otherwise force the label/value two-column grid onto it; the
-   nested facts divs deliberately keep that inherited layout. */
-.audit-details .audit-transfer { display:grid; gap:9px; grid-template-columns:1fr; }
-.audit-transfer-lines { width:100%; border-collapse:collapse; text-align:left; }
-.audit-transfer-lines th { padding:6px 8px; border-bottom:1px solid var(--line); color:var(--muted); font-size:.62rem; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; }
-.audit-transfer-lines td { padding:6px 8px; border-bottom:1px solid #eef2ee; color:var(--text); font-size:.74rem; font-variant-numeric:tabular-nums; }
-.audit-transfer-note { color:var(--muted); font-size:.66rem; }
-.audit-raw { margin-top:2px; }
-.audit-raw summary { cursor:pointer; color:var(--muted); font-weight:700; }
+.audit-record { max-width:280px; }
+.audit-record-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.audit-person { padding:0; border:0; background:none; color:var(--forest-bright); font:800 .82rem 'DM Sans'; text-align:left; text-decoration:underline dotted; text-underline-offset:2px; cursor:pointer; }
+.audit-person:hover { color:var(--forest); text-decoration-style:solid; }
+.audit-open { width:1%; text-align:right; white-space:nowrap; }
+.audit-open-button { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; border:1px solid var(--line-strong); border-radius:8px; background:#fff; color:var(--forest); font-weight:800; font-size:.76rem; cursor:pointer; }
+.audit-open-button:hover { border-color:var(--forest); background:var(--mint-soft); }
+
 .audit-pager { border-top:1px solid var(--line); }
-.audit-pager div { display:flex; gap:8px; }
-.audit-pager button { height:36px; background:#e8f2eb; color:var(--forest); }
-.audit-empty { min-height:220px; display:grid; place-content:center; justify-items:center; gap:5px; padding:20px; color:var(--muted); text-align:center; }
+.audit-pager div { display:flex; gap:8px; flex-wrap:wrap; }
+.audit-pager button { height:34px; padding:0 13px; border:0; border-radius:8px; background:#e8f2eb; color:var(--forest); font-weight:800; cursor:pointer; }
+.audit-pager button:disabled { opacity:.45; cursor:default; }
+.audit-empty { min-height:220px; display:grid; place-content:center; justify-items:center; gap:7px; padding:20px; color:var(--muted); text-align:center; }
 .audit-empty strong { color:var(--text); }
-@media(max-width:700px) { .audit-filters label,.audit-filters label.audit-search { flex:1 1 100%; } .audit-apply { width:100%; } .audit-results-head { align-items:flex-start; flex-direction:column; } }
+.audit-empty-clear { margin-top:4px; height:36px; padding:0 14px; border:0; border-radius:8px; background:var(--forest); color:#fff; font-weight:800; cursor:pointer; }
+
+@media(max-width:860px) {
+    .audit-ranges { order:2; width:100%; overflow-x:auto; }
+    .audit-search { order:1; flex:1 1 100%; }
+    .audit-filter-toggle { order:3; }
+    .audit-record { max-width:180px; }
+}
+@media(max-width:700px) {
+    .audit-filters label { flex:1 1 100%; }
+    .audit-results-head { align-items:flex-start; flex-direction:column; }
+}

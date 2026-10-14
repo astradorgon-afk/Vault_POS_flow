@@ -4,10 +4,19 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
 
-    <!-- Keep the ASP.NET Core / EF Core families in lockstep. -->
-    <AspNetCoreVersion>10.0.9</AspNetCoreVersion>
-    <EfCoreVersion>10.0.9</EfCoreVersion>
-    <ExtensionsVersion>10.0.9</ExtensionsVersion>
+    <!--
+      Keep the ASP.NET Core / EF Core families in lockstep. They are not three
+      independent choices: ASP.NET Core 10.0.13 depends on EF Core and
+      Extensions 10.0.13, and with transitive pinning on, leaving either behind
+      fails the restore outright as a package downgrade (NU1109).
+
+      Moved to 10.0.13 because 10.0.9 shipped Microsoft.AspNetCore.SignalR.Common
+      with advisory GHSA-334f-vvp4-7g6p, which NuGet audit raises and
+      TreatWarningsAsErrors turns into a failed build on any clean restore.
+    -->
+    <AspNetCoreVersion>10.0.13</AspNetCoreVersion>
+    <EfCoreVersion>10.0.13</EfCoreVersion>
+    <ExtensionsVersion>10.0.13</ExtensionsVersion>
   </PropertyGroup>
 
   <ItemGroup Label="ASP.NET Core">

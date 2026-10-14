@@ -55,12 +55,24 @@ public sealed class UserSession
     /// the rest wait and adopt the token the winner installed.</summary>
     internal SemaphoreSlim RefreshGate { get; } = new(1, 1);
 
+    /// <summary>
+    /// Notified whenever the credentials rotate, so the stored session behind
+    /// this browser can follow.
+    /// </summary>
+    /// <remarks>
+    /// Refresh tokens are single-use. A stored session left holding the token
+    /// that was just spent would fail to restore on the next page load, which
+    /// reads to the operator as being signed out at random.
+    /// </remarks>
+    public Action<SignInResponse>? CredentialsRotated { get; set; }
+
     /// <summary>Replaces the credentials after a token refresh, keeping the
     /// chosen work location untouched.</summary>
     public void UpdateCredentials(SignInResponse response)
     {
         ArgumentNullException.ThrowIfNull(response);
         Current = response;
+        CredentialsRotated?.Invoke(response);
     }
 
     /// <summary>Sets an optional starting location within the signed-in user's scope.</summary>
@@ -77,6 +89,28 @@ public sealed class UserSession
         WorkLocationName = locationId is null ? null : name;
         WorkLocationKind = locationId is null ? null : kind;
         return true;
+    }
+
+    /// <summary>
+    /// Adopts a session this browser already established, after a reload or in
+    /// a second tab.
+    /// </summary>
+    /// <remarks>
+    /// The work location is taken as given rather than re-validated: it was
+    /// checked against the account at sign-in, and the stored session is the
+    /// server's own record of that check, not something the browser supplied.
+    /// </remarks>
+    /// <param name="response">The credentials held for this browser.</param>
+    /// <param name="locationId">The work location chosen at sign-in.</param>
+    /// <param name="locationName">The name shown for that location.</param>
+    /// <param name="locationKind">The kind of that location.</param>
+    public void Restore(SignInResponse response, Guid? locationId, string? locationName, int? locationKind)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        Current = response;
+        WorkLocationId = locationId;
+        WorkLocationName = locationName;
+        WorkLocationKind = locationKind;
     }
 
     /// <summary>Clears the current session.</summary>

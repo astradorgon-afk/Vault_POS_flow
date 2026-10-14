@@ -1,8 +1,8 @@
 @page "/admin/audit"
 @attribute [Authorize(Policy = "audit.view")]
 @rendermode InteractiveServer
+@implements IDisposable
 @using System.Globalization
-@using System.Text.Json
 @inject VaultFlowApiClient Api
 
 <PageTitle>Activity log · VaultFlow</PageTitle>
@@ -10,19 +10,39 @@
 <section class="audit-page">
     <header class="audit-head">
         <div><span class="eyebrow">Business oversight</span><h1>Activity log</h1><p>Review recorded activity across sales, inventory, transfers, access, and more.</p></div>
+    </header>
+
+    <section class="audit-toolbar" aria-label="Find activity">
+        <div class="audit-ranges" role="group" aria-label="Date range">
+            @foreach ((string Key, string Label) choice in Ranges)
+            {
+                <button type="button" class="audit-range @(range == choice.Key ? "is-on" : null)"
+                        aria-pressed="@(range == choice.Key ? "true" : "false")"
+                        disabled="@loading" @onclick="() => SelectRangeAsync(choice.Key)">@choice.Label</button>
+            }
+            @if (range == CustomRange)
+            {
+                <span class="audit-range is-on" aria-current="true">Custom dates</span>
+            }
+        </div>
+        <label class="audit-search">
+            <span class="audit-sr">Search activity</span>
+            <input type="search" @bind="search" @bind:event="oninput" @bind:after="OnSearchTypedAsync"
+                   placeholder="Search action, product, transfer number, reason…" />
+        </label>
         <button type="button" class="audit-filter-toggle" aria-expanded="@(filtersOpen ? "true" : "false")" aria-controls="audit-filter-bar" @onclick="ToggleFilters">
-            Filters
+            More filters
             @if (ActiveFilterCount > 0)
             {
                 <b class="audit-filter-badge">@ActiveFilterCount</b>
             }
             <span class="audit-filter-caret" aria-hidden="true">@(filtersOpen ? "▴" : "▾")</span>
         </button>
-    </header>
+    </section>
 
-    <section id="audit-filter-bar" class="audit-filters" aria-label="Filter activity" hidden="@(!filtersOpen)">
+    <section id="audit-filter-bar" class="audit-filters" aria-label="More filters" hidden="@(!filtersOpen)">
         <label><span>Activity type</span>
-            <select @bind="category">
+            <select @bind="category" @bind:after="ApplyFiltersAsync">
                 <option value="">All activity</option>
                 <option value="transactions">Transactions</option>
                 <option value="inventory">Inventory</option>
@@ -34,166 +54,371 @@
                 <option value="other">Other activity</option>
             </select>
         </label>
-        <label class="audit-search"><span>Search</span><input type="search" @bind="search" @bind:event="oninput" placeholder="Action, product, transfer number, reason" /></label>
-        <label><span>From</span><input type="date" @bind="fromDate" /></label>
-        <label><span>To</span><input type="date" @bind="toDate" /></label>
-        <button type="button" class="audit-apply" @onclick="ApplyFiltersAsync" disabled="@loading">@(loading ? "Loading…" : "Apply filters")</button>
+        <label><span>From</span><input type="date" @bind="fromDate" @bind:after="OnDatesEditedAsync" /></label>
+        <label><span>To</span><input type="date" @bind="toDate" @bind:after="OnDatesEditedAsync" /></label>
+        <label><span>Rows per page</span>
+            <select @bind="pageSize" @bind:after="ApplyFiltersAsync">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </label>
     </section>
+
+    @if (ActiveFilterCount > 0)
+    {
+        <div class="audit-chips" aria-label="Filters in use">
+            <span class="audit-chips-label">Showing</span>
+            @if (category.Length > 0)
+            {
+                <span class="audit-chip">@AuditLogView.CategoryLabel(category)<button type="button" aria-label="Remove activity type filter" @onclick="ClearCategoryAsync">×</button></span>
+            }
+            @if (!string.IsNullOrWhiteSpace(search))
+            {
+                <span class="audit-chip">“@search.Trim()”<button type="button" aria-label="Clear search" @onclick="ClearSearchAsync">×</button></span>
+            }
+            @if (personId is not null)
+            {
+                <span class="audit-chip">@(personName ?? "One person")<button type="button" aria-label="Remove person filter" @onclick="ClearPersonAsync">×</button></span>
+            }
+            @if (fromDate is not null || toDate is not null)
+            {
+                <span class="audit-chip">@DateChipLabel<button type="button" aria-label="Clear dates" @onclick="ClearDatesAsync">×</button></span>
+            }
+            <button type="button" class="audit-chip-clear" @onclick="ClearAllFiltersAsync">Clear all</button>
+        </div>
+    }
 
     @if (!string.IsNullOrWhiteSpace(message))
     {
         <div class="audit-message" role="status">@message</div>
     }
 
-    <section class="audit-results" aria-live="polite">
-        @if (loading)
+    <section class="audit-results @(loading && items.Count > 0 ? "is-loading" : null)" aria-live="polite" aria-busy="@(loading ? "true" : "false")">
+        @if (items.Count == 0)
         {
-            <div class="audit-empty">Loading activity…</div>
-        }
-        else if (items.Count == 0)
-        {
-            <div class="audit-empty"><strong>No activity matched these filters.</strong><span>Try another category, date range, or search term.</span></div>
+            <div class="audit-empty">
+                @if (loading)
+                {
+                    <span>Loading activity…</span>
+                }
+                else if (message is not null)
+                {
+                    <strong>Nothing to show.</strong>
+                    <button type="button" class="audit-empty-clear" @onclick="() => LoadAsync(offset)">Try again</button>
+                }
+                else
+                {
+                    <strong>No activity matched these filters.</strong>
+                    <span>Try a wider date range, another activity type, or a different search term.</span>
+                    @if (ActiveFilterCount > 0)
+                    {
+                        <button type="button" class="audit-empty-clear" @onclick="ClearAllFiltersAsync">Clear all filters</button>
+                    }
+                }
+            </div>
         }
         else
         {
             <header class="audit-results-head">
                 <strong>@total.ToString("N0", CultureInfo.InvariantCulture) activity records</strong>
-                <span>Showing @((offset + 1).ToString("N0", CultureInfo.InvariantCulture))–@Math.Min(offset + PageSize, total).ToString("N0", CultureInfo.InvariantCulture)</span>
+                <span>Showing @((offset + 1).ToString("N0", CultureInfo.InvariantCulture))–@Math.Min(offset + pageSize, total).ToString("N0", CultureInfo.InvariantCulture) · newest first · store time</span>
             </header>
             <div class="audit-table-scroll">
                 <table>
-                    <thead><tr><th>When</th><th>Activity</th><th>Who</th><th>Location</th><th>Record</th></tr></thead>
-                    <tbody>
-                        @foreach (PosAuditLogItem item in items)
-                        {
-                            <tr @key="item.Id">
-                                <td class="audit-when"><strong>@item.OccurredAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</strong><small>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</small></td>
-                                <td><span class="audit-action">@ActionLabel(item.Action)</span><small class="audit-code">@item.Action</small></td>
-                                <td><strong>@item.ActorName</strong><small>@(string.IsNullOrWhiteSpace(item.RoleSnapshot) ? "Role not recorded" : item.RoleSnapshot)</small></td>
-                                <td>@(item.LocationName ?? "Business-wide")</td>
-                                <td>
-                                    <strong>@item.EntityType</strong>
-                                    @if (!string.IsNullOrWhiteSpace(item.RecordSummary)) { <small class="audit-record-summary">@item.RecordSummary</small> }
-                                    @if (item.EntityId is { } entityId) { <small>@ShortId(entityId)</small> }
-                                    <details class="audit-details">
-                                        <summary>Details</summary>
-                                        <dl>
-                                            @if (!string.IsNullOrWhiteSpace(item.Reason)) { <div><dt>Reason</dt><dd>@item.Reason</dd></div> }
-                                            @if (item.ReferenceDocumentType is not null) { <div><dt>Reference</dt><dd>@item.ReferenceDocumentType · @ShortId(item.ReferenceDocumentId)</dd></div> }
-                                            @if (!string.IsNullOrWhiteSpace(item.PreviousValueJson)) { <div><dt>Before</dt><dd><pre class="audit-json">@PrettyJson(item.PreviousValueJson)</pre></dd></div> }
-                                            @if (!string.IsNullOrWhiteSpace(item.NewValueJson))
-                                            {
-                                                bool isTransfer = item.Action.StartsWith("transfer.", StringComparison.OrdinalIgnoreCase);
-                                                TransferDetailRead? transfer = isTransfer ? ReadTransferDetails(item.NewValueJson) : null;
-                                                <div>
-                                                    <dt>@(isTransfer ? "Transfer details (current state)" : "Updated")</dt>
-                                                    <dd>
-                                                        @if (transfer is not null)
-                                                        {
-                                                            <div class="audit-transfer">
-                                                                <dl class="audit-transfer-facts">
-                                                                    <div><dt>Status</dt><dd>@SplitWords(transfer.CurrentStatus)</dd></div>
-                                                                    <div><dt>Mode</dt><dd>@SplitWords(transfer.Mode)</dd></div>
-                                                                    <div><dt>Kind</dt><dd>@SplitWords(transfer.Kind)</dd></div>
-                                                                    <div><dt>Route</dt><dd>@transfer.Source <span aria-hidden="true">→</span> @transfer.Destination</dd></div>
-                                                                    @if (transfer.TransferNumber is not null) { <div><dt>Transfer no.</dt><dd>@transfer.TransferNumber</dd></div> }
-                                                                    @if (transfer.ShipmentNumber is not null) { <div><dt>Shipment</dt><dd>@transfer.ShipmentNumber</dd></div> }
-                                                                    @if (transfer.ReceiptNumber is not null) { <div><dt>Receipt</dt><dd>@transfer.ReceiptNumber</dd></div> }
-                                                                </dl>
-                                                                @if (transfer.Products.Count > 0)
-                                                                {
-                                                                    <table class="audit-transfer-lines">
-                                                                        <thead><tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th></tr></thead>
-                                                                        <tbody>
-                                                                            @foreach (TransferDetailLine line in transfer.Products)
-                                                                            {
-                                                                                <tr @key="line.LineNo">
-                                                                                    <td>@line.LineNo.ToString("D2", CultureInfo.InvariantCulture)</td>
-                                                                                    <td>@line.ProductName</td>
-                                                                                    <td>@FormatQuantity(line.Requested)</td>
-                                                                                    <td>@FormatQuantity(line.Picked)</td>
-                                                                                    <td>@FormatQuantity(line.Received)</td>
-                                                                                    <td>@FormatQuantity(line.Damaged)</td>
-                                                                                </tr>
-                                                                            }
-                                                                        </tbody>
-                                                                    </table>
-                                                                    <small class="audit-transfer-note">Quantities are the transfer's current totals, not the values at the time of this event.</small>
-                                                                }
-                                                            </div>
-                                                            <details class="audit-raw"><summary>Raw payload</summary><pre class="audit-json">@PrettyJson(item.NewValueJson)</pre></details>
-                                                        }
-                                                        else
-                                                        {
-                                                            <pre class="audit-json">@PrettyJson(item.NewValueJson)</pre>
-                                                        }
-                                                    </dd>
-                                                </div>
-                                            }
-                                            @if (item.CorrelationId != Guid.Empty)
-                                            {
-                                                <div>
-                                                    <dt>Related</dt>
-                                                    <dd>Recorded together with other entries from the same user action.<small class="audit-correlation-code" title="Correlation code for support">Code @ShortId(item.CorrelationId)</small></dd>
-                                                </div>
-                                            }
-                                        </dl>
-                                    </details>
-                                </td>
+                    <thead><tr><th>Time</th><th>Activity</th><th>Who</th><th>Location</th><th>Record</th><th><span class="audit-sr">Details</span></th></tr></thead>
+                    @foreach (IGrouping<DateOnly, PosAuditLogItem> day in DayGroups)
+                    {
+                        <tbody @key="day.Key">
+                            <tr class="audit-day">
+                                <th colspan="6" scope="colgroup">
+                                    <strong>@AuditLogView.DayLabel(day.Key)</strong>
+                                    <span>@AuditLogView.DayDate(day.Key)</span>
+                                    <small>@day.Count().ToString("N0", CultureInfo.InvariantCulture) shown</small>
+                                </th>
                             </tr>
-                        }
-                    </tbody>
+                            @foreach (PosAuditLogItem item in day)
+                            {
+                                <tr @key="item.Id" class="audit-row @(selected?.Id == item.Id ? "is-selected" : null)" @onclick="() => Open(item)">
+                                    <td class="audit-when">
+                                        <strong>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm", CultureInfo.InvariantCulture)</strong>
+                                        <small>@AuditLogView.Ago(item.OccurredAtUtc)</small>
+                                    </td>
+                                    <td><span class="audit-action">@AuditLogView.ActionLabel(item.Action)</span><small class="audit-code">@item.Action</small></td>
+                                    <td>
+                                        @if (item.UserId is not null)
+                                        {
+                                            <button type="button" class="audit-person" title="Show only this person's activity"
+                                                    @onclick:stopPropagation="true" @onclick="() => FilterByPersonAsync(item)">@item.ActorName</button>
+                                        }
+                                        else
+                                        {
+                                            <strong>@item.ActorName</strong>
+                                        }
+                                        <small>@AuditLogView.RoleLabel(item.RoleSnapshot)</small>
+                                    </td>
+                                    <td>@(item.LocationName ?? "Business-wide")</td>
+                                    <td class="audit-record">
+                                        <strong>@AuditLogView.RecordLabel(item.EntityType)</strong>
+                                        @if (!string.IsNullOrWhiteSpace(item.RecordSummary)) { <small class="audit-record-summary">@item.RecordSummary</small> }
+                                    </td>
+                                    <td class="audit-open">
+                                        <button type="button" class="audit-open-button" @onclick:stopPropagation="true" @onclick="() => Open(item)">
+                                            Details<span aria-hidden="true">›</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    }
                 </table>
             </div>
             <footer class="audit-pager">
-                <span>Page @(offset / PageSize + 1) of @Math.Max(1, (total + PageSize - 1) / PageSize)</span>
+                <span>Page @CurrentPage.ToString("N0", CultureInfo.InvariantCulture) of @PageCount.ToString("N0", CultureInfo.InvariantCulture)</span>
                 <div>
+                    <button type="button" @onclick="FirstAsync" disabled="@(offset == 0 || loading)">Newest</button>
                     <button type="button" @onclick="PreviousAsync" disabled="@(offset == 0 || loading)">Previous</button>
-                    <button type="button" @onclick="NextAsync" disabled="@(offset + PageSize >= total || loading)">Next</button>
+                    <button type="button" @onclick="NextAsync" disabled="@(offset + pageSize >= total || loading)">Next</button>
+                    <button type="button" @onclick="LastAsync" disabled="@(offset + pageSize >= total || loading)">Oldest</button>
                 </div>
             </footer>
         }
     </section>
 </section>
 
+@if (selected is { } entry)
+{
+    <AuditEntryPanel Entry="entry"
+                     Position="SelectedIndex + 1"
+                     PageTotal="items.Count"
+                     CanShowNewer="SelectedIndex > 0"
+                     CanShowOlder="SelectedIndex >= 0 && SelectedIndex < items.Count - 1"
+                     OnClose="Close"
+                     OnNewer="ShowNewer"
+                     OnOlder="ShowOlder"
+                     OnFilterPerson="() => FilterByPersonAsync(entry)"
+                     OnFilterDay="() => FilterByDayAsync(entry)" />
+}
+
 @code {
-    private const int PageSize = 50;
+    private const string CustomRange = "custom";
+    private static readonly (string Key, string Label)[] Ranges =
+    [
+        ("all", "All time"),
+        ("today", "Today"),
+        ("7", "Last 7 days"),
+        ("30", "Last 30 days"),
+        ("month", "This month"),
+    ];
+
     private readonly List<PosAuditLogItem> items = [];
     private string category = string.Empty;
     private string search = string.Empty;
+    private string range = "all";
     private DateTime? fromDate;
     private DateTime? toDate;
+    private Guid? personId;
+    private string? personName;
     private string? message;
     private int total;
     private int offset;
+    private int pageSize = 50;
     private bool loading = true;
-    private bool filtersOpen = true;
+    private bool filtersOpen;
+    private int searchGeneration;
+    private int loadGeneration;
+    private CancellationTokenSource? inFlight;
+    private PosAuditLogItem? selected;
 
     private int ActiveFilterCount =>
         (category.Length > 0 ? 1 : 0) +
         (string.IsNullOrWhiteSpace(search) ? 0 : 1) +
-        (fromDate is null ? 0 : 1) +
-        (toDate is null ? 0 : 1);
+        (personId is null ? 0 : 1) +
+        (fromDate is null && toDate is null ? 0 : 1);
+
+    private int PageCount => Math.Max(1, (total + pageSize - 1) / pageSize);
+    private int CurrentPage => offset / pageSize + 1;
+    private int SelectedIndex => selected is null ? -1 : items.FindIndex(item => item.Id == selected.Id);
+
+    private IEnumerable<IGrouping<DateOnly, PosAuditLogItem>> DayGroups =>
+        items.GroupBy(item => DateOnly.FromDateTime(item.OccurredAtUtc.InStoreTime().DateTime));
+
+    private string DateChipLabel => (fromDate, toDate) switch
+    {
+        ({ } start, { } end) when DateOnly.FromDateTime(start) == DateOnly.FromDateTime(end) => Day(start),
+        ({ } start, { } end) => $"{Day(start)} – {Day(end)}",
+        ({ } start, null) => $"From {Day(start)}",
+        (null, { } end) => $"Until {Day(end)}",
+        _ => "Any date",
+    };
+
+    private static string Day(DateTime value) => value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
 
     protected override Task OnInitializedAsync() => LoadAsync(0);
 
     private void ToggleFilters() => filtersOpen = !filtersOpen;
 
     private Task ApplyFiltersAsync() => LoadAsync(0);
-    private Task PreviousAsync() => LoadAsync(Math.Max(0, offset - PageSize));
-    private Task NextAsync() => LoadAsync(offset + PageSize);
 
+    /// <summary>Runs the search a short moment after typing stops, so no "Apply" click is needed.</summary>
+    private async Task OnSearchTypedAsync()
+    {
+        int generation = ++searchGeneration;
+        await Task.Delay(400);
+        if (generation == searchGeneration)
+        {
+            await LoadAsync(0);
+        }
+    }
+
+    private Task SelectRangeAsync(string key)
+    {
+        range = key;
+        DateOnly today = StoreClock.Today;
+        (DateOnly? start, DateOnly? end) = key switch
+        {
+            "today" => (today, today),
+            "7" => (today.AddDays(-6), today),
+            "30" => (today.AddDays(-29), today),
+            "month" => (new DateOnly(today.Year, today.Month, 1), today),
+            _ => ((DateOnly?)null, (DateOnly?)null),
+        };
+
+        fromDate = start?.ToDateTime(TimeOnly.MinValue);
+        toDate = end?.ToDateTime(TimeOnly.MinValue);
+        return LoadAsync(0);
+    }
+
+    private Task OnDatesEditedAsync()
+    {
+        range = fromDate is null && toDate is null ? "all" : CustomRange;
+        return LoadAsync(0);
+    }
+
+    private Task FilterByPersonAsync(PosAuditLogItem item)
+    {
+        if (item.UserId is not { } actorId)
+        {
+            return Task.CompletedTask;
+        }
+
+        personId = actorId;
+        personName = item.ActorName;
+        return LoadAsync(0);
+    }
+
+    private Task FilterByDayAsync(PosAuditLogItem item)
+    {
+        DateTime day = item.OccurredAtUtc.InStoreTime().Date;
+        fromDate = day;
+        toDate = day;
+        range = CustomRange;
+        return LoadAsync(0);
+    }
+
+    private Task ClearCategoryAsync()
+    {
+        category = string.Empty;
+        return LoadAsync(0);
+    }
+
+    private Task ClearSearchAsync()
+    {
+        search = string.Empty;
+        searchGeneration++;
+        return LoadAsync(0);
+    }
+
+    private Task ClearPersonAsync()
+    {
+        personId = null;
+        personName = null;
+        return LoadAsync(0);
+    }
+
+    private Task ClearDatesAsync()
+    {
+        fromDate = null;
+        toDate = null;
+        range = "all";
+        return LoadAsync(0);
+    }
+
+    private Task ClearAllFiltersAsync()
+    {
+        category = string.Empty;
+        search = string.Empty;
+        searchGeneration++;
+        personId = null;
+        personName = null;
+        fromDate = null;
+        toDate = null;
+        range = "all";
+        return LoadAsync(0);
+    }
+
+    private Task FirstAsync() => LoadAsync(0);
+    private Task PreviousAsync() => LoadAsync(Math.Max(0, offset - pageSize));
+    private Task NextAsync() => LoadAsync(offset + pageSize);
+    private Task LastAsync() => LoadAsync((PageCount - 1) * pageSize);
+
+    private void Open(PosAuditLogItem item) => selected = item;
+
+    private void Close() => selected = null;
+
+    private void ShowNewer() => Step(-1);
+    private void ShowOlder() => Step(1);
+
+    /// <summary>Moves the panel one entry up or down the list, without closing it.</summary>
+    private void Step(int direction)
+    {
+        int next = SelectedIndex + direction;
+        if (next >= 0 && next < items.Count)
+        {
+            selected = items[next];
+        }
+    }
+
+    /// <summary>Stops a pending search, and any load still running, once the page is gone.</summary>
+    public void Dispose()
+    {
+        searchGeneration++;
+        inFlight?.Cancel();
+        inFlight?.Dispose();
+        inFlight = null;
+    }
+
+    /// <summary>
+    /// Loads a page of activity, cancelling whatever was still loading.
+    /// </summary>
+    /// <remarks>
+    /// Two loads can be in the air at once — a debounced search landing just
+    /// after a range button was pressed. Without the generation check the
+    /// slower one wins and the table ends up showing a filter nobody selected.
+    /// </remarks>
     private async Task LoadAsync(int nextOffset)
     {
+        inFlight?.Cancel();
+        inFlight?.Dispose();
+        CancellationTokenSource source = new();
+        inFlight = source;
+        int generation = ++loadGeneration;
+
         loading = true;
         message = null;
+        selected = null;
         try
         {
             ApiResult<PosAuditLogPage> result = await Api.GetAuditLogAsync(
-                category, search,
+                category, search, personId,
                 fromDate is { } start ? DateOnly.FromDateTime(start) : null,
                 toDate is { } end ? DateOnly.FromDateTime(end) : null,
-                nextOffset, PageSize, CancellationToken.None);
+                nextOffset, pageSize, source.Token);
+            if (generation != loadGeneration)
+            {
+                return;
+            }
+
             if (result is not { IsSuccess: true, Value: { } page })
             {
                 message = result.Error ?? "The activity log could not be loaded.";
@@ -205,143 +430,24 @@
             total = page.Total;
             offset = page.Offset;
         }
-        catch (HttpRequestException)
+        catch (OperationCanceledException)
         {
-            message = "The activity log is unavailable. Try again shortly.";
+            // Superseded by a newer load, or the page is gone.
+            return;
         }
         finally
         {
-            loading = false;
-        }
-    }
-
-    private static string ActionLabel(string action)
-        => string.Join(' ', action.Split('.', StringSplitOptions.RemoveEmptyEntries)
-            .Select(part => part.Length == 0 ? part : char.ToUpperInvariant(part[0]) + part[1..]));
-
-    private static string ShortId(Guid? id)
-        => id is { } value ? value.ToString("N", CultureInfo.InvariantCulture)[..8].ToUpperInvariant() : "—";
-
-    private static string PrettyJson(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(json);
-            return JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions { WriteIndented = true });
-        }
-        catch (JsonException)
-        {
-            return json;
-        }
-    }
-
-    private sealed record TransferDetailLine(int LineNo, string ProductName, decimal Requested, decimal Picked, decimal Received, decimal Damaged);
-
-    private sealed record TransferDetailRead(
-        string? TransferNumber,
-        string? ShipmentNumber,
-        string? ReceiptNumber,
-        string CurrentStatus,
-        string Mode,
-        string Kind,
-        string Source,
-        string Destination,
-        IReadOnlyList<TransferDetailLine> Products);
-
-    /// <summary>Reads the transfer audit payload built by the API; returns null for any other or older shape.</summary>
-    private static TransferDetailRead? ReadTransferDetails(string json)
-    {
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(json);
-            JsonElement root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("currentStatus", out _))
+            if (generation == loadGeneration)
             {
-                return null;
+                loading = false;
             }
 
-            return new TransferDetailRead(
-                OptionalString(root, "transferNumber"),
-                OptionalString(root, "shipmentNumber"),
-                OptionalString(root, "receiptNumber"),
-                OptionalString(root, "currentStatus") ?? "—",
-                OptionalString(root, "mode") ?? "—",
-                OptionalString(root, "kind") ?? "—",
-                NestedName(root, "source"),
-                NestedName(root, "destination"),
-                ReadProductLines(root));
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        static string? OptionalString(JsonElement element, string name)
-            => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
-                ? value.GetString()
-                : null;
-
-        static string NestedName(JsonElement element, string name)
-            => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Object
-                ? OptionalString(value, "name") ?? "Unknown"
-                : "Unknown";
-
-        static List<TransferDetailLine> ReadProductLines(JsonElement element)
-        {
-            List<TransferDetailLine> lines = [];
-            if (!element.TryGetProperty("products", out JsonElement products) || products.ValueKind != JsonValueKind.Array)
+            if (ReferenceEquals(inFlight, source))
             {
-                return lines;
+                inFlight = null;
             }
 
-            foreach (JsonElement product in products.EnumerateArray())
-            {
-                lines.Add(new TransferDetailLine(
-                    product.TryGetProperty("lineNo", out JsonElement lineNo) && lineNo.TryGetInt32(out int number) ? number : 0,
-                    OptionalString(product, "productName") ?? "Unknown product",
-                    DecimalValue(product, "requestedQuantity"),
-                    DecimalValue(product, "pickedQuantity"),
-                    DecimalValue(product, "receivedQuantity"),
-                    DecimalValue(product, "damagedQuantity")));
-            }
-
-            return lines;
+            source.Dispose();
         }
-
-        static decimal DecimalValue(JsonElement element, string name)
-            => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out decimal number) ? number : 0m;
     }
-
-    /// <summary>"WarehouseToStore" → "Warehouse to store".</summary>
-    private static string SplitWords(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "—";
-        }
-
-        System.Text.StringBuilder builder = new(value.Length + 8);
-        for (int index = 0; index < value.Length; index++)
-        {
-            char current = value[index];
-            if (index > 0 && char.IsUpper(current) && !char.IsUpper(value[index - 1]))
-            {
-                builder.Append(' ');
-            }
-
-            builder.Append(current);
-        }
-
-        return builder.ToString();
-    }
-
-    private static string FormatQuantity(decimal quantity)
-        => quantity % 1m == 0m
-            ? quantity.ToString("0", CultureInfo.InvariantCulture)
-            : quantity.ToString("0.###", CultureInfo.InvariantCulture);
 }

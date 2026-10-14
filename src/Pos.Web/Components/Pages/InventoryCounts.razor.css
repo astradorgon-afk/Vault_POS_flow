@@ -1,10 +1,18 @@
 .head-pickers { display:flex; gap:12px; flex-wrap:wrap; }
-.search-action { min-width:130px; height:42px; border:0; border-radius:8px; background:var(--signal); color:#1d170d; font-weight:700; cursor:pointer; }
-.search-action:hover { background:var(--signal-bright); }
+.search-action { min-width:130px; height:42px; padding:0 17px; border:0; border-radius:9px; background:var(--forest); color:#fff; font-weight:800; cursor:pointer; }
+.search-action:hover { background:var(--forest-bright); }
 .search-action:disabled { opacity:.5; cursor:default; }
-.open-count-hint { margin-top:12px; padding:10px 12px; border-left:3px solid var(--signal); background:rgba(227,168,79,0.12); color:#f0c982; font-size:.82rem; }
+.open-count-hint { margin-top:12px; padding:11px 13px; border-left:3px solid var(--amber); background:var(--amber-soft); color:#6d5420; font-size:.82rem; }
 .open-count-actions { margin-top:14px; display:flex; justify-content:flex-end; }
-.results-panel { border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; min-height:260px; }
+/* A count waiting on a signature is the one row someone has to act on. */
+.awaiting-flag { margin-left:9px; padding:3px 10px; border-radius:99px; background:var(--amber-soft); color:#6d5420; font-weight:800; font-size:.72rem; }
+.row-awaiting td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
+.counted-cell { display:grid; gap:5px; min-width:92px; }
+.counted-cell span:first-child { font-variant-numeric:tabular-nums; }
+.counted-bar { display:block; height:4px; border-radius:99px; background:#ecefec; overflow:hidden; }
+.counted-bar b { display:block; height:100%; border-radius:99px; background:var(--forest); }
+
+.results-panel { border:1px solid var(--line); border-radius:18px; background:#fff; overflow:hidden; min-height:260px; box-shadow:var(--shadow-card); }
 .results-empty { min-height:260px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
 .results-empty span { margin-top:5px; font-size:.82rem; }
 @media(max-width:620px){.office-head{align-items:stretch;flex-direction:column}}

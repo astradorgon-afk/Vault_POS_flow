@@ -18,10 +18,11 @@ builder.Services.AddAuthorizationCore(options =>
 {
     foreach (PermissionDefinition permission in Permissions.All)
     {
+        // The permission claim is the only grant. A role shortcut here would let
+        // a page render that the API then refuses, because RequirePermission on
+        // the endpoint reads the permission and nothing else.
         options.AddPolicy(permission.Code, policy => policy.RequireAssertion(context =>
-            context.User.HasClaim("permission", permission.Code)
-            || (permission.Code == Permissions.Administration.ViewAudit &&
-                (context.User.IsInRole(Roles.Owner) || context.User.IsInRole(Roles.Administrator)))));
+            context.User.HasClaim("permission", permission.Code)));
     }
 
     options.AddPolicy(
@@ -40,9 +41,20 @@ builder.Services.AddScoped<OfflineReadinessNotice>();
 builder.Services.AddScoped<PageTrail>();
 builder.Services.AddSingleton<PwaSessions>();
 builder.Services.AddSingleton<PwaLoginHandoffs>();
+builder.Services.AddHostedService<PwaSessionSweeper>();
 builder.Services.AddHttpClient("pwa-api", (services, client) =>
-    client.BaseAddress = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ApiOptions>>().Value.BaseAddress);
+{
+    client.BaseAddress = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ApiOptions>>().Value.BaseAddress;
+    // The snapshot download pages through the catalog and open orders, so this
+    // one is allowed longer than a screen would wait.
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
 builder.Services.AddBarcodeScanning(perSession: true);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<WebSessions>();
+builder.Services.AddSingleton<OneUseTokens<PendingWebSignIn>>();
+builder.Services.AddSingleton<OneUseTokens<WebSessionTicket>>();
+builder.Services.AddScoped<WebSessionRestorer>();
 builder.Services.AddScoped<VaultFlowAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(services =>
     services.GetRequiredService<VaultFlowAuthenticationStateProvider>());
@@ -50,6 +62,9 @@ builder.Services.AddHttpClient<VaultFlowApiClient>((services, client) =>
 {
     ApiOptions options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ApiOptions>>().Value;
     client.BaseAddress = options.BaseAddress;
+    // Someone is watching a spinner behind every one of these. The default 100
+    // seconds is far past the point where a screen should say so and stop.
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 builder.Services.AddOptions<ApiOptions>()
     .BindConfiguration(ApiOptions.SectionName)
@@ -100,6 +115,7 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+app.MapWebSessionEndpoints();
 app.MapPwaGateway();
 app.MapFallbackToFile("/offline/{*path:nonfile}", "offline/index.html");
 app.MapRazorComponents<App>()

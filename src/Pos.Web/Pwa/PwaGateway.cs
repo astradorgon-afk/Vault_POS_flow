@@ -451,13 +451,15 @@ public sealed record PwaPush(IReadOnlyList<PwaEvent> Events);
 public sealed record PwaEvent(Guid EventId, long DeviceSequence, string EventType, JsonElement Payload,
     DateTimeOffset OccurredAtUtc);
 
-public sealed class PwaSession(Guid deviceId, Guid locationId, SignInResponse credentials)
+public sealed class PwaSession(Guid deviceId, Guid locationId, SignInResponse credentials) : IDisposable
 {
     public Guid DeviceId { get; } = deviceId;
     public Guid LocationId { get; } = locationId;
     public SignInResponse Credentials { get; set; } = credentials;
     public SemaphoreSlim Gate { get; } = new(1, 1);
     public DateTimeOffset ExpiresAtUtc { get; } = DateTimeOffset.UtcNow.AddDays(7);
+
+    public void Dispose() => Gate.Dispose();
 }
 
 public sealed class PwaSessions
@@ -468,8 +470,29 @@ public sealed class PwaSessions
     {
         if (!sessions.TryGetValue(key, out PwaSession? session)) return null;
         if (session.ExpiresAtUtc > DateTimeOffset.UtcNow) return session;
-        sessions.TryRemove(key, out _);
+        if (sessions.TryRemove(key, out PwaSession? expired)) expired.Dispose();
         return null;
     }
     public PwaSession? Remove(string key) => sessions.TryRemove(key, out PwaSession? session) ? session : null;
+
+    /// <summary>Drops every expired session. Returns how many went.</summary>
+    /// <remarks>
+    /// A lookup only ever evicts the key being looked up, so a device that
+    /// stops coming back leaves its credentials resident. This is the only
+    /// path that reclaims those.
+    /// </remarks>
+    public int RemoveExpired()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        int removed = 0;
+        foreach (KeyValuePair<string, PwaSession> entry in sessions)
+        {
+            if (entry.Value.ExpiresAtUtc > now) continue;
+            if (!sessions.TryRemove(entry)) continue;
+            entry.Value.Dispose();
+            removed++;
+        }
+
+        return removed;
+    }
 }

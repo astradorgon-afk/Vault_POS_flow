@@ -5,13 +5,31 @@ using Pos.Web.Services;
 namespace Pos.Web.Security;
 
 /// <summary>Projects the API session into Blazor authorization state.</summary>
-public sealed class VaultFlowAuthenticationStateProvider(UserSession session, VaultFlowApiClient api) : AuthenticationStateProvider
+/// <remarks>
+/// This is also where a signed-in browser gets its session back. A circuit
+/// starts with an empty <see cref="UserSession"/>, so without this a reload
+/// would read as signed out even though the server still holds the session.
+/// </remarks>
+/// <param name="session">The circuit's session.</param>
+/// <param name="api">The API client.</param>
+/// <param name="restorer">Finds the session this browser already has.</param>
+public sealed class VaultFlowAuthenticationStateProvider(
+    UserSession session,
+    VaultFlowApiClient api,
+    WebSessionRestorer restorer) : AuthenticationStateProvider
 {
     private static readonly AuthenticationState Anonymous = new(new ClaimsPrincipal(new ClaimsIdentity()));
+    private bool restored;
 
     /// <inheritdoc />
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
+        if (!restored)
+        {
+            restored = true;
+            restorer.Restore();
+        }
+
         try
         {
             // A circuit that idled past its access-token window refreshes the
@@ -38,9 +56,14 @@ public sealed class VaultFlowAuthenticationStateProvider(UserSession session, Va
     /// <summary>Notifies the component tree that sign-in succeeded.</summary>
     public void NotifySignedIn() => NotifyAuthenticationStateChanged(Task.FromResult(CreateState()));
 
-    /// <summary>Ends the local session.</summary>
+    /// <summary>Ends the local session, and the stored one behind it.</summary>
+    /// <remarks>
+    /// Clearing only the circuit's copy would leave the browser holding a
+    /// cookie that signs it straight back in on the next page load.
+    /// </remarks>
     public void SignOut()
     {
+        restorer.Discard();
         session.Clear();
         NotifyAuthenticationStateChanged(Task.FromResult(Anonymous));
     }

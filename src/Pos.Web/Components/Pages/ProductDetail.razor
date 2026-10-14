@@ -1,0 +1,172 @@
+@page "/catalog/products/{ProductId:guid}"
+@attribute [Authorize(Policy = "product.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@* Loading and the barcode commands live in ProductDetail.razor.cs. *@
+
+<PageTitle>Product · VaultFlow</PageTitle>
+
+<section class="catalog-page">
+@if (loading && product is null)
+{
+    <div class="loading-card">Loading the product…</div>
+}
+else if (product is null)
+{
+    <div class="pos-message" role="alert">@(message ?? "This product could not be found.")</div>
+}
+else
+{
+    <header class="office-head">
+        <div>
+            <p class="office-kicker"><a class="count-back" href="/catalog">Products</a> · @product.Sku</p>
+            <h1 class="office-title">@product.Name</h1>
+            <p class="office-lead">
+                @(CategoryName(product.CategoryId)) · base unit @UnitName(product.BaseUnitOfMeasureId)
+                @if (product.TracksBatches) { <text> · batch tracked</text> }
+                @if (product.TracksExpiry) { <text> · expiry tracked</text> }
+            </p>
+        </div>
+        <span class="@(product.IsActive ? "status-chip sc-posted" : "status-chip sc-cancelled")">@(product.IsActive ? "Active" : "Discontinued")</span>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    <section class="count-meta">
+        <span><strong>SKU</strong>@product.Sku</span>
+        @if (product.DefaultPurchaseCost is { } cost)
+        {
+            <span><strong>Default cost</strong>@cost.ToString("C", Peso)</span>
+        }
+        @if (product.ShelfLifeDays is { } days)
+        {
+            <span><strong>Shelf life</strong>@days.ToString("N0", CultureInfo.InvariantCulture) days</span>
+        }
+        <span><strong>VAT</strong>@(product.IsVatExempt ? "Exempt" : "Standard")</span>
+        <span><strong>Added</strong>@product.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</span>
+    </section>
+
+    @* The translation table for this product. Everything that scans — the
+       register, receiving, counting, transfers — resolves through these rows. *@
+    <section class="barcode-panel" aria-label="Barcodes">
+        <header class="barcode-head">
+            <div>
+                <strong>Barcodes</strong>
+                <span>What a scanner has to read to find this product.</span>
+            </div>
+            @if (CanManageBarcodes)
+            {
+                <button type="button" class="search-action" @onclick="ToggleAdd">@(adding ? "Close" : "Add a barcode")</button>
+            }
+        </header>
+
+        @if (adding && CanManageBarcodes)
+        {
+            <div class="barcode-add">
+                <ScanTarget OnScan="OnScannedAsync" />
+                <CameraScanner Enabled="@(!working)" />
+                <div class="barcode-add-grid">
+                    <label><span>Code</span>
+                        <input type="text" inputmode="numeric" placeholder="Scan or type…" aria-label="New barcode"
+                               @bind="newCode" @bind:event="oninput" @onkeydown="OnAddKeyAsync" />
+                    </label>
+                    <label><span>Scans as</span>
+                        <select @bind="newUnitId">
+                            <option value="">Base unit (@UnitName(product.BaseUnitOfMeasureId))</option>
+                            @foreach (PosUnitOfMeasure unit in units)
+                            {
+                                <option value="@unit.Id">@unit.Code · @unit.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label><span>Pack quantity</span>
+                        <input type="number" min="0.001" step="0.001" @bind="newPackQuantity" />
+                    </label>
+                    <label class="barcode-add-check">
+                        <input type="checkbox" @bind="newIsPrimary" /><span>Make this the primary code</span>
+                    </label>
+                </div>
+                <div class="barcode-add-actions">
+                    <span class="barcode-hint">
+                        @CatalogView.PackSummary(newPackQuantity, UnitName(product.BaseUnitOfMeasureId))
+                        @if (CatalogView.CheckDigitWarning(newCode) is { } typo)
+                        {
+                            <b class="barcode-typo">@typo</b>
+                        }
+                    </span>
+                    <button type="button" class="search-action" @onclick="AddBarcodeAsync"
+                            disabled="@(working || string.IsNullOrWhiteSpace(newCode) || newPackQuantity <= 0m)">
+                        @(working ? "Attaching…" : "Attach code")
+                    </button>
+                </div>
+            </div>
+        }
+
+        @if (barcodes.Count == 0)
+        {
+            <div class="results-empty">
+                <strong>No barcode yet.</strong>
+                <span>Until one is attached, scanning will not find this product.</span>
+            </div>
+        }
+        else
+        {
+            <table class="sales-table barcode-table">
+                <thead>
+                    <tr><th>Code</th><th>Symbology</th><th>Scans as</th><th>Pack</th><th>Added</th><th><span class="catalog-sr">Actions</span></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (PosProductBarcode row in barcodes)
+                    {
+                        <tr @key="row.Barcode" class="@(row.RetiredAtUtc is null ? null : "is-retired")">
+                            <td>
+                                <code class="barcode-value">@row.Barcode</code>
+                                @if (row.IsPrimary && row.RetiredAtUtc is null)
+                                {
+                                    <span class="barcode-primary">Primary</span>
+                                }
+                                @if (row.RetiredAtUtc is { } retired)
+                                {
+                                    <span class="barcode-retired">Retired @retired.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</span>
+                                }
+                            </td>
+                            <td>@row.Symbology</td>
+                            <td>@UnitName(row.UnitOfMeasureId)</td>
+                            <td>@FormatQuantity(row.PackQuantity)</td>
+                            <td class="sheet-muted">@row.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
+                            <td class="barcode-actions">
+                                @if (CanManageBarcodes && row.RetiredAtUtc is null)
+                                {
+                                    @if (!row.IsPrimary)
+                                    {
+                                        <button type="button" class="action-button" @onclick="() => SetPrimaryAsync(row.Barcode)" disabled="@working">Make primary</button>
+                                    }
+                                    <button type="button" class="action-button danger" @onclick="() => BeginRetire(row.Barcode)" disabled="@working">Retire</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @if (retiring is { } target)
+        {
+            <div class="reason-editor">
+                <label class="reason-label" for="retire-reason">Why is <code>@target</code> being retired?</label>
+                <input id="retire-reason" class="reason-input" type="text" @bind="retireReason" placeholder="Optional — e.g. supplier changed the pack" />
+                <p class="barcode-hint">
+                    The code stays on record so older receipts and counts still resolve, and it is never reissued to another product.
+                </p>
+                <div class="reason-actions">
+                    <button type="button" class="action-button danger" @onclick="RetireAsync" disabled="@working">@(working ? "Retiring…" : "Confirm retire")</button>
+                    <button type="button" class="action-button subtle" @onclick="CancelRetire">Dismiss</button>
+                </div>
+            </div>
+        }
+    </section>
+}
+</section>

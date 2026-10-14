@@ -221,6 +221,9 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("ix_audit_log_correlation");
 
+                    b.HasIndex("OccurredAtUtc")
+                        .HasDatabaseName("ix_audit_log_occurred");
+
                     b.HasIndex("Action", "OccurredAtUtc")
                         .HasDatabaseName("ix_audit_log_action");
 
@@ -3964,6 +3967,12 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .HasColumnName("transfer_order_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OccurredAtUtc")
+                        .HasDatabaseName("ix_transfer_custody_occurred");
+
+                    b.HasIndex("ActorUserId", "OccurredAtUtc")
+                        .HasDatabaseName("ix_transfer_custody_actor");
 
                     b.HasIndex("TransferOrderId", "Sequence")
                         .IsUnique()

@@ -309,7 +309,8 @@ public sealed class AuthenticationService(
                     nameof(RefreshToken),
                     token.Id,
                     Reason: FormattableString.Invariant(
-                        $"A rotated refresh token was presented again; {burned} tokens in the family were revoked.")),
+                        $"A rotated refresh token was presented again; {burned} tokens in the family were revoked."),
+                    ActorUserId: token.UserId),
                 cancellationToken).ConfigureAwait(false);
 
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -404,7 +405,9 @@ public sealed class AuthenticationService(
             new AuditEntry(
                 AuditActions.Authentication.TokenRefreshed,
                 nameof(AppUser),
-                user.Id),
+                user.Id,
+                ActorUserId: token.UserId,
+                ActorRoleSnapshot: RoleSnapshot(authorization)),
             cancellationToken).ConfigureAwait(false);
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -438,8 +441,20 @@ public sealed class AuthenticationService(
 
         await EndSessionsAsync(token.FamilyId, now, "signed out", cancellationToken).ConfigureAwait(false);
 
+        // Signing out presents only the refresh token, so there is no caller to
+        // read the roles from; they are looked up to leave the same trail a
+        // sign-in does. Rare enough that the extra read does not matter.
+        UserAuthorization authorization = await permissions
+            .GetAuthorizationAsync(token.UserId, cancellationToken)
+            .ConfigureAwait(false);
+
         await audit.WriteAsync(
-            new AuditEntry(AuditActions.Authentication.Logout, nameof(AppUser), token.UserId.Value),
+            new AuditEntry(
+                AuditActions.Authentication.Logout,
+                nameof(AppUser),
+                token.UserId.Value,
+                ActorUserId: token.UserId,
+                ActorRoleSnapshot: RoleSnapshot(authorization)),
             cancellationToken).ConfigureAwait(false);
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -572,7 +587,9 @@ public sealed class AuthenticationService(
                 AuditActions.Authentication.LoginSucceeded,
                 nameof(AppUser),
                 user.Id,
-                LocationId: device?.LocationId),
+                LocationId: device?.LocationId,
+                ActorUserId: userId,
+                ActorRoleSnapshot: RoleSnapshot(authorization)),
             cancellationToken).ConfigureAwait(false);
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -580,6 +597,14 @@ public sealed class AuthenticationService(
         return Result<AuthenticationResult>.Success(Build(
             access, material.Value, refresh.ExpiresAtUtc, user, authorization, version, offlineOnly));
     }
+
+    /// <summary>
+    /// The authority an account held at the moment of an authentication event,
+    /// written onto the entry the way an authenticated request's role claims
+    /// are, so the activity log reads the same for both.
+    /// </summary>
+    private static string? RoleSnapshot(UserAuthorization authorization)
+        => authorization.Roles.Count == 0 ? null : string.Join(", ", authorization.Roles);
 
     private static AuthenticationResult Build(
         AccessToken access,
@@ -781,7 +806,11 @@ public sealed class AuthenticationService(
                     : AuditActions.Authentication.LoginFailed,
                 nameof(AppUser),
                 userId?.Value,
-                Reason: reason.ToString()),
+                Reason: reason.ToString(),
+                // No role lookup on the failure path: it runs once per attempt,
+                // including a run of guesses, and a refused attempt exercised no
+                // authority to record.
+                ActorUserId: userId),
             cancellationToken).ConfigureAwait(false);
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

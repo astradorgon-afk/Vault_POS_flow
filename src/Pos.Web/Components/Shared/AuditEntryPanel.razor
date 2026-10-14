@@ -1,0 +1,198 @@
+@using System.Globalization
+@using Pos.Web.Components.Pages
+
+<div class="audit-scrim" @onclick="OnClose"></div>
+<aside class="audit-drawer" role="dialog" aria-modal="true" aria-labelledby="audit-drawer-title" tabindex="-1"
+       @ref="panelRef" @onkeydown="OnKeyAsync">
+    <header class="audit-drawer-head">
+        <div>
+            <span class="eyebrow">Activity detail</span>
+            <h2 id="audit-drawer-title">@AuditLogView.ActionLabel(Entry.Action)</h2>
+            <small class="audit-code">@Entry.Action</small>
+        </div>
+        <button type="button" class="audit-drawer-close" aria-label="Close details (Esc)" @onclick="OnClose">×</button>
+    </header>
+
+    <nav class="audit-drawer-steps" aria-label="Step through entries">
+        <button type="button" @onclick="OnNewer" disabled="@(!CanShowNewer)" title="Newer entry (up arrow)">↑ Newer</button>
+        <span>@Position.ToString("N0", CultureInfo.InvariantCulture) of @PageTotal.ToString("N0", CultureInfo.InvariantCulture) on this page</span>
+        <button type="button" @onclick="OnOlder" disabled="@(!CanShowOlder)" title="Older entry (down arrow)">Older ↓</button>
+    </nav>
+
+    <div class="audit-drawer-body">
+        <p class="audit-lead">@AuditLogView.WhoDidWhat(Entry.ActorName, Entry.RoleSnapshot, Entry.Action)</p>
+
+        <dl class="audit-facts">
+            <div>
+                <dt>When</dt>
+                <dd>
+                    <strong>@Entry.OccurredAtUtc.InStoreTime().ToString("dddd, MMM d, yyyy", CultureInfo.InvariantCulture)</strong>
+                    <span>@Entry.OccurredAtUtc.InStoreTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture) store time · @AuditLogView.Ago(Entry.OccurredAtUtc)</span>
+                    <button type="button" class="audit-link" @onclick="OnFilterDay">Show only this day</button>
+                </dd>
+            </div>
+            <div>
+                <dt>Who</dt>
+                <dd>
+                    <strong>@Entry.ActorName</strong>
+                    <span>@AuditLogView.RoleLabel(Entry.RoleSnapshot)</span>
+                    @if (Entry.UserId is not null)
+                    {
+                        <button type="button" class="audit-link" @onclick="OnFilterPerson">Show only this person</button>
+                    }
+                </dd>
+            </div>
+            <div><dt>Location</dt><dd><strong>@(Entry.LocationName ?? "Business-wide")</strong></dd></div>
+            <div>
+                <dt>Record</dt>
+                <dd>
+                    <strong>@AuditLogView.RecordLabel(Entry.EntityType)</strong>
+                    @if (!string.IsNullOrWhiteSpace(Entry.RecordSummary)) { <span>@Entry.RecordSummary</span> }
+                    @if (Entry.EntityId is not null) { <code class="audit-copyable">@AuditLogView.FullId(Entry.EntityId)</code> }
+                </dd>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(Entry.Reason))
+            {
+                <div><dt>Reason</dt><dd><strong class="audit-reason">@Entry.Reason</strong></dd></div>
+            }
+            @if (Entry.ReferenceDocumentType is not null)
+            {
+                <div><dt>Reference</dt><dd><strong>@Entry.ReferenceDocumentType</strong><code class="audit-copyable">@AuditLogView.FullId(Entry.ReferenceDocumentId)</code></dd></div>
+            }
+        </dl>
+
+        @if (Transfer is { } transfer)
+        {
+            <section class="audit-block">
+                <h3>Transfer, as it stands now</h3>
+                <dl class="audit-transfer-facts">
+                    <div><dt>Status</dt><dd>@AuditLogView.SplitWords(transfer.CurrentStatus)</dd></div>
+                    <div><dt>Mode</dt><dd>@AuditLogView.SplitWords(transfer.Mode)</dd></div>
+                    <div><dt>Kind</dt><dd>@AuditLogView.SplitWords(transfer.Kind)</dd></div>
+                    <div><dt>Route</dt><dd>@transfer.Source <span aria-hidden="true">→</span> @transfer.Destination</dd></div>
+                    @if (transfer.TransferNumber is not null) { <div><dt>Transfer no.</dt><dd>@transfer.TransferNumber</dd></div> }
+                    @if (transfer.ShipmentNumber is not null) { <div><dt>Shipment</dt><dd>@transfer.ShipmentNumber</dd></div> }
+                    @if (transfer.ReceiptNumber is not null) { <div><dt>Receipt</dt><dd>@transfer.ReceiptNumber</dd></div> }
+                </dl>
+                @if (transfer.Products.Count > 0)
+                {
+                    <table class="audit-transfer-lines">
+                        <thead><tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th></tr></thead>
+                        <tbody>
+                            @foreach (TransferDetailLine line in transfer.Products)
+                            {
+                                <tr @key="line.LineNo">
+                                    <td>@line.LineNo.ToString("D2", CultureInfo.InvariantCulture)</td>
+                                    <td>@line.ProductName</td>
+                                    <td>@AuditLogView.FormatQuantity(line.Requested)</td>
+                                    <td>@AuditLogView.FormatQuantity(line.Picked)</td>
+                                    <td>@AuditLogView.FormatQuantity(line.Received)</td>
+                                    <td>@AuditLogView.FormatQuantity(line.Damaged)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <small class="audit-transfer-note">Quantities are the transfer's current totals, not the values at the time of this event.</small>
+                }
+            </section>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Entry.PreviousValueJson))
+        {
+            <details class="audit-block audit-payload">
+                <summary>Values before this change</summary>
+                <pre class="audit-json">@AuditLogView.PrettyJson(Entry.PreviousValueJson)</pre>
+            </details>
+        }
+        @if (!string.IsNullOrWhiteSpace(Entry.NewValueJson))
+        {
+            <details class="audit-block audit-payload" open="@(Transfer is null)">
+                <summary>@(Transfer is null ? "Values after this change" : "Raw recorded payload")</summary>
+                <pre class="audit-json">@AuditLogView.PrettyJson(Entry.NewValueJson)</pre>
+            </details>
+        }
+
+        <section class="audit-block audit-trace">
+            <h3>For support</h3>
+            <dl class="audit-facts">
+                <div><dt>Entry</dt><dd><code class="audit-copyable">@AuditLogView.FullId(Entry.Id)</code></dd></div>
+                @if (Entry.CorrelationId != Guid.Empty)
+                {
+                    <div>
+                        <dt>Related</dt>
+                        <dd>
+                            <span>Recorded together with other entries from the same user action.</span>
+                            <code class="audit-copyable">@AuditLogView.FullId(Entry.CorrelationId)</code>
+                        </dd>
+                    </div>
+                }
+            </dl>
+            <small>Click a code to select it, then copy.</small>
+        </section>
+    </div>
+</aside>
+
+@code {
+    /// <summary>The entry on show.</summary>
+    [Parameter, EditorRequired] public PosAuditLogItem Entry { get; set; } = default!;
+
+    /// <summary>Where this entry sits in the page being read, counting from one.</summary>
+    [Parameter] public int Position { get; set; }
+
+    /// <summary>How many entries the current page holds.</summary>
+    [Parameter] public int PageTotal { get; set; }
+
+    /// <summary>Whether a newer entry is available to step to.</summary>
+    [Parameter] public bool CanShowNewer { get; set; }
+
+    /// <summary>Whether an older entry is available to step to.</summary>
+    [Parameter] public bool CanShowOlder { get; set; }
+
+    /// <summary>Raised when the reader closes the panel.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised to step to the entry above this one.</summary>
+    [Parameter] public EventCallback OnNewer { get; set; }
+
+    /// <summary>Raised to step to the entry below this one.</summary>
+    [Parameter] public EventCallback OnOlder { get; set; }
+
+    /// <summary>Raised to narrow the log to this entry's actor.</summary>
+    [Parameter] public EventCallback OnFilterPerson { get; set; }
+
+    /// <summary>Raised to narrow the log to the day this entry happened on.</summary>
+    [Parameter] public EventCallback OnFilterDay { get; set; }
+
+    private ElementReference panelRef;
+
+    private TransferDetailRead? Transfer
+        => Entry.Action.StartsWith("transfer.", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Entry.NewValueJson)
+            ? AuditLogView.ReadTransferDetails(Entry.NewValueJson)
+            : null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            await panelRef.FocusAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The panel closed before it could take focus.
+        }
+    }
+
+    /// <summary>Esc closes; the arrow keys walk the list without closing.</summary>
+    private Task OnKeyAsync(KeyboardEventArgs e) => e.Key switch
+    {
+        "Escape" => OnClose.InvokeAsync(),
+        "ArrowUp" when CanShowNewer => OnNewer.InvokeAsync(),
+        "ArrowDown" when CanShowOlder => OnOlder.InvokeAsync(),
+        _ => Task.CompletedTask,
+    };
+}

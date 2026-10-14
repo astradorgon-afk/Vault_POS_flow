@@ -227,5 +227,11 @@ public sealed class TransferCustodyEventConfiguration : IEntityTypeConfiguration
         builder.HasIndex(e => new { e.TransferOrderId, e.Sequence })
             .IsUnique()
             .HasDatabaseName("ux_transfer_custody_sequence");
+
+        // The activity log reads this table newest-first beside the audit log,
+        // and narrows it by who acted. Neither question is served by the
+        // sequence index, which leads with the transfer.
+        builder.HasIndex(e => e.OccurredAtUtc).HasDatabaseName("ix_transfer_custody_occurred");
+        builder.HasIndex(e => new { e.ActorUserId, e.OccurredAtUtc }).HasDatabaseName("ix_transfer_custody_actor");
     }
 }

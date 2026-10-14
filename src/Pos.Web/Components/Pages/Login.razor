@@ -9,6 +9,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject Pos.Web.Pwa.PwaLoginHandoffs Handoffs
+@inject Pos.Web.Security.OneUseTokens<Pos.Web.Security.PendingWebSignIn> PendingSignIns
 @inject Pos.Web.Services.OfflineReadinessNotice OfflineNotice
 
 <PageTitle>Sign in · VaultFlow</PageTitle>
@@ -70,7 +71,7 @@
                 <label for="previous-offline-key">@(oldSecretKind == "pin" ? "Previous offline PIN" : "Previous account password")</label>
                 <input id="previous-offline-key" type="password" autocomplete="off" @bind="oldSecret" />
                 <p class="login-help">Enter this once to keep saved drafts and pending work while switching to your current account password.</p>
-                <button type="button" class="login-continue" @onclick="ContinueOnline">Continue online without migrating now</button>
+                <button type="button" class="login-continue" @onclick="ContinueOnlineAsync">Continue online without migrating now</button>
             }
 
             <button type="submit" disabled="@busy">@(busy ? "Preparing workspace…" : awaitingOldSecret ? "Move saved work" : offlineReady ? "Open workspace" : onlineAuthenticated ? offlineDataPrepared ? "Check offline files" : "Prepare offline access" : "Open workspace")</button>
@@ -84,7 +85,7 @@
                     <h2 id="offline-setup-title">@(deviceEnrolled ? "Offline setup needs attention" : "Set up offline access")</h2>
                     <p id="offline-setup-description">You can use your online workspace now. Offline use is unavailable until this device is registered and prepared.</p>
                     @if (!string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
-                    <button type="button" class="offline-setup-continue" @onclick="ContinueOnline" disabled="@busy">@(deviceEnrolled ? "Continue online" : "Continue online without enrolling")</button>
+                    <button type="button" class="offline-setup-continue" @onclick="ContinueOnlineAsync" disabled="@busy">@(deviceEnrolled ? "Continue online" : "Continue online without enrolling")</button>
                     <div class="offline-setup-enrollment">
                         @if (!deviceEnrolled)
                         {
@@ -211,7 +212,7 @@
         }
         if (onlineAuthenticated)
         {
-            if (offlineReady) ContinueOnline();
+            if (offlineReady) await ContinueOnlineAsync();
             else await PrepareOfflineAsync();
             return;
         }
@@ -321,7 +322,7 @@
             await CheckOfflineFilesAsync();
             if (offlineReady && !showOfflineSetupModal)
             {
-                ContinueOnline();
+                await ContinueOnlineAsync();
             }
         }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException)
@@ -364,7 +365,7 @@
 
     private async Task FinishOfflinePreparationAsync()
     {
-        if (offlineStore is null) { ContinueOnline(); return; }
+        if (offlineStore is null) { await ContinueOnlineAsync(); return; }
         busy = true;
         error = null;
         try
@@ -382,7 +383,7 @@
             await CheckOfflineFilesAsync();
             if (offlineReady && !showOfflineSetupModal)
             {
-                ContinueOnline();
+                await ContinueOnlineAsync();
             }
         }
         catch (JSException)
@@ -394,11 +395,56 @@
         finally { busy = false; }
     }
 
-    private void ContinueOnline()
+    /// <summary>
+    /// Finishes sign-in: hands the session to the browser as a cookie, then
+    /// goes where the operator was headed.
+    /// </summary>
+    /// <remarks>
+    /// The cookie is what makes the session outlive this circuit. Without it a
+    /// reload, or a link opened in a second tab, would land back on this page.
+    /// A circuit has no HTTP response of its own, so the session is parked
+    /// under a one-use token and the browser posts that token back to collect
+    /// its cookie. Failing to establish it is not worth blocking sign-in over:
+    /// the workspace still works, it just will not survive a reload.
+    /// </remarks>
+    private async Task ContinueOnlineAsync()
     {
         showOfflineSetupModal = false;
+        await EstablishSessionCookieAsync();
         Authentication.NotifySignedIn();
         Navigation.NavigateTo(SafeReturnUrl(ReturnUrl));
+    }
+
+    private async Task EstablishSessionCookieAsync()
+    {
+        if (Session.Current is not { } credentials)
+        {
+            return;
+        }
+
+        try
+        {
+            Pos.Web.Security.WebSession stored = new()
+            {
+                Credentials = credentials,
+                WorkLocationId = Session.WorkLocationId,
+                WorkLocationName = Session.WorkLocationName,
+                WorkLocationKind = Session.WorkLocationKind,
+            };
+
+            // The stored session is the same object the server keeps, so a
+            // token refresh later in this circuit keeps it current.
+            Session.CredentialsRotated = rotated => stored.Credentials = rotated;
+            string token = PendingSignIns.Issue(new Pos.Web.Security.PendingWebSignIn(stored), TimeSpan.FromMinutes(1));
+            await JS.InvokeVoidAsync("vaultflowSession.begin", token);
+        }
+        catch (JSException)
+        {
+            // The workspace opens either way; only reload survival is lost.
+        }
+        catch (JSDisconnectedException)
+        {
+        }
     }
 
     public async ValueTask DisposeAsync()

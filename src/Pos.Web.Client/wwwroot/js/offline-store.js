@@ -163,14 +163,42 @@ export async function enrol(enrolmentCode) {
     return device;
 }
 
+// A PIN is short enough to guess by hand, and the sealed data sits on a device
+// someone can pick up. Nothing server-side can rate-limit an offline unlock, so
+// the count is kept here and the delay grows with it.
+const maxUnlockAttempts = 10;
+
+async function unlockDelay(scope) {
+    const failures = (await meta(`${scope}:unlockFailures`)) ?? 0;
+    if (failures < 3) return 0;
+    return Math.min(30000, 1000 * 2 ** (failures - 3));
+}
+
+async function noteUnlockFailure(scope) {
+    const failures = ((await meta(`${scope}:unlockFailures`)) ?? 0) + 1;
+    await setMeta(`${scope}:unlockFailures`, failures);
+    return failures;
+}
+
 async function unlockProfile(profile, password) {
+    const waitMs = await unlockDelay(profile.scope);
+    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
     const key = await keyFor(password, profile.salt);
     try {
         const verifier = await open(profile.verifier, key);
         if (verifier !== profile.scope) throw new Error();
-    } catch { throw new Error(profile.unlockMethod === 'pin'
-        ? 'Offline PIN did not unlock this employee’s local data.'
-        : 'Password did not unlock this employee’s local data.'); }
+    } catch {
+        const failures = await noteUnlockFailure(profile.scope);
+        const left = maxUnlockAttempts - failures;
+        const secretName = profile.unlockMethod === 'pin' ? 'Offline PIN' : 'Password';
+        if (left <= 0) throw new Error(
+            `${secretName} did not unlock this employee’s local data. Too many attempts — sign in online to open it again.`);
+        throw new Error(left <= 3
+            ? `${secretName} did not unlock this employee’s local data. ${left} attempt${left === 1 ? '' : 's'} left before an online sign-in is required.`
+            : `${secretName} did not unlock this employee’s local data.`);
+    }
+
+    await setMeta(`${profile.scope}:unlockFailures`, 0);
     active = { scope: profile.scope, userId: profile.userId, locationId: profile.locationId,
         displayName: profile.displayName, key };
     return active;
@@ -305,6 +333,8 @@ export async function unlock(scope, password) {
     const lastOnline = Date.parse(profile.lastOnlineUtc);
     if (!Number.isFinite(lastOnline) || Date.now() - lastOnline > maxOfflineAge)
         throw new Error('Offline unlock expired. Sign in online to renew it.');
+    if (((await meta(`${scope}:unlockFailures`)) ?? 0) >= maxUnlockAttempts)
+        throw new Error('Too many failed unlock attempts. Sign in online to open this employee’s saved data again.');
     await unlockProfile(profile, password);
     const snapshot = await loadSnapshot();
     if (!snapshot) {
@@ -482,37 +512,93 @@ async function mark(item, status, message, entityId = item.entityId ?? null) {
     await completed(tx);
 }
 
-export async function synchronize() {
+// The gateway accepts up to 100 events in one push. Staying under that keeps a
+// single failure from costing a large batch.
+const pushBatchSize = 50;
+
+// Confirmed work is kept long enough to be looked up, then dropped. Without
+// this the outbox and its sealed payloads grow for as long as the device is in
+// service, toward the storage quota that queue() already has to apologise for.
+const confirmedRetention = 30 * 24 * 60 * 60 * 1000;
+
+function outcomeStatus(outcome) {
+    if (outcome === 'Accepted' || outcome === 'Duplicate') return 'Confirmed';
+    if (outcome === 'Conflict') return 'Conflict';
+    return outcome === 'Deferred' ? 'Saved on device' : 'Needs review';
+}
+
+/// Drops confirmed events, and their sealed payloads, once they are old enough.
+async function pruneConfirmed(scope) {
+    const db = await database();
+    const all = await req(db.transaction('outbox').objectStore('outbox').index('scope').getAll(scope));
+    const cutoff = Date.now() - confirmedRetention;
+    const stale = all.filter(item => item.status === 'Confirmed' &&
+        Date.parse(item.updatedAtUtc ?? item.occurredAtUtc) < cutoff);
+    if (stale.length === 0) return;
+    const tx = db.transaction(['outbox', 'data'], 'readwrite');
+    for (const item of stale) {
+        tx.objectStore('outbox').delete(item.eventId);
+        tx.objectStore('data').delete(`${scope}:operation:${item.eventId}`);
+    }
+    await completed(tx);
+}
+
+let syncInFlight = null;
+
+/// Pushes saved work, then refreshes the local copy. Overlapping callers — a
+/// button, the online event, a retry — share the one run rather than racing
+/// each other's status writes and cursor.
+export function synchronize() {
+    syncInFlight ??= runSynchronize().finally(() => { syncInFlight = null; });
+    return syncInFlight;
+}
+
+async function runSynchronize() {
     if (!active) throw new Error('Unlock the local workspace first.');
     await assertOnlineIdentity();
     const scope = active.scope;
     const db = await database();
-    const all = await req(db.transaction('outbox').objectStore('outbox').getAll());
+    const all = await req(db.transaction('outbox').objectStore('outbox').index('scope').getAll(scope));
+    const pending = all
+        .filter(item => ['Saved on device', 'Syncing'].includes(item.status))
+        .sort((a, b) => a.sequence - b.sequence);
     let sent = 0;
-    for (const item of all.sort((a, b) => a.sequence - b.sequence)) {
-        if (item.scope !== scope || !['Saved on device', 'Syncing'].includes(item.status)) continue;
-        const sealed = await req(db.transaction('data').objectStore('data').get(`${scope}:operation:${item.eventId}`));
-        if (!sealed) { await mark(item, 'Needs review', 'Local event payload is missing.'); continue; }
-        const payload = await open(sealed);
-        await mark(item, 'Syncing', null);
+    let halt = false;
+    for (let start = 0; start < pending.length && !halt; start += pushBatchSize) {
+        const batch = [];
+        for (const item of pending.slice(start, start + pushBatchSize)) {
+            const sealed = await req(db.transaction('data').objectStore('data').get(`${scope}:operation:${item.eventId}`));
+            if (!sealed) { await mark(item, 'Needs review', 'Local event payload is missing.'); continue; }
+            batch.push({ item, payload: await open(sealed) });
+        }
+        if (batch.length === 0) continue;
+
+        for (const { item } of batch) await mark(item, 'Syncing', null);
+        let result;
         try {
-            const result = await api('push', { method: 'POST',
+            result = await api('push', { method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ events: [{ eventId: item.eventId,
-                    deviceSequence: item.sequence, eventType: item.eventType,
-                    payload, occurredAtUtc: item.occurredAtUtc }] }) });
+                body: JSON.stringify({ events: batch.map(({ item, payload }) => ({
+                    eventId: item.eventId, deviceSequence: item.sequence,
+                    eventType: item.eventType, payload, occurredAtUtc: item.occurredAtUtc })) }) });
+        } catch (error) {
+            // The work is intact; it simply has not left the device yet.
+            for (const { item } of batch) await mark(item, 'Saved on device', error.message);
+            break;
+        }
+
+        for (const { item } of batch) {
             const event = result.results?.find(row => row.eventId === item.eventId);
-            if (!event) throw new Error('The server did not return an event result.');
-            const status = ['Accepted'].includes(event.outcome) ? 'Confirmed'
-                : event.outcome === 'Conflict' ? 'Conflict'
-                : event.outcome === 'Duplicate' ? 'Confirmed'
-                : event.outcome === 'Deferred' ? 'Saved on device' : 'Needs review';
+            if (!event) {
+                await mark(item, 'Saved on device', 'The server did not return a result for this operation.');
+                halt = true;
+                continue;
+            }
+            const status = outcomeStatus(event.outcome);
             await mark(item, status, event.message || event.errorCode || null, event.entityId);
             sent++;
-            if (status === 'Saved on device') break;
-        } catch (error) {
-            await mark(item, 'Saved on device', error.message);
-            break;
+            // Deferred means the server is not ready for what follows either.
+            if (status === 'Saved on device') halt = true;
         }
     }
     try {
@@ -531,6 +617,8 @@ export async function synchronize() {
         if (error.status === 410) await download();
         // Pending events are still intact when a feed refresh cannot finish.
     }
+    try { await pruneConfirmed(scope); }
+    catch { /* Reclaiming space is never worth failing a sync over. */ }
     return { sent, operations: await operations() };
 }
 

@@ -29,7 +29,7 @@
         </label>
         <label class="location-picker">
             <span>Status</span>
-            <select @bind="selectedStatus" disabled="@(selectedLocationId is null)">
+            <select @bind="selectedStatus" @bind:after="LoadCountsAsync" disabled="@(selectedLocationId is null)">
                 <option value="">All states</option>
                 @foreach (string statusName in StatusNames)
                 {
@@ -51,10 +51,16 @@
 else
 {
     <section class="search-strip">
-        <span>@(counts.Count) count@(counts.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")</span>
+        <span>
+            @(counts.Count) count@(counts.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")
+            @if (AwaitingApproval > 0)
+            {
+                <b class="awaiting-flag">@AwaitingApproval awaiting approval</b>
+            }
+        </span>
         <button type="button" class="search-action" @onclick="LoadCountsAsync"
                 disabled="@(loading || selectedLocationId is null)">
-            @(loading ? "Loading…" : "Find counts")
+            @(loading ? "Loading…" : "Refresh")
         </button>
     </section>
 
@@ -130,11 +136,14 @@ else
                 <tbody>
                     @foreach (PosInventoryCountSummary count in counts)
                     {
-                        <tr class="office-row-click" @key="count.Id" @onclick="() => OpenCount(count.Id)">
+                        <tr class="office-row-click @(count.Status == "PendingApproval" ? "row-awaiting" : null)" @key="count.Id" @onclick="() => OpenCount(count.Id)">
                             <td class="sale-number"><a href="@($"/inventory/counts/{count.Id:D}")" @onclick:stopPropagation="true">@count.Number</a></td>
                             <td>@SplitWords(count.Kind)</td>
                             <td><span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span></td>
-                            <td>@count.CountedLines / @count.Lines</td>
+                            <td class="counted-cell">
+                                <span>@count.CountedLines / @count.Lines</span>
+                                <span class="counted-bar"><b style="width:@(Percent(count).ToString("0.#", CultureInfo.InvariantCulture))%"></b></span>
+                            </td>
                             <td>@Money(count.TotalAbsoluteVarianceValue)</td>
                             <td>@count.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@(count.PostedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
@@ -204,6 +213,13 @@ else
         {
             await LoadCategoriesAsync();
         }
+
+        // A store already chosen for this session, or the only one this account
+        // has, needs no second act of selection before the page says anything.
+        if (selectedLocationId is not null)
+        {
+            await LoadCountsAsync();
+        }
     }
 
     private async Task LoadLocationsAsync()
@@ -236,12 +252,18 @@ else
         }
     }
 
-    private void OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    /// <summary>
+    /// Choosing a store loads it. Making the reader pick a store and then press
+    /// a button to see anything made an empty panel the normal first sight of
+    /// this page.
+    /// </summary>
+    private Task OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
         selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) && locations.Any(location => location.Id == id) ? id : null;
         counts.Clear();
         searchedLabel = string.Empty;
         message = null;
+        return selectedLocationId is null ? Task.CompletedTask : LoadCountsAsync();
     }
 
     private void OnKindChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
@@ -358,6 +380,11 @@ else
 
     private static string Money(decimal value)
         => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private int AwaitingApproval => counts.Count(count => count.Status == "PendingApproval");
+
+    private static double Percent(PosInventoryCountSummary count)
+        => count.Lines == 0 ? 0d : count.CountedLines * 100d / count.Lines;
 
     private static string StatusChipClass(string status) => status switch
     {

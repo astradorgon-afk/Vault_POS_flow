@@ -6,6 +6,7 @@ public sealed partial class VaultFlowApiClient
     public Task<ApiResult<PosAuditLogPage>> GetAuditLogAsync(
         string? category,
         string? search,
+        Guid? userId,
         DateOnly? from,
         DateOnly? to,
         int offset,
@@ -20,6 +21,10 @@ public sealed partial class VaultFlowApiClient
         if (!string.IsNullOrWhiteSpace(search))
         {
             parameters.Add($"search={Uri.EscapeDataString(search.Trim())}");
+        }
+        if (userId is { } actorId)
+        {
+            parameters.Add(FormattableString.Invariant($"userId={actorId:D}"));
         }
         if (from is { } start)
         {

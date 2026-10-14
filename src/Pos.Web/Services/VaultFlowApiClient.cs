@@ -4,7 +4,14 @@ namespace Pos.Web.Services;
 public sealed partial class VaultFlowApiClient(HttpClient http, UserSession session)
 {
     /// <summary>Signs in with a username, password and optional two-factor code.</summary>
-    public async Task<ApiResult<SignInResponse>> SignInAsync(
+    public Task<ApiResult<SignInResponse>> SignInAsync(
+        string userName,
+        string password,
+        string? twoFactorCode,
+        CancellationToken cancellationToken)
+        => GuardAsync(() => SignInCoreAsync(userName, password, twoFactorCode, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<SignInResponse>> SignInCoreAsync(
         string userName,
         string password,
         string? twoFactorCode,
@@ -53,6 +60,46 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     }
 
     private const string SessionExpiredText = "Your session has expired. Reload the page to sign in again.";
+    private const string UnreachableText = "VaultFlow could not reach the server. Check the connection, then try again.";
+    private const string TimedOutText = "The server took too long to answer. Try again in a moment.";
+    private const string UnreadableText = "The server sent a response VaultFlow could not read.";
+
+    /// <summary>
+    /// Turns a transport failure into a result the screen can show. A timeout
+    /// reads as its own message, because "try again in a moment" is true of a
+    /// slow server and misleading for an unreachable one.
+    /// </summary>
+    /// <remarks>
+    /// Cancellation the caller asked for — a component disposed, a newer load
+    /// started — is rethrown: the screen is gone and has nothing to show. Only
+    /// the HttpClient's own timeout, which cancels a token the caller never
+    /// signalled, becomes a message.
+    /// </remarks>
+    private static async Task<ApiResult<T>> GuardAsync<T>(
+        Func<Task<ApiResult<T>>> call,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return ApiResult<T>.Failure(TimedOutText);
+        }
+        catch (HttpRequestException)
+        {
+            return ApiResult<T>.Failure(UnreachableText);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return ApiResult<T>.Failure(UnreadableText);
+        }
+    }
 
     /// <summary>Sends an authorized request, refreshing the circuit's access
     /// token shortly before it expires and retrying once when the API rejects
@@ -169,7 +216,10 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
             : "VaultFlow could not complete that operation.");
 
     /// <summary>Gets and deserializes an authenticated API resource.</summary>
-    public async Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
+    public Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
+        => GuardAsync(() => GetCoreAsync<T>(path, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<T>> GetCoreAsync<T>(string path, CancellationToken cancellationToken)
     {
         using HttpResponseMessage? response = await SendAuthorizedAsync(
             () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
@@ -192,8 +242,54 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
             : ApiResult<T>.Success(value);
     }
 
+    /// <summary>
+    /// Reads a response along with one of its headers, for endpoints that
+    /// report paging counts outside the body.
+    /// </summary>
+    /// <typeparam name="T">The response shape.</typeparam>
+    /// <param name="path">The request path.</param>
+    /// <param name="header">The response header to return.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The result, and the header's value when the server sent one.</returns>
+    public async Task<(ApiResult<T> Result, string? Header)> GetWithHeaderAsync<T>(
+        string path, string header, CancellationToken cancellationToken)
+    {
+        string? captured = null;
+        ApiResult<T> result = await GuardAsync(
+            async () =>
+            {
+                using HttpResponseMessage? response = await SendAuthorizedAsync(
+                    () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+                if (response is null)
+                {
+                    return ApiResult<T>.Failure(SessionExpiredText);
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
+                    return ApiResult<T>.Failure(LoadFailureText(response, problem), problem?.ErrorCode);
+                }
+
+                if (response.Headers.TryGetValues(header, out IEnumerable<string>? values))
+                {
+                    captured = values.FirstOrDefault();
+                }
+
+                T? value = await response.Content.ReadFromJsonAsync<T>(cancellationToken).ConfigureAwait(false);
+                return value is null
+                    ? ApiResult<T>.Failure("The API returned an unreadable response.")
+                    : ApiResult<T>.Success(value);
+            }, cancellationToken).ConfigureAwait(false);
+
+        return (result, captured);
+    }
+
     /// <summary>Posts a JSON body through the register and reads the response.</summary>
-    public async Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
+    public Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
+        => GuardAsync(() => PostCoreAsync<T>(path, body, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<T>> PostCoreAsync<T>(string path, object body, CancellationToken cancellationToken)
     {
         using HttpResponseMessage? response = await SendAuthorizedAsync(
             () =>
@@ -247,7 +343,10 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
             cancellationToken);
 
     /// <summary>Gets a plain-text body from an authenticated API resource.</summary>
-    public async Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
+    public Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
+        => GuardAsync(() => GetTextCoreAsync(path, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<string>> GetTextCoreAsync(string path, CancellationToken cancellationToken)
     {
         using HttpResponseMessage? response = await SendAuthorizedAsync(
             () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
@@ -417,7 +516,11 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     // ---- Inventory counts ----
 
     /// <summary>Sends a command whose response is empty on success (204).</summary>
-    public async Task<ApiResult<string>> SendCommandAsync(
+    public Task<ApiResult<string>> SendCommandAsync(
+        HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+        => GuardAsync(() => SendCommandCoreAsync(method, path, body, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<string>> SendCommandCoreAsync(
         HttpMethod method, string path, object? body, CancellationToken cancellationToken)
     {
         using HttpResponseMessage? response = await SendAuthorizedAsync(
