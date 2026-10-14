@@ -33,18 +33,16 @@
                         <span aria-hidden="true">←</span><em>Back</em>
                     </a>
                 }
-                <div class="page-trail">
-                    <nav aria-label="Breadcrumb">
-                        <ol>
-                            <li>@place.Section</li>
-                            @if (place.Parent is { } up && up.Label != place.Section)
-                            {
-                                <li><a href="@up.Href">@up.Label</a></li>
-                            }
-                        </ol>
-                    </nav>
-                    <strong aria-current="page">@place.Title</strong>
-                </div>
+                <nav class="page-trail" aria-label="Breadcrumb">
+                    <ol>
+                        <li>@place.Section</li>
+                        @if (place.Parent is { } up && up.Label != place.Section)
+                        {
+                            <li><a href="@up.Href">@up.Label</a></li>
+                        }
+                        <li><strong aria-current="page">@place.Title</strong></li>
+                    </ol>
+                </nav>
             </div>
 
             <AuthorizeView>

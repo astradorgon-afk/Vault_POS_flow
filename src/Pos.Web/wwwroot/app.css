@@ -172,7 +172,7 @@ h1:focus { outline: none; }
 .nav-link.active small{background:var(--danger);border-color:#7c2d27;color:#fff}
 .sidebar-footer { padding:12px 18px 16px; border-top:1px solid rgba(255,255,255,.1); }.sidebar-footer>div{display:grid;gap:2px;margin-bottom:11px}.sidebar-footer span{color:#8eaa9b;font-size:.65rem;text-transform:uppercase;letter-spacing:.1em}.sidebar-footer strong{overflow:hidden;color:#e8f0eb;font-size:.8rem;text-overflow:ellipsis;white-space:nowrap}
 .sign-out { display: flex; }.sign-out:hover{background:rgba(255,255,255,.07);color:#fff}.sign-out svg{width:17px}
-.workspace-context { display:grid; gap:2px; }.workspace-context span{color:var(--muted);font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.workspace-context strong { font: 700 .95rem "Manrope"; font-family: "Manrope", sans-serif; font-weight: 700; letter-spacing: -.01em; }
+.workspace-context { display:grid; gap:2px; }
 .menu-button { display:none; width:42px; height:42px; place-items:center; flex:none; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--forest); }.menu-button svg{width:20px}
 .notification-bell svg{width:19px}
 .operator strong{font-size:.8rem}
@@ -392,7 +392,7 @@ select.qr-field{cursor:pointer}
 .results-panel{border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden;min-height:260px}.results-empty{min-height:260px;display:grid;place-content:center;justify-items:center;color:var(--muted);text-align:center}.results-empty span{margin-top:5px;font-size:.82rem}
 
 @media(max-width:900px){.app-shell{grid-template-columns:1fr}.sidebar.is-open{transform:translateX(0)}.sidebar-close,.menu-button{display:grid}.nav-scrim{position:fixed;inset:0;z-index:25;display:block;border:0;background:rgba(8,20,14,.52);backdrop-filter:blur(2px)}.nav-heading{display:block}.workspace-context{margin-right:auto}.operator>span:last-child{display:none}}
-@media(max-width:650px){.top-row{min-height:68px}.top-actions{gap:8px}.workspace-context span{display:none}.section-heading{align-items:flex-start;flex-direction:column}.ledger-head{display:none}.ledger-row{grid-template-columns:1fr auto;padding:14px}.ledger-row .store-bar{grid-column:1/-1;grid-row:2}.ledger-row>span{display:none}.attention-list .ledger-head{display:none}.attention-row{grid-template-columns:1fr auto}.attention-row>span{grid-column:1/-1}}
+@media(max-width:650px){.top-row{min-height:68px}.top-actions{gap:8px}.section-heading{align-items:flex-start;flex-direction:column}.ledger-head{display:none}.ledger-row{grid-template-columns:1fr auto;padding:14px}.ledger-row .store-bar{grid-column:1/-1;grid-row:2}.ledger-row>span{display:none}.attention-list .ledger-head{display:none}.attention-row{grid-template-columns:1fr auto}.attention-row>span{grid-column:1/-1}}
 @media(max-width:650px){.top-row .app-install-link{max-width:104px;padding:5px 9px;line-height:1.15;text-align:center;white-space:normal}.top-row .operator{display:none}}
 
 .quiet-link { color:var(--forest); font-weight:800; text-decoration:none; white-space:nowrap; }
@@ -815,13 +815,15 @@ select.qr-field{cursor:pointer}
 .page-back em{font-style:normal}
 .page-back:hover{background:var(--mint-soft);border-color:#9fcdb0}
 .page-back:focus-visible{outline:2px solid var(--forest);outline-offset:2px}
-.page-trail{display:grid;gap:2px;min-width:0}
-.page-trail ol{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--muted);font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.page-trail{min-width:0}
+.page-trail ol{margin:0;padding:0;list-style:none;display:flex;flex-wrap:nowrap;align-items:center;gap:6px;min-width:0;color:var(--muted);font-size:.68rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase}
+.page-trail li{min-width:0}
+.page-trail li:last-child{overflow:hidden}
 .page-trail li+li::before{content:"›";margin-right:6px;color:var(--line-strong)}
 .page-trail a{color:var(--forest);text-decoration:none}
 .page-trail a:hover{text-decoration:underline}
-.page-trail strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 .95rem "Manrope";letter-spacing:-.01em}
-@media(max-width:650px){.page-back em{display:none}.page-back{padding:0 10px}.page-trail ol{display:none}}
+.page-trail strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);font-weight:800}
+@media(max-width:650px){.page-back em{display:none}.page-back{padding:0 10px}.page-trail li:not(:last-child){display:none}.page-trail li+li::before{content:none}}
 
 /* Password with its own Show/Hide switch. */
 .password-field{position:relative;display:flex}

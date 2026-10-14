@@ -265,9 +265,8 @@ function Invoke-Build {
 $api = $null
 try {
     # A Web UI left over from an earlier run keeps serving after its terminal is
-    # closed, so bind the port once instead of failing: reuse the running
-    # instance. Rebuilding it would only produce bits that instance never loads,
-    # so skip the build as well.
+    # closed. Reuse that instance, but restore the API if it has stopped.
+    # Rebuilding the Web UI would produce bits this instance never loads.
     if (Test-PortListening $webPort) {
         $owner = Get-ListeningProcessId $webPort
         $ownerText = if ($null -eq $owner) { '' } else { " (process $owner)" }
@@ -275,7 +274,20 @@ try {
         Write-Host 'It was not rebuilt. Stop it and run this script again to build the current source.' -ForegroundColor DarkGray
 
         if (-not (Test-ApiLive)) {
-            Write-Host 'The API on http://localhost:5177 is not answering, so the reused Web UI cannot load data until it runs.' -ForegroundColor Yellow
+            Start-DevelopmentDatabase
+            Invoke-Build $apiProject
+
+            Write-Host "Restarting the API on http://${bindHost}:$apiPort" -ForegroundColor Cyan
+            $api = Start-Process dotnet -WindowStyle Hidden -PassThru -WorkingDirectory $repositoryRoot -ArgumentList @(
+                'run', '--project', "`"$apiProject`"", '--no-build', '--launch-profile', 'http',
+                '--', '--urls', "http://${bindHost}:$apiPort")
+
+            $deadline = (Get-Date).AddSeconds($ApiStartupSeconds)
+            while (-not (Test-ApiLive)) {
+                if ($api.HasExited) { throw "The API exited with code $($api.ExitCode) before it became healthy." }
+                if ((Get-Date) -gt $deadline) { throw "The API did not become healthy within $ApiStartupSeconds seconds." }
+                Start-Sleep -Seconds 2
+            }
         }
 
         if (-not $LocalOnly) {
@@ -307,7 +319,7 @@ try {
         Invoke-Build $webProject
 
         Write-Host "Starting the API on http://${bindHost}:$apiPort" -ForegroundColor Cyan
-        $api = Start-Process dotnet -NoNewWindow -PassThru -WorkingDirectory $repositoryRoot -ArgumentList @(
+        $api = Start-Process dotnet -WindowStyle Hidden -PassThru -WorkingDirectory $repositoryRoot -ArgumentList @(
             'run', '--project', "`"$apiProject`"", '--no-build', '--launch-profile', 'http',
             '--', '--urls', "http://${bindHost}:$apiPort")
 

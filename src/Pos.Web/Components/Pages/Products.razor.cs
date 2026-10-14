@@ -28,17 +28,19 @@ public sealed partial class Products : IDisposable
     private readonly List<PosUnitOfMeasure> units = [];
     private readonly List<PosBrand> brands = [];
     private readonly List<PosSupplier> suppliers = [];
+    private readonly HashSet<Guid> collapsedCategories = [];
 
     private CancellationTokenSource? inFlight;
     private int searchGeneration;
     private int loadGeneration;
     private int total;
     private int offset;
-    private int pageSize = 50;
+    private int pageSize = 25;
     private bool loading = true;
     private bool looking;
     private bool working;
     private bool showCreate;
+    private bool showBarcodeDesk;
     private bool includeInactive;
     private string search = string.Empty;
     private string? message;
@@ -59,13 +61,97 @@ public sealed partial class Products : IDisposable
 
     private int CurrentPage => offset / pageSize + 1;
 
-    private Task FirstAsync() => LoadAsync(0);
+    private IReadOnlyList<int?> PageLinks
+    {
+        get
+        {
+            List<int?> links = [];
+            int start = Math.Max(1, Math.Min(CurrentPage - 1, PageCount - 3));
+            int end = Math.Min(PageCount, start + 3);
+            if (start > 1)
+            {
+                links.Add(1);
+                if (start > 2)
+                {
+                    links.Add(null);
+                }
+            }
+
+            for (int page = start; page <= end; page++)
+            {
+                links.Add(page);
+            }
+            if (end < PageCount)
+            {
+                if (end < PageCount - 1)
+                {
+                    links.Add(null);
+                }
+                links.Add(PageCount);
+            }
+
+            return links;
+        }
+    }
+
+    private Task GoToPageAsync(int page) => LoadAsync((page - 1) * pageSize);
+
+    private void ToggleCategory(Guid categoryId)
+    {
+        if (!collapsedCategories.Add(categoryId))
+        {
+            collapsedCategories.Remove(categoryId);
+        }
+    }
+
+    private void ToggleBarcodeDesk() => showBarcodeDesk = !showBarcodeDesk;
+
+    private string CategoryName(Guid categoryId)
+        => categories.FirstOrDefault(category => category.Id == categoryId)?.Name ?? "Other products";
+
+    private static string CategoryTone(string name)
+    {
+        if (name.Contains("hair", StringComparison.OrdinalIgnoreCase) || name.Contains("shampoo", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tone-mint";
+        }
+
+        if (name.Contains("personal", StringComparison.OrdinalIgnoreCase) || name.Contains("beauty", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tone-blue";
+        }
+
+        if (name.Contains("house", StringComparison.OrdinalIgnoreCase) || name.Contains("clean", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tone-lilac";
+        }
+
+        if (name.Contains("pet", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tone-peach";
+        }
+
+        if (name.Contains("food", StringComparison.OrdinalIgnoreCase) || name.Contains("beverage", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tone-rose";
+        }
+
+        return "tone-slate";
+    }
+
+    private static string CategoryIcon(string name) => CategoryTone(name) switch
+    {
+        "tone-mint" => "bottle",
+        "tone-blue" => "bottle",
+        "tone-lilac" => "home",
+        "tone-peach" => "paw",
+        "tone-rose" => "food",
+        _ => "more",
+    };
 
     private Task PreviousAsync() => LoadAsync(Math.Max(0, offset - pageSize));
 
     private Task NextAsync() => LoadAsync(offset + pageSize);
-
-    private Task LastAsync() => LoadAsync((PageCount - 1) * pageSize);
 
     private bool CanCreate => Session.HasPermission("product.create");
 
@@ -95,7 +181,7 @@ public sealed partial class Products : IDisposable
         ApiResult<List<PosCategory>> categoryResult = await Api.GetCategoriesAsync(token);
         if (categoryResult is { IsSuccess: true, Value: { } loadedCategories })
         {
-            categories.AddRange(loadedCategories.Where(c => c.IsActive).OrderBy(c => c.Name));
+            categories.AddRange(loadedCategories.OrderBy(c => c.Name));
         }
 
         ApiResult<List<PosUnitOfMeasure>> unitResult = await Api.GetUnitsAsync(token);
@@ -208,6 +294,7 @@ public sealed partial class Products : IDisposable
             return OnNewBarcodeTypedAsync();
         }
 
+        showBarcodeDesk = true;
         lookupCode = scan.Code;
         return LookupAsync();
     }
@@ -276,8 +363,6 @@ public sealed partial class Products : IDisposable
         attaching = null;
         attachTarget = null;
     }
-
-    private void ChooseTarget(PosCatalogProduct product) => attachTarget = product;
 
     private Task OnRowAsync(PosCatalogProduct product)
     {

@@ -24,6 +24,7 @@ public sealed class PageTrail(NavigationManager navigation)
 {
     private static readonly NavCrumb Sales = new("Sales ledger", "sales");
     private static readonly NavCrumb PurchaseOrders = new("Purchase orders", "purchasing");
+    private static readonly NavCrumb Catalogue = new("Products & barcodes", "catalog");
 
     private string? namedPath;
     private string? namedTitle;
@@ -77,6 +78,8 @@ public sealed class PageTrail(NavigationManager navigation)
         _ when path.StartsWith("transfers/", StringComparison.Ordinal) => new("Inventory", "Transfer", new NavCrumb("Transfers", "transfers")),
         _ when path.StartsWith("inventory/timeline/", StringComparison.Ordinal) => new("Inventory", "Movement chain", new NavCrumb("Stock levels", "inventory/stock")),
         "reports" => new("Stores", "Daily reports", null),
+        "catalog" => new("Your workspace", "Products & barcodes", new NavCrumb("Your workspace", string.Empty)),
+        _ when path.StartsWith("catalog/products/", StringComparison.Ordinal) => new("Your workspace", "Product", Catalogue),
         "inventory/exceptions" => new("Inventory", "Failed attempts", null),
         "purchasing" => new("Purchasing", "Purchase orders", null),
         "receiving" => new("Inventory", "Goods receiving", null),
