@@ -280,6 +280,7 @@ try
     app.MapLocationEndpoints();
     app.MapCatalogEndpoints();
     app.MapProductCurationEndpoints();
+    app.MapProductChangeApprovalEndpoints();
     app.MapInventoryEndpoints();
     app.MapInventoryTimelineEndpoints();
     app.MapInventoryExceptionEndpoints();

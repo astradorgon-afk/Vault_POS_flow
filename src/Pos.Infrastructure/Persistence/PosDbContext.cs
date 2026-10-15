@@ -114,6 +114,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets product barcodes.</summary>
     public DbSet<ProductBarcode> ProductBarcodes => Set<ProductBarcode>();
 
+    /// <summary>Catalogue changes held for the owner's approval.</summary>
+    public DbSet<ProductChangeRequest> ProductChangeRequests => Set<ProductChangeRequest>();
+
     /// <summary>Gets product price rows.</summary>
     public DbSet<ProductPrice> ProductPrices => Set<ProductPrice>();
 

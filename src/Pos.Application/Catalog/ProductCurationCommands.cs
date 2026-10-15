@@ -29,8 +29,11 @@ public sealed record UpdateProductCommand(
     bool IsVatExempt,
     decimal DefaultPurchaseCost,
     string? ImageRef)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Edit master fields";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Edit;
 }
@@ -40,8 +43,11 @@ public sealed record UpdateProductCommand(
 /// <param name="Active">The requested state.</param>
 /// <param name="Reason">Why; required to deactivate.</param>
 public sealed record SetProductActivationCommand(ProductId ProductId, bool Active, string? Reason)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => Active ? "Reactivate the product" : "Deactivate the product";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Disable;
 }
@@ -58,8 +64,11 @@ public sealed record AddProductBarcodeCommand(
     UnitOfMeasureId? UnitOfMeasureId,
     decimal PackQuantity,
     bool IsPrimary)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => FormattableString.Invariant($"Attach barcode {Barcode}");
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.ManageBarcodes;
 }
@@ -69,8 +78,11 @@ public sealed record AddProductBarcodeCommand(
 /// <param name="Barcode">The barcode value.</param>
 /// <param name="Reason">Why the code is retired.</param>
 public sealed record RetireProductBarcodeCommand(ProductId ProductId, string? Barcode, string? Reason)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => FormattableString.Invariant($"Retire barcode {Barcode}");
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.ManageBarcodes;
 }
@@ -79,8 +91,11 @@ public sealed record RetireProductBarcodeCommand(ProductId ProductId, string? Ba
 /// <param name="ProductId">The product.</param>
 /// <param name="Barcode">The barcode value.</param>
 public sealed record SetPrimaryProductBarcodeCommand(ProductId ProductId, string? Barcode)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => FormattableString.Invariant($"Make {Barcode} the primary barcode");
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.ManageBarcodes;
 }
@@ -99,8 +114,11 @@ public sealed record ScheduleProductPriceCommand(
     DateTimeOffset? EffectiveFromUtc,
     DateTimeOffset? EffectiveToUtc,
     string? Reason)
-    : ICommand<ProductPriceId>, IAuthorizedMessage
+    : ICommand<ProductPriceId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => FormattableString.Invariant($"Schedule a new price of {Amount}");
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.ManagePrices;
 }
@@ -113,8 +131,11 @@ public sealed record CancelScheduledProductPriceCommand(
     ProductId ProductId,
     ProductPriceId PriceId,
     string? Reason)
-    : ICommand<ProductPriceId>, IAuthorizedMessage
+    : ICommand<ProductPriceId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Cancel a scheduled price";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.ManagePrices;
 }
@@ -137,8 +158,11 @@ public sealed record SetProductLocationSettingCommand(
     decimal TargetStock,
     decimal MaximumStock,
     decimal PreferredReplenishmentQuantity)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Change how it is stocked at a location";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Edit;
 }
@@ -153,8 +177,11 @@ public sealed record AddProductUnitConversionCommand(
     UnitOfMeasureId FromUnitId,
     UnitOfMeasureId ToUnitId,
     decimal Factor)
-    : ICommand<ProductUnitConversionId>, IAuthorizedMessage
+    : ICommand<ProductUnitConversionId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Add a unit conversion";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Edit;
 }
@@ -163,8 +190,11 @@ public sealed record AddProductUnitConversionCommand(
 /// <param name="ProductId">The product.</param>
 /// <param name="ConversionId">The conversion.</param>
 public sealed record RemoveProductUnitConversionCommand(ProductId ProductId, ProductUnitConversionId ConversionId)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Remove a unit conversion";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Edit;
 }
@@ -183,8 +213,11 @@ public sealed record LinkProductSupplierCommand(
     int LeadTimeDays,
     decimal? MinimumOrderQuantity,
     bool IsPreferred)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Link or update a supplier";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Edit;
 }
@@ -193,8 +226,11 @@ public sealed record LinkProductSupplierCommand(
 /// <param name="ProductId">The product.</param>
 /// <param name="SupplierId">The supplier.</param>
 public sealed record UnlinkProductSupplierCommand(ProductId ProductId, SupplierId SupplierId)
-    : ICommand<ProductId>, IAuthorizedMessage
+    : ICommand<ProductId>, IAuthorizedMessage, IProductChangeCommand
 {
+    /// <inheritdoc />
+    public string ChangeSummary => "Remove a supplier link";
+
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Catalog.Edit;
 }

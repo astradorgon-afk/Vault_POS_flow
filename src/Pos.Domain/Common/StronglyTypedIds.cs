@@ -168,6 +168,30 @@ public readonly record struct ProductId(Guid Value) : IStronglyTypedId, ICompara
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
 
+/// <summary>Identifies a requested catalogue change awaiting approval.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct ProductChangeRequestId(Guid Value) : IStronglyTypedId, IComparable<ProductChangeRequestId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static ProductChangeRequestId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="ProductChangeRequestId"/>.</returns>
+    public static ProductChangeRequestId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(ProductChangeRequestId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
 /// <summary>Identifies a product barcode row.</summary>
 /// <param name="Value">The underlying UUIDv7 value.</param>
 [System.Diagnostics.CodeAnalysis.SuppressMessage(

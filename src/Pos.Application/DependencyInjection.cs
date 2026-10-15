@@ -2,6 +2,7 @@ using System.Reflection;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pos.Application.Catalog;
 using Pos.Application.Common.Behaviours;
 using Pos.Application.Common.Messaging;
 
@@ -32,6 +33,7 @@ public static class DependencyInjection
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(LoggingBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(ValidationBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(AuthorizationBehaviour<,>));
+        services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(ProductChangeApprovalBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(NegativeStockAttemptBehaviour<,>));
         services.AddTransient(typeof(IPipelineBehaviour<,>), typeof(UnitOfWorkBehaviour<,>));
 

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Pos.Application.Catalog;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Inventory;
@@ -419,6 +420,9 @@ public static class DependencyInjection
         services.TryAddScoped<SyncPullService>();
         services.TryAddScoped<SyncBaselineService>();
         services.TryAddScoped<IChangeFeedPublisher, ChangeFeedPublisher>();
+        services.TryAddScoped<IProductChangeRequestRepository, ProductChangeRequestRepository>();
+        services.TryAddScoped<ProductChangeReason>();
+        services.TryAddScoped<ProductChangeReplayScope>();
         services.TryAddScoped<SyncFailureService>();
         services.TryAddScoped<SyncStatusService>();
         services.AddHostedService<SyncRetryWorker>();

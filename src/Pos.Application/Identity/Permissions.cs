@@ -53,6 +53,12 @@ public static class Permissions
         /// <summary>Deactivate or reactivate a product.</summary>
         public const string Disable = "product.disable";
 
+        /// <summary>
+        /// Approve another user's catalogue change, and make catalogue changes
+        /// without approval. Seeded to the owner alone.
+        /// </summary>
+        public const string ApproveChanges = "product.change.approve";
+
         /// <summary>Manage categories.</summary>
         public const string ManageCategories = "category.manage";
 
@@ -298,6 +304,7 @@ public static class Permissions
         Def(Catalog.ManagePrices, "Catalog", "Create effective-dated price changes.", offline: false, readOnly: false),
         Def(Catalog.ViewCost, "Catalog", "See purchase cost and margin.", offline: false, readOnly: true),
         Def(Catalog.Disable, "Catalog", "Deactivate or reactivate a product.", offline: false, readOnly: false),
+        Def(Catalog.ApproveChanges, "Catalog", "Approve catalogue changes, and change the catalogue without approval.", offline: false, readOnly: false),
         Def(Catalog.ManageCategories, "Catalog", "Manage categories.", offline: false, readOnly: false),
         Def(Catalog.ManageBrands, "Catalog", "Manage brands.", offline: false, readOnly: false),
         Def(Catalog.ManageUnits, "Catalog", "Manage units of measure.", offline: false, readOnly: false),

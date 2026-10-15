@@ -115,4 +115,66 @@ public static class CatalogErrors
         FormattableString.Invariant($"catalog.{kind}_already_exists"),
         FormattableString.Invariant($"The value '{value}' is already in use."),
         new Dictionary<string, object?> { ["value"] = value });
+
+    /// <summary>A catalogue change was submitted without a usable reason.</summary>
+    /// <param name="minimumLength">The shortest reason accepted.</param>
+    /// <returns>The error.</returns>
+    public static Error ChangeReasonRequired(int minimumLength) => Error.Validation(
+        "catalog.change_reason_required",
+        FormattableString.Invariant(
+            $"Changing a product needs a reason of at least {minimumLength} characters for the approver."));
+
+    /// <summary>A decision was recorded without the note it requires.</summary>
+    /// <returns>The error.</returns>
+    public static Error ChangeDecisionNoteRequired() => Error.Validation(
+        "catalog.change_note_required",
+        "Rejecting a change needs a note saying why.");
+
+    /// <summary>A decision was attempted on a request that is no longer open.</summary>
+    /// <param name="status">Where the request has got to.</param>
+    /// <returns>The error.</returns>
+    public static Error ChangeRequestClosed(string status) => Error.Conflict(
+        "catalog.change_request_closed",
+        FormattableString.Invariant($"This change request has already been {status.ToLowerInvariant()}."),
+        new Dictionary<string, object?> { ["status"] = status });
+
+    /// <summary>Somebody tried to approve their own request.</summary>
+    /// <returns>The error.</returns>
+    public static Error ChangeRequestSelfApproval() => Error.Forbidden(
+        "catalog.change_self_approval",
+        "A change request cannot be approved by the person who raised it.");
+
+    /// <summary>Somebody tried to withdraw a request that is not theirs.</summary>
+    /// <returns>The error.</returns>
+    public static Error ChangeRequestNotYours() => Error.Forbidden(
+        "catalog.change_not_yours",
+        "Only the person who raised a change request can withdraw it.");
+
+    /// <summary>A request names a change the replay registry does not know.</summary>
+    /// <param name="changeType">The unrecognised change type.</param>
+    /// <returns>The error.</returns>
+    public static Error ChangeRequestNotReplayable(string? changeType) => Error.Conflict(
+        "catalog.change_not_replayable",
+        FormattableString.Invariant($"The change '{changeType}' cannot be replayed."),
+        new Dictionary<string, object?> { ["changeType"] = changeType });
+
+    /// <summary>A change was held for approval rather than applied.</summary>
+    /// <param name="requestId">The request raised.</param>
+    /// <param name="summary">What was asked for.</param>
+    /// <returns>The error.</returns>
+    public static Error ChangeAwaitingApproval(ProductChangeRequestId requestId, string summary) => Error.Conflict(
+        "catalog.change_awaiting_approval",
+        FormattableString.Invariant($"{summary} was sent to the owner for approval."),
+        new Dictionary<string, object?>
+        {
+            ["requestId"] = requestId.Value,
+            ["summary"] = summary,
+        });
+
+    /// <summary>A change request was looked up and not found.</summary>
+    /// <param name="requestId">The identifier that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error ChangeRequestUnknown(ProductChangeRequestId requestId) => Error.NotFound(
+        "catalog.change_request_unknown",
+        FormattableString.Invariant($"Change request {requestId.Value} was not found."));
 }

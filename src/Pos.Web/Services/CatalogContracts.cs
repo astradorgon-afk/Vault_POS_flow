@@ -83,3 +83,40 @@ public sealed record PosCatalogPage(
     int Total,
     int Offset,
     int Limit);
+
+/// <summary>A catalogue change held for the owner's approval.</summary>
+/// <param name="RequestId">The request.</param>
+/// <param name="ProductId">The product being changed.</param>
+/// <param name="ProductName">The product's name.</param>
+/// <param name="ProductSku">The product's SKU.</param>
+/// <param name="ChangeType">The kind of change held.</param>
+/// <param name="Summary">A one-line description of the change.</param>
+/// <param name="Reason">Why the requester says it is needed.</param>
+/// <param name="Status">Where the request has got to.</param>
+/// <param name="RequestedBy">Who raised it.</param>
+/// <param name="RequestedByName">Their display name.</param>
+/// <param name="RequestedAtUtc">When it was raised.</param>
+/// <param name="DecidedByName">Who decided, when decided.</param>
+/// <param name="DecidedAtUtc">When it was decided.</param>
+/// <param name="DecisionNote">The approver's note.</param>
+/// <param name="FailureReason">Why applying it failed, when it did.</param>
+public sealed record PosProductChangeRequest(
+    Guid RequestId,
+    Guid ProductId,
+    string ProductName,
+    string ProductSku,
+    string ChangeType,
+    string Summary,
+    string Reason,
+    string Status,
+    Guid RequestedBy,
+    string? RequestedByName,
+    DateTimeOffset RequestedAtUtc,
+    string? DecidedByName,
+    DateTimeOffset? DecidedAtUtc,
+    string? DecisionNote,
+    string? FailureReason);
+
+/// <summary>The note recorded with an approval decision.</summary>
+/// <param name="Note">Why; required when rejecting.</param>
+public sealed record PosProductChangeDecision(string? Note);

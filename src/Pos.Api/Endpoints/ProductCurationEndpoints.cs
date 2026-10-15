@@ -28,6 +28,10 @@ public static class ProductCurationEndpoints
 
         RouteGroupBuilder group = app.MapGroup("/api/v1/catalog/products/{id:guid}").WithTags("Catalog");
 
+        // A caller who cannot approve their own changes has theirs held, and
+        // a held change needs the reason it was submitted with.
+        group.AddEndpointFilter(ProductChangeApprovalEndpoints.CaptureReasonAsync);
+
         Map(group.MapPut(string.Empty, UpdateAsync), Permissions.Catalog.Edit, "UpdateProduct", "Edits a product's master fields.");
         Map(group.MapPost("/deactivate", DeactivateAsync), Permissions.Catalog.Disable, "DeactivateProduct", "Stops a product being sold or received.");
         Map(group.MapPost("/activate", ActivateAsync), Permissions.Catalog.Disable, "ActivateProduct", "Returns a product to sale and receiving.");

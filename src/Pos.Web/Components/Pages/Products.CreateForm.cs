@@ -17,6 +17,7 @@ public sealed partial class Products
     private string newCategoryId = string.Empty;
     private string newUnitId = string.Empty;
     private string newBarcode = string.Empty;
+    private string newDescription = string.Empty;
     private string newBrandId = string.Empty;
     private string newSupplierId = string.Empty;
     private decimal newCost;
@@ -120,6 +121,7 @@ public sealed partial class Products
         !string.IsNullOrWhiteSpace(newName) ||
         !string.IsNullOrWhiteSpace(newSku) ||
         !string.IsNullOrWhiteSpace(newBarcode) ||
+        !string.IsNullOrWhiteSpace(newDescription) ||
         !string.IsNullOrWhiteSpace(newCategoryId) ||
         !string.IsNullOrWhiteSpace(newUnitId) ||
         !string.IsNullOrWhiteSpace(newBrandId) ||
@@ -173,6 +175,7 @@ public sealed partial class Products
         newCategoryId = string.Empty;
         newUnitId = string.Empty;
         newBarcode = string.Empty;
+        newDescription = string.Empty;
         newBrandId = string.Empty;
         newSupplierId = string.Empty;
         newCost = 0m;
@@ -180,6 +183,8 @@ public sealed partial class Products
         newTracksExpiry = false;
         newShelfLifeDays = null;
         newVatExempt = false;
+        barcodeTaken = null;
+        barcodeCheckGeneration++;
     }
 
     /// <inheritdoc />
@@ -232,7 +237,7 @@ public sealed partial class Products
                 newName.Trim(),
                 categoryId,
                 unitId,
-                Description: null,
+                Description: string.IsNullOrWhiteSpace(newDescription) ? null : newDescription.Trim(),
                 BrandId: Guid.TryParse(newBrandId, out Guid brandId) ? brandId : null,
                 PrimarySupplierId: Guid.TryParse(newSupplierId, out Guid supplierId) ? supplierId : null,
                 TaxCode: null,

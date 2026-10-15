@@ -19,20 +19,27 @@
     }
     else
     {
-        <header class="receiving-head">
-            <div><span class="eyebrow">Goods receiving · @locationName</span><h1>@(order.Number ?? "Purchase order")</h1><p>Count the goods that physically arrived. Previous deliveries are already deducted from the quantities due.</p></div>
-            <span class="receiving-state @(CanReceiveNow ? "ready" : "")">@SplitWords(order.Status)</span>
+        <header class="page-head">
+            <div>
+                <h1>Receive delivery</h1>
+                <div class="po"><strong>@(order.Number ?? "Purchase order")</strong> <i aria-hidden="true">·</i> @locationName</div>
+            </div>
+            <span class="badge @(CanReceiveNow ? "is-open" : null)"><i class="dot" aria-hidden="true"></i>@SplitWords(order.Status)</span>
         </header>
 
-        <section class="receiving-route" aria-label="Delivery route">
-            <div class="receiving-route-stop">
-                <span>From supplier</span>
-                <strong>@supplierName</strong>
+        <section class="route-card" aria-label="Delivery route">
+            <div class="route-field">
+                <span class="icon-box" aria-hidden="true"><AppIcon Name="transfer" /></span>
+                <div><span class="label">From supplier</span><strong>@supplierName</strong></div>
             </div>
-            <span class="receiving-route-arrow" aria-hidden="true">→</span>
-            <div class="receiving-route-stop">
-                <span>Deliver to</span>
-                <strong>@locationName</strong>
+            <span class="route-arrow" aria-hidden="true"><AppIcon Name="arrow" /></span>
+            <div class="route-field">
+                <span class="icon-box" aria-hidden="true"><AppIcon Name="location" /></span>
+                <div><span class="label">Deliver to</span><strong>@locationName</strong></div>
+            </div>
+            <div class="route-stats">
+                <div><strong>@lines.Count</strong><span>@(lines.Count == 1 ? "item" : "items") ordered</span></div>
+                <div><strong>@Quantity(TotalDue)</strong><span>units due</span></div>
             </div>
         </section>
 
@@ -41,70 +48,304 @@
             <div class="receiving-message" role="status">@message</div>
         }
 
-        @if (CanReceiveNow)
-        {
-            <section class="receiving-card">
-                <header><div><span class="eyebrow">New delivery</span><h2>Count what arrived</h2></div><p>Leave a line at zero if it is not in this delivery.</p></header>
-                <div class="receiving-scanner">
-                    <ScanTarget OnScan="OnScannedAsync" Enabled="@(!saving)" />
-                    <CameraScanner Enabled="@(!saving)" />
-                    <span>Scan a product to add one to Arrived, or enter quantities below.</span>
-                </div>
-                <div class="receiving-lines">
-                    @foreach (ReceiptLineInput line in lines)
-                    {
-                        <div class="receiving-line" @key="line.OrderLine.Id">
-                            <div class="receiving-line-title"><strong>@(line.OrderLine.ProductName ?? line.OrderLine.ProductSku ?? "Product")</strong><small>@line.OrderLine.ProductSku · @Quantity(line.Due) still due</small></div>
-                            <div class="receiving-fields">
-                                <label><span>Arrived</span><input type="number" min="0" step="0.001" @bind="line.Received" /></label>
-                                <label><span>Damaged</span><input type="number" min="0" step="0.001" @bind="line.Damaged" /></label>
-                                <label><span>Wrong item</span><input type="number" min="0" step="0.001" @bind="line.WrongItem" /></label>
-                                <label><span>Expired</span><input type="number" min="0" step="0.001" @bind="line.Expired" /></label>
-                                <label><span>Lot number <small>if tracked</small></span><input type="text" maxlength="80" @bind="line.LotNumber" /></label>
-                                <label><span>Made on <small>if known</small></span><input type="date" @bind="line.ManufacturedOn" /></label>
-                                <label><span>Expires on <small>if known</small></span><input type="date" @bind="line.ExpiresOn" /></label>
+        <div class="layout">
+            <div class="left-col">
+
+                @if (CanReceiveNow)
+                {
+                    <section class="card">
+                        <div class="card-head">
+                            <div>
+                                <div class="eyebrow">New delivery</div>
+                                <h2>Count what arrived</h2>
+                                <p>Enter the quantities received in this delivery.</p>
                             </div>
                         </div>
-                    }
-                </div>
-                <footer>
-                    <div class="receiving-supplier-docs">
-                        <label><span>Supplier DR number <em>optional</em></span><input type="text" maxlength="40" @bind="supplierDrNumber" placeholder="As printed on their delivery receipt" /></label>
-                        <label><span>Supplier OR number <em>optional</em></span><input type="text" maxlength="40" @bind="supplierOrNumber" placeholder="As printed on their official receipt" /></label>
-                        <label><span>Released by supplier <em>optional</em></span><input type="datetime-local" @bind="supplierReleasedAt" /></label>
-                    </div>
-                    <label class="receiving-check"><input type="checkbox" @bind="documentsMissing" /><span>Delivery documents are missing</span></label>
-                    <button type="button" class="receiving-primary" @onclick="RecordAsync" disabled="@(saving || !CanRecord)">@(saving ? "Recording…" : "Record delivery")</button>
-                </footer>
-            </section>
-        }
-        else if (historyLoaded)
-        {
-            <div class="receiving-message">This order is not currently ready for another delivery.</div>
-        }
 
-        <section class="receiving-card receiving-history">
-            <header><div><span class="eyebrow">Recorded stock</span><h2>Delivery history</h2></div><p>@receipts.Count @(receipts.Count == 1 ? "delivery" : "deliveries") recorded</p></header>
-            @if (receipts.Count == 0)
-            {
-                <p class="receiving-history-empty">No deliveries recorded yet.</p>
-            }
-            else
-            {
-                @foreach (PosGoodsReceipt receipt in receipts.OrderByDescending(item => item.ReceivedAtUtc))
-                {
-                    <article class="receiving-history-row" @key="receipt.Id">
-                        <div><strong>@receipt.Number</strong><small>@receipt.ReceivedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small></div>
-                        <span>@Quantity(receipt.Lines.Sum(line => line.QuantityAccepted)) accepted</span>
-                        @if (receipt.DocumentsMissing) { <span class="receiving-state">Documents missing</span> }
-                        @if (PurchasingText.SupplierPaperwork(receipt) is { } paperwork)
-                        {
-                            <span class="receiving-state">@paperwork</span>
-                        }
-                    </article>
+                        <div class="toolbar">
+                            <span class="scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                            <button type="button" class="btn" disabled="@saving" @onclick="FillAllDue">
+                                <AppIcon Name="check" /> Mark all arrived
+                            </button>
+                        </div>
+                        @* A wedge scanner types wherever focus is, so it needs no row. *@
+                        <p class="scanner-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
+                        <p class="damage-help">Count all arrived units, then enter how many are damaged. Usable = arrived − damaged and anything reported as an issue.</p>
+
+                        <ScanTarget OnScan="OnScannedAsync" Enabled="@(!saving)" />
+
+                        <div class="table-head" aria-hidden="true">
+                            <span>Product</span><span>Due</span><span>Arrived</span><span>Damaged</span><span>Actions</span>
+                        </div>
+
+                        <div class="product-rows">
+                            @foreach (ReceiptLineInput line in lines)
+                            {
+                                <article class="product-row" @key="line.OrderLine.Id" aria-label="@line.Name">
+                                    <div class="product">
+                                        <div class="product-name">@line.Name</div>
+                                        <div class="sku">@line.OrderLine.ProductSku</div>
+                                        @if (line.HasNotes)
+                                        {
+                                            <div class="note-marker">Details added</div>
+                                        }
+                                    </div>
+
+                                    <div class="due-cell"><span class="due">@Quantity(line.Due)</span></div>
+
+                                    <div class="quantity-cell">
+                                        <div class="stepper">
+                                            <button type="button" aria-label="One fewer @line.OrderLine.ProductSku"
+                                                    disabled="@(line.Received <= 0)" @onclick="() => Step(line, -1)">−</button>
+                                            <input type="number" min="0" max="@line.Due" step="1" inputmode="numeric"
+                                                   aria-label="Arrived quantity for @line.OrderLine.ProductSku"
+                                                   value="@line.Received" @onchange="e => SetArrived(line, e.Value)" />
+                                            <button type="button" aria-label="One more @line.OrderLine.ProductSku"
+                                                    disabled="@(line.Received >= line.Due)" @onclick="() => Step(line, 1)">+</button>
+                                        </div>
+                                        <button type="button" class="text-btn" disabled="@(line.Received == line.Due)"
+                                                @onclick="() => SetArrived(line, line.Due)">Receive all @Quantity(line.Due)</button>
+                                    </div>
+
+                                    <div class="damage-cell">
+                                        <label class="damage-field">
+                                            <span class="damage-label">Damaged</span>
+                                            <span class="damage-input">
+                                                <input type="number" min="0" max="@line.Received" step="1" inputmode="numeric"
+                                                       aria-label="Damaged quantity for @line.OrderLine.ProductSku"
+                                                       value="@line.Damaged" @onchange="e => SetDamaged(line, e.Value)" />
+                                            </span>
+                                        </label>
+                                        <div class="usable">@Quantity(Usable(line)) usable units</div>
+                                    </div>
+
+                                    <div class="action-stack">
+                                        <button type="button" class="row-scan" @onclick="() => OpenScan(line)"
+                                                aria-label="Scan barcode for @line.Name">
+                                            <AppIcon Name="camera" /> Scan barcode
+                                        </button>
+                                        <button type="button" @onclick="() => OpenIssue(line)">
+                                            <AppIcon Name="warning" /> Report issue
+                                        </button>
+                                        <button type="button" @onclick="() => OpenBatch(line)">
+                                            <AppIcon Name="box" /> Batch &amp; dates
+                                        </button>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+
+                        <div class="helper">
+                            <AppIcon Name="info" />
+                            Leave arrived at 0 for items not in this delivery. Damaged and reported issues cannot exceed arrived.
+                        </div>
+                    </section>
                 }
+                else if (historyLoaded)
+                {
+                    <div class="receiving-message">This order is not currently ready for another delivery.</div>
+                }
+
+                <section class="card history">
+                    <div class="card-head">
+                        <div><div class="eyebrow">Recorded stock</div><h2>Delivery history</h2></div>
+                        <span class="count">@receipts.Count @(receipts.Count == 1 ? "delivery" : "deliveries")</span>
+                    </div>
+                    @if (receipts.Count == 0)
+                    {
+                        <div class="empty">
+                            <span class="icon-box" aria-hidden="true"><AppIcon Name="box" /></span>
+                            <strong>No deliveries recorded yet</strong>
+                            <p>Recorded deliveries will appear here.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (PosGoodsReceipt receipt in receipts.OrderByDescending(item => item.ReceivedAtUtc))
+                        {
+                            <div class="history-entry" @key="receipt.Id">
+                                <div>
+                                    <strong>@receipt.Number</strong>
+                                    <p>@receipt.ReceivedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</p>
+                                </div>
+                                <span class="badge">@Quantity(receipt.Lines.Sum(l => l.QuantityAccepted)) accepted</span>
+                                @if (receipt.DocumentsMissing)
+                                {
+                                    <span class="badge is-warn">Documents missing</span>
+                                }
+                                @if (PurchasingText.SupplierPaperwork(receipt) is { } paperwork)
+                                {
+                                    <span class="badge is-quiet">@paperwork</span>
+                                }
+                            </div>
+                        }
+                    }
+                </section>
+            </div>
+
+            @if (CanReceiveNow)
+            {
+                <aside class="right-col">
+                    <section class="card">
+                        <div class="card-head">
+                            <h2>Supplier paperwork</h2>
+                            <span class="optional">Optional</span>
+                        </div>
+                        <div class="form-body">
+                            <label class="field">DR number
+                                <input type="text" maxlength="40" autocomplete="off" disabled="@documentsMissing"
+                                       placeholder="Delivery receipt number" @bind="supplierDrNumber" /></label>
+                            <label class="field">OR number
+                                <input type="text" maxlength="40" autocomplete="off" disabled="@documentsMissing"
+                                       placeholder="Official receipt number" @bind="supplierOrNumber" /></label>
+                            <label class="field">Released by supplier
+                                <input type="datetime-local" @bind="supplierReleasedAt" /></label>
+                            <label class="check">
+                                <input type="checkbox" @bind="documentsMissing" />
+                                Driver brought no paperwork
+                            </label>
+                        </div>
+                    </section>
+
+                    @* The running total is the reason to keep this column: it answers
+                       "what am I about to commit" without scrolling back up. *@
+                    <section class="card">
+                        <div class="card-head">
+                            <h2>Delivery summary</h2>
+                            <span class="card-head-icon" aria-hidden="true"><AppIcon Name="box" /></span>
+                        </div>
+                        <div class="summary-body">
+                            <div class="summary-row"><span>Items counted</span><strong>@CountedLines of @lines.Count</strong></div>
+                            <div class="summary-row"><span>Units arrived</span><strong>@Quantity(TotalArrived) of @Quantity(TotalDue)</strong></div>
+                            <div class="summary-row"><span>Damaged or rejected</span><strong>@Quantity(TotalProblem)</strong></div>
+                            <div class="summary-row stock-summary"><span>Usable units</span><strong>@Quantity(TotalUsable)</strong></div>
+
+                            <div class="progress" role="progressbar" aria-label="Units counted"
+                                 aria-valuemin="0" aria-valuemax="@Quantity(TotalDue)" aria-valuenow="@Quantity(TotalArrived)">
+                                <div style="width:@(ProgressPercent.ToString(CultureInfo.InvariantCulture))%"></div>
+                            </div>
+
+                            <button type="button" class="btn primary submit" disabled="@(saving || !CanRecord)" @onclick="RecordAsync">
+                                <AppIcon Name="check" /> @(saving ? "Recording…" : "Record delivery")
+                            </button>
+                            <p class="summary-foot">@SubmitHelp</p>
+                        </div>
+                    </section>
+                </aside>
             }
-        </section>
+        </div>
+    }
+
+    @* Dialogs. The app renders its own overlay rather than a native <dialog>,
+       which would need interop to open. *@
+    @if (unknownCode is { } newCode)
+    {
+        <div class="dlg-scrim" @onclick="() => unknownCode = null"></div>
+        <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="capture-title">
+            <h2 id="capture-title">Not in the catalogue</h2>
+            <p class="dlg-product"><code>@newCode</code> did not match any product.</p>
+            <p class="dlg-lead">
+                Capture it so the code resolves and the delivery can be recorded against it.
+                Price, tax and stocking settings stay with the catalogue owner.
+            </p>
+            <label class="field">Product name
+                <input maxlength="128" placeholder="As printed on the carton"
+                       @bind="captureName" @bind:event="oninput" /></label>
+            <div class="dlg-pair">
+                <label class="field">Category
+                    <select @bind="captureCategoryId">
+                        <option value="">Select a category</option>
+                        @foreach (PosCategory category in captureCategories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </select>
+                </label>
+                <label class="field">Unit
+                    <select @bind="captureUnitId">
+                        <option value="">Select a unit</option>
+                        @foreach (PosUnitOfMeasure unit in captureUnits)
+                        {
+                            <option value="@unit.Id">@unit.Name (@unit.Code)</option>
+                        }
+                    </select>
+                </label>
+            </div>
+            @if (captureError is { } problem)
+            {
+                <p class="dlg-warn">@problem</p>
+            }
+            <footer>
+                <span class="dlg-status">@(CaptureBlockedReason ?? "Ready to capture.")</span>
+                <button type="button" class="btn" @onclick="() => unknownCode = null">Cancel</button>
+                <button type="button" class="btn primary"
+                        disabled="@(CaptureBlockedReason is not null || capturing)"
+                        @onclick="CaptureProductAsync">
+                    @(capturing ? "Capturing\u2026" : "Capture product")
+                </button>
+            </footer>
+        </div>
+    }
+    else if (scanLine is { } scanning)
+    {
+        <div class="dlg-scrim" @onclick="CloseDialogs"></div>
+        <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+            <h2 id="scan-title">Scan product barcode</h2>
+            <p class="dlg-product">@scanning.Name <i aria-hidden="true">·</i> @scanning.OrderLine.ProductSku</p>
+            <p class="dlg-lead">Point the camera at this product's barcode. A matching scan adds one arrived unit.</p>
+            <CameraScanner Enabled="@(!saving)" />
+            <label class="field">Barcode value
+                <input type="text" inputmode="numeric" class="code-input" placeholder="Enter barcode value"
+                       autocomplete="off" @bind="scanCode" @bind:event="oninput"
+                       @onkeydown="e => OnScanCodeKeyAsync(e)" /></label>
+            <footer>
+                <button type="button" class="btn" @onclick="CloseDialogs">Close</button>
+                <button type="button" class="btn primary" disabled="@string.IsNullOrWhiteSpace(scanCode)"
+                        @onclick="SubmitScanCodeAsync">Add one unit</button>
+            </footer>
+        </div>
+    }
+    else if (issueLine is { } issuing)
+    {
+        <div class="dlg-scrim" @onclick="CloseDialogs"></div>
+        <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="issue-title">
+            <h2 id="issue-title">Report an issue</h2>
+            <p class="dlg-product">@issuing.Name</p>
+            <p class="dlg-lead">These come out of the usable count and are quarantined rather than shelved.</p>
+            <div class="dlg-pair">
+                <label class="field">Wrong item
+                    <input type="number" min="0" step="1" inputmode="numeric"
+                           value="@issuing.WrongItem" @onchange="e => SetWrongItem(issuing, e.Value)" /></label>
+                <label class="field">Expired
+                    <input type="number" min="0" step="1" inputmode="numeric"
+                           value="@issuing.Expired" @onchange="e => SetExpired(issuing, e.Value)" /></label>
+            </div>
+            @if (issuing.Received > 0 && issuing.Damaged + issuing.WrongItem + issuing.Expired > issuing.Received)
+            {
+                <p class="dlg-warn">That is more problem stock than arrived on this line.</p>
+            }
+            <footer>
+                <button type="button" class="btn primary" @onclick="CloseDialogs">Done</button>
+            </footer>
+        </div>
+    }
+    else if (batchLine is { } batching)
+    {
+        <div class="dlg-scrim" @onclick="CloseDialogs"></div>
+        <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="batch-title">
+            <h2 id="batch-title">Batch &amp; dates</h2>
+            <p class="dlg-product">@batching.Name</p>
+            <p class="dlg-lead">Taken from the carton. Expiry drives which stock is sold first.</p>
+            <label class="field">Lot number
+                <input type="text" maxlength="80" placeholder="Enter lot number" @bind="batching.LotNumber" /></label>
+            <div class="dlg-pair">
+                <label class="field">Made on<input type="date" @bind="batching.ManufacturedOn" /></label>
+                <label class="field">Expires on<input type="date" @bind="batching.ExpiresOn" /></label>
+            </div>
+            <footer>
+                <button type="button" class="btn primary" @onclick="CloseDialogs">Done</button>
+            </footer>
+        </div>
     }
 </section>
 
@@ -126,7 +367,250 @@
     private bool historyLoaded;
     private ScanLine? scanQueue;
 
+    // Capturing a product the delivery brought but the catalogue does not know.
+    private readonly List<PosCategory> captureCategories = [];
+    private readonly List<PosUnitOfMeasure> captureUnits = [];
+    private string? unknownCode;
+    private string captureName = string.Empty;
+    private string captureCategoryId = string.Empty;
+    private string captureUnitId = string.Empty;
+    private string? captureError;
+    private bool capturing;
+
+    private bool CanCreateProducts => Session.HasPermission("product.create");
+
+    /// <summary>Why the capture button is disabled, or null when it is ready.</summary>
+    private string? CaptureBlockedReason
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(captureName))
+            {
+                return "A name is needed.";
+            }
+
+            if (!Guid.TryParse(captureCategoryId, out _))
+            {
+                return "Choose a category.";
+            }
+
+            return Guid.TryParse(captureUnitId, out _) ? null : "Choose a unit.";
+        }
+    }
+
+    /// <summary>
+    /// Creates the scanned product with the few facts the dock can be sure of,
+    /// then re-runs the scan so the delivery can be counted against it.
+    /// </summary>
+    /// <remarks>
+    /// Only name, category, unit and the scanned barcode are captured. Price,
+    /// tax treatment and stocking settings are the catalogue owner's decisions
+    /// and are left for them, rather than guessed at under delivery pressure.
+    /// </remarks>
+    private async Task CaptureProductAsync()
+    {
+        if (CaptureBlockedReason is not null
+            || unknownCode is not { } code
+            || !Guid.TryParse(captureCategoryId, out Guid categoryId)
+            || !Guid.TryParse(captureUnitId, out Guid unitId))
+        {
+            return;
+        }
+
+        capturing = true;
+        captureError = null;
+        try
+        {
+            PosCreateProduct body = new(
+                SuggestedSku(captureName),
+                captureName.Trim(),
+                categoryId,
+                unitId,
+                InitialBarcode: code);
+
+            ApiResult<PosReference> created = await Api.CreateProductAsync(body, CancellationToken.None);
+            if (created is not { IsSuccess: true })
+            {
+                captureError = created.Error ?? "The product could not be created.";
+                return;
+            }
+
+            message = $"{captureName.Trim()} was added to the catalogue and {code} now scans as it.";
+            unknownCode = null;
+
+            // Re-run the scan so, if this product is on the order, the delivery
+            // is counted straight away rather than needing a second pass.
+            await CountScannedAsync(new BarcodeScan(code, ScanSource.Simulated, DateTimeOffset.UtcNow));
+        }
+        catch (HttpRequestException)
+        {
+            captureError = "The catalogue is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            capturing = false;
+        }
+    }
+
+    /// <summary>Loads the few lists the capture form offers, when it may be used.</summary>
+    private async Task LoadCaptureLookupsAsync()
+    {
+        if (!CanCreateProducts || captureUnits.Count > 0)
+        {
+            return;
+        }
+
+        ApiResult<List<PosCategory>> categories = await Api.GetCategoriesAsync(CancellationToken.None);
+        if (categories is { IsSuccess: true, Value: { } loadedCategories })
+        {
+            captureCategories.AddRange(loadedCategories.Where(c => c.IsActive).OrderBy(c => c.Name));
+        }
+
+        ApiResult<List<PosUnitOfMeasure>> units = await Api.GetUnitsAsync(CancellationToken.None);
+        if (units is { IsSuccess: true, Value: { } loadedUnits })
+        {
+            captureUnits.AddRange(loadedUnits.OrderBy(u => u.Code));
+        }
+    }
+
+    /// <summary>A SKU built from the name, so the dock is not asked to invent one.</summary>
+    private static string SuggestedSku(string name)
+    {
+        string[] words = name.ToUpperInvariant()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(word => new string([.. word.Where(char.IsAsciiLetterOrDigit)]))
+            .Where(word => word.Length > 0)
+            .Take(2)
+            .ToArray();
+
+        string stem = words.Length == 0 ? "NEW" : string.Join('-', words);
+        // Suffixed because the dock cannot see whether the stem is already taken,
+        // and a clash would refuse the capture outright.
+        return $"{stem}-{DateTime.UtcNow:HHmmss}";
+    }
+
     private bool CanReceiveNow => historyLoaded && order?.Status is "Ordered" or "PartiallyReceived";
+    private int CountedLines => lines.Count(line => line.Received > 0);
+    private decimal TotalDue => lines.Sum(line => line.Due);
+    private decimal TotalArrived => lines.Sum(line => line.Received);
+    private decimal TotalProblem => lines.Sum(line => line.Damaged + line.WrongItem + line.Expired);
+    private decimal TotalUsable => TotalArrived - TotalProblem;
+
+    private decimal ProgressPercent => TotalDue <= 0
+        ? 100m
+        : Math.Clamp(Math.Round(TotalArrived / TotalDue * 100m, 1), 0m, 100m);
+
+    private string SubmitHelp => CanRecord
+        ? "Ready to record this delivery."
+        : TotalDue <= 0 ? "All ordered units have been received." : "Enter a quantity to continue.";
+
+    /// <summary>What is left to shelve once damage and issues come out.</summary>
+    private static decimal Usable(ReceiptLineInput line)
+        => Math.Max(0m, line.Received - line.Damaged - line.WrongItem - line.Expired);
+
+    // One line is worked at a time, so a single set of fields serves all three
+    // dialogs and only one can be open.
+    private ReceiptLineInput? scanLine;
+    private ReceiptLineInput? issueLine;
+    private ReceiptLineInput? batchLine;
+    private string scanCode = string.Empty;
+
+    private void OpenScan(ReceiptLineInput line)
+    {
+        CloseDialogs();
+        scanLine = line;
+        scanCode = string.Empty;
+    }
+
+    private void OpenIssue(ReceiptLineInput line)
+    {
+        CloseDialogs();
+        issueLine = line;
+    }
+
+    private void OpenBatch(ReceiptLineInput line)
+    {
+        CloseDialogs();
+        batchLine = line;
+    }
+
+    private void CloseDialogs()
+    {
+        scanLine = null;
+        issueLine = null;
+        batchLine = null;
+    }
+
+    /// <summary>Sets every line to the quantity still outstanding.</summary>
+    private void FillAllDue()
+    {
+        foreach (ReceiptLineInput line in lines)
+        {
+            SetArrived(line, line.Due);
+        }
+    }
+
+    /// <summary>Nudges a line's arrived count, within nothing and what is due.</summary>
+    private static void Step(ReceiptLineInput line, int by)
+        => SetArrived(line, line.Received + by);
+
+    private static void SetArrived(ReceiptLineInput line, object? value)
+        => SetArrived(line, ToQuantity(value, line.Received));
+
+    /// <summary>
+    /// Sets what arrived, held between zero and the quantity still due, and
+    /// trims any problem count that no longer fits under it.
+    /// </summary>
+    private static void SetArrived(ReceiptLineInput line, decimal value)
+    {
+        line.Received = Math.Clamp(value, 0m, line.Due);
+        line.Damaged = Math.Min(line.Damaged, line.Received);
+        line.WrongItem = Math.Min(line.WrongItem, line.Received);
+        line.Expired = Math.Min(line.Expired, line.Received);
+    }
+
+    private static void SetDamaged(ReceiptLineInput line, object? value)
+        => line.Damaged = Math.Clamp(ToQuantity(value, line.Damaged), 0m, line.Received);
+
+    private static void SetWrongItem(ReceiptLineInput line, object? value)
+        => line.WrongItem = Math.Clamp(ToQuantity(value, line.WrongItem), 0m, line.Received);
+
+    private static void SetExpired(ReceiptLineInput line, object? value)
+        => line.Expired = Math.Clamp(ToQuantity(value, line.Expired), 0m, line.Received);
+
+    /// <summary>Reads a typed quantity, keeping the old one when it is not a number.</summary>
+    private static decimal ToQuantity(object? value, decimal fallback)
+        => decimal.TryParse(
+            value?.ToString(),
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out decimal parsed) ? parsed : fallback;
+
+    /// <summary>
+    /// Adds the code typed in the scan dialog, for a camera that will not open
+    /// or a barcode too scuffed to read.
+    /// </summary>
+    /// <remarks>
+    /// It runs the scan path rather than trusting the row it was opened from, so
+    /// a code belonging to another line is still credited correctly and an
+    /// unknown one still offers to capture the product.
+    /// </remarks>
+    private async Task SubmitScanCodeAsync()
+    {
+        string code = BarcodeText.Clean(scanCode);
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        scanCode = string.Empty;
+        CloseDialogs();
+        await CountScannedAsync(new BarcodeScan(code, ScanSource.Simulated, DateTimeOffset.UtcNow));
+    }
+
+    private Task OnScanCodeKeyAsync(KeyboardEventArgs e)
+        => e.Key == "Enter" ? SubmitScanCodeAsync() : Task.CompletedTask;
+
     private bool CanRecord => lines.Any(line => line.Received > 0) &&
         lines.All(line => line.Received >= 0 && line.Damaged >= 0 && line.WrongItem >= 0 &&
             line.Expired >= 0 && line.Damaged + line.WrongItem + line.Expired <= line.Received);
@@ -157,6 +641,7 @@
             }
 
             order = orderResult.Value;
+            await LoadCaptureLookupsAsync();
             Task<ApiResult<List<PosLocation>>> locationsTask = Api.GetLocationsAsync(CancellationToken.None);
             Task<ApiResult<List<PosSupplier>>> suppliersTask = Api.GetSuppliersAsync(CancellationToken.None, includeInactive: true);
             await Task.WhenAll(locationsTask, suppliersTask);
@@ -273,9 +758,25 @@
             ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
             if (found is not { IsSuccess: true, Value: { } product })
             {
+                // Unknown stock turns up on the dock: a substitution, an
+                // over-ship, a line the supplier added. Offer to capture it
+                // rather than leaving the receiver with nowhere to go.
+                if (CanCreateProducts && found.ErrorCode is "catalog.barcode_unknown" or null)
+                {
+                    unknownCode = BarcodeText.Clean(scan.Code);
+                    captureName = string.Empty;
+                    captureCategoryId = string.Empty;
+                    captureUnitId = string.Empty;
+                    captureError = null;
+                    message = $"{unknownCode} is not in the catalogue yet.";
+                    return;
+                }
+
                 message = $"{scan.Code}: {found.Error ?? "Product not found."}";
                 return;
             }
+
+            unknownCode = null;
 
             ReceiptLineInput? line = lines.FirstOrDefault(item =>
                 item.OrderLine.ProductId == product.Id && item.Received + 1m <= item.Due);
@@ -311,6 +812,16 @@
         public string? LotNumber { get; set; }
         public DateOnly? ManufacturedOn { get; set; }
         public DateOnly? ExpiresOn { get; set; }
+
+        public string Name => OrderLine.ProductName ?? OrderLine.ProductSku ?? "Product";
+
+        public bool HasProblem => WrongItem > 0 || Expired > 0;
+
+        public bool HasBatchDetail =>
+            !string.IsNullOrWhiteSpace(LotNumber) || ManufacturedOn is not null || ExpiresOn is not null;
+
+        /// <summary>Whether a dialog has been filled in, so the row can say so.</summary>
+        public bool HasNotes => HasProblem || HasBatchDetail;
     }
 
     private static string Quantity(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);

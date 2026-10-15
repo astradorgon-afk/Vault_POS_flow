@@ -84,29 +84,93 @@ public sealed partial class VaultFlowApiClient
     /// Attaches a barcode to a product, which is what makes a scanned number
     /// resolve to it everywhere else in the system.
     /// </summary>
+    /// <param name="productId">The product.</param>
+    /// <param name="barcode">The code and how it scans.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <param name="changeReason">
+    /// Why the change is needed. Required of anyone who cannot approve their own
+    /// catalogue changes; their request is held for the owner with this against it.
+    /// </param>
     public Task<ApiResult<PosReference>> AddProductBarcodeAsync(
-        Guid productId, PosAddProductBarcode barcode, CancellationToken cancellationToken)
+        Guid productId, PosAddProductBarcode barcode, CancellationToken cancellationToken, string? changeReason = null)
         => PostAsync<PosReference>(
-            FormattableString.Invariant($"{CatalogProducts}/{productId:D}/barcodes"), barcode, cancellationToken);
+            FormattableString.Invariant($"{CatalogProducts}/{productId:D}/barcodes"),
+            barcode,
+            cancellationToken,
+            ChangeReasonHeader(changeReason));
 
     /// <summary>
     /// Retires a barcode. The row stays, so older documents that scanned it
     /// still resolve and the value is never reissued to another product.
     /// </summary>
     public Task<ApiResult<string>> RetireProductBarcodeAsync(
-        Guid productId, string barcode, string? reason, CancellationToken cancellationToken)
+        Guid productId, string barcode, string? reason, CancellationToken cancellationToken, string? changeReason = null)
         => SendCommandAsync(
             HttpMethod.Post,
             FormattableString.Invariant($"{CatalogProducts}/{productId:D}/barcodes/{Uri.EscapeDataString(barcode)}/retire"),
             new PosRetireProductBarcode(reason),
-            cancellationToken);
+            cancellationToken,
+            ChangeReasonHeader(changeReason ?? reason));
 
     /// <summary>Makes an active barcode the product's primary code.</summary>
     public Task<ApiResult<string>> SetPrimaryProductBarcodeAsync(
-        Guid productId, string barcode, CancellationToken cancellationToken)
+        Guid productId, string barcode, CancellationToken cancellationToken, string? changeReason = null)
         => SendCommandAsync(
             HttpMethod.Post,
             FormattableString.Invariant($"{CatalogProducts}/{productId:D}/barcodes/{Uri.EscapeDataString(barcode)}/primary"),
+            null,
+            cancellationToken,
+            ChangeReasonHeader(changeReason));
+
+    private const string ChangeRequests = "/api/v1/catalog/change-requests";
+
+    private static Dictionary<string, string>? ChangeReasonHeader(string? reason)
+        => string.IsNullOrWhiteSpace(reason) ? null : new Dictionary<string, string> { ["X-Change-Reason"] = reason };
+
+    /// <summary>Lists catalogue changes held for approval.</summary>
+    /// <param name="pendingOnly">True for only those still awaiting a decision.</param>
+    /// <param name="productId">A product to filter by, or null for all.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The requests, newest first.</returns>
+    public Task<ApiResult<List<PosProductChangeRequest>>> GetProductChangeRequestsAsync(
+        bool pendingOnly, Guid? productId, CancellationToken cancellationToken)
+        => GetAsync<List<PosProductChangeRequest>>(
+            FormattableString.Invariant(
+                $"{ChangeRequests}?pendingOnly={(pendingOnly ? "true" : "false")}{(productId is { } id ? $"&productId={id:D}" : string.Empty)}"),
+            cancellationToken);
+
+    /// <summary>Approves a held change, which applies it.</summary>
+    /// <param name="requestId">The request.</param>
+    /// <param name="note">An optional note.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The request, or why it was refused.</returns>
+    public Task<ApiResult<PosReference>> ApproveProductChangeAsync(
+        Guid requestId, string? note, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"{ChangeRequests}/{requestId:D}/approve"),
+            new PosProductChangeDecision(note),
+            cancellationToken);
+
+    /// <summary>Refuses a held change.</summary>
+    /// <param name="requestId">The request.</param>
+    /// <param name="note">Why; required.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The request, or why it was refused.</returns>
+    public Task<ApiResult<PosReference>> RejectProductChangeAsync(
+        Guid requestId, string? note, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"{ChangeRequests}/{requestId:D}/reject"),
+            new PosProductChangeDecision(note),
+            cancellationToken);
+
+    /// <summary>Takes back a change the signed-in user raised.</summary>
+    /// <param name="requestId">The request.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The request, or why it was refused.</returns>
+    public Task<ApiResult<string>> WithdrawProductChangeAsync(Guid requestId, CancellationToken cancellationToken)
+        => SendCommandAsync(
+            HttpMethod.Post,
+            FormattableString.Invariant($"{ChangeRequests}/{requestId:D}/withdraw"),
             null,
             cancellationToken);
 

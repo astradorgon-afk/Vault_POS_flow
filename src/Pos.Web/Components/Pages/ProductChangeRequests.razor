@@ -1,0 +1,103 @@
+@page "/catalog/change-requests"
+@attribute [Authorize(Policy = "product.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+
+<PageTitle>Catalogue approvals · VaultFlow</PageTitle>
+
+<section class="approvals-page">
+    <header class="office-head">
+        <div>
+            <h1 class="office-title">Catalogue approvals</h1>
+            <p class="office-lead">
+                Changes to products that staff have asked for. Nothing here has reached the catalogue yet —
+                a change is applied only once it is approved.
+            </p>
+        </div>
+        <label class="approvals-toggle">
+            <input type="checkbox" @bind="showDecided" @bind:after="ReloadAsync" />
+            <span>Include decided</span>
+        </label>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    @if (loading)
+    {
+        <div class="approvals-empty">Loading…</div>
+    }
+    else if (requests.Count == 0)
+    {
+        <div class="approvals-empty">
+            <strong>Nothing is waiting.</strong>
+            <span>Catalogue changes raised by staff who cannot approve their own will appear here.</span>
+        </div>
+    }
+    else
+    {
+        <div class="approvals-list">
+            @foreach (PosProductChangeRequest request in requests)
+            {
+                bool pending = string.Equals(request.Status, "Pending", StringComparison.OrdinalIgnoreCase);
+                <article class="approval-card @(pending ? "is-pending" : null)" @key="request.RequestId">
+                    <header>
+                        <div class="approval-what">
+                            <strong>@request.Summary</strong>
+                            <span>@request.ProductName <i aria-hidden="true">·</i> @request.ProductSku</span>
+                        </div>
+                        <span class="approval-status status-@request.Status.ToLowerInvariant()">@request.Status</span>
+                    </header>
+
+                    <p class="approval-reason">&ldquo;@request.Reason&rdquo;</p>
+
+                    <p class="approval-who">
+                        Asked by <strong>@(request.RequestedByName ?? "a colleague")</strong>
+                        on @request.RequestedAtUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.CurrentCulture)
+                    </p>
+
+                    @if (request.DecidedAtUtc is { } decided)
+                    {
+                        <p class="approval-decision">
+                            @request.Status by <strong>@(request.DecidedByName ?? "an approver")</strong>
+                            on @decided.ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.CurrentCulture)@(request.DecisionNote is { } note ? $" — {note}" : "")
+                        </p>
+                    }
+
+                    @if (request.FailureReason is { } failure)
+                    {
+                        <p class="approval-failure"><b>Could not be applied.</b> @failure</p>
+                    }
+
+                    @if (pending && CanApprove)
+                    {
+                        <div class="approval-actions">
+                            <input type="text" maxlength="512" placeholder="Note (required to reject)"
+                                   aria-label="Decision note"
+                                   value="@NoteFor(request.RequestId)"
+                                   @oninput="e => SetNote(request.RequestId, e.Value?.ToString())" />
+                            <button type="button" class="action-button" disabled="@working"
+                                    @onclick="() => RejectAsync(request)">Reject</button>
+                            <button type="button" class="search-action" disabled="@working"
+                                    @onclick="() => ApproveAsync(request)">Approve &amp; apply</button>
+                        </div>
+                    }
+                    else if (pending && request.RequestedBy == CurrentUserId)
+                    {
+                        <div class="approval-actions">
+                            <span class="approval-hint">Waiting on the owner.</span>
+                            <button type="button" class="action-button" disabled="@working"
+                                    @onclick="() => WithdrawAsync(request)">Withdraw</button>
+                        </div>
+                    }
+                    else if (pending)
+                    {
+                        <span class="approval-hint">Waiting on the owner.</span>
+                    }
+                </article>
+            }
+        </div>
+    }
+</section>

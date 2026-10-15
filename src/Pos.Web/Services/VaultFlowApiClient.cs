@@ -46,6 +46,25 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     }
 
     /// <summary>Creates an authorized request for future API operations.</summary>
+    /// <summary>Adds request headers, skipping any with no value.</summary>
+    /// <param name="request">The request being built.</param>
+    /// <param name="headers">The headers to add, if any.</param>
+    private static void Apply(HttpRequestMessage request, IReadOnlyDictionary<string, string>? headers)
+    {
+        if (headers is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<string, string> header in headers)
+        {
+            if (!string.IsNullOrWhiteSpace(header.Value))
+            {
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+    }
+
     public HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
         HttpRequestMessage request = new(method, new Uri(path, UriKind.Relative));
@@ -286,16 +305,25 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     }
 
     /// <summary>Posts a JSON body through the register and reads the response.</summary>
-    public Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
-        => GuardAsync(() => PostCoreAsync<T>(path, body, cancellationToken), cancellationToken);
+    public Task<ApiResult<T>> PostAsync<T>(
+        string path,
+        object body,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? headers = null)
+        => GuardAsync(() => PostCoreAsync<T>(path, body, headers, cancellationToken), cancellationToken);
 
-    private async Task<ApiResult<T>> PostCoreAsync<T>(string path, object body, CancellationToken cancellationToken)
+    private async Task<ApiResult<T>> PostCoreAsync<T>(
+        string path,
+        object body,
+        IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken)
     {
         using HttpResponseMessage? response = await SendAuthorizedAsync(
             () =>
             {
                 HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
                 request.Content = JsonContent.Create(body);
+                Apply(request, headers);
                 return request;
             }, cancellationToken).ConfigureAwait(false);
         if (response is null)
@@ -517,11 +545,19 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
 
     /// <summary>Sends a command whose response is empty on success (204).</summary>
     public Task<ApiResult<string>> SendCommandAsync(
-        HttpMethod method, string path, object? body, CancellationToken cancellationToken)
-        => GuardAsync(() => SendCommandCoreAsync(method, path, body, cancellationToken), cancellationToken);
+        HttpMethod method,
+        string path,
+        object? body,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? headers = null)
+        => GuardAsync(() => SendCommandCoreAsync(method, path, body, headers, cancellationToken), cancellationToken);
 
     private async Task<ApiResult<string>> SendCommandCoreAsync(
-        HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+        HttpMethod method,
+        string path,
+        object? body,
+        IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken)
     {
         using HttpResponseMessage? response = await SendAuthorizedAsync(
             () =>
@@ -532,6 +568,7 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
                     request.Content = JsonContent.Create(body);
                 }
 
+                Apply(request, headers);
                 return request;
             }, cancellationToken).ConfigureAwait(false);
         if (response is null)

@@ -24,167 +24,177 @@
         <div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="create-product-title"
              tabindex="-1" @ref="modalRef" @onkeydown="OnModalKey">
             <header class="modal-head">
+                <span class="modal-mark" aria-hidden="true"><AppIcon Name="box" /></span>
                 <div>
-                    <span>New master record</span>
-                    <h2 id="create-product-title">Add a product</h2>
-                    <p>Three things are required: what it is called, its SKU, and how it is counted.</p>
+                    <h2 id="create-product-title">Add product</h2>
+                    <p>Create a new item in your product catalogue.</p>
                 </div>
-                <button type="button" class="modal-close" aria-label="Close (Esc)" @onclick="TryDismiss">×</button>
+                @* Esc and the backdrop keep a half-filled form; this is a
+                   deliberate click, so it always closes. *@
+                <button type="button" class="modal-close" aria-label="Close" @onclick="ToggleCreate">&times;</button>
             </header>
 
             <div class="modal-body">
 
-                <div class="form-step">
-                    <div class="form-step-mark">1</div>
-                    <div class="form-step-body">
-                        <h3>What is it?</h3>
-                        <div class="form-row">
-                            <label class="form-wide">
-                                <span>Name <b class="req">required</b></span>
-                                <input maxlength="128" @bind="newName" @bind:event="oninput" placeholder="Jasmine Rice 5kg" />
-                            </label>
-                            <label>
-                                <span>SKU <b class="req">required</b></span>
-                                <div class="input-with-action">
-                                    <input maxlength="32" @bind="newSku" @bind:event="oninput" placeholder="RICE-5KG" />
-                                    @if (SuggestedSku is { } suggestion)
-                                    {
-                                        <button type="button" class="inline-action" @onclick="() => newSku = suggestion">Use @suggestion</button>
-                                    }
-                                </div>
-                            </label>
-                        </div>
+                <section class="form-block">
+                    <h3><span class="form-block-mark" aria-hidden="true"><AppIcon Name="bottle" /></span>Basic information</h3>
+                    <label class="field">
+                        <span class="field-label">Product name <b class="req" aria-label="required">*</b></span>
+                        <input maxlength="128" @bind="newName" @bind:event="oninput" placeholder="e.g. Aloe Isla Shampoo Anti-Hairfall 170ml" />
+                    </label>
+                    <div class="field-pair">
+                        <label class="field">
+                            <span class="field-label">Category <b class="req" aria-label="required">*</b></span>
+                            <select @bind="newCategoryId">
+                                <option value="">Select a category</option>
+                                @foreach (PosCategory category in categories.Where(category => category.IsActive))
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">SKU <b class="req" aria-label="required">*</b></span>
+                            <input maxlength="32" @bind="newSku" @bind:event="oninput" placeholder="e.g. PC-1017" />
+                            @* House SKU conventions vary, so a guess is offered rather than filled in. *@
+                            @if (SuggestedSku is { } suggestion)
+                            {
+                                <button type="button" class="field-action" @onclick="() => newSku = suggestion">Use @suggestion</button>
+                            }
+                        </label>
                     </div>
-                </div>
+                </section>
 
-                @* The page is about barcodes, so the form scans like the rest of it. *@
-                <div class="form-step">
-                    <div class="form-step-mark">2</div>
-                    <div class="form-step-body">
-                        <h3>Its barcode <small>optional — codes can be attached later</small></h3>
-                        <div class="form-row">
-                            <label class="form-wide">
-                                <span class="form-sr">Barcode</span>
-                                <input class="code-input" type="text" inputmode="numeric" aria-label="Barcode for the new product"
-                                       @bind="newBarcode" @bind:event="oninput" @bind:after="OnNewBarcodeTypedAsync"
-                                       placeholder="Scan or type a barcode…" />
-                            </label>
-                        </div>
-                        <CameraScanner Enabled="@(!working)" />
-                        @if (barcodeTaken is { } owner)
-                        {
-                            <p class="form-warn is-blocking">
-                                <b>Already registered.</b> That code already scans as <strong>@owner</strong>, and a barcode can only ever belong to one product.
-                            </p>
-                        }
-                        else if (CatalogView.CheckDigitWarning(newBarcode) is { } mistyped)
-                        {
-                            <p class="form-warn">@mistyped</p>
-                        }
-                        else if (!string.IsNullOrWhiteSpace(newBarcode))
-                        {
-                            <p class="form-good">Free to use — nothing is registered against this code.</p>
-                        }
-                    </div>
-                </div>
+                @* The page is about barcodes, so this section carries the accent. *@
+                <section class="form-block is-barcode">
+                    <h3><span class="form-block-mark" aria-hidden="true"><AppIcon Name="tag" /></span>Barcode information</h3>
+                    <label class="field">
+                        <span class="field-label">Primary barcode</span>
+                        <input class="code-input" type="text" inputmode="numeric" aria-label="Barcode for the new product"
+                               @bind="newBarcode" @bind:event="oninput" @bind:after="OnNewBarcodeTypedAsync"
+                               placeholder="Scan or enter barcode number" />
+                    </label>
+                    <p class="field-note">Optional. Barcode must be unique across products.</p>
+                    <div class="barcode-camera"><CameraScanner Enabled="@(!working)" /></div>
+                    @if (barcodeTaken is { } owner)
+                    {
+                        <p class="form-warn is-blocking">
+                            <b>Already registered.</b> That code already scans as <strong>@owner</strong>, and a barcode can only ever belong to one product.
+                        </p>
+                    }
+                    else if (CatalogView.CheckDigitWarning(newBarcode) is { } mistyped)
+                    {
+                        <p class="form-warn">@mistyped</p>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(newBarcode))
+                    {
+                        <p class="form-good">Free to use — nothing is registered against this code.</p>
+                    }
+                </section>
 
-                <div class="form-step">
-                    <div class="form-step-mark">3</div>
-                    <div class="form-step-body">
-                        <h3>How is it counted and grouped?</h3>
-                        <div class="form-row">
-                            <label>
-                                <span>Base unit <b class="req">required</b></span>
-                                <select @bind="newUnitId">
-                                    <option value="">Select a unit</option>
-                                    @foreach (PosUnitOfMeasure unit in units)
-                                    {
-                                        <option value="@unit.Id">@unit.Code · @unit.Name</option>
-                                    }
-                                </select>
-                                <small>The unit stock is held in. Pack sizes hang off this.</small>
-                            </label>
-                            <label>
-                                <span>Category <b class="req">required</b></span>
-                                <select @bind="newCategoryId">
-                                    <option value="">Select a category</option>
-                                    @foreach (PosCategory category in categories.Where(category => category.IsActive))
-                                    {
-                                        <option value="@category.Id">@category.Code · @category.Name</option>
-                                    }
-                                </select>
-                                <small>Decides which cycle counts include it.</small>
-                            </label>
-                            <label>
-                                <span>Brand</span>
-                                <select @bind="newBrandId">
-                                    <option value="">No brand</option>
-                                    @foreach (PosBrand brand in brands)
-                                    {
-                                        <option value="@brand.Id">@brand.Name</option>
-                                    }
-                                </select>
-                            </label>
-                            <label>
-                                <span>Primary supplier</span>
-                                <select @bind="newSupplierId">
-                                    <option value="">None</option>
-                                    @foreach (PosSupplier supplier in suppliers)
-                                    {
-                                        <option value="@supplier.Id">@supplier.Code · @supplier.Name</option>
-                                    }
-                                </select>
-                            </label>
-                            <label>
-                                <span>Default cost</span>
-                                <input type="number" min="0" step="0.01" @bind="newCost" />
-                                <small>Per base unit, until a receipt says otherwise.</small>
-                            </label>
-                        </div>
+                <section class="form-block">
+                    <h3><span class="form-block-mark" aria-hidden="true"><AppIcon Name="settings" /></span>Additional details</h3>
+                    <div class="field-pair">
+                        <label class="field">
+                            <span class="field-label">Unit of measure <b class="req" aria-label="required">*</b></span>
+                            <select @bind="newUnitId">
+                                <option value="">Select a unit</option>
+                                @foreach (PosUnitOfMeasure unit in units)
+                                {
+                                    <option value="@unit.Id">@unit.Name (@unit.Code)</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Description <small>(optional)</small></span>
+                            <textarea rows="2" maxlength="512" @bind="newDescription" @bind:event="oninput" placeholder="Add any additional product details…"></textarea>
+                        </label>
                     </div>
-                </div>
+                    <div class="field-pair">
+                        <label class="field">
+                            <span class="field-label">Brand</span>
+                            <select @bind="newBrandId">
+                                <option value="">No brand</option>
+                                @foreach (PosBrand brand in brands)
+                                {
+                                    <option value="@brand.Id">@brand.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Primary supplier</span>
+                            <select @bind="newSupplierId">
+                                <option value="">None</option>
+                                @foreach (PosSupplier supplier in suppliers)
+                                {
+                                    <option value="@supplier.Id">@supplier.Name</option>
+                                }
+                            </select>
+                        </label>
+                    </div>
+                    <label class="field field-half">
+                        <span class="field-label">Default cost</span>
+                        <input type="number" min="0" step="0.01" @bind="newCost" />
+                        <small class="field-note">Per base unit, until a receipt says otherwise.</small>
+                    </label>
 
-                <div class="form-step">
-                    <div class="form-step-mark">4</div>
-                    <div class="form-step-body">
-                        <h3>How is it handled? <small>awkward to change once stock exists</small></h3>
-                        <div class="choice-row">
-                            <label class="choice @(newTracksBatches ? "is-on" : null)">
-                                <input type="checkbox" @bind="newTracksBatches" />
-                                <span><strong>Batch tracked</strong><small>Stock is held per delivery batch, and counted per batch.</small></span>
-                            </label>
-                            <label class="choice @(newTracksExpiry ? "is-on" : null)">
-                                <input type="checkbox" @bind="newTracksExpiry" />
-                                <span><strong>Has an expiry date</strong><small>Expiry runs can quarantine it once it is past date.</small></span>
-                            </label>
-                            <label class="choice @(newVatExempt ? "is-on" : null)">
-                                <input type="checkbox" @bind="newVatExempt" />
-                                <span><strong>VAT exempt</strong><small>Sold without VAT added.</small></span>
-                            </label>
-                        </div>
-                        @if (newTracksExpiry)
-                        {
-                            <div class="form-row form-row-tight">
-                                <label>
-                                    <span>Shelf life (days)</span>
-                                    <input type="number" min="1" @bind="newShelfLifeDays" placeholder="e.g. 365" />
-                                    <small>Works out an expiry date when a receipt does not carry one.</small>
-                                </label>
-                            </div>
-                        }
+                    @* Each of these is awkward to change once stock exists, so each says what it means. *@
+                    <div class="switch-rows">
+                        <label class="switch-row">
+                            <span class="switch-copy">
+                                <strong>Batch tracked</strong>
+                                <small>Stock is held per delivery batch, and counted per batch.</small>
+                            </span>
+                            <input class="switch-input" type="checkbox" @bind="newTracksBatches" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="switch-row">
+                            <span class="switch-copy">
+                                <strong>Has an expiry date</strong>
+                                <small>Expiry runs can quarantine it once it is past date.</small>
+                            </span>
+                            <input class="switch-input" type="checkbox" @bind="newTracksExpiry" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="switch-row">
+                            <span class="switch-copy">
+                                <strong>VAT exempt</strong>
+                                <small>Sold without VAT added.</small>
+                            </span>
+                            <input class="switch-input" type="checkbox" @bind="newVatExempt" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                        </label>
                     </div>
-                </div>
+                    @if (newTracksExpiry)
+                    {
+                        <label class="field field-half">
+                            <span class="field-label">Shelf life (days)</span>
+                            <input type="number" min="1" @bind="newShelfLifeDays" placeholder="e.g. 365" />
+                            <small class="field-note">Recorded against the product. Expiry dates themselves are entered per delivery at goods receiving.</small>
+                        </label>
+                    }
+                </section>
+
+                @* What the form adds up to so far, and what still stands in the way. *@
+                <section class="preview-card" aria-live="polite">
+                    <span class="preview-mark" aria-hidden="true"><AppIcon Name="receipt" /></span>
+                    <div>
+                        <strong>Product preview <em>(not yet saved)</em></strong>
+                        <span>@(string.IsNullOrWhiteSpace(newName) ? "Unnamed product" : newName) <i aria-hidden="true">·</i> @(string.IsNullOrWhiteSpace(newSku) ? "No SKU" : newSku)</span>
+                        <span>
+                            @(string.IsNullOrWhiteSpace(newBarcode) ? "No barcode" : newBarcode) <i aria-hidden="true">·</i>
+                            <b class="preview-state @(CreateBlockedReason is null ? "is-ready" : null)">@(CreateBlockedReason ?? "Ready to create")</b>
+                        </span>
+                    </div>
+                </section>
 
             </div>
 
             <footer class="modal-foot">
-                <span class="@(CreateBlockedReason is null ? "form-ready" : null)">@(CreateBlockedReason ?? "Ready to create.")</span>
-                <div class="form-footer-actions">
-                    <button type="button" class="action-button subtle" @onclick="ToggleCreate">Cancel</button>
-                    <button type="button" class="search-action" @onclick="CreateProductAsync" disabled="@(CreateBlockedReason is not null || working)">
-                        @(working ? "Creating…" : "Create product")
-                    </button>
-                </div>
+                <button type="button" class="action-button" @onclick="ResetCreateForm" disabled="@(working || !IsFormDirty)">Clear</button>
+                <button type="button" class="search-action" @onclick="CreateProductAsync" disabled="@(CreateBlockedReason is not null || working)">
+                    <AppIcon Name="check" /> @(working ? "Creating…" : "Create product")
+                </button>
             </footer>
         </div>
     }
