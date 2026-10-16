@@ -103,21 +103,7 @@
 .tr-cancel-submit:disabled { background: #f8eeee; color: #c9a4a4; cursor: not-allowed; }
 
 /* ---- Pick / receive / approval rows -------------------------------------- */
-.pick-rows { display: grid; gap: 8px; }
-.pick-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
-.pick-row .pick-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-weight: 700; }
-.pick-row .pick-requested { color: var(--muted); font-size: .78rem; }
-.pick-row input { width: 110px; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--field); color: var(--ink); font-weight: 700; }
 /* The row a barcode scan just counted. */
-.pick-row.scan-hit,
-.receive-row.scan-hit { border-color: var(--forest-bright); background: var(--signal-soft); }
-.receive-rows { display: grid; gap: 8px; }
-.receive-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
-.receive-row .receive-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-weight: 700; }
-.receive-row .receive-batch,
-.receive-row .receive-awaiting { color: var(--muted); font-size: .76rem; white-space: nowrap; }
-.receive-row label { display: grid; gap: 3px; color: var(--muted); font-size: .59rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.receive-row input { width: 104px; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--field); color: var(--ink); font-weight: 700; }
 
 /* ---- Restock approval rows ----------------------------------------------- */
 .restock-approval-lines { display: grid; gap: 8px; margin-bottom: 12px; }
@@ -185,8 +171,6 @@
 }
 
 @media (max-width: 620px) {
-    .pick-row { flex-wrap: wrap; }
-    .receive-row { align-items: flex-start; }
     .restock-approval-line { align-items: stretch; flex-wrap: wrap; }
     .restock-approval-line > div { flex-basis: 100%; }
     /* One decision at a time on a phone: the panel's buttons go full width. */

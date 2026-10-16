@@ -211,26 +211,100 @@ else
         </section>
     }
 
+    @* Picking and receiving both wear the goods-receiving count sheet: a table
+       of rows with a stepper, a per-row scan, and a footer carrying the running
+       total next to the button that commits it. The page already has a sticky
+       side column for the timeline, so the total sits in a footer strip rather
+       than a second narrow column. *@
     @if (ShowPick)
     {
-        <section class="action-panel">
-            <div class="action-title"><strong>Pick the stock</strong><span>Enter or scan the quantity actually picked for each product. Uncounted products stay at zero.</span></div>
-            <ScanTarget OnScan="OnScannedAsync" />
-            <CameraScanner Enabled="@(!acting)" />
-            
-            <div class="pick-rows">
-                @foreach (PickRow row in pickRows)
-                {
-                    <div class="pick-row @(scanned.ContainsKey(row.LineNo) ? "scan-hit" : null)" @key="row.LineNo">
-                        <span class="pick-name">@row.ProductName</span>
-                        <span class="pick-requested">requested @Quantity(row.Requested) · already picked @Quantity(row.Picked)</span>
-                        <input type="number" min="0" max="@(row.Requested - row.Picked)" step="1" value="@row.Quantity" aria-label="Picked quantity for @row.ProductName"
-                               @onchange="(e) => OnPickQuantityChanged(row, e)" />
+        <section class="cs-sheet">
+            <div class="cs-card">
+                <div class="cs-card-head">
+                    <div>
+                        <div class="cs-eyebrow">Warehouse pick</div>
+                        <h2>Pick the stock</h2>
+                        <p>Enter or scan the quantity actually picked for each product. Uncounted products stay at zero.</p>
                     </div>
-                }
-            </div>
-            <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="PickAsync" disabled="@(!CanPickNow || acting)">@(acting ? "Accepting…" : "Accept request")</button>
+                    <span class="cs-count">@PickedLines of @pickRows.Count</span>
+                </div>
+
+                <div class="cs-toolbar">
+                    <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                    <button type="button" class="cs-btn" disabled="@acting" @onclick="PickAllRequested">
+                        <AppIcon Name="check" /> Pick all requested
+                    </button>
+                </div>
+                @* A wedge scanner types wherever focus is, so it needs no row. *@
+                <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
+                <p class="cs-note">@(message is null ? "Each scan adds one unit to the product it belongs to. A line cannot be picked past what the store requested." : message)</p>
+
+                <ScanTarget OnScan="OnScannedAsync" />
+
+                <div class="cs-table-head" aria-hidden="true">
+                    <span>Product</span><span>Left</span><span>Picking now</span><span>Already picked</span><span>Actions</span>
+                </div>
+
+                <div class="cs-rows">
+                    @foreach (PickRow row in pickRows)
+                    {
+                        <article class="cs-row @(scanned.ContainsKey(row.LineNo) ? "is-hit" : null)" @key="row.LineNo" aria-label="@row.ProductName">
+                            <div class="cs-product">
+                                <div class="cs-name">@row.ProductName</div>
+                                <div class="cs-sku">Requested @Quantity(row.Requested)</div>
+                                @if (scanned.ContainsKey(row.LineNo))
+                                {
+                                    <div class="cs-flag">Counted by scan</div>
+                                }
+                            </div>
+
+                            <div class="cs-due-cell"><span class="cs-due">@Quantity(row.Requested - row.Picked)</span></div>
+
+                            <div class="cs-qty-cell" data-label="PICKING NOW">
+                                <div class="cs-stepper">
+                                    <button type="button" aria-label="One fewer @row.ProductName"
+                                            disabled="@(row.Quantity <= 0m)" @onclick="() => StepPick(row, -1m)">−</button>
+                                    <input type="number" min="0" max="@(row.Requested - row.Picked)" step="1" inputmode="numeric"
+                                           aria-label="Picked quantity for @row.ProductName"
+                                           value="@row.Quantity" @onchange="e => OnPickQuantityChanged(row, e)" />
+                                    <button type="button" aria-label="One more @row.ProductName"
+                                            disabled="@(row.Quantity >= row.Requested - row.Picked)" @onclick="() => StepPick(row, 1m)">+</button>
+                                </div>
+                                <button type="button" class="cs-text-btn" disabled="@(row.Quantity == row.Requested - row.Picked)"
+                                        @onclick="() => SetPick(row, row.Requested - row.Picked)">Pick all @Quantity(row.Requested - row.Picked)</button>
+                            </div>
+
+                            <div class="cs-second-cell">
+                                <span class="cs-second-label">Already picked</span>
+                                <strong>@Quantity(row.Picked)</strong>
+                                <div class="cs-derived @(row.Picked + row.Quantity >= row.Requested ? "is-up" : "is-flat")">@Quantity(row.Picked + row.Quantity) of @Quantity(row.Requested)</div>
+                            </div>
+
+                            <div class="cs-actions">
+                                <button type="button" class="cs-row-scan" @onclick="() => OpenScan(row.LineNo, row.ProductName)"
+                                        aria-label="Scan barcode for @row.ProductName">
+                                    <AppIcon Name="camera" /> Scan barcode
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+
+                <div class="cs-foot">
+                    <div class="cs-foot-facts">
+                        <span class="cs-foot-fact">Lines picked <strong>@PickedLines of @pickRows.Count</strong></span>
+                        <span class="cs-foot-fact is-key">Units picking now <strong>@Quantity(PickingNowUnits)</strong></span>
+                        <span class="cs-foot-fact">Still requested <strong>@Quantity(PickRemainingUnits)</strong></span>
+                    </div>
+                    <button type="button" class="cs-btn cs-primary" @onclick="PickAsync" disabled="@(!CanPickNow || acting)">
+                        <AppIcon Name="check" /> @(acting ? "Accepting…" : "Accept request")
+                    </button>
+                </div>
+
+                <div class="cs-helper">
+                    <AppIcon Name="info" />
+                    Leave a line at zero when none of it was picked. Picking does not move stock — dispatch does.
+                </div>
             </div>
         </section>
     }
@@ -272,27 +346,102 @@ else
 
     @if (ShowReceive)
     {
-        <section class="action-panel receive-panel">
-            <div class="action-title"><strong>Receive and count</strong><span>Enter what actually arrived, or scan each item: scanning a product counts it from one. Shortfalls are kept on the books as a discrepancy for review.</span></div>
-            <ScanTarget OnScan="OnScannedAsync" Enabled="@(!ShowPick)" />
-            <CameraScanner Enabled="@(!acting && !ShowPick)" />
-            
-            <div class="receive-rows">
-                @foreach (ReceiveRow row in receiveRows)
-                {
-                    <div class="receive-row @(scanned.ContainsKey(row.LineNo) ? "scan-hit" : null)" @key="(row.LineNo, row.BatchId)">
-                        <span class="receive-name">@row.ProductName</span>
-                        <span class="receive-batch">@(row.BatchId is null ? "any lot" : $"lot {row.BatchId.Value.ToString("D", CultureInfo.InvariantCulture)[..8]}")</span>
-                        <span class="receive-awaiting">awaiting @Quantity(row.Remaining)</span>
-                        <label>Good <input type="number" min="0" step="1" value="@row.Received"
-                                           @onchange="(e) => OnReceiveQuantityChanged(row, e, true)" /></label>
-                        <label>Damaged <input type="number" min="0" step="1" value="@row.Damaged"
-                                              @onchange="(e) => OnReceiveQuantityChanged(row, e, false)" /></label>
+        <section class="cs-sheet">
+            <div class="cs-card">
+                <div class="cs-card-head">
+                    <div>
+                        <div class="cs-eyebrow">Arriving stock</div>
+                        <h2>Count what arrived</h2>
+                        <p>Count the good units and the damaged ones separately. Shortfalls are kept on the books as a discrepancy for review.</p>
                     </div>
-                }
-            </div>
-            <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="ReceiveAsync" disabled="@(!CanReceiveNow || acting)">@(acting ? "Posting…" : "Post receipt")</button>
+                    <span class="cs-count">@ReceivedLines of @receiveRows.Count</span>
+                </div>
+
+                <div class="cs-toolbar">
+                    <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                    <button type="button" class="cs-btn" disabled="@acting" @onclick="ReceiveAllAwaiting">
+                        <AppIcon Name="check" /> Mark all arrived good
+                    </button>
+                </div>
+                @* A wedge scanner types wherever focus is, so it needs no row. *@
+                <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
+                @* Good and damaged are two separate counts here, not a total and a
+                   deduction: the receipt posts each one on its own. *@
+                <p class="cs-note">Count the units that arrived usable under Good, and the units that arrived broken under Damaged. Together they are what the delivery brought.</p>
+
+                <ScanTarget OnScan="OnScannedAsync" Enabled="@(!ShowPick)" />
+
+                <div class="cs-table-head" aria-hidden="true">
+                    <span>Product</span><span>Awaiting</span><span>Good</span><span>Damaged</span><span>Actions</span>
+                </div>
+
+                <div class="cs-rows">
+                    @foreach (ReceiveRow row in receiveRows)
+                    {
+                        <article class="cs-row @(scanned.ContainsKey(row.LineNo) ? "is-hit" : null)" @key="(row.LineNo, row.BatchId)" aria-label="@row.ProductName">
+                            <div class="cs-product">
+                                <div class="cs-name">@row.ProductName</div>
+                                <div class="cs-sku">@(row.BatchId is null ? "any lot" : $"lot {row.BatchId.Value.ToString("D", CultureInfo.InvariantCulture)[..8]}")</div>
+                                @if (row.Received + row.Damaged > row.Remaining)
+                                {
+                                    <div class="cs-flag is-warn">More than was sent — raises a discrepancy</div>
+                                }
+                            </div>
+
+                            <div class="cs-due-cell"><span class="cs-due">@Quantity(row.Remaining)</span></div>
+
+                            <div class="cs-qty-cell" data-label="GOOD">
+                                <div class="cs-stepper">
+                                    <button type="button" aria-label="One fewer @row.ProductName"
+                                            disabled="@(row.Received <= 0m)" @onclick="() => StepReceive(row, -1m)">−</button>
+                                    <input type="number" min="0" step="1" inputmode="numeric"
+                                           aria-label="Good quantity received for @row.ProductName"
+                                           value="@row.Received" @onchange="e => OnReceiveQuantityChanged(row, e, true)" />
+                                    <button type="button" aria-label="One more @row.ProductName"
+                                            @onclick="() => StepReceive(row, 1m)">+</button>
+                                </div>
+                                <button type="button" class="cs-text-btn" disabled="@(row.Received == row.Remaining)"
+                                        @onclick="() => SetReceive(row, row.Remaining)">Receive all @Quantity(row.Remaining)</button>
+                            </div>
+
+                            <div class="cs-second-cell">
+                                <label class="cs-second-field">
+                                    <span class="cs-second-label">Damaged</span>
+                                    <span class="cs-second-input">
+                                        <input type="number" min="0" step="1" inputmode="numeric"
+                                               aria-label="Damaged quantity for @row.ProductName"
+                                               value="@row.Damaged" @onchange="e => OnReceiveQuantityChanged(row, e, false)" />
+                                    </span>
+                                </label>
+                                <div class="cs-derived @(row.Damaged > 0m ? "is-down" : "is-flat")">@Quantity(row.Received + row.Damaged) arrived in total</div>
+                            </div>
+
+                            <div class="cs-actions">
+                                <button type="button" class="cs-row-scan" @onclick="() => OpenScan(row.LineNo, row.ProductName)"
+                                        aria-label="Scan barcode for @row.ProductName">
+                                    <AppIcon Name="camera" /> Scan barcode
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+
+                <div class="cs-foot">
+                    <div class="cs-foot-facts">
+                        <span class="cs-foot-fact">Items counted <strong>@ReceivedLines of @receiveRows.Count</strong></span>
+                        <span class="cs-foot-fact">Arrived <strong>@Quantity(ReceivedUnits + DamagedUnits) of @Quantity(AwaitingUnits)</strong></span>
+                        <span class="cs-foot-fact">Damaged <strong>@Quantity(DamagedUnits)</strong></span>
+                        <span class="cs-foot-fact is-key">Good units <strong>@Quantity(ReceivedUnits)</strong></span>
+                    </div>
+                    <button type="button" class="cs-btn cs-primary" @onclick="ReceiveAsync" disabled="@(!CanReceiveNow || acting)">
+                        <AppIcon Name="check" /> @(acting ? "Posting…" : "Post receipt")
+                    </button>
+                </div>
+
+                <div class="cs-helper">
+                    <AppIcon Name="info" />
+                    Leave a line at 0 for items that did not arrive. Anything short of what was sent stays open as a discrepancy.
+                </div>
             </div>
         </section>
     }
@@ -362,6 +511,28 @@ else
     </section>
     </aside><!-- /.tr-col-side -->
     </div><!-- /.tr-layout -->
+
+    @* Rendered by the app rather than a native dialog, which would need interop. *@
+    @if (scanRowLineNo is not null)
+    {
+        <div class="cs-dlg-scrim" @onclick="CloseScan"></div>
+        <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="transfer-scan-title">
+            <h2 id="transfer-scan-title">Scan product barcode</h2>
+            <p class="cs-dlg-product">@scanRowName</p>
+            <p class="cs-dlg-lead">Point the camera at this product's barcode. Each scan counts one unit against the line it belongs to, whichever row it was opened from.</p>
+            <CameraScanner Enabled="@(!acting)" />
+            <label class="cs-field">Barcode value
+                <input type="text" inputmode="numeric" class="cs-code-input" placeholder="Enter barcode value"
+                       autocomplete="off" @bind="scanCode" @bind:event="oninput"
+                       @onkeydown="OnScanCodeKeyAsync" /></label>
+            <footer>
+                <span class="cs-dlg-status">@(message ?? "Ready to scan.")</span>
+                <button type="button" class="cs-btn" @onclick="CloseScan">Done</button>
+                <button type="button" class="cs-btn cs-primary" disabled="@string.IsNullOrWhiteSpace(scanCode)"
+                        @onclick="SubmitScanCodeAsync">Add one unit</button>
+            </footer>
+        </div>
+    }
 }
 
 </div>
@@ -746,6 +917,108 @@ else
             }
         }
     }
+
+    private int PickedLines => pickRows.Count(row => row.Quantity > 0m);
+
+    private decimal PickingNowUnits => pickRows.Sum(row => row.Quantity);
+
+    private decimal PickRemainingUnits => pickRows.Sum(row => row.Requested - row.Picked - row.Quantity);
+
+    private int ReceivedLines => receiveRows.Count(row => row.Received > 0m || row.Damaged > 0m);
+
+    private decimal ReceivedUnits => receiveRows.Sum(row => row.Received);
+
+    private decimal DamagedUnits => receiveRows.Sum(row => row.Damaged);
+
+    private decimal AwaitingUnits => receiveRows.Sum(row => row.Remaining);
+
+    /// <summary>Sets a pick row's quantity, clamped to what is still requested.</summary>
+    private void SetPick(PickRow row, decimal quantity)
+    {
+        int index = pickRows.IndexOf(row);
+        if (index >= 0)
+        {
+            pickRows[index] = pickRows[index] with { Quantity = Math.Clamp(quantity, 0m, row.Requested - row.Picked) };
+        }
+    }
+
+    private void StepPick(PickRow row, decimal delta) => SetPick(row, row.Quantity + delta);
+
+    /// <summary>Picks the whole outstanding request on every line.</summary>
+    private void PickAllRequested()
+    {
+        for (int index = 0; index < pickRows.Count; index++)
+        {
+            PickRow row = pickRows[index];
+            pickRows[index] = row with { Quantity = row.Requested - row.Picked };
+        }
+    }
+
+    /// <summary>Sets a receive row's arrived quantity. Over-receipt is allowed:
+    /// more than was sent is a real discrepancy the receipt has to carry.</summary>
+    private void SetReceive(ReceiveRow row, decimal quantity)
+    {
+        int index = receiveRows.IndexOf(row);
+        if (index >= 0)
+        {
+            receiveRows[index] = receiveRows[index] with { Received = Math.Max(0m, quantity) };
+        }
+    }
+
+    private void StepReceive(ReceiveRow row, decimal delta) => SetReceive(row, row.Received + delta);
+
+    /// <summary>Counts every line at what is still awaited.</summary>
+    private void ReceiveAllAwaiting()
+    {
+        for (int index = 0; index < receiveRows.Count; index++)
+        {
+            ReceiveRow row = receiveRows[index];
+            receiveRows[index] = row with { Received = row.Remaining };
+        }
+    }
+
+    private int? scanRowLineNo;
+    private string scanRowName = string.Empty;
+    private string scanCode = string.Empty;
+
+    private void OpenScan(int lineNo, string productName)
+    {
+        scanRowLineNo = lineNo;
+        scanRowName = productName;
+        scanCode = string.Empty;
+    }
+
+    private void CloseScan()
+    {
+        scanRowLineNo = null;
+        scanCode = string.Empty;
+    }
+
+    /// <summary>
+    /// Counts the code typed in the scan dialog, for a camera that will not open.
+    /// </summary>
+    /// <remarks>
+    /// It runs the scan path rather than trusting the row the dialog was opened
+    /// from, so a carton scanned against the wrong line still lands on the
+    /// product it actually belongs to.
+    /// </remarks>
+    private async Task SubmitScanCodeAsync()
+    {
+        string code = Pos.Shared.Scanning.BarcodeText.Clean(scanCode);
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        scanCode = string.Empty;
+        await CountScannedAsync(new Pos.Shared.Scanning.BarcodeScan(
+            code,
+            Pos.Shared.Scanning.ScanSource.Simulated,
+            DateTimeOffset.UtcNow));
+    }
+
+    private Task OnScanCodeKeyAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+        => e.Key == "Enter" ? SubmitScanCodeAsync() : Task.CompletedTask;
 
     private void OnPickQuantityChanged(PickRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {

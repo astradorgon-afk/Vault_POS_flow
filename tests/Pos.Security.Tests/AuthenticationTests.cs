@@ -121,6 +121,35 @@ public sealed class AuthenticationTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task ADeviceBoundToken_RefreshesOnlyWhenTheDeviceIsNamed()
+    {
+        // The PWA signs in through its gateway with X-Device-Id, so the refresh
+        // token it gets back is bound to that browser. A refresh that forgets to
+        // name the device reads as a stolen token and is refused, which reaches
+        // the phone as a bare 401 in the middle of a sync.
+        await factory.CreateUserAsync("auth-pwa-device", Roles.Auditor, [MainWarehouse]);
+        DeviceId device = await factory.CreateDeviceAsync("W01", MainWarehouse);
+
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Device-Id", device.Value.ToString());
+
+        TokenPair pair = await SignInAsync(client, "auth-pwa-device");
+
+        using HttpClient anonymous = factory.CreateClient();
+        using HttpResponseMessage unnamed = await anonymous.PostAsJsonAsync(
+            "/api/v1/auth/refresh",
+            new { refreshToken = pair.RefreshToken },
+            CancellationToken.None);
+
+        unnamed.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "a device-bound token presented without its device is treated as theft");
+
+        TokenPair refreshed = await RefreshAsync(client, pair.RefreshToken);
+
+        refreshed.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
     public async Task ReusingARotatedToken_BurnsTheWholeFamily()
     {
         await factory.CreateUserAsync("auth-reuse", Roles.Auditor, [MainWarehouse]);

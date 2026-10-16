@@ -1,13 +1,227 @@
-:root{font-family:Inter,system-ui,sans-serif;color:#173324;background:#f5f4ee}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{border:1px solid #b5c4b9;border-radius:9px;padding:.65rem 1rem;background:#fff;color:#173324;cursor:pointer}button:hover{background:#e9f2eb}button:disabled{opacity:.55;cursor:not-allowed}.primary{background:#175637;color:white;border-color:#175637}.primary:hover{background:#12472e}a{color:#175637}.site-header{display:flex;justify-content:space-between;align-items:center;padding:1rem max(1rem,calc((100vw - 1120px)/2));background:#153c2b;color:white}.site-header a{color:white}.workspace{max-width:1120px;margin:auto;padding:1.2rem}.hero{padding:1.2rem 0 1.5rem}.hero h1{font-size:clamp(2rem,4vw,3.5rem);max-width:780px;line-height:1.1;margin:.5rem 0}.hero p{max-width:700px;color:#506258}.hero small,.panel small{letter-spacing:.08em;text-transform:uppercase;color:#62806c}.panel{background:white;border:1px solid #dce5dc;border-radius:15px;padding:1.3rem;margin-bottom:1rem;box-shadow:0 3px 18px #1733240b}.panel h2{margin:.3rem 0 1rem}.narrow{max-width:520px}.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}.status-grid .panel{min-height:160px}.status-grid h2{font-size:1.2rem}.workflow-nav,.actions,.scanner-row{display:flex;gap:.6rem;align-items:end;flex-wrap:wrap;margin:1rem 0}.workflow-nav button{font-weight:700}.workflow-nav button:focus{outline:2px solid #175637}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem}label{display:flex;flex-direction:column;gap:.3rem;font-weight:600;margin:.45rem 0}input,select{border:1px solid #adc0b1;border-radius:8px;padding:.6rem;background:white;width:100%;min-width:0}.checkbox{flex-direction:row;align-items:center}.checkbox input{width:auto}.scanner-row label{min-width:220px}.results{padding:0;list-style:none;max-height:260px;overflow:auto}.results li{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e5ebe5;padding:.35rem}.results small{margin-left:.5rem}.subpanel{background:#f4f8f4;border-radius:12px;padding:1rem;margin:1rem 0}.line-row,.receiving-line{display:grid;grid-template-columns:minmax(140px,2fr) repeat(2,minmax(90px,1fr)) auto;gap:.6rem;align-items:center;border-top:1px solid #e3eae4;padding:.6rem 0}.receiving-line{grid-template-columns:minmax(140px,2fr) repeat(6,minmax(75px,1fr))}.line-row label,.receiving-line label{font-size:.85rem}.stock-row{display:grid;grid-template-columns:minmax(180px,2fr) repeat(4,minmax(90px,1fr));gap:.6rem;align-items:center;border-top:1px solid #e3eae4;padding:.7rem 0}.stock-row strong small{display:block;font-weight:400}.line-row label,.receiving-line label{font-size:.85rem}.notice,.error{border-radius:8px;padding:.8rem 1rem}.notice{background:#e0f1e2}.error{background:#fff0ec;color:#912e20}.operation{display:grid;grid-template-columns:1fr auto;gap:.25rem;border-top:1px solid #e3eae4;padding:1rem 0}.operation small,.operation p{grid-column:1/-1}.state{background:#edf3ec;border-radius:100px;padding:.25rem .6rem;font-weight:700}.camera-card{width:100%;background:#143c2b;color:white;border-radius:12px;padding:.5rem}.camera-card video{width:100%;max-height:260px}.camera-card .actions{margin:.4rem}.camera-card p{margin:.5rem}@media(max-width:800px){.status-grid,.form-grid{grid-template-columns:1fr}.receiving-line,.line-row,.stock-row{grid-template-columns:repeat(2,minmax(0,1fr))}.receiving-line strong,.line-row strong,.stock-row strong{grid-column:1/-1}.site-header{padding:1rem}.workspace{padding:.8rem}}
+/* Offline-only components, layered over the server's app.css.
+ *
+ * This file used to carry a whole second look — Inter, a cream page, its own
+ * button, input and label rules — which loaded after app.css and quietly won
+ * every conflict, so the installed app never matched the site it was installed
+ * from. It now styles only what is specific to device-held work, in the shared
+ * tokens, and leaves the shell, type and controls to app.css.
+ */
 
-.install-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.75rem 1.5rem;border-color:#b5d5be;background:#f9fcf8}
-.install-panel h2{margin:.25rem 0}
-.install-panel p{margin:.3rem 0;color:#506258}
-.install-panel>.primary{font-weight:700;white-space:nowrap}
-.install-confirmation{font-weight:700}
-.install-message,.install-steps{grid-column:1/-1}
-.install-steps summary{width:fit-content;color:#175637;font-weight:700;cursor:pointer}
-.install-steps ul{margin:.8rem 0;padding-left:1.4rem;line-height:1.6}
-.install-steps li+li{margin-top:.4rem}
-.install-steps p{font-size:.88rem}
-@media(max-width:580px){.install-panel{grid-template-columns:1fr}.install-panel>.primary{width:100%}}
+/* app.css styles the shell and its named components but leaves bare controls
+   alone, and this app has plenty of them. These keep that coverage, now in the
+   site's tokens rather than the old green-grey of the standalone sheet. */
+button {
+    min-height: 42px; padding: 0 16px;
+    border: 1px solid var(--line-strong); border-radius: 9px;
+    background: #fff; color: var(--ink);
+    font-size: .84rem; font-weight: 800; cursor: pointer;
+}
+button:hover:enabled { border-color: var(--forest-bright); background: var(--mint-soft); color: var(--forest); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary { border-color: var(--forest); background: var(--forest); color: #fff; }
+button.primary:hover:enabled { border-color: var(--forest-bright); background: var(--forest-bright); color: #fff; }
+
+label { display: grid; gap: 6px; margin: 10px 0; min-width: 0; font-weight: 600; }
+input, select, textarea {
+    box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px;
+    border: 1px solid var(--line-strong); border-radius: 9px; background: #fff;
+    color: var(--ink); font-size: .88rem; font-weight: 600;
+}
+input::placeholder, textarea::placeholder { color: #9aaca3; font-weight: 400; }
+input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color: var(--forest); }
+
+/* Device work surfaces. A panel is the offline equivalent of the site's card. */
+.panel { margin-bottom: 16px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--shadow-card); }
+.panel h2 { margin: 0 0 14px; font: 700 1.1rem 'Manrope', sans-serif; color: var(--ink); letter-spacing: -.015em; }
+.panel small { color: var(--muted); font-size: .78rem; }
+.subpanel { margin: 16px 0; padding: 16px 18px; border-radius: 12px; background: #f6faf7; }
+
+.actions, .scanner-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.scanner-row label { min-width: 220px; }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.form-grid label, .scanner-row label, .line-row label, .receiving-line label { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.form-grid input, .form-grid select, .scanner-row input, .scanner-row select,
+.line-row input, .receiving-line input {
+    box-sizing: border-box; width: 100%; min-width: 0; height: 44px; padding: 0 12px;
+    border: 1px solid var(--line-strong); border-radius: 9px; background: #fff;
+    color: var(--ink); font-size: .88rem; font-weight: 600;
+}
+.checkbox { display: flex; flex-direction: row; align-items: center; gap: 9px; text-transform: none; letter-spacing: 0; font-size: .82rem; }
+.checkbox input { width: 18px; height: 18px; flex: none; accent-color: var(--forest); }
+
+/* Rows of counted work held on the device. */
+.line-row { display: grid; grid-template-columns: minmax(140px, 2fr) repeat(2, minmax(90px, 1fr)) auto; gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
+.line-row strong { color: var(--ink); font-size: .9rem; }
+
+/* ---------------------------------------------------------------------------
+   The count sheet, shared with the desktop receiving screen.
+
+   The server copy lives in Pos.Web/wwwroot/count-sheet.css. This one repeats it
+   in the offline app's tokens because the installed app must style itself from
+   files the service worker already caches, and it carries the phone layout
+   first: the counter is standing at a pallet holding a handset, not sitting at
+   a monitor. Keep the two in step when either changes.
+   --------------------------------------------------------------------------- */
+.cs-sheet { display: block; margin-top: 16px; }
+.cs-layout { display: grid; gap: 16px; align-items: start; }
+.cs-main, .cs-side { display: grid; gap: 16px; min-width: 0; }
+
+.cs-card { min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--shadow-card); overflow: hidden; }
+.cs-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 18px 14px; }
+.cs-card-head > div { min-width: 0; }
+.cs-card-head h2 { margin: 0; font: 700 1.05rem 'Manrope', sans-serif; letter-spacing: -.015em; color: var(--ink); }
+.cs-card-head p { margin: 6px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.5; }
+.cs-card-icon { display: grid; place-items: center; color: var(--muted); }
+.cs-card-icon svg { width: 17px; height: 17px; }
+.cs-eyebrow { margin-bottom: 5px; color: var(--forest); font-size: .64rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.cs-optional { padding: 3px 8px; border-radius: 5px; background: #f1f4f1; color: var(--muted); font-size: .66rem; font-weight: 600; }
+.cs-count { padding: 4px 11px; border-radius: 99px; background: #f1f4f1; color: var(--muted); font-size: .72rem; font-weight: 800; white-space: nowrap; }
+
+.cs-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 0 18px 14px; }
+.cs-scan-hint { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .74rem; line-height: 1.5; }
+.cs-scan-hint svg { width: 17px; height: 17px; flex: none; }
+.cs-sheet .cs-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 15px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--forest); font-size: .8rem; font-weight: 800; white-space: nowrap; cursor: pointer; }
+.cs-sheet .cs-btn:hover:enabled { border-color: var(--forest-bright); background: var(--mint-soft); }
+.cs-sheet .cs-btn:disabled { opacity: .5; cursor: not-allowed; }
+.cs-sheet .cs-btn svg { width: 16px; height: 16px; flex: none; }
+.cs-sheet .cs-btn.cs-primary { border-color: var(--forest); background: var(--forest); color: #fff; }
+.cs-sheet .cs-btn.cs-primary:hover:enabled { border-color: var(--forest-bright); background: var(--forest-bright); }
+.cs-help { margin: 0 18px 14px; color: var(--muted); font-size: .76rem; line-height: 1.6; }
+.cs-note { margin: 0 18px 16px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: #f6faf7; color: #52665a; font-size: .76rem; line-height: 1.6; }
+
+/* The camera and its typed fallback, side by side on anything but a phone. */
+.cs-scanbar { display: grid; gap: 10px; margin: 0 18px 16px; }
+.cs-scanbar .cs-field { margin: 0; }
+
+.cs-table-head { display: none; }
+.cs-rows { display: block; }
+.cs-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 12px; position: relative; padding: 18px; border-top: 1px solid var(--line); }
+.cs-row > .cs-product { grid-column: 1 / -1; padding-right: 74px; }
+.cs-name { font-size: .92rem; font-weight: 700; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.cs-sku { margin-top: 4px; color: var(--muted); font-size: .74rem; }
+.cs-flag { margin-top: 5px; color: var(--forest); font-size: .68rem; font-weight: 700; }
+.cs-flag.is-warn { color: #86662a; }
+
+.cs-due-cell { position: absolute; top: 18px; right: 18px; }
+.cs-due { display: inline-block; padding: 4px 11px; border-radius: 6px; background: var(--mint-soft); color: var(--forest); font-size: .78rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cs-due::after { content: " due"; font-size: .66rem; font-weight: 600; }
+
+.cs-qty-cell { grid-column: 1; grid-row: 2; min-width: 0; }
+.cs-qty-cell::before { content: attr(data-label); display: block; margin-bottom: 8px; color: var(--muted); font-size: .66rem; font-weight: 800; letter-spacing: .08em; }
+.cs-stepper { display: flex; align-items: stretch; width: 100%; height: 48px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; overflow: hidden; isolation: isolate; }
+.cs-stepper button { flex: 0 0 38px; width: 38px; min-height: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0; background: #f4f8f3; color: var(--forest); font-size: 1.2rem; line-height: 1; cursor: pointer; }
+.cs-stepper button:hover:enabled { background: var(--mint-soft); }
+.cs-stepper button:disabled { background: #f8faf7; color: #a8b9af; }
+.cs-stepper input { flex: 1 1 0; width: 0; min-width: 0; height: 100%; min-height: 0; margin: 0; padding: 0 2px; border: 0; border-inline: 1px solid var(--line); border-radius: 0; background: #fff; color: var(--ink); font-size: 1rem; font-weight: 800; text-align: center; appearance: textfield; font-variant-numeric: tabular-nums; }
+.cs-stepper input::-webkit-inner-spin-button, .cs-stepper input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.cs-text-btn { min-height: 36px; margin-top: 6px; padding: 4px 0 0; border: 0; border-radius: 0; background: transparent; color: var(--forest); font-size: .72rem; font-weight: 800; text-align: left; cursor: pointer; }
+.cs-text-btn:hover:enabled { background: transparent; border: 0; }
+.cs-text-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.cs-second-cell { grid-column: 2; grid-row: 2; min-width: 0; }
+.cs-second-field { display: block; margin: 0; width: 100%; }
+.cs-second-label { display: block; margin: 0 0 8px; color: var(--muted); font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.cs-second-input { display: block; }
+.cs-second-input input { width: 100%; min-width: 0; height: 48px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-size: 1rem; font-weight: 700; text-align: center; appearance: textfield; font-variant-numeric: tabular-nums; }
+.cs-second-input input::-webkit-inner-spin-button, .cs-second-input input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+/* The derived number the counter actually cares about. */
+.cs-derived { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--forest); font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cs-derived::before { content: ""; width: 5px; height: 5px; flex: none; border-radius: 50%; background: #75a487; }
+
+/* Row actions are the only way into the per-line detail, so they are real targets. */
+.cs-actions { grid-column: 1 / -1; grid-row: 3; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); min-width: 0; }
+.cs-actions button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 46px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fafcf9; color: #52665a; font-size: .76rem; font-weight: 700; white-space: normal; cursor: pointer; }
+.cs-actions button:hover:enabled { border-color: var(--forest-bright); background: var(--mint-soft); color: var(--forest); }
+.cs-actions svg { width: 15px; height: 15px; flex: none; }
+.cs-actions .cs-row-scan { grid-column: 1 / -1; border-color: #d6e5da; background: var(--mint-soft); color: var(--forest); font-size: .82rem; }
+
+.cs-helper { display: flex; align-items: flex-start; gap: 9px; padding: 14px 18px; border-top: 1px solid var(--line); background: #fbfcfa; color: var(--muted); font-size: .74rem; line-height: 1.6; }
+.cs-helper svg { width: 15px; height: 15px; flex: none; margin-top: 1px; }
+
+.cs-form { padding: 0 18px 18px; }
+.cs-field { display: block; margin: 0 0 15px; color: #54685a; font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
+.cs-field :is(input, select) { box-sizing: border-box; display: block; width: 100%; min-width: 0; height: 48px; margin-top: 7px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-size: .92rem; font-weight: 600; }
+.cs-field input:disabled { background: #f3f5f2; color: #6c7e72; cursor: not-allowed; }
+.cs-check { display: flex; flex-direction: row; align-items: center; gap: 9px; margin: 0; color: #54685a; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.cs-check input { width: 19px; height: 19px; min-height: 0; flex: none; accent-color: var(--forest); }
+.cs-unexpected { padding: 14px 0; border-top: 1px solid var(--line); }
+.cs-unexpected:first-child { border-top: 0; padding-top: 0; }
+.cs-unexpected strong { display: block; margin-bottom: 10px; color: var(--ink); font-size: .9rem; font-family: ui-monospace, Consolas, monospace; }
+
+.cs-summary { padding: 0 18px 18px; }
+.cs-summary-row { display: flex; justify-content: space-between; gap: 12px; margin: 12px 0; color: var(--muted); font-size: .82rem; }
+.cs-summary-row strong { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
+.cs-summary-key { margin: 16px -12px 0; padding: 13px 12px; border-top: 1px solid var(--line); border-radius: 8px; background: #f4f8f3; color: var(--forest); }
+.cs-summary-key strong { color: var(--forest); font-size: 1.05rem; }
+.cs-progress { height: 6px; margin: 16px 0 20px; border-radius: 99px; background: #edf1eb; overflow: hidden; }
+.cs-progress > div { height: 100%; border-radius: 99px; background: var(--forest); transition: width .2s ease; }
+.cs-sheet .cs-submit { width: 100%; min-height: 50px; font-size: .86rem; }
+.cs-sheet .cs-submit + .cs-submit { margin-top: 9px; }
+.cs-summary-foot { margin: 10px 0 0; color: var(--muted); font-size: .72rem; line-height: 1.5; text-align: center; }
+
+/* Rendered by the app rather than a native dialog, which would need interop. */
+.cs-dlg-scrim { position: fixed; inset: 0; z-index: 120; background: rgba(22, 51, 42, .45); }
+.cs-dlg { position: fixed; z-index: 130; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(430px, calc(100vw - 24px)); max-height: min(88dvh, 860px); overflow-y: auto; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: #fff; color: var(--ink); box-shadow: 0 24px 80px rgba(16, 45, 42, .22); }
+.cs-dlg h2 { margin: 0 0 8px; font: 700 1.1rem 'Manrope', sans-serif; letter-spacing: -.015em; }
+.cs-dlg-product { margin: 0 0 4px; color: var(--ink); font-size: .86rem; font-weight: 700; }
+.cs-dlg-lead { margin: 0 0 16px; color: var(--muted); font-size: .78rem; line-height: 1.6; }
+.cs-dlg footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.cs-dlg-status { flex: 1 1 100%; margin: 0 0 6px; color: var(--muted); font-size: .74rem; text-align: left; }
+
+@media (min-width: 720px) {
+    .cs-scanbar { grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; }
+}
+
+/* Only a real monitor gets the five-column table and the side column; below
+   that the phone layout above stands. */
+@media (min-width: 1100px) {
+    .cs-layout { grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; }
+    .cs-table-head { display: grid; grid-template-columns: minmax(160px, 1fr) 54px 118px 104px 112px; gap: 14px; padding: 11px 18px; border-block: 1px solid var(--line); background: #f8faf8; color: var(--muted); font-size: .64rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .cs-row { grid-template-columns: minmax(160px, 1fr) 54px 118px 104px 112px; gap: 14px; align-items: start; min-height: 132px; padding: 22px 18px; }
+    .cs-row > .cs-product { grid-column: auto; padding-right: 0; padding-top: 3px; }
+    .cs-name { font-size: .86rem; }
+    .cs-due-cell { position: static; padding-top: 7px; }
+    .cs-due::after { content: ""; }
+    .cs-qty-cell { grid-column: auto; grid-row: auto; }
+    .cs-qty-cell::before { content: ""; display: none; }
+    .cs-stepper { width: 112px; height: 42px; }
+    .cs-stepper button { flex-basis: 32px; width: 32px; font-size: 1.05rem; }
+    .cs-stepper input { font-size: .9rem; }
+    .cs-second-cell { grid-column: auto; grid-row: auto; }
+    .cs-second-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    .cs-second-input input { height: 42px; font-size: .9rem; }
+    .cs-actions { grid-column: auto; grid-row: auto; grid-template-columns: 1fr; gap: 7px; padding-top: 4px; border-top: 0; }
+    .cs-actions button { justify-content: flex-start; min-height: 30px; padding: 2px 0; border: 0; border-radius: 0; background: none; font-size: .7rem; font-weight: 600; white-space: nowrap; }
+    .cs-actions button:hover:enabled { background: none; }
+    .cs-actions .cs-row-scan { justify-content: center; min-height: 34px; padding: 6px 7px; border: 1px solid #d6e5da; border-radius: 7px; background: var(--mint-soft); font-size: .72rem; font-weight: 800; }
+    .cs-field :is(input, select) { height: 42px; font-size: .82rem; }
+}
+
+.results { max-height: 280px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.results li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: .85rem; }
+.results li:last-child { border-bottom: 0; }
+.results small { margin-left: 8px; color: var(--muted); }
+
+.operation { display: grid; grid-template-columns: 1fr auto; gap: 4px; padding: 15px 0; border-top: 1px solid var(--line); }
+.operation small, .operation p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: .8rem; }
+.state { padding: 4px 11px; border-radius: 99px; background: var(--mint-soft); color: var(--forest); font-size: .72rem; font-weight: 800; white-space: nowrap; }
+
+/* Queued-work verdicts, in the same two tones the site uses. */
+.notice, .error { padding: 12px 15px; border-radius: 9px; font-size: .85rem; }
+.notice { border-left: 3px solid var(--forest); background: var(--mint-soft); color: #2c4a3b; }
+.error { border-left: 3px solid var(--danger); background: #fff5f4; color: #7d3a33; }
+
+/* The camera stays dark so the viewfinder is the brightest thing on screen. */
+.camera-card { width: 100%; padding: 10px; border-radius: 13px; background: #143c2b; color: #fff; }
+.camera-card video { width: 100%; max-height: 260px; border-radius: 9px; }
+.camera-card .actions { margin: 8px 4px 4px; }
+.camera-card p { margin: 8px 4px; font-size: .82rem; }
+
+@media (max-width: 800px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .receiving-line, .line-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .receiving-line strong, .line-row strong { grid-column: 1 / -1; }
+    .panel { padding: 16px; }
+    .scanner-row label { min-width: 0; flex: 1 1 100%; }
+}

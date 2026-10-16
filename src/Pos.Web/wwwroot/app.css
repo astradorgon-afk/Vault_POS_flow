@@ -252,6 +252,13 @@ h1:focus { outline: none; }
 .nt-item.is-unread::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:#2fa564}
 .nt-empty{padding:48px 20px;display:grid;justify-items:center;gap:6px;text-align:center}.nt-empty>span{width:48px;height:48px;display:grid;place-items:center;border-radius:50%;background:var(--mint-soft);color:var(--forest-bright)}.nt-empty>span svg{width:22px}.nt-empty h2{margin:6px 0 0;font:700 1rem 'Manrope'}.nt-empty p{margin:0;color:var(--muted);font-size:.82rem}
 .nt-empty button{margin-top:8px;padding:8px 14px;border:1px solid #b9d3c3;border-radius:9px;background:#fff;color:var(--forest-bright);font-size:.78rem;font-weight:700;cursor:pointer}
+.nt-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;border-top:1px solid var(--line);background:#fcfdfc;color:var(--muted);font-size:.76rem}
+.nt-pager div{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.nt-pager button{min-width:32px;height:32px;padding:0 9px;border:0;border-radius:8px;background:transparent;color:var(--ink);font-size:.78rem;font-weight:700;cursor:pointer}
+.nt-pager button:hover:enabled{background:var(--mint-soft);color:var(--forest-bright)}
+.nt-pager button.is-current{background:var(--forest);color:#fff}
+.nt-pager button:disabled{opacity:.4;cursor:default}
+.nt-pager-gap{padding:0 2px;color:var(--muted)}
 .nt-side{min-width:0;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fff}
 .nt-side h3{margin:0 0 8px;color:var(--muted);font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.nt-side h3:not(:first-child){margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
 .nt-side-list{display:grid;gap:2px}.nt-side-list button{display:flex;align-items:center;gap:11px;min-height:36px;padding:0 10px;border:0;border-radius:9px;background:transparent;color:var(--ink);font-size:.82rem;text-align:left;cursor:pointer}.nt-side-list button:hover{background:var(--paper)}
@@ -260,7 +267,7 @@ h1:focus { outline: none; }
 .nt-select{position:relative;display:flex;align-items:center}.nt-select svg{position:absolute;left:11px;width:16px;color:var(--forest-bright);pointer-events:none}
 .nt-select select{width:100%;min-height:38px;padding:0 12px 0 36px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font:inherit;font-size:.82rem;cursor:pointer}
 @media(max-width:1100px){.nt-layout{grid-template-columns:1fr}}
-@media(max-width:650px){.nt-hero-art{display:none}.nt-toolbar{align-items:stretch}.nt-tabs{overflow-x:auto}.nt-item{grid-template-columns:auto minmax(0,1fr);padding:14px}.nt-meta{grid-column:2;justify-items:start;grid-auto-flow:column;align-items:center}.nt-go{display:none}}
+@media(max-width:650px){.nt-pager{flex-direction:column;align-items:stretch;gap:8px}.nt-hero-art{display:none}.nt-toolbar{align-items:stretch}.nt-tabs{overflow-x:auto}.nt-item{grid-template-columns:auto minmax(0,1fr);padding:14px}.nt-meta{grid-column:2;justify-items:start;grid-auto-flow:column;align-items:center}.nt-go{display:none}}
 
 /* Quarantine ------------------------------------------------------------- */
 .qr-head{margin-bottom:18px}.qr-head h1{margin:.3rem 0 .3rem;font:800 clamp(1.5rem,2.4vw,2rem)/1.1 'Manrope';letter-spacing:-.03em}.qr-head p{margin:0;color:var(--muted);font-size:.9rem}

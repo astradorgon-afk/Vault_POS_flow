@@ -19,10 +19,10 @@
             <header><span class="eyebrow">Secure workspace</span><h2>Welcome back <span class="wave" aria-hidden="true">👋</span></h2><p>Use your VaultFlow account to open the operations console.</p></header>
             @if (!showOfflineSetupModal && !string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
             <label for="username">Username or email</label>
-            <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" disabled="@busy" />
+            <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" @bind:event="oninput" disabled="@busy" />
             <label for="password">Password</label>
             <div class="password-field">
-                <input id="password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" autocapitalize="off" spellcheck="false" required @bind="password" disabled="@busy" />
+                <input id="password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" autocapitalize="off" spellcheck="false" required @bind="password" @bind:event="oninput" disabled="@busy" />
                 <button type="button" class="password-toggle" title="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@showPassword" aria-label="@(showPassword ? "Hide password" : "Show password")" @onclick="() => showPassword = !showPassword">
                     @if (showPassword)
                     {
@@ -47,7 +47,7 @@
                     <div id="login-option-fields" class="option-fields">
                         <div class="field">
                             <label for="two-factor">Two-factor authentication code</label>
-                            <input id="two-factor" name="two-factor" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code (if required)" maxlength="6" @bind="twoFactorCode" disabled="@busy" />
+                            <input id="two-factor" name="two-factor" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code (if required)" maxlength="6" @bind="twoFactorCode" @bind:event="oninput" disabled="@busy" />
                         </div>
                         <div class="field">
                             <label for="work-location">Work location</label>
@@ -69,13 +69,14 @@
             @if (awaitingOldSecret)
             {
                 <label for="previous-offline-key">@(oldSecretKind == "pin" ? "Previous offline PIN" : "Previous account password")</label>
-                <input id="previous-offline-key" type="password" autocomplete="off" @bind="oldSecret" />
+                <input id="previous-offline-key" type="password" autocomplete="off" @bind="oldSecret" @bind:event="oninput" />
                 <p class="login-help">Enter this once to keep saved drafts and pending work while switching to your current account password.</p>
                 <button type="button" class="login-continue" @onclick="ContinueOnlineAsync">Continue online without migrating now</button>
             }
 
-            <button type="submit" disabled="@busy">@(busy ? "Preparing workspace…" : awaitingOldSecret ? "Move saved work" : offlineReady ? "Open workspace" : onlineAuthenticated ? offlineDataPrepared ? "Check offline files" : "Prepare offline access" : "Open workspace")</button>
-            @if (!onlineAuthenticated) { <p class="login-help">VaultFlow will confirm when this device is ready for offline use.</p> }
+            <button type="submit" disabled="@(busy || !interactive)">@(busy ? "Preparing workspace…" : awaitingOldSecret ? "Move saved work" : offlineReady ? "Open workspace" : onlineAuthenticated ? offlineDataPrepared ? "Check offline files" : "Prepare offline access" : "Open workspace")</button>
+            @if (!interactive) { <p class="login-help" role="status">Preparing the sign-in form…</p> }
+            else if (!onlineAuthenticated) { <p class="login-help">VaultFlow will confirm when this device is ready for offline use.</p> }
         </form>
         @if (showOfflineSetupModal)
         {
@@ -103,6 +104,7 @@
 @code {
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
 
+    private bool interactive;
     private bool showPassword;
     private bool optionsOpen;
     private bool busy;
@@ -126,9 +128,18 @@
     private Guid? selectedLocationId;
     private readonly List<PosSignInLocation> locationChoices = [];
 
+    /// <remarks>
+    /// The page is prerendered, so its first paint is plain HTML with no
+    /// handlers attached. A click landing there would post the form natively
+    /// and reload the page instead of signing in, costing the operator a
+    /// click. <see cref="interactive"/> only becomes true once the circuit
+    /// runs this method, which keeps the button inert until it works.
+    /// </remarks>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+        interactive = true;
+        StateHasChanged();
         await InitializeOfflineStoreAsync();
         StateHasChanged();
     }

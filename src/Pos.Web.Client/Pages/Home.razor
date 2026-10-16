@@ -9,6 +9,7 @@
 @page "/sync"
 @page "/team"
 @implements IAsyncDisposable
+@using System.Globalization
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 
@@ -27,13 +28,13 @@
             <input id="offline-username" name="username" autocomplete="username" required autofocus @bind="userName" @bind:event="oninput" disabled="@busy" />
             <label for="offline-password">Password</label>
             <div class="password-field">
-                <input id="offline-password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" required @bind="password" disabled="@busy" />
+                <input id="offline-password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" required @bind="password" @bind:event="oninput" disabled="@busy" />
                 <button type="button" class="password-toggle" aria-label="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@showPassword" @onclick="() => showPassword = !showPassword">@(showPassword ? "Hide" : "Show")</button>
             </div>
             @if (device is null)
             {
                 <label for="offline-enrol">Enroll installation <span>one-time setup</span></label>
-                <input id="offline-enrol" @bind="enrolmentCode" disabled="@(!ready || !connected || busy)" />
+                <input id="offline-enrol" @bind="enrolmentCode" @bind:event="oninput" disabled="@(!ready || !connected || busy)" />
                 <p class="login-help">Connect to enroll this installation. An administrator provides the one-time code. If browser data was cleared, work that was only saved on this device may be gone.</p>
             }
             <div class="login-location">
@@ -90,7 +91,7 @@ else
 </aside>
 @if (navigationOpen) { <button class="nav-scrim" type="button" aria-label="Close navigation" @onclick="CloseNavigation"></button> }
 <div class="app-main">
-<header class="top-row"><button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@navigationOpen" @onclick="ToggleNavigation"><AppIcon Name="menu" /></button><div class="workspace-context"><div class="page-trail"><nav aria-label="Breadcrumb"><ol><li>@PageSection</li></ol></nav><strong aria-current="page">@PageTitleText</strong></div></div><div class="top-actions"><span class="connection-pill @(connected ? "is-online" : "is-offline")" role="status">@(connected ? "Connected" : "Offline")</span>@if (connected) { <button type="button" class="notification-bell" aria-label="Notifications" @onclick="OpenNotificationsOnline"><AppIcon Name="bell" /></button> } else { <span class="notification-bell offline-unavailable" title="Notifications need Wi-Fi" aria-label="Notifications need Wi-Fi"><AppIcon Name="bell" /></span> }<div class="operator"><span class="operator-mark" aria-hidden="true">@Initials</span><span><strong>@displayName</strong><small>@(device?.LocationName ?? "Saved workspace")</small></span></div></div></header>
+<header class="top-row"><button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@navigationOpen" @onclick="ToggleNavigation"><AppIcon Name="menu" /></button><div class="workspace-context"><nav class="page-trail" aria-label="Breadcrumb"><ol><li>@PageSection</li><li><strong aria-current="page">@PageTitleText</strong></li></ol></nav></div><div class="top-actions"><span class="connection-pill @(connected ? "is-online" : "is-offline")" role="status">@(connected ? "Connected" : "Offline")</span>@if (connected) { <button type="button" class="notification-bell" aria-label="Notifications" @onclick="OpenNotificationsOnline"><AppIcon Name="bell" /></button> } else { <span class="notification-bell offline-unavailable" title="Notifications need Wi-Fi" aria-label="Notifications need Wi-Fi"><AppIcon Name="bell" /></span> }<div class="operator"><span class="operator-mark" aria-hidden="true">@Initials</span><span><strong>@displayName</strong><small>@(device?.LocationName ?? "Saved workspace")</small></span></div></div></header>
 <main id="main-content" class="workspace content" tabindex="-1">
     @if (!cacheReady) { <p class="notice" role="status">Downloading offline files. Keep this page open until it is ready.</p> }
     @if (unlocked && !connected) { <p class="notice" role="status">You are working from downloaded data. Edits stay <strong>Saved on device</strong> until the server confirms them.</p> }
@@ -244,22 +245,213 @@ else
             <header class="receiving-head"><div><span class="eyebrow">Inventory · inbound stock</span><h1>Goods receiving</h1><p>Record deliveries for downloaded orders headed to your assigned location.</p></div><button type="button" class="receiving-secondary" disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh</button></header>
             @if (orders.Count == 0) { <div class="receiving-empty"><strong>No downloaded deliveries to show.</strong><span>Connect and refresh to prepare new orders for offline counting.</span></div> }
             else { <div class="receiving-list">@foreach (OfflineOrder order in orders) { <button type="button" class="receiving-row @(receiving.PurchaseOrderId == order.Id ? "selected" : string.Empty)" @onclick="() => SelectOrderAsync(new ChangeEventArgs { Value = order.Id.ToString() })"><span class="receiving-row-mark" aria-hidden="true">↘</span><span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@(device?.LocationName ?? "Assigned location") · @order.Lines.Count lines</small></span><span class="receiving-state ready">Ready to receive</span><span class="receiving-row-arrow" aria-hidden="true">→</span></button> }</div> }
-            <section class="qr-card receiving-work"><h2>Physical receiving count</h2><p>Stock changes only after server confirmation. Unexpected goods require review.</p>
-                <label>Order<select value="@receiving.PurchaseOrderId" @onchange="SelectOrderAsync"><option value="@Guid.Empty">Choose downloaded order</option>@foreach (OfflineOrder order in orders) { <option value="@order.Id">@(order.Number ?? order.Id.ToString("D")) · @order.Status</option> }</select></label>
-                @if (receiving.PurchaseOrderId != Guid.Empty)
+
+            @* The same count sheet the desktop receiving screen uses, so staff
+               who learn one know the other: the lines with a stepper and a
+               per-row scan, then paperwork and the running total. *@
+            <div class="cs-sheet">
+                @if (receiving.PurchaseOrderId == Guid.Empty)
                 {
-                    <div class="scanner-row"><BarcodeCamera OnScan="OnReceivingScanAsync" /><label>Barcode<input @bind="manualCode" /></label><button @onclick="() => OnReceivingScanAsync(manualCode)">Count one</button></div>
-                    @foreach (ReceivingWorkingLine line in receiving.Lines) { <div class="receiving-line" @key="line"><strong>@line.Name</strong><label>Arrived<input type="number" min="0" step="0.001" @bind="line.QuantityReceived" /></label><label>Damaged<input type="number" min="0" step="0.001" @bind="line.QuantityDamaged" /></label><label>Wrong item<input type="number" min="0" step="0.001" @bind="line.QuantityWrongItem" /></label><label>Expired<input type="number" min="0" step="0.001" @bind="line.QuantityExpired" /></label><label>Cost<input type="number" min="0" step="0.01" @bind="line.UnitCost" /></label><label>Lot<input @bind="line.LotNumber" /></label></div> }
-                    <div class="line-row">
-                        <label>Supplier DR number<input maxlength="40" @bind="receiving.SupplierDeliveryReceiptNumber" placeholder="As printed" /></label>
-                        <label>Supplier OR number<input maxlength="40" @bind="receiving.SupplierOfficialReceiptNumber" placeholder="As printed" /></label>
-                        <label>Released by supplier<input type="datetime-local" @bind="receiving.SupplierReleasedAt" /></label>
+                    <div class="cs-card">
+                        <div class="cs-card-head">
+                            <div><div class="cs-eyebrow">New delivery</div><h2>Choose a delivery</h2><p>Pick one of the downloaded orders above, or choose it here.</p></div>
+                        </div>
+                        <div class="cs-form">
+                            <label class="cs-field">Order
+                                <select value="@receiving.PurchaseOrderId" @onchange="SelectOrderAsync">
+                                    <option value="@Guid.Empty">Choose downloaded order</option>
+                                    @foreach (OfflineOrder order in orders) { <option value="@order.Id">@(order.Number ?? order.Id.ToString("D")) · @order.Status</option> }
+                                </select>
+                            </label>
+                        </div>
                     </div>
-                    <label class="checkbox"><input type="checkbox" @bind="receiving.DocumentsMissing" /> Delivery documents missing</label>
-                    @if (receiving.UnexpectedGoods.Count > 0) { <h3>Unexpected goods · quarantine review</h3>@foreach (UnexpectedGood good in receiving.UnexpectedGoods) { <div class="line-row" @key="good"><strong>@good.Barcode</strong><label>Description<input @bind="good.Description" /></label><label>Quantity<input type="number" min="0" step="0.001" @bind="good.Quantity" /></label></div> } }
-                    <div class="actions"><button @onclick="SaveReceivingAsync">Save count on device</button><button class="primary" disabled="@busy" @onclick="QueueReceivingAsync">Queue receiving count</button></div>
                 }
-            </section>
+                else
+                {
+                <div class="cs-layout">
+                    <div class="cs-main">
+                        <div class="cs-card">
+                            <div class="cs-card-head">
+                                <div>
+                                    <div class="cs-eyebrow">New delivery</div>
+                                    <h2>Count what arrived</h2>
+                                    <p>Enter the quantities received in this delivery. Stock changes only after the server confirms it.</p>
+                                </div>
+                                <span class="cs-count">@ReceivingCountedLines of @receiving.Lines.Count</span>
+                            </div>
+
+                            <div class="cs-toolbar">
+                                <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                                <button type="button" class="cs-btn" disabled="@busy" @onclick="MarkAllArrivedAsync">
+                                    <AppIcon Name="check" /> Mark all arrived
+                                </button>
+                            </div>
+                            <p class="cs-help">@(scanMessage ?? "Open a row's scanner, or use the camera below. A scan is matched to the product it belongs to, whichever row it came from.")</p>
+                            <p class="cs-note">Count all arrived units, then enter how many are damaged. Usable = arrived − damaged and anything reported as an issue.</p>
+
+                            <div class="cs-scanbar">
+                                <BarcodeCamera OnScan="OnReceivingScanAsync" />
+                                <label class="cs-field">Barcode<input inputmode="numeric" autocomplete="off" placeholder="Enter barcode value" @bind="manualCode" @bind:event="oninput" /></label>
+                                <button type="button" class="cs-btn" disabled="@string.IsNullOrWhiteSpace(manualCode)" @onclick="CountManualCodeAsync">Count one</button>
+                            </div>
+
+                            <div class="cs-table-head" aria-hidden="true">
+                                <span>Product</span><span>Due</span><span>Arrived</span><span>Damaged</span><span>Actions</span>
+                            </div>
+
+                            <div class="cs-rows">
+                                @foreach (ReceivingWorkingLine line in receiving.Lines)
+                                {
+                                    <article class="cs-row" @key="line" aria-label="@line.Name">
+                                        <div class="cs-product">
+                                            <div class="cs-name">@line.Name</div>
+                                            <div class="cs-sku">@(SkuFor(line) ?? "No SKU")</div>
+                                            @if (HasIssueDetail(line)) { <div class="cs-flag">Details added</div> }
+                                        </div>
+
+                                        <div class="cs-due-cell"><span class="cs-due">@Units(DueFor(line))</span></div>
+
+                                        <div class="cs-qty-cell" data-label="ARRIVED">
+                                            <div class="cs-stepper">
+                                                <button type="button" aria-label="One fewer @line.Name"
+                                                        disabled="@(line.QuantityReceived <= 0m)" @onclick="() => StepArrivedAsync(line, -1m)">−</button>
+                                                <input type="number" min="0" step="0.001" inputmode="decimal"
+                                                       aria-label="Arrived quantity for @line.Name"
+                                                       value="@line.QuantityReceived" @onchange="e => SetArrivedAsync(line, e.Value)" />
+                                                <button type="button" aria-label="One more @line.Name"
+                                                        @onclick="() => StepArrivedAsync(line, 1m)">+</button>
+                                            </div>
+                                            <button type="button" class="cs-text-btn" disabled="@(line.QuantityReceived == DueFor(line))"
+                                                    @onclick="() => SetArrivedAsync(line, DueFor(line))">Receive all @Units(DueFor(line))</button>
+                                        </div>
+
+                                        <div class="cs-second-cell">
+                                            <label class="cs-second-field">
+                                                <span class="cs-second-label">Damaged</span>
+                                                <span class="cs-second-input">
+                                                    <input type="number" min="0" step="0.001" inputmode="decimal"
+                                                           aria-label="Damaged quantity for @line.Name"
+                                                           value="@line.QuantityDamaged" @onchange="e => SetDamagedAsync(line, e.Value)" />
+                                                </span>
+                                            </label>
+                                            <div class="cs-derived">@Units(UsableFor(line)) usable units</div>
+                                        </div>
+
+                                        <div class="cs-actions">
+                                            <button type="button" class="cs-row-scan" @onclick="() => OpenReceivingScan(line)"
+                                                    aria-label="Scan barcode for @line.Name">
+                                                <AppIcon Name="camera" /> Scan barcode
+                                            </button>
+                                            <button type="button" @onclick="() => OpenReceivingDetail(line)">
+                                                <AppIcon Name="warning" /> Issue, lot &amp; cost
+                                            </button>
+                                        </div>
+                                    </article>
+                                }
+                            </div>
+
+                            <div class="cs-helper">
+                                <AppIcon Name="info" />
+                                Leave arrived at 0 for items not in this delivery. Damaged and reported issues cannot exceed arrived.
+                            </div>
+                        </div>
+
+                        @if (receiving.UnexpectedGoods.Count > 0)
+                        {
+                            <div class="cs-card">
+                                <div class="cs-card-head">
+                                    <div><div class="cs-eyebrow">Quarantine review</div><h2>Unexpected goods</h2><p>Codes that are not on this order. They are held for review instead of counted into stock.</p></div>
+                                    <span class="cs-count">@receiving.UnexpectedGoods.Count</span>
+                                </div>
+                                <div class="cs-form">
+                                    @foreach (UnexpectedGood good in receiving.UnexpectedGoods)
+                                    {
+                                        <div class="cs-unexpected" @key="good">
+                                            <strong>@good.Barcode</strong>
+                                            <label class="cs-field">Description<input @bind="good.Description" placeholder="As printed on the carton" /></label>
+                                            <label class="cs-field">Quantity<input type="number" min="0" step="0.001" @bind="good.Quantity" /></label>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <aside class="cs-side">
+                        <div class="cs-card">
+                            <div class="cs-card-head">
+                                <h2>Supplier paperwork</h2>
+                                <span class="cs-optional">Optional</span>
+                            </div>
+                            <div class="cs-form">
+                                <label class="cs-field">DR number<input maxlength="40" autocomplete="off" disabled="@receiving.DocumentsMissing" placeholder="Delivery receipt number" @bind="receiving.SupplierDeliveryReceiptNumber" /></label>
+                                <label class="cs-field">OR number<input maxlength="40" autocomplete="off" disabled="@receiving.DocumentsMissing" placeholder="Official receipt number" @bind="receiving.SupplierOfficialReceiptNumber" /></label>
+                                <label class="cs-field">Released by supplier<input type="datetime-local" @bind="receiving.SupplierReleasedAt" /></label>
+                                <label class="cs-check"><input type="checkbox" @bind="receiving.DocumentsMissing" /> Driver brought no paperwork</label>
+                            </div>
+                        </div>
+
+                        <div class="cs-card">
+                            <div class="cs-card-head">
+                                <h2>Delivery summary</h2>
+                                <span class="cs-card-icon" aria-hidden="true"><AppIcon Name="box" /></span>
+                            </div>
+                            <div class="cs-summary">
+                                <div class="cs-summary-row"><span>Items counted</span><strong>@ReceivingCountedLines of @receiving.Lines.Count</strong></div>
+                                <div class="cs-summary-row"><span>Units arrived</span><strong>@Units(ReceivingArrivedUnits) of @Units(ReceivingDueUnits)</strong></div>
+                                <div class="cs-summary-row"><span>Damaged or rejected</span><strong>@Units(ReceivingProblemUnits)</strong></div>
+                                <div class="cs-summary-row cs-summary-key"><span>Usable units</span><strong>@Units(ReceivingUsableUnits)</strong></div>
+
+                                <div class="cs-progress" role="progressbar" aria-label="Units counted"
+                                     aria-valuemin="0" aria-valuemax="@Units(ReceivingDueUnits)" aria-valuenow="@Units(ReceivingArrivedUnits)">
+                                    <div style="width:@ReceivingPercent%"></div>
+                                </div>
+
+                                <button type="button" class="cs-btn cs-primary cs-submit" disabled="@busy" @onclick="QueueReceivingAsync">
+                                    <AppIcon Name="check" /> @(busy ? "Queueing…" : "Queue receiving count")
+                                </button>
+                                <button type="button" class="cs-btn cs-submit" disabled="@busy" @onclick="SaveReceivingAsync">Save count on device</button>
+                                <p class="cs-summary-foot">Queued counts stay on this device until the server confirms them.</p>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+                }
+            </div>
+
+            @if (scanLine is { } scanning)
+            {
+                <div class="cs-dlg-scrim" @onclick="CloseReceivingDialogs"></div>
+                <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="pwa-scan-title">
+                    <h2 id="pwa-scan-title">Scan product barcode</h2>
+                    <p class="cs-dlg-product">@scanning.Name</p>
+                    <p class="cs-dlg-lead">Point the camera at this product's barcode. Each scan adds one arrived unit to the product it belongs to, whichever row it was opened from.</p>
+                    <BarcodeCamera OnScan="OnReceivingScanAsync" />
+                    <label class="cs-field">Barcode value<input inputmode="numeric" autocomplete="off" placeholder="Enter barcode value" @bind="manualCode" @bind:event="oninput" /></label>
+                    <footer>
+                        <span class="cs-dlg-status">@(scanMessage ?? "Ready to scan.")</span>
+                        <button type="button" class="cs-btn" @onclick="CloseReceivingDialogs">Done</button>
+                        <button type="button" class="cs-btn cs-primary" disabled="@string.IsNullOrWhiteSpace(manualCode)" @onclick="CountManualCodeAsync">Add one unit</button>
+                    </footer>
+                </div>
+            }
+            else if (detailLine is { } detailing)
+            {
+                <div class="cs-dlg-scrim" @onclick="CloseReceivingDialogs"></div>
+                <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="pwa-detail-title">
+                    <h2 id="pwa-detail-title">Issue, lot &amp; cost</h2>
+                    <p class="cs-dlg-product">@detailing.Name</p>
+                    <p class="cs-dlg-lead">Anything recorded here comes off the usable count and is reviewed when the delivery reaches the server.</p>
+                    <label class="cs-field">Wrong item<input type="number" min="0" step="0.001" @bind="detailing.QuantityWrongItem" /></label>
+                    <label class="cs-field">Expired<input type="number" min="0" step="0.001" @bind="detailing.QuantityExpired" /></label>
+                    <label class="cs-field">Unit cost<input type="number" min="0" step="0.01" @bind="detailing.UnitCost" /></label>
+                    <label class="cs-field">Lot number<input maxlength="40" @bind="detailing.LotNumber" placeholder="As printed" /></label>
+                    <footer>
+                        <span class="cs-dlg-status">@Units(UsableFor(detailing)) usable units</span>
+                        <button type="button" class="cs-btn cs-primary" @onclick="SaveReceivingDetailAsync">Done</button>
+                    </footer>
+                </div>
+            }
         }
         else if (section == "inventory" && CanInventory)
         {
@@ -873,6 +1065,112 @@ else
         receiving = new ReceivingWorking { PurchaseOrderId = orderId, Lines = order?.Lines.Select(l => new ReceivingWorkingLine { PurchaseOrderLineId = l.Id, Name = l.ProductName ?? l.ProductSku ?? l.ProductId.ToString("D"), UnitCost = l.UnitCost }).ToList() ?? [] };
         await SaveReceivingCoreAsync();
     });
+    // The order behind the open count, so a line can show what was ordered: the
+    // working line holds only what was counted.
+    private OfflineOrder? ReceivingOrder => orders.FirstOrDefault(o => o.Id == receiving.PurchaseOrderId);
+    private OfflineOrderLine? OrderedFor(ReceivingWorkingLine line)
+        => ReceivingOrder?.Lines.FirstOrDefault(l => l.Id == line.PurchaseOrderLineId);
+    private decimal DueFor(ReceivingWorkingLine line) => OrderedFor(line)?.OrderedQuantity ?? 0m;
+    private string? SkuFor(ReceivingWorkingLine line) => OrderedFor(line)?.ProductSku;
+
+    /// <summary>What can go on the shelf: everything arrived, less every problem.</summary>
+    private static decimal UsableFor(ReceivingWorkingLine line)
+        => Math.Max(0m, line.QuantityReceived - line.QuantityDamaged - line.QuantityWrongItem - line.QuantityExpired);
+    private static bool HasIssueDetail(ReceivingWorkingLine line)
+        => line.QuantityWrongItem > 0m || line.QuantityExpired > 0m || !string.IsNullOrWhiteSpace(line.LotNumber);
+
+    private int ReceivingCountedLines => receiving.Lines.Count(l => l.QuantityReceived > 0m);
+    private decimal ReceivingArrivedUnits => receiving.Lines.Sum(l => l.QuantityReceived);
+    private decimal ReceivingDueUnits => receiving.Lines.Sum(DueFor);
+    private decimal ReceivingProblemUnits => receiving.Lines.Sum(l => l.QuantityDamaged + l.QuantityWrongItem + l.QuantityExpired);
+    private decimal ReceivingUsableUnits => receiving.Lines.Sum(UsableFor);
+    private string ReceivingPercent => ReceivingDueUnits <= 0m
+        ? "0"
+        : Math.Clamp(ReceivingArrivedUnits * 100m / ReceivingDueUnits, 0m, 100m).ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string Units(decimal value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+
+    private ReceivingWorkingLine? scanLine;
+    private ReceivingWorkingLine? detailLine;
+
+    private void OpenReceivingScan(ReceivingWorkingLine line)
+    {
+        scanLine = line;
+        detailLine = null;
+        manualCode = string.Empty;
+        scanMessage = null;
+    }
+
+    private void OpenReceivingDetail(ReceivingWorkingLine line)
+    {
+        detailLine = line;
+        scanLine = null;
+    }
+
+    private void CloseReceivingDialogs()
+    {
+        scanLine = null;
+        detailLine = null;
+        manualCode = string.Empty;
+    }
+
+    private Task SaveReceivingDetailAsync()
+    {
+        detailLine = null;
+        return SaveReceivingCoreAsync();
+    }
+
+    /// <summary>Counts the code typed beside the camera, for a camera that will not open.</summary>
+    private async Task CountManualCodeAsync()
+    {
+        string code = manualCode.Trim();
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        manualCode = string.Empty;
+        await OnReceivingScanAsync(code);
+    }
+
+    private Task SetArrivedAsync(ReceivingWorkingLine line, object? raw)
+    {
+        line.QuantityReceived = decimal.TryParse(
+            raw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, value)
+            : 0m;
+        return SaveReceivingCoreAsync();
+    }
+
+    private Task SetArrivedAsync(ReceivingWorkingLine line, decimal quantity)
+    {
+        line.QuantityReceived = Math.Max(0m, quantity);
+        return SaveReceivingCoreAsync();
+    }
+
+    private Task StepArrivedAsync(ReceivingWorkingLine line, decimal delta)
+        => SetArrivedAsync(line, line.QuantityReceived + delta);
+
+    private Task SetDamagedAsync(ReceivingWorkingLine line, object? raw)
+    {
+        line.QuantityDamaged = decimal.TryParse(
+            raw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, value)
+            : 0m;
+        return SaveReceivingCoreAsync();
+    }
+
+    /// <summary>Counts every line at what the order says is due.</summary>
+    private Task MarkAllArrivedAsync()
+    {
+        foreach (ReceivingWorkingLine line in receiving.Lines)
+        {
+            line.QuantityReceived = DueFor(line);
+        }
+
+        return SaveReceivingCoreAsync();
+    }
+
     private async Task OnReceivingScanAsync(string code)
     {
         OfflineProduct? product = FindProduct(code); OfflineOrder? order = orders.FirstOrDefault(o => o.Id == receiving.PurchaseOrderId);

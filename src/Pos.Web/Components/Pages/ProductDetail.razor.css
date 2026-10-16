@@ -37,6 +37,7 @@
 .barcode-hint { color:var(--muted); font-size:.8rem; line-height:1.5; }
 .barcode-typo { display:block; margin-top:5px; color:#8a6a1f; font-weight:700; }
 
+.barcode-table-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain; }
 .barcode-table { width:100%; border-collapse:collapse; }
 .barcode-table th { padding:13px 18px; text-align:left; color:var(--muted); font-size:.67rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; border-bottom:1px solid var(--line); }
 .barcode-table td { padding:13px 18px; border-bottom:1px solid var(--line); color:var(--ink); font-size:.86rem; vertical-align:middle; }
@@ -60,5 +61,5 @@
 
 @media(max-width:620px){
     .office-head{align-items:stretch;flex-direction:column}
-    .barcode-table{display:block;overflow-x:auto}
+    .barcode-table{min-width:560px}
 }

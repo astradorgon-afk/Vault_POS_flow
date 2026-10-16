@@ -1,6 +1,6 @@
-/* The offline client loads the online app.css first. These rules cover its
-   device-only data and disabled server workflows. */
-:root, html, body { color:var(--ink); background:var(--paper); font-family:'DM Sans',sans-serif; }
+/* The offline client loads the online app.css, then offline.css. These rules
+   cover only what is left: device-held data and the workflows a disconnected
+   device cannot run. */
 .workspace.content { width:min(100%,1520px); max-width:none; margin:0 auto; padding:clamp(20px,2.5vw,36px); }
 .app-main { min-width:0; }
 .nav-link.online-feature { width:100%; text-align:left; cursor:pointer; }
@@ -23,10 +23,6 @@
 .readiness-panel { display:flex; align-items:center; justify-content:space-between; gap:20px; }
 .readiness-panel h2 { margin:0 0 6px; font:700 1.1rem 'Manrope',sans-serif; }
 .readiness-panel p { margin:0 0 8px; color:var(--muted); }
-.panel { border-color:var(--line); border-radius:14px; box-shadow:var(--shadow-card); }
-.panel small { color:var(--muted); letter-spacing:normal; text-transform:none; }
-.primary { border-color:var(--forest); background:var(--forest); color:#fff; }
-.primary:hover { background:var(--forest-bright); }
 .order-list h2 { margin-bottom:4px; }
 .order-list>p { color:var(--muted); font-size:.84rem; }
 .po-stage-unavailable { min-height:36px; padding:0 12px; display:inline-flex; align-items:center; gap:8px; border:1px dashed var(--line-strong); border-radius:99px; color:var(--muted); font-size:.8rem; font-weight:700; }

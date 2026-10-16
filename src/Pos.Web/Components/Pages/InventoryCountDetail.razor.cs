@@ -262,12 +262,93 @@ public sealed partial class InventoryCountDetail : IDisposable
     private void OnGaugeChanged(int lineNo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
         => message = sheet.SetDraft(lineNo, e.Value?.ToString());
 
+    /// <summary>Moves a line's count by one, the way the stepper buttons do.</summary>
+    /// <remarks>
+    /// It goes through <see cref="InventoryCountSheet.SetDraft"/> rather than
+    /// <see cref="InventoryCountSheet.Increment"/> so the floor at zero and the
+    /// rounding stay in one place. Increment is the scan path and may run before
+    /// a line has any draft at all.
+    /// </remarks>
+    private void Step(PosInventoryCountLineView line, decimal delta)
+    {
+        decimal current = sheet.Quantity(line) ?? 0m;
+        message = sheet.SetDraft(line.LineNo, Math.Max(0m, current + delta).ToString(CultureInfo.InvariantCulture));
+        lastScannedLine = null;
+    }
+
+    /// <summary>Counts a line at what the ledger says it holds.</summary>
+    private void MatchSystem(PosInventoryCountLineView line)
+        => message = sheet.SetDraft(line.LineNo, line.SystemQuantity.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// Agrees with the ledger on every line still uncounted.
+    /// </summary>
+    /// <remarks>
+    /// Lines already counted are left alone: this is a shortcut for the long
+    /// tail a counter has walked past and found correct, not a way to discard
+    /// counts already recorded.
+    /// </remarks>
+    private void MatchAllToSystem()
+    {
+        foreach (PosInventoryCountLineView line in sheet.Lines)
+        {
+            if (sheet.Quantity(line) is null)
+            {
+                sheet.SetDraft(line.LineNo, line.SystemQuantity.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        message = null;
+    }
+
+    private static string VarianceBand(decimal? value)
+        => value is null ? "is-flat" : value > 0m ? "is-up" : value < 0m ? "is-down" : "is-flat";
+
+    private PosInventoryCountLineView? scanLine;
+    private string scanCode = string.Empty;
+
+    private void OpenScan(PosInventoryCountLineView line)
+    {
+        scanLine = line;
+        scanCode = string.Empty;
+        scanNote = null;
+    }
+
+    private void CloseScan()
+    {
+        scanLine = null;
+        scanCode = string.Empty;
+    }
+
+    /// <summary>
+    /// Counts the code typed in the scan dialog, for a camera that will not open.
+    /// </summary>
+    /// <remarks>
+    /// It runs the scan path rather than trusting the row the dialog was opened
+    /// from, so a carton scanned against the wrong line still lands on the
+    /// product it actually belongs to.
+    /// </remarks>
+    private async Task SubmitScanCodeAsync()
+    {
+        string code = BarcodeText.Clean(scanCode);
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        scanCode = string.Empty;
+        await CountScannedAsync(new BarcodeScan(code, ScanSource.Simulated, DateTimeOffset.UtcNow));
+    }
+
+    private Task OnScanCodeKeyAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+        => e.Key == "Enter" ? SubmitScanCodeAsync() : Task.CompletedTask;
+
     private string RowClass(PosInventoryCountLineView line)
     {
         List<string> classes = [];
         if (line.LineNo == lastScannedLine)
         {
-            classes.Add("scan-hit");
+            classes.Add("is-hit");
         }
 
         if (sheet.IsDirty(line.LineNo))

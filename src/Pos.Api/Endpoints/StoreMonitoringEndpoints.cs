@@ -83,7 +83,7 @@ public static class StoreMonitoringEndpoints
             .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.View) { Scope = ScopeSource.None })
             .WithTags("Dashboard")
             .WithName("GetStoreMovements")
-            .WithSummary("Gets dispatched product movements and store restock requests over a period.");
+            .WithSummary("Gets dispatched product movements and restock requests for stores and the main warehouse over a period.");
 
         app.MapGet("/api/v1/inventory/stock-levels", GetStockLevelsAsync)
             .RequireAuthorization()
@@ -275,8 +275,11 @@ public static class StoreMonitoringEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(location => location.Kind == LocationKind.Store && location.IsActive)
-            .OrderBy(location => location.Code)
+            .Where(location =>
+                (location.Kind == LocationKind.Store || location.Kind == LocationKind.MainWarehouse)
+                && location.IsActive)
+            .OrderBy(location => location.Kind)
+            .ThenBy(location => location.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         stores = [.. stores.Where(store => authorization.HasAllLocations || authorization.Locations.Contains(store.Id))];
@@ -371,7 +374,9 @@ public static class StoreMonitoringEndpoints
                     reference,
                     "Store request",
                     transfer.Status.ToString(),
+                    sourceId,
                     locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
+                    destinationId,
                     locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
                     requestedUnits,
                     transfer.CreatedAtUtc));
@@ -407,7 +412,9 @@ public static class StoreMonitoringEndpoints
                 reference,
                 "Dispatched transfer",
                 transfer.Status.ToString(),
+                sourceId,
                 locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
+                destinationId,
                 locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
                 dispatchedUnits,
                 actualDispatchedAt)
@@ -442,7 +449,7 @@ public static class StoreMonitoringEndpoints
             end,
             dispatchedTransferCount,
             storeResults,
-            [.. activity.OrderByDescending(entry => entry.OccurredAtUtc).Take(12)]));
+            [.. activity.OrderByDescending(entry => entry.OccurredAtUtc).Take(60)]));
     }
 
     private static IEnumerable<StoreMovementItem> DispatchedItems(
@@ -738,7 +745,9 @@ public sealed record StoreMovementActivity(
     string Reference,
     string Kind,
     string Status,
+    Guid SourceLocationId,
     string SourceLocationName,
+    Guid DestinationLocationId,
     string DestinationLocationName,
     decimal ProductUnits,
     DateTimeOffset OccurredAtUtc)

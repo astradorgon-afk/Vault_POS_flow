@@ -185,15 +185,15 @@ public static class PwaGateway
     private static IResult Me(HttpContext context, PwaSessions sessions)
         => FindSession(context, sessions) is { } session
             ? Results.Ok(new { session.Credentials.User, session.DeviceId, session.LocationId })
-            : Results.Unauthorized();
+            : SessionExpired();
 
     private static async Task<IResult> EmployeesAsync(
         HttpContext context, IHttpClientFactory clients, PwaSessions sessions, CancellationToken ct)
     {
         PwaSession? session = FindSession(context, sessions);
-        if (session is null) return Results.Unauthorized();
+        if (session is null) return SessionExpired();
         HttpClient client = clients.CreateClient("pwa-api");
-        if (!await RefreshIfNeededAsync(session, client, ct)) return Results.Unauthorized();
+        if (!await RefreshIfNeededAsync(session, client, ct)) return SessionExpired();
         using HttpResponseMessage response = await GetAsync(client, session, "/api/v1/pwa/employees", ct);
         return await ForwardAsync(response, ct);
     }
@@ -204,9 +204,9 @@ public static class PwaGateway
     {
         if (!SafeMutation(context)) return Results.StatusCode(403);
         PwaSession? administrator = FindSession(context, sessions);
-        if (administrator is null) return Results.Unauthorized();
+        if (administrator is null) return SessionExpired();
         HttpClient client = clients.CreateClient("pwa-api");
-        if (!await RefreshIfNeededAsync(administrator, client, ct)) return Results.Unauthorized();
+        if (!await RefreshIfNeededAsync(administrator, client, ct)) return SessionExpired();
         using HttpRequestMessage request = Authorized(administrator, HttpMethod.Post, "/api/v1/pwa/provision-token");
         request.Content = JsonContent.Create(new { body.UserId });
         using HttpResponseMessage response = await client.SendAsync(request, ct);
@@ -229,9 +229,9 @@ public static class PwaGateway
         HttpContext context, IHttpClientFactory clients, PwaSessions sessions, CancellationToken ct)
     {
         PwaSession? session = FindSession(context, sessions);
-        if (session is null) return Results.Unauthorized();
+        if (session is null) return SessionExpired();
         HttpClient client = clients.CreateClient("pwa-api");
-        if (!await RefreshIfNeededAsync(session, client, ct)) return Results.Unauthorized();
+        if (!await RefreshIfNeededAsync(session, client, ct)) return SessionExpired();
         SnapshotOutcome result = await FetchSnapshotAsync(client, session, ct);
         return result.Error ?? Results.Json(result.Snapshot);
     }
@@ -339,9 +339,9 @@ public static class PwaGateway
         long cursor, CancellationToken ct)
     {
         PwaSession? session = FindSession(context, sessions);
-        if (session is null) return Results.Unauthorized();
+        if (session is null) return SessionExpired();
         HttpClient client = clients.CreateClient("pwa-api");
-        if (!await RefreshIfNeededAsync(session, client, ct)) return Results.Unauthorized();
+        if (!await RefreshIfNeededAsync(session, client, ct)) return SessionExpired();
         using HttpResponseMessage response = await GetAsync(client, session,
             $"/api/v1/sync/pull?cursor={cursor}&limit=500", ct);
         return await ForwardAsync(response, ct);
@@ -353,14 +353,14 @@ public static class PwaGateway
     {
         if (!SafeMutation(context)) return Results.StatusCode(403);
         PwaSession? session = FindSession(context, sessions);
-        if (session is null) return Results.Unauthorized();
+        if (session is null) return SessionExpired();
         if (body.Events is null || body.Events.Count > 100 || body.Events.Any(item =>
             item.EventId == Guid.Empty || item.DeviceSequence <= 0 ||
             item.EventType is not ("PwaPurchaseDraft" or "PwaReceivingCount" or "PwaRestockDraft") ||
             item.Payload.ValueKind != JsonValueKind.Object || item.Payload.GetRawText().Length > 1_000_000))
             return Results.BadRequest(new { message = "The PWA event batch is invalid." });
         HttpClient client = clients.CreateClient("pwa-api");
-        if (!await RefreshIfNeededAsync(session, client, ct)) return Results.Unauthorized();
+        if (!await RefreshIfNeededAsync(session, client, ct)) return SessionExpired();
         Guid userId = session.Credentials.User.Id;
         var events = body.Events.Select(item => new
         {
@@ -383,6 +383,14 @@ public static class PwaGateway
 
     private static PwaSession? FindSession(HttpContext context, PwaSessions sessions)
         => context.Request.Cookies.TryGetValue(Cookie, out string? key) ? sessions.Get(key) : null;
+
+    /// <summary>
+    /// Says that the online half of this session is over — the key is unknown
+    /// here, or its credentials can no longer be renewed. Saved work stays on
+    /// the device; it syncs once the employee signs in online again.
+    /// </summary>
+    private static IResult SessionExpired()
+        => PwaProblem(401, "This browser's online session has ended. Sign in online again to sync the work saved here.");
 
     /// <summary>An error body the PWA can show: the offline store reads <c>detail</c>, <c>message</c> or <c>title</c>.</summary>
     private static IResult PwaProblem(int statusCode, string message)
@@ -416,8 +424,17 @@ public static class PwaGateway
         try
         {
             if (session.Credentials.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddMinutes(1)) return true;
-            using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/refresh",
-                new { session.Credentials.RefreshToken }, ct);
+
+            // The sign-in that minted this token named the device, so the token
+            // is bound to it. A refresh that does not name the same device reads
+            // as a stolen token and is refused, which would strand the browser
+            // ten minutes after it signed in.
+            using HttpRequestMessage refresh = new(HttpMethod.Post, "/api/v1/auth/refresh")
+            {
+                Content = JsonContent.Create(new { session.Credentials.RefreshToken }),
+            };
+            refresh.Headers.Add("X-Device-Id", session.DeviceId.ToString("D"));
+            using HttpResponseMessage response = await client.SendAsync(refresh, ct);
             if (!response.IsSuccessStatusCode) return false;
             SignInResponse? refreshed = await response.Content.ReadFromJsonAsync<SignInResponse>(JsonOptions, ct);
             if (refreshed is null || refreshed.User.Id != session.Credentials.User.Id) return false;

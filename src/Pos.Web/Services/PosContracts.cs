@@ -707,7 +707,9 @@ public sealed record PosStoreMovementActivity(
     string Reference,
     string Kind,
     string Status,
+    Guid SourceLocationId,
     string SourceLocationName,
+    Guid DestinationLocationId,
     string DestinationLocationName,
     decimal ProductUnits,
     DateTimeOffset OccurredAtUtc)

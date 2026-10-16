@@ -1,4 +1,4 @@
-@page "/catalog"
+﻿@page "/catalog"
 @attribute [Authorize(Policy = "product.view")]
 @rendermode InteractiveServer
 @using System.Globalization
@@ -340,7 +340,7 @@
         else
         {
             <div class="catalog-grid">
-                @foreach (IGrouping<Guid, PosCatalogProduct> group in products.GroupBy(product => product.CategoryId))
+                @foreach (IGrouping<Guid, PosCatalogProduct> group in products.GroupBy(product => product.CategoryId).OrderByDescending(group => group.Count()).ThenBy(group => CategoryName(group.Key), StringComparer.OrdinalIgnoreCase))
                 {
                     string categoryName = CategoryName(group.Key);
                     string tone = CategoryTone(categoryName);
