@@ -27,6 +27,16 @@ else
 {
     PosInventoryCountSummary count = detail.Count;
 
+    @* Worked out once per render: the row list is walked several times below
+       (count, page maths, the rows themselves) and on a full physical that is
+       hundreds of lines each time. *@
+    List<(Guid Id, string Name)> sheetCategories = SheetCategories();
+    List<PosInventoryCountLineView> matching = FilteredLines();
+    int pageCount = PageCountFor(matching.Count);
+    int currentPage = Math.Min(page, pageCount - 1);
+    int firstShown = currentPage * PageSize;
+    List<PosInventoryCountLineView> shown = [.. matching.Skip(firstShown).Take(PageSize)];
+
     <div class="office-head">
         <div>
             <p class="office-kicker"><a class="count-back" href="/inventory/counts">Stock counts</a> · @StoreName(count.LocationId)</p>
@@ -36,9 +46,18 @@ else
         <span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span>
     </div>
 
+    @* An error and a confirmation used to render identically, so "Counts saved."
+       and a refusal from head office looked the same at a glance. *@
     @if (!string.IsNullOrWhiteSpace(message))
     {
-        <div class="pos-message" role="status">@message</div>
+        <div class="cs-banner @(messageIsError ? "is-error" : "is-ok")" role="@(messageIsError ? "alert" : "status")">
+            <AppIcon Name="@(messageIsError ? "alert" : "check")" />
+            <div class="cs-banner-text">
+                <strong>@(messageIsError ? "That did not go through" : "Done")</strong>
+                <span>@message</span>
+            </div>
+            <button type="button" class="cs-banner-x" aria-label="Dismiss this message" @onclick="DismissMessage">×</button>
+        </div>
     }
 
     @if (!string.IsNullOrWhiteSpace(detail.Note))
@@ -93,14 +112,27 @@ else
                 <section class="sheet-toolbar" aria-label="Find lines">
                     <label class="sheet-search">
                         <span class="sheet-sr">Search this sheet</span>
-                        <input type="search" @bind="search" @bind:event="oninput" placeholder="Search product or SKU…" />
+                        <input type="search" @bind="SearchText" @bind:event="oninput" placeholder="Search product or SKU…" />
                     </label>
+                    @if (sheetCategories.Count > 0)
+                    {
+                        <label class="sheet-category">
+                            <span class="sheet-sr">Category</span>
+                            <select @bind="CategoryChoice" aria-label="Filter by category">
+                                <option value="">All categories</option>
+                                @foreach ((Guid Id, string Name) category in sheetCategories)
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
                     <div class="sheet-filters" role="group" aria-label="Show lines">
                         @foreach ((CountSheetFilter Key, string Label) choice in FilterChoices)
                         {
                             <button type="button" class="sheet-filter @(filter == choice.Key ? "is-on" : null)"
                                     aria-pressed="@(filter == choice.Key ? "true" : "false")"
-                                    @onclick="() => filter = choice.Key">
+                                    @onclick="() => SetFilter(choice.Key)">
                                 @choice.Label<b>@sheet.CountFor(choice.Key).ToString("N0", CultureInfo.InvariantCulture)</b>
                             </button>
                         }
@@ -112,16 +144,16 @@ else
                 </div>
 
                 <div class="cs-rows" aria-live="polite">
-                    @if (!VisibleLines.Any())
+                    @if (matching.Count == 0)
                     {
                         <div class="cs-empty">
                             <strong>No lines match.</strong>
-                            <p>Clear the search, or choose a different set of lines.</p>
+                            <p>Clear the search, pick another category, or choose a different set of lines.</p>
                         </div>
                     }
                     else
                     {
-                        @foreach (PosInventoryCountLineView line in VisibleLines)
+                        @foreach (PosInventoryCountLineView line in shown)
                         {
                             <article class="cs-row @RowClass(line)" @key="line.LineNo" aria-label="@ProductDisplayName(line.ProductId)">
                                 <div class="cs-product">
@@ -157,6 +189,10 @@ else
                                         </div>
                                         <button type="button" class="cs-text-btn" disabled="@(sheet.Quantity(line) == line.SystemQuantity)"
                                                 @onclick="() => MatchSystem(line)">Match system @Quantity(line.SystemQuantity)</button>
+                                        @if (LineError(line.LineNo) is { } lineError)
+                                        {
+                                            <p class="cs-line-error" role="alert"><AppIcon Name="alert" /> @lineError</p>
+                                        }
                                     }
                                     else
                                     {
@@ -184,6 +220,26 @@ else
                         }
                     }
                 </div>
+
+                @if (matching.Count > 0)
+                {
+                    <nav class="cs-pager" aria-label="Sheet pages">
+                        <span class="cs-pager-count">
+                            Showing @((firstShown + 1).ToString("N0", CultureInfo.InvariantCulture))–@((firstShown + shown.Count).ToString("N0", CultureInfo.InvariantCulture))
+                            of @matching.Count.ToString("N0", CultureInfo.InvariantCulture) line@(matching.Count == 1 ? "" : "s")
+                        </span>
+                        @if (pageCount > 1)
+                        {
+                            <div class="cs-pager-steps">
+                                <button type="button" class="cs-btn" disabled="@(currentPage == 0)"
+                                        @onclick="() => GoToPage(currentPage - 1, pageCount)">Previous</button>
+                                <span class="cs-pager-page">Page @((currentPage + 1).ToString("N0", CultureInfo.InvariantCulture)) of @pageCount.ToString("N0", CultureInfo.InvariantCulture)</span>
+                                <button type="button" class="cs-btn" disabled="@(currentPage >= pageCount - 1)"
+                                        @onclick="() => GoToPage(currentPage + 1, pageCount)">Next</button>
+                            </div>
+                        }
+                    </nav>
+                }
 
                 <div class="cs-helper">
                     <AppIcon Name="info" />

@@ -12,3 +12,18 @@ window.vaultflowPrintReceipt = function (html) {
         setTimeout(function () { target.print(); }, 120);
     };
 };
+
+// The same hand-off for full-page records (A4 rather than till roll), used by
+// the activity log's "Print" action.  A wider window so the preview shows the
+// sheet as it will come out.
+window.vaultflowPrintDocument = function (html) {
+    var target = window.open('', 'vaultflow-print-document', 'width=900,height=960');
+    if (!target) { return; }
+    target.document.open();
+    target.document.write(html);
+    target.document.close();
+    target.onload = function () {
+        target.focus();
+        setTimeout(function () { target.print(); }, 120);
+    };
+};

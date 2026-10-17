@@ -10,6 +10,9 @@
 .audit-drawer-head h2 { margin:3px 0 4px; color:var(--text); font:700 1.35rem 'Manrope'; letter-spacing:-.02em; }
 .audit-drawer-head small { color:var(--muted); font-size:.74rem; }
 .audit-code { font-family:ui-monospace,Consolas,monospace; }
+.audit-drawer-actions { display:flex; flex:none; align-items:center; gap:8px; }
+.audit-drawer-print { height:34px; padding:0 13px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--forest); font:800 .78rem 'DM Sans'; white-space:nowrap; cursor:pointer; }
+.audit-drawer-print:hover { border-color:var(--forest-bright); color:var(--forest-bright); }
 .audit-drawer-close { flex:none; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--muted); font-size:1.2rem; line-height:1; cursor:pointer; }
 .audit-drawer-close:hover { border-color:var(--line-strong); color:var(--text); }
 .audit-drawer-steps { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 20px; border-bottom:1px solid var(--line); background:#f7faf7; color:var(--muted); font-size:.76rem; }

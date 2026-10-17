@@ -1,5 +1,8 @@
 @using System.Globalization
+@using System.Net
+@using System.Text
 @using Pos.Web.Components.Pages
+@inject IJSRuntime Js
 
 <div class="audit-scrim" @onclick="OnClose"></div>
 <aside class="audit-drawer" role="dialog" aria-modal="true" aria-labelledby="audit-drawer-title" tabindex="-1"
@@ -10,7 +13,10 @@
             <h2 id="audit-drawer-title">@AuditLogView.ActionLabel(Entry.Action)</h2>
             <small class="audit-code">@Entry.Action</small>
         </div>
-        <button type="button" class="audit-drawer-close" aria-label="Close details (Esc)" @onclick="OnClose">×</button>
+        <div class="audit-drawer-actions">
+            <button type="button" class="audit-drawer-print" @onclick="PrintAsync" title="Print this record">Print</button>
+            <button type="button" class="audit-drawer-close" aria-label="Close details (Esc)" @onclick="OnClose">×</button>
+        </div>
     </header>
 
     <nav class="audit-drawer-steps" aria-label="Step through entries">
@@ -169,6 +175,155 @@
         => Entry.Action.StartsWith("transfer.", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Entry.NewValueJson)
             ? AuditLogView.ReadTransferDetails(Entry.NewValueJson)
             : null;
+
+    /// <summary>Hands a self-contained A4 copy of this entry to the browser's print dialog.</summary>
+    private async Task PrintAsync() => await Js.InvokeVoidAsync("vaultflowPrintDocument", BuildPrintHtml());
+
+    /// <summary>
+    /// Builds the printed record as its own document rather than styling the drawer for
+    /// print: the drawer is a fixed-position overlay, which browsers paginate badly.
+    /// The raw JSON payloads are left out — they are support detail, not part of the record.
+    /// </summary>
+    private string BuildPrintHtml()
+    {
+        TransferDetailRead? transfer = Transfer;
+        StringBuilder html = new();
+        html.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>");
+        html.Append(Encode(AuditLogView.ActionLabel(Entry.Action)));
+        html.Append(" - VaultFlow</title><style>");
+        html.Append("""
+            :root { color-scheme: light; }
+            * { box-sizing: border-box; }
+            @page { size: A4 portrait; margin: 16mm 15mm; }
+            html, body { margin: 0; padding: 0; }
+            body { background: #fff; color: #16261d; font: 11pt/1.5 'Segoe UI', Arial, sans-serif; }
+            header.sheet { display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; padding-bottom: 4mm; border-bottom: 1.5pt solid #16261d; }
+            .brand { font-size: 13pt; font-weight: 700; letter-spacing: .02em; }
+            .brand span { display: block; color: #5d6f63; font-size: 8.5pt; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
+            .title { text-align: right; }
+            .title h1 { margin: 0; font-size: 15pt; line-height: 1.25; overflow-wrap: anywhere; }
+            .title code { color: #5d6f63; font-size: 8.5pt; }
+            .lead { margin: 5mm 0 0; padding: 3mm 4mm; border-left: 2.5pt solid #2f6b4f; background: #f4f8f5; font-size: 10.5pt; overflow-wrap: anywhere; }
+            h2 { margin: 7mm 0 2.5mm; padding-bottom: 1.5mm; border-bottom: .75pt solid #cfdbd3; font-size: 9pt; letter-spacing: .08em; text-transform: uppercase; }
+            table.facts { width: 100%; border-collapse: collapse; }
+            table.facts th { width: 34mm; padding: 1.6mm 0; color: #5d6f63; font-size: 8.5pt; font-weight: 700; letter-spacing: .05em; text-align: left; text-transform: uppercase; vertical-align: top; }
+            table.facts td { padding: 1.6mm 0; vertical-align: top; overflow-wrap: anywhere; }
+            table.facts td small { display: block; color: #5d6f63; font-size: 8.5pt; }
+            code.id { color: #44584c; font: 8.5pt ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+            table.lines { width: 100%; border-collapse: collapse; margin-top: 2mm; }
+            table.lines th { padding: 2mm; border-bottom: 1pt solid #16261d; color: #44584c; font-size: 8pt; letter-spacing: .05em; text-align: left; text-transform: uppercase; }
+            table.lines td { padding: 2mm; border-bottom: .5pt solid #e3eae5; font-size: 10pt; font-variant-numeric: tabular-nums; }
+            table.lines th.n, table.lines td.n { text-align: right; }
+            table.lines tr { break-inside: avoid; }
+            .note { margin-top: 2mm; color: #5d6f63; font-size: 8.5pt; }
+            footer.sheet { margin-top: 9mm; padding-top: 3mm; border-top: .75pt solid #cfdbd3; color: #5d6f63; font-size: 8.5pt; }
+            """);
+        html.Append("</style></head><body><header class=\"sheet\"><div class=\"brand\">VaultFlow<span>Operations ledger</span></div><div class=\"title\"><h1>");
+        html.Append(Encode(AuditLogView.ActionLabel(Entry.Action)));
+        html.Append("</h1><code>");
+        html.Append(Encode(Entry.Action));
+        html.Append("</code></div></header><p class=\"lead\">");
+        html.Append(Encode(AuditLogView.WhoDidWhat(Entry.ActorName, Entry.RoleSnapshot, Entry.Action)));
+        html.Append("</p><h2>Activity</h2><table class=\"facts\"><tbody>");
+
+        AppendFact(html, "When", Encode(Entry.OccurredAtUtc.InStoreTime().ToString("dddd, MMM d, yyyy", CultureInfo.InvariantCulture)),
+            Encode(Entry.OccurredAtUtc.InStoreTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture) + " store time"));
+        AppendFact(html, "Who", Encode(Entry.ActorName), Encode(AuditLogView.RoleLabel(Entry.RoleSnapshot)));
+        AppendFact(html, "Location", Encode(Entry.LocationName ?? "Business-wide"), null);
+
+        StringBuilder record = new();
+        record.Append(Encode(AuditLogView.RecordLabel(Entry.EntityType)));
+        if (Entry.EntityId is not null)
+        {
+            record.Append("<br><code class=\"id\">");
+            record.Append(Encode(AuditLogView.FullId(Entry.EntityId)));
+            record.Append("</code>");
+        }
+
+        AppendFact(html, "Record", record.ToString(),
+            string.IsNullOrWhiteSpace(Entry.RecordSummary) ? null : Encode(Entry.RecordSummary));
+
+        if (!string.IsNullOrWhiteSpace(Entry.Reason))
+        {
+            AppendFact(html, "Reason", Encode(Entry.Reason), null);
+        }
+
+        if (Entry.ReferenceDocumentType is not null)
+        {
+            AppendFact(html, "Reference", Encode(Entry.ReferenceDocumentType)
+                + "<br><code class=\"id\">" + Encode(AuditLogView.FullId(Entry.ReferenceDocumentId)) + "</code>", null);
+        }
+
+        html.Append("</tbody></table>");
+
+        if (transfer is not null)
+        {
+            html.Append("<h2>Transfer, as it stands now</h2><table class=\"facts\"><tbody>");
+            AppendFact(html, "Status", Encode(AuditLogView.SplitWords(transfer.CurrentStatus)), null);
+            AppendFact(html, "Mode", Encode(AuditLogView.SplitWords(transfer.Mode)), null);
+            AppendFact(html, "Kind", Encode(AuditLogView.SplitWords(transfer.Kind)), null);
+            AppendFact(html, "Route", Encode(transfer.Source) + " &rarr; " + Encode(transfer.Destination), null);
+            if (transfer.TransferNumber is not null) { AppendFact(html, "Transfer no.", Encode(transfer.TransferNumber), null); }
+            if (transfer.ShipmentNumber is not null) { AppendFact(html, "Shipment", Encode(transfer.ShipmentNumber), null); }
+            if (transfer.ReceiptNumber is not null) { AppendFact(html, "Receipt", Encode(transfer.ReceiptNumber), null); }
+            html.Append("</tbody></table>");
+
+            if (transfer.Products.Count > 0)
+            {
+                html.Append("<table class=\"lines\"><thead><tr><th>#</th><th>Product</th><th class=\"n\">Requested</th><th class=\"n\">Picked</th><th class=\"n\">Received</th><th class=\"n\">Damaged</th></tr></thead><tbody>");
+                foreach (TransferDetailLine line in transfer.Products)
+                {
+                    html.Append("<tr><td>");
+                    html.Append(Encode(line.LineNo.ToString("D2", CultureInfo.InvariantCulture)));
+                    html.Append("</td><td>");
+                    html.Append(Encode(line.ProductName));
+                    html.Append("</td><td class=\"n\">");
+                    html.Append(Encode(AuditLogView.FormatQuantity(line.Requested)));
+                    html.Append("</td><td class=\"n\">");
+                    html.Append(Encode(AuditLogView.FormatQuantity(line.Picked)));
+                    html.Append("</td><td class=\"n\">");
+                    html.Append(Encode(AuditLogView.FormatQuantity(line.Received)));
+                    html.Append("</td><td class=\"n\">");
+                    html.Append(Encode(AuditLogView.FormatQuantity(line.Damaged)));
+                    html.Append("</td></tr>");
+                }
+
+                html.Append("</tbody></table><div class=\"note\">Quantities are the transfer's current totals, not the values at the time of this event.</div>");
+            }
+        }
+
+        html.Append("<h2>For support</h2><table class=\"facts\"><tbody>");
+        AppendFact(html, "Entry", "<code class=\"id\">" + Encode(AuditLogView.FullId(Entry.Id)) + "</code>", null);
+        if (Entry.CorrelationId != Guid.Empty)
+        {
+            AppendFact(html, "Related", "<code class=\"id\">" + Encode(AuditLogView.FullId(Entry.CorrelationId)) + "</code>",
+                "Recorded together with other entries from the same user action.");
+        }
+
+        html.Append("</tbody></table><footer class=\"sheet\">Printed ");
+        html.Append(Encode(DateTimeOffset.UtcNow.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)));
+        html.Append(" store time · VaultFlow activity record</footer></body></html>");
+        return html.ToString();
+    }
+
+    /// <summary>Writes one label/value row; <paramref name="value"/> is already encoded markup.</summary>
+    private static void AppendFact(StringBuilder html, string label, string value, string? note)
+    {
+        html.Append("<tr><th>");
+        html.Append(Encode(label));
+        html.Append("</th><td>");
+        html.Append(value);
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            html.Append("<small>");
+            html.Append(note);
+            html.Append("</small>");
+        }
+
+        html.Append("</td></tr>");
+    }
+
+    private static string Encode(string? value) => WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(value) ? "—" : value);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

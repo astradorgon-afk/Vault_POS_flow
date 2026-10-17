@@ -9,6 +9,8 @@
 .sheet-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 .sheet-search { flex:1 1 230px; }
 .sheet-search input { width:100%; height:42px; padding:0 13px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); font-size:.88rem; }
+.sheet-category { flex:0 1 190px; }
+.sheet-category select { width:100%; height:42px; padding:0 11px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); font-size:.82rem; font-weight:600; }
 .sheet-filters { display:flex; flex-wrap:wrap; gap:6px; }
 .sheet-filter { display:inline-flex; align-items:center; gap:7px; height:42px; padding:0 14px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--muted); font-weight:800; font-size:.78rem; cursor:pointer; }
 .sheet-filter:hover { border-color:var(--forest-bright); color:var(--ink); }

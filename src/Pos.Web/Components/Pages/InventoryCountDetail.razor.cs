@@ -33,8 +33,14 @@ public sealed partial class InventoryCountDetail : IDisposable
 
     private static readonly CultureInfo Peso = CultureInfo.GetCultureInfo("en-PH");
 
+    /// <summary>Lines shown at once. A full physical runs to hundreds; a counter works a screen at a time.</summary>
+    private const int PageSize = 50;
+
     private readonly List<PosLocation> locations = [];
     private readonly Dictionary<Guid, (string Sku, string Name)> productNames = [];
+    private readonly Dictionary<Guid, Guid> productCategories = [];
+    private readonly List<PosCategory> categories = [];
+    private readonly Dictionary<int, string> lineErrors = [];
     private readonly Dictionary<Guid, string> people = [];
     private readonly InventoryCountSheet sheet = new();
 
@@ -48,7 +54,10 @@ public sealed partial class InventoryCountDetail : IDisposable
     private string reasonText = string.Empty;
     private string search = string.Empty;
     private CountSheetFilter filter = CountSheetFilter.All;
+    private Guid? categoryId;
+    private int page;
     private string? message;
+    private bool messageIsError;
 
     private bool CanViewInventory => Session.HasPermission("inventory.view");
     private bool CanCount => Session.HasPermission("inventory.count");
@@ -59,8 +68,84 @@ public sealed partial class InventoryCountDetail : IDisposable
 
     private double PercentCounted => sheet.TotalLines == 0 ? 0d : sheet.CountedLines * 100d / sheet.TotalLines;
 
-    private IEnumerable<PosInventoryCountLineView> VisibleLines
-        => sheet.Visible(filter, search, Describe);
+    /// <summary>Every line matching the search, the filter chips and the chosen category.</summary>
+    private List<PosInventoryCountLineView> FilteredLines()
+        => [.. sheet.Visible(filter, search, Describe)
+            .Where(line => categoryId is not { } wanted
+                || (productCategories.TryGetValue(line.ProductId, out Guid actual) && actual == wanted))];
+
+    /// <summary>The categories actually represented on this sheet, named and sorted.</summary>
+    private List<(Guid Id, string Name)> SheetCategories()
+    {
+        HashSet<Guid> onSheet = [.. sheet.Lines
+            .Select(line => productCategories.TryGetValue(line.ProductId, out Guid id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)];
+
+        return [.. categories
+            .Where(category => onSheet.Contains(category.Id))
+            .Select(category => (category.Id, category.Name))
+            .OrderBy(category => category.Name, StringComparer.CurrentCultureIgnoreCase)];
+    }
+
+    private static int PageCountFor(int rows) => Math.Max(1, (int)Math.Ceiling(rows / (double)PageSize));
+
+    /// <summary>Search, filter and category each reset to the first page; staying on page 9 of a list that now has two reads as an empty sheet.</summary>
+    private string SearchText
+    {
+        get => search;
+        set
+        {
+            search = value;
+            page = 0;
+        }
+    }
+
+    private void SetFilter(CountSheetFilter choice)
+    {
+        filter = choice;
+        page = 0;
+    }
+
+    private string CategoryChoice
+    {
+        get => categoryId?.ToString() ?? string.Empty;
+        set
+        {
+            categoryId = Guid.TryParse(value, out Guid parsed) ? parsed : null;
+            page = 0;
+        }
+    }
+
+    private void GoToPage(int target, int pageCount) => page = Math.Clamp(target, 0, pageCount - 1);
+
+    /// <summary>Brings the page holding a line into view, so a scan is never counted off-screen.</summary>
+    private void ShowPageContaining(int lineNo)
+    {
+        int index = FilteredLines().FindIndex(line => line.LineNo == lineNo);
+        if (index >= 0)
+        {
+            page = index / PageSize;
+        }
+    }
+
+    /// <summary>Clears the banner, so a stale failure does not sit over a sheet that has since worked.</summary>
+    private void DismissMessage()
+    {
+        message = null;
+        messageIsError = false;
+    }
+
+    private void Fail(string text)
+    {
+        message = text;
+        messageIsError = true;
+    }
+
+    private void Succeed(string text)
+    {
+        message = text;
+        messageIsError = false;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -105,13 +190,13 @@ public sealed partial class InventoryCountDetail : IDisposable
             ApiResult<PosInventoryCountDetail> response = await Api.GetInventoryCountAsync(CountId, token);
             if (!response.IsSuccess || response.Value is null)
             {
-                message = response.Error ?? "This count could not be found.";
+                Fail(response.Error ?? "This count could not be found.");
                 return;
             }
 
             if (!Session.CanUseInventoryLocation(response.Value.Count.LocationId))
             {
-                message = "This count is outside your assigned locations.";
+                Fail("This count is outside your assigned locations.");
                 return;
             }
 
@@ -144,6 +229,64 @@ public sealed partial class InventoryCountDetail : IDisposable
             productNames[id] = (ShortId(id), "Product");
         }
 
+        if (wanted.Count == 0)
+        {
+            return;
+        }
+
+        // The catalogue rows carry the category, which the plain product list does
+        // not. Where this account may not read the catalogue the names still
+        // arrive from the product list and the category filter stays hidden,
+        // rather than the sheet failing to name its own lines.
+        if (!await LoadNamesFromCatalogAsync(wanted, token))
+        {
+            await LoadNamesFromProductsAsync(wanted, token);
+            return;
+        }
+
+        ApiResult<List<PosCategory>> response = await Api.GetCategoriesAsync(token);
+        if (response.IsSuccess && response.Value is not null)
+        {
+            categories.Clear();
+            categories.AddRange(response.Value);
+        }
+    }
+
+    /// <summary>Names the lines from the catalogue, recording each product's category.</summary>
+    /// <returns><see langword="true"/> when the catalogue answered.</returns>
+    private async Task<bool> LoadNamesFromCatalogAsync(HashSet<Guid> wanted, CancellationToken token)
+    {
+        bool answered = false;
+        for (int offset = 0; offset < 2000 && wanted.Count > 0; offset += 200)
+        {
+            ApiResult<List<PosCatalogProduct>> response =
+                await Api.GetCatalogProductsAsync(null, true, offset, 200, token);
+            if (!response.IsSuccess || response.Value is null)
+            {
+                return answered;
+            }
+
+            answered = true;
+            foreach (PosCatalogProduct product in response.Value)
+            {
+                productCategories[product.Id] = product.CategoryId;
+                if (wanted.Remove(product.Id))
+                {
+                    productNames[product.Id] = (product.Sku, product.Name);
+                }
+            }
+
+            if (response.Value.Count < 200)
+            {
+                break;
+            }
+        }
+
+        return answered;
+    }
+
+    private async Task LoadNamesFromProductsAsync(HashSet<Guid> wanted, CancellationToken token)
+    {
         for (int offset = 0; offset < 2000 && wanted.Count > 0; offset += 200)
         {
             ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(null, offset, 200, token);
@@ -242,12 +385,21 @@ public sealed partial class InventoryCountDetail : IDisposable
             lastScannedLine = line.LineNo;
             scanNote = $"{product.Name}: {counted.ToString("0.###", CultureInfo.InvariantCulture)} counted.";
 
-            // A scan against a line the current filter hides would otherwise
-            // vanish as it is counted, which reads as the scan being lost.
+            // A scan against a line the current view hides would otherwise vanish
+            // as it is counted, which reads as the scan being lost. The filter,
+            // the category and the page all have to give way to the scanned line.
             if (filter == CountSheetFilter.Uncounted)
             {
                 filter = CountSheetFilter.All;
             }
+
+            if (categoryId is { } chosen
+                && (!productCategories.TryGetValue(line.ProductId, out Guid actual) || actual != chosen))
+            {
+                categoryId = null;
+            }
+
+            ShowPageContaining(line.LineNo);
         }
         catch (HttpRequestException)
         {
@@ -260,7 +412,35 @@ public sealed partial class InventoryCountDetail : IDisposable
     }
 
     private void OnGaugeChanged(int lineNo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
-        => message = sheet.SetDraft(lineNo, e.Value?.ToString());
+        => RecordDraft(lineNo, e.Value?.ToString());
+
+    /// <summary>
+    /// Writes a draft quantity and keeps any complaint beside the line it is about.
+    /// </summary>
+    /// <remarks>
+    /// The banner alone was not enough: on a paged sheet the offending row can be
+    /// well off-screen, so the message is pinned under the field as well.
+    /// </remarks>
+    private void RecordDraft(int lineNo, string? raw)
+    {
+        string? error = sheet.SetDraft(lineNo, raw);
+        if (error is null)
+        {
+            lineErrors.Remove(lineNo);
+            if (messageIsError && lineErrors.Count == 0)
+            {
+                DismissMessage();
+            }
+
+            return;
+        }
+
+        lineErrors[lineNo] = error;
+        Fail(error);
+    }
+
+    private string? LineError(int lineNo)
+        => lineErrors.TryGetValue(lineNo, out string? error) ? error : null;
 
     /// <summary>Moves a line's count by one, the way the stepper buttons do.</summary>
     /// <remarks>
@@ -272,13 +452,13 @@ public sealed partial class InventoryCountDetail : IDisposable
     private void Step(PosInventoryCountLineView line, decimal delta)
     {
         decimal current = sheet.Quantity(line) ?? 0m;
-        message = sheet.SetDraft(line.LineNo, Math.Max(0m, current + delta).ToString(CultureInfo.InvariantCulture));
+        RecordDraft(line.LineNo, Math.Max(0m, current + delta).ToString(CultureInfo.InvariantCulture));
         lastScannedLine = null;
     }
 
     /// <summary>Counts a line at what the ledger says it holds.</summary>
     private void MatchSystem(PosInventoryCountLineView line)
-        => message = sheet.SetDraft(line.LineNo, line.SystemQuantity.ToString(CultureInfo.InvariantCulture));
+        => RecordDraft(line.LineNo, line.SystemQuantity.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>
     /// Agrees with the ledger on every line still uncounted.
@@ -298,7 +478,8 @@ public sealed partial class InventoryCountDetail : IDisposable
             }
         }
 
-        message = null;
+        lineErrors.Clear();
+        DismissMessage();
     }
 
     private static string VarianceBand(decimal? value)
@@ -374,7 +555,8 @@ public sealed partial class InventoryCountDetail : IDisposable
     private Task SaveCountsAsync()
         => RunCommandAsync(
             token => Api.RecordInventoryCountLinesAsync(CountId, sheet.CountedRequests(), token),
-            "Counts saved.");
+            "Counts saved.",
+            "The counts on this sheet were not saved");
 
     private Task SubmitAsync()
         => RunCommandAsync(async token =>
@@ -390,29 +572,51 @@ public sealed partial class InventoryCountDetail : IDisposable
             }
 
             return await Api.SubmitInventoryCountAsync(CountId, token);
-        }, "Count submitted for approval.");
+        }, "Count submitted for approval.", "This sheet was not submitted");
 
     private async Task ApproveAsync()
     {
         approving = false;
-        await RunCommandAsync(token => Api.ApproveInventoryCountAsync(CountId, token), "Variance posted to stock.");
+        await RunCommandAsync(
+            token => Api.ApproveInventoryCountAsync(CountId, token),
+            "Variance posted to stock.",
+            "The variance was not posted — stock is unchanged");
     }
 
     private async Task RejectAsync()
     {
         string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
         rejecting = false;
-        await RunCommandAsync(token => Api.RejectInventoryCountAsync(CountId, reason, token), "Count sent back for recounting.");
+        await RunCommandAsync(
+            token => Api.RejectInventoryCountAsync(CountId, reason, token),
+            "Count sent back for recounting.",
+            "The sheet was not sent back");
     }
 
     private async Task CancelCountAsync()
     {
         string? reason = string.IsNullOrWhiteSpace(reasonText) ? null : reasonText.Trim();
         cancelling = false;
-        await RunCommandAsync(token => Api.CancelInventoryCountAsync(CountId, reason, token), "Count cancelled.");
+        await RunCommandAsync(
+            token => Api.CancelInventoryCountAsync(CountId, reason, token),
+            "Count cancelled.",
+            "The count was not cancelled");
     }
 
-    private async Task RunCommandAsync(Func<CancellationToken, Task<ApiResult<PosReference>>> command, string successMessage)
+    /// <summary>
+    /// Runs one command against the sheet and says plainly what happened.
+    /// </summary>
+    /// <param name="command">The call to make.</param>
+    /// <param name="successMessage">What to say when it worked.</param>
+    /// <param name="failureLead">
+    /// What did <em>not</em> happen, phrased so the counter knows where the sheet
+    /// stands: a bare server string like "Conflict" leaves them guessing whether
+    /// their counts survived.
+    /// </param>
+    private async Task RunCommandAsync(
+        Func<CancellationToken, Task<ApiResult<PosReference>>> command,
+        string successMessage,
+        string failureLead)
     {
         if (detail is null)
         {
@@ -420,13 +624,15 @@ public sealed partial class InventoryCountDetail : IDisposable
         }
 
         busy = true;
-        message = null;
+        DismissMessage();
         try
         {
             ApiResult<PosReference> response = await command(CancellationToken.None);
             if (!response.IsSuccess || response.Value is null)
             {
-                message = response.Error;
+                Fail(string.IsNullOrWhiteSpace(response.Error)
+                    ? $"{failureLead}. Head office refused the request without saying why — try again, and tell an administrator if it keeps happening."
+                    : $"{failureLead}: {response.Error}");
                 return;
             }
 
@@ -434,12 +640,17 @@ public sealed partial class InventoryCountDetail : IDisposable
             await LoadDetailAsync();
             if (detail is not null)
             {
-                message = successMessage;
+                lineErrors.Clear();
+                Succeed(successMessage);
             }
         }
         catch (OperationCanceledException)
         {
             // The page is gone.
+        }
+        catch (HttpRequestException)
+        {
+            Fail($"{failureLead}: head office could not be reached. Check the connection and try again — nothing on this sheet has been lost.");
         }
         finally
         {

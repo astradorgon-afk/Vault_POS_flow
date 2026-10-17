@@ -16,6 +16,20 @@
 .cs-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
 .cs-main,.cs-side{display:grid;gap:22px;min-width:0}
 
+/* The summary column rides down the page with the counter. A sheet runs to
+   hundreds of lines, and the two numbers that say "what am I about to commit"
+   are worth nothing at the top of a scroll that ends elsewhere. 84px clears the
+   sticky top bar, the same offset the purchase-order summary uses. Where the
+   column is taller than the screen it scrolls on its own, so Cancel count never
+   ends up stranded below the fold. Only in the two-column layout: under
+   1100px the column sits above the rows and has nothing to follow. */
+@media(min-width:1101px){
+    .cs-side{position:sticky;top:84px;max-height:calc(100vh - 104px);overflow:auto;overscroll-behavior:contain}
+    .cs-side::-webkit-scrollbar{width:8px}
+    .cs-side::-webkit-scrollbar-track{background:transparent}
+    .cs-side::-webkit-scrollbar-thumb{border-radius:99px;background:#d9e2dc}
+}
+
 .cs-card{min-width:0;border:1px solid #e2e9e4;border-radius:12px;background:#fff;box-shadow:0 3px 8px rgba(23,56,45,.012);overflow:hidden}
 .cs-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:22px 24px}
 .cs-card-head>div{min-width:0}
@@ -136,6 +150,29 @@
 .cs-empty strong{font-size:.78rem;font-weight:600;color:#17382d}
 .cs-empty p{margin:5px 0 0;color:#73817b;font-size:.72rem}
 
+/* A refusal and a confirmation have to be told apart at a glance: the counter
+   is standing in an aisle, reading this at arm's length. */
+.cs-banner{display:flex;align-items:flex-start;gap:11px;margin:0 0 16px;padding:13px 15px;border:1px solid;border-left-width:4px;border-radius:9px}
+.cs-banner svg{width:17px;height:17px;flex:none;margin-top:1px}
+.cs-banner-text{display:grid;gap:2px;min-width:0}
+.cs-banner-text strong{font-size:.82rem;font-weight:700}
+.cs-banner-text span{font-size:.78rem;line-height:1.5;overflow-wrap:anywhere}
+.cs-banner-x{flex:none;margin-left:auto;padding:0 4px;border:0;background:none;color:inherit;font-size:1.15rem;line-height:1;opacity:.6;cursor:pointer}
+.cs-banner-x:hover{opacity:1}
+.cs-banner.is-error{border-color:#e4b9b3;border-left-color:#b4493c;background:#fdf3f1;color:#8d382e}
+.cs-banner.is-ok{border-color:#cfe3d5;border-left-color:#1b634b;background:#f2f8f3;color:#1b634b}
+
+/* The offending row can be well off-screen on a paged sheet, so the complaint
+   is repeated under the field it is about. */
+.cs-line-error{display:flex;align-items:flex-start;gap:6px;margin:7px 0 0;color:#8d382e;font-size:.68rem;line-height:1.45}
+.cs-line-error svg{width:12px;height:12px;flex:none;margin-top:1px}
+
+.cs-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:14px 24px;border-top:1px solid #e2e9e4;background:#fbfcfa}
+.cs-pager-count{color:#73817b;font-size:.72rem;font-variant-numeric:tabular-nums}
+.cs-pager-steps{display:flex;align-items:center;gap:10px}
+.cs-pager-steps .cs-btn{min-height:38px}
+.cs-pager-page{color:#17382d;font-size:.72rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+
 /* Rendered by the app rather than a native dialog, which would need interop. */
 .cs-dlg-scrim{position:fixed;inset:0;z-index:120;background:rgba(22,51,42,.4);backdrop-filter:blur(2px)}
 .cs-dlg{position:fixed;z-index:130;top:50%;left:50%;transform:translate(-50%,-50%);width:min(430px,calc(100vw - 32px));max-height:min(88vh,860px);overflow-y:auto;padding:24px;border:1px solid #e2e9e4;border-radius:14px;background:#fff;color:#17382d;box-shadow:0 24px 80px rgba(16,45,42,.19)}
@@ -189,6 +226,9 @@
     .cs-actions button:hover{background:#edf5ef}
     .cs-actions .cs-row-scan{grid-column:1/-1;min-height:46px;font-size:.78rem}
 
+    .cs-pager{padding-inline:20px}
+    .cs-pager-steps{flex:1 1 100%;justify-content:space-between}
+    .cs-pager-steps .cs-btn{min-height:46px;padding-inline:18px}
     .cs-foot{padding-inline:20px}
     .cs-foot .cs-btn{flex:1 1 100%;min-height:48px;font-size:.82rem}
     .cs-helper{padding-inline:20px;align-items:flex-start}
