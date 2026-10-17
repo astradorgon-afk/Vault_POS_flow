@@ -56,6 +56,19 @@ public sealed class CreateTransferCommandHandler(
                 TransferErrors.DestinationLocationExternal(command.DestinationLocationId));
         }
 
+        // Closing a location takes it out of service: no new stock leaves it and
+        // none arrives. Everything already on its books stays readable.
+        if (!source.IsActive)
+        {
+            return Result<TransferOrderId>.Failure(TransferErrors.SourceLocationClosed(command.SourceLocationId));
+        }
+
+        if (!destination.IsActive)
+        {
+            return Result<TransferOrderId>.Failure(
+                TransferErrors.DestinationLocationClosed(command.DestinationLocationId));
+        }
+
         TransferKind kind = KindFor(source.Kind, destination.Kind);
         TransferMode mode = TransferMode.Normal;
         PreApprovalToken? token = null;

@@ -53,6 +53,7 @@ public static class AuditEndpoints
         [FromQuery] string? category,
         [FromQuery] string? search,
         [FromQuery] Guid? userId,
+        [FromQuery] Guid? locationId,
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
         [FromQuery] int offset = 0,
@@ -92,6 +93,18 @@ public static class AuditEndpoints
                  entry.EntityId == actorId &&
                  entry.Action.StartsWith(AuthenticationPrefix)));
             transferEvents = transferEvents.Where(entry => entry.ActorUserId == actor);
+        }
+
+        // Everything one location did. A transfer belongs to both ends of its
+        // route, so it answers to either — otherwise a store's history would
+        // show what it received and not what it sent.
+        if (locationId is { } place)
+        {
+            LocationId scope = new(place);
+            query = query.Where(entry => entry.LocationId == scope);
+            transferEvents = transferEvents.Where(entry => context.Transfers
+                .Any(transfer => transfer.Id == entry.TransferOrderId
+                    && (transfer.SourceLocationId == scope || transfer.DestinationLocationId == scope)));
         }
 
         query = ApplyCategory(query, category);

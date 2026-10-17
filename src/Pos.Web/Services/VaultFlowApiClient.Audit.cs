@@ -7,6 +7,7 @@ public sealed partial class VaultFlowApiClient
         string? category,
         string? search,
         Guid? userId,
+        Guid? locationId,
         DateOnly? from,
         DateOnly? to,
         int offset,
@@ -25,6 +26,10 @@ public sealed partial class VaultFlowApiClient
         if (userId is { } actorId)
         {
             parameters.Add(FormattableString.Invariant($"userId={actorId:D}"));
+        }
+        if (locationId is { } place)
+        {
+            parameters.Add(FormattableString.Invariant($"locationId={place:D}"));
         }
         if (from is { } start)
         {

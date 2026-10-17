@@ -278,6 +278,7 @@ try
     app.MapPwaProvisionEndpoints();
     app.MapSyncEndpoints();
     app.MapLocationEndpoints();
+    app.MapLocationHistoryEndpoints();
     app.MapCatalogEndpoints();
     app.MapProductCurationEndpoints();
     app.MapProductChangeApprovalEndpoints();
@@ -289,6 +290,7 @@ try
     app.MapPurchaseEndpoints();
     app.MapDirectDeliveryEndpoints();
     app.MapSupplierReturnEndpoints();
+    app.MapSupplyRequestEndpoints();
     app.MapTransferEndpoints();
     app.MapQuarantineEndpoints();
     app.MapReceiptEndpoints();

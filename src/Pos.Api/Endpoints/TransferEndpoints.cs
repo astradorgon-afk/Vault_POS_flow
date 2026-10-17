@@ -330,6 +330,14 @@ public static class TransferEndpoints
             .WithName("CancelTransferDispatch")
             .WithSummary("Cancels a dispatched transfer and reverses the ledger.");
 
+        group.MapPost("/{id:guid}/cancel", CancelTransferBeforeDispatchAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Pick)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("CancelTransferBeforeDispatch")
+            .WithSummary("Abandons a transfer that has not been dispatched; no ledger movement is involved.");
+
         group.MapPost("/{id:guid}/receive", ReceiveTransferAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Receive)
             {
@@ -662,6 +670,18 @@ public static class TransferEndpoints
         CancellationToken cancellationToken)
         => await DispatchAsync(
             new CancelTransferDispatchCommand(new TransferOrderId(id), body.Reason),
+            dispatcher,
+            currentUser,
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<IResult> CancelTransferBeforeDispatchAsync(
+        Guid id,
+        [FromBody] CancelTransferDispatchBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+        => await DispatchAsync(
+            new CancelTransferBeforeDispatchCommand(new TransferOrderId(id), body.Reason),
             dispatcher,
             currentUser,
             cancellationToken).ConfigureAwait(false);

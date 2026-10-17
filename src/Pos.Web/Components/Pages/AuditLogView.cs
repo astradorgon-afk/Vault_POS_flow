@@ -81,9 +81,16 @@ public static class AuditLogView
         ["inventory.balances.rebuilt"] = "Rebuilt stock balances",
         ["inventory.integrity.drift"] = "Found stock balances adrift",
 
-        ["purchase.order.created"] = "Created a purchase order",
+        ["purchase.order.created"] = "Drafted a purchase order",
+        ["purchase.order.submitted"] = "Sent a purchase order for approval",
         ["purchase.order.approved"] = "Approved a purchase order",
         ["purchase.order.rejected"] = "Rejected a purchase order",
+        ["purchase.order.sent"] = "Sent a purchase order to the supplier",
+        ["purchase.order.cancelled"] = "Cancelled a purchase order",
+        ["purchase.order.closed"] = "Closed a purchase order",
+        ["purchase.supply.requested"] = "Asked for the warehouse to be restocked",
+        ["purchase.supply.ordered"] = "Ordered against a warehouse supply request",
+        ["purchase.supply.closed"] = "Closed a warehouse supply request",
         ["purchase.goods.received"] = "Received goods",
         ["purchase.discrepancy.raised"] = "Raised a receiving discrepancy",
         ["purchase.direct_to_store"] = "Recorded a direct-to-store delivery",
@@ -154,6 +161,9 @@ public static class AuditLogView
         "RefreshToken" => "Sign-in token",
         "NegativeStockAttempt" => "Blocked posting",
         "TransferOrder" or "Transfer" => "Transfer",
+        "PurchaseOrder" => "Purchase order",
+        "GoodsReceipt" => "Goods receipt",
+        "SupplyRequest" => "Supply request",
         _ => Humanize(entityType),
     };
 

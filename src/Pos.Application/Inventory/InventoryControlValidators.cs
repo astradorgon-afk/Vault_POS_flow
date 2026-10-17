@@ -25,7 +25,9 @@ public sealed class CreateStockAdjustmentCommandValidator : AbstractValidator<Cr
 
         RuleFor(c => c.Lines)
             .NotEmpty().WithErrorCode("adjustment.empty")
-            .Must(lines => lines is null || lines.Count <= InventoryControlRules.MaxLines).WithErrorCode("inventory_control.too_many_lines");
+            .Must(lines => lines is null || lines.Count <= InventoryControlRules.MaxLines)
+                .WithErrorCode("inventory_control.too_many_lines")
+                .WithMessage($"An adjustment carries at most {InventoryControlRules.MaxLines} lines in one request. Split it into smaller adjustments.");
 
         RuleForEach(c => c.Lines).ChildRules(line =>
         {
@@ -80,7 +82,9 @@ public sealed class RecordCountLinesCommandValidator : AbstractValidator<RecordC
     {
         RuleFor(c => c.Lines)
             .NotEmpty().WithErrorCode("count.lines_required")
-            .Must(lines => lines is null || lines.Count <= InventoryControlRules.MaxLines).WithErrorCode("inventory_control.too_many_lines");
+            .Must(lines => lines is null || lines.Count <= InventoryControlRules.MaxLines)
+                .WithErrorCode("inventory_control.too_many_lines")
+                .WithMessage($"Only {InventoryControlRules.MaxLines} lines can be saved in one go. This sheet sent more than that, so save it in batches of {InventoryControlRules.MaxLines} or fewer.");
 
         RuleForEach(c => c.Lines).ChildRules(line =>
         {

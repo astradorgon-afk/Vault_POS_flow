@@ -190,6 +190,14 @@ public sealed partial class VaultFlowApiClient
             new { },
             cancellationToken);
 
+    /// <summary>Abandons a transfer that has not been dispatched; nothing is reversed.</summary>
+    public Task<ApiResult<PosReference>> CancelTransferBeforeDispatchAsync(
+        Guid transferId, string reason, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/cancel"),
+            new PosCancelTransferDispatchRequest(reason),
+            cancellationToken);
+
     /// <summary>Cancels a dispatched transfer and reverses the ledger.</summary>
     public Task<ApiResult<PosReference>> CancelTransferDispatchAsync(
         Guid transferId, string reason, CancellationToken cancellationToken)

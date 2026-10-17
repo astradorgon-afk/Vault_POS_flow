@@ -9,7 +9,7 @@
 
 <section class="restock-page">
     <header class="restock-head">
-        <div><span class="eyebrow">Owner approvals · inventory</span><h1>Restock approvals</h1><p>Review supply requests from your stores. Approval releases a request to warehouse picking.</p></div>
+        <div><span class="eyebrow">Owner approvals · inventory</span><h1>Restock approvals</h1><p>Review supply requests from your stores and your warehouse. A store's request is filled from warehouse stock; the warehouse's own request is filled by buying from a supplier.</p></div>
         <button type="button" class="restock-refresh" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
 
@@ -19,6 +19,36 @@
         <button type="button" class="@(showPending ? "active" : null)" @onclick="() => showPending = true">Needs decision <span>@Pending.Count</span></button>
         <button type="button" class="@(!showPending ? "active" : null)" @onclick="() => showPending = false">All requests <span>@requests.Count</span></button>
     </nav>
+
+    @if (supplyRequests.Count > 0)
+    {
+        <section class="restock-card">
+            <header>
+                <div><span class="eyebrow">Buy from a supplier</span><h2>The warehouse needs stock</h2></div>
+                <p>The warehouse has nobody to transfer from. Put these on a purchase order, or turn the request down.</p>
+            </header>
+            <div class="restock-list">
+                @foreach (PosSupplyRequest request in supplyRequests)
+                {
+                    <div class="restock-row restock-row-static" @key="request.Id">
+                        <div>
+                            <strong>@request.Number</strong>
+                            <small>
+                                @StoreName(request.DestinationLocationId) ·
+                                @request.Lines.Count line@(request.Lines.Count == 1 ? "" : "s") ·
+                                @request.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
+                                @if (request.Status == "PartiallyOrdered")
+                                {
+                                    <text> · part ordered</text>
+                                }
+                            </small>
+                        </div>
+                        <a class="restock-order-link" href="@($"/purchasing/new?supplyRequest={request.Id:D}")">Create purchase order →</a>
+                    </div>
+                }
+            </div>
+        </section>
+    }
 
     <section class="restock-card">
         <header><div><span class="eyebrow">Warehouse supply</span><h2>@(showPending ? "Waiting for approval" : "All store requests")</h2></div><p>Open a request to review its products and approve or reject it.</p></header>
@@ -47,6 +77,7 @@
 
 @code {
     private readonly List<PosTransferSummary> requests = [];
+    private readonly List<PosSupplyRequest> supplyRequests = [];
     private readonly Dictionary<Guid, string> storeNames = [];
     private bool loading = true;
     private bool showPending = true;
@@ -68,6 +99,16 @@
             {
                 storeNames.Clear();
                 foreach (PosLocation location in locations.Value) { storeNames[location.Id] = location.Name; }
+            }
+
+            // The warehouse's own requests live in a different document type, so
+            // they are fetched separately and shown in their own section: the
+            // decision on them is "buy this", not "release stock".
+            ApiResult<List<PosSupplyRequest>> supply = await Api.GetSupplyRequestsAsync(true, CancellationToken.None);
+            supplyRequests.Clear();
+            if (supply.IsSuccess && supply.Value is not null)
+            {
+                supplyRequests.AddRange(supply.Value.OrderByDescending(request => request.RequestedAtUtc));
             }
 
             ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);

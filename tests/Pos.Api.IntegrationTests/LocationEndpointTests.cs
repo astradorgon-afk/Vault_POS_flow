@@ -348,7 +348,7 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
-    public async Task Administrator_CanCloseAnEmptyLocationAndItLeavesTheDirectory()
+    public async Task Administrator_CanCloseALocation_ItStaysVisibleButLeavesThePickers()
     {
         LocationId location = await factory.CreateLocationAsync("STORE09", "Store Nine");
         await factory.CreateUserAsync("loc-admin-close", Roles.Administrator, tier: ApprovalTier.Tier3);
@@ -364,8 +364,9 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
 
         closed.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        // A closed location keeps its row and its history but leaves the
-        // working directory, which is what makes closing read as a delete.
+        // A closed location keeps its row, its history and its place in the
+        // administration list: an owner has to be able to find what it did, and
+        // the row itself says it is closed.
         using HttpResponseMessage read = await GetAsync(
             client, FormattableString.Invariant($"/api/v1/locations/{location.Value}"), token);
         using JsonDocument document = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
@@ -375,7 +376,15 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
         using HttpResponseMessage administration = await GetAsync(
             client, "/api/v1/locations/administration", token);
         using JsonDocument directory = JsonDocument.Parse(await administration.Content.ReadAsStringAsync());
-        directory.RootElement.EnumerateArray()
+        JsonElement retired = directory.RootElement.EnumerateArray()
+            .Single(l => l.GetProperty("code").GetString() == "STORE09");
+        retired.GetProperty("isActive").GetBoolean().Should().BeFalse();
+
+        // It drops out of the pickers, though: no till may be assigned to it.
+        using HttpResponseMessage deviceChoices = await GetAsync(
+            client, "/api/v1/locations/device-choices", token);
+        using JsonDocument choices = JsonDocument.Parse(await deviceChoices.Content.ReadAsStringAsync());
+        choices.RootElement.EnumerateArray()
             .Select(l => l.GetProperty("code").GetString())
             .Should().NotContain("STORE09");
 

@@ -45,9 +45,9 @@
             {
                 <p class="restock-empty">Loading stores and products…</p>
             }
-            else if (stores.Count == 0)
+            else if (stores.Count == 0 && warehouses.Count == 0)
             {
-                <p class="restock-empty">No active store is assigned to this account.</p>
+                <p class="restock-empty">No active store or warehouse is assigned to this account.</p>
             }
             else
             {
@@ -55,16 +55,24 @@
                     <li class="restock-step @(selectedStoreId is not null ? "is-done" : null)">
                         <span class="restock-step-num" aria-hidden="true">@(selectedStoreId is not null ? "✓" : "1")</span>
                         <div class="restock-step-body">
-                            <div class="restock-step-head"><strong>Choose the store</strong><small>The request is delivered to this store.</small></div>
+                            <div class="restock-step-head"><strong>Choose where it goes</strong><small>@(IsWarehouseRequest ? "The owner buys these from a supplier." : "The request is delivered to this store.")</small></div>
                             <label class="restock-field">
-                                <select aria-label="Deliver to store" value="@selectedStoreId" @onchange="OnStoreChanged">
-                                    <option value="">Select a store</option>
+                                <select aria-label="Deliver to" value="@selectedStoreId" @onchange="OnStoreChanged">
+                                    <option value="">Select a location</option>
                                     @foreach (PosLocation store in stores)
                                     {
                                         <option value="@store.Id">@store.Code · @store.Name</option>
                                     }
+                                    @foreach (PosLocation warehouse in warehouses)
+                                    {
+                                        <option value="@warehouse.Id">@warehouse.Code · @warehouse.Name (buy from supplier)</option>
+                                    }
                                 </select>
                             </label>
+                            @if (IsWarehouseRequest)
+                            {
+                                <p class="restock-step-note">The warehouse has nobody to transfer from, so this goes to the owner as a shopping list. Approving it raises a purchase order against a supplier.</p>
+                            }
                         </div>
                     </li>
 
@@ -170,7 +178,7 @@
                             <span class="restock-send-reason">@reason</span>
                         }
                     </span>
-                    <button type="button" class="restock-primary" disabled="@(!CanSend)" @onclick="SendAsync">@(sending ? "Sending…" : "Send for approval")</button>
+                    <button type="button" class="restock-primary" disabled="@(!CanSend)" @onclick="SendAsync">@(sending ? "Sending…" : IsWarehouseRequest ? "Send to the owner to buy" : "Send for approval")</button>
                 </footer>
             }
         </section>
@@ -182,13 +190,50 @@
                 <div><span class="eyebrow">Track deliveries</span><h2>Request history</h2></div>
                 <button type="button" class="restock-refresh" @onclick="LoadRequestsAsync" disabled="@loadingRequests">@(loadingRequests ? "Refreshing…" : "Refresh")</button>
             </header>
+            @if (supplyRequests.Count > 0)
+            {
+                <div class="restock-supply-block">
+                    <h3>Sent to the owner to buy</h3>
+                    <div class="restock-list">
+                        @foreach (PosSupplyRequest supply in supplyRequests)
+                        {
+                            <div class="restock-row restock-row-static" @key="supply.Id">
+                                <div>
+                                    <strong>@supply.Number</strong>
+                                    <small>
+                                        @StoreName(supply.DestinationLocationId) ·
+                                        @supply.Lines.Count line@(supply.Lines.Count == 1 ? "" : "s") ·
+                                        @supply.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
+                                    </small>
+                                    @if (supply.Orders.Count > 0)
+                                    {
+                                        <small class="restock-row-hint">
+                                            On @string.Join(", ", supply.Orders.Select(o => o.Number ?? "a draft order"))
+                                        </small>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(supply.DecisionReason))
+                                    {
+                                        <small>“@supply.DecisionReason”</small>
+                                    }
+                                </div>
+                                <span class="restock-status @SupplyStatusClass(supply.Status)">@SplitWords(supply.Status)</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
             @if (loading)
             {
                 <p class="restock-empty">Loading your requests…</p>
             }
-            else if (requests.Count == 0)
+            else if (requests.Count == 0 && supplyRequests.Count == 0)
             {
                 <p class="restock-empty">No restock requests yet. <button type="button" class="restock-link-button" @onclick='() => activeTab = "new"'>Send your first request →</button></p>
+            }
+            else if (requests.Count == 0)
+            {
+                <p class="restock-empty">No transfer requests from this account yet.</p>
             }
             else
             {
@@ -239,6 +284,11 @@
     private PosStockLevelReport? stockLevels;
     private Guid? selectedStoreId;
     private Guid? warehouseLocationId;
+    private readonly List<PosLocation> warehouses = [];
+    private readonly List<PosSupplyRequest> supplyRequests = [];
+
+    /// <summary>Whether the chosen destination is the warehouse, which is bought for rather than transferred to.</summary>
+    private bool IsWarehouseRequest => selectedStoreId is { } chosen && warehouses.Any(w => w.Id == chosen);
     private Guid? savedDraftId;
     private Guid? justSentId;
     private string search = string.Empty;
@@ -275,9 +325,10 @@
     {
         get
         {
-            if (selectedStoreId is not { } storeId || stores.All(store => store.Id != storeId))
+            if (selectedStoreId is not { } storeId
+                || (stores.All(store => store.Id != storeId) && warehouses.All(warehouse => warehouse.Id != storeId)))
             {
-                return "Choose a store to deliver to.";
+                return "Choose where the goods should go.";
             }
 
             if (draft.Count == 0)
@@ -290,7 +341,10 @@
                 return "Every product needs a quantity above zero.";
             }
 
-            return warehouseLocationId is null
+            // A store request is filled from the warehouse, so there has to be
+            // one. The warehouse's own request is filled by a supplier, so it
+            // does not.
+            return !IsWarehouseRequest && warehouseLocationId is null
                 ? "The main warehouse is not configured. Ask the owner to set it up."
                 : null;
         }
@@ -341,6 +395,13 @@
             {
                 warehouseLocationId = locations.Value.FirstOrDefault(location => location.Kind == 0 && location.IsActive)?.Id;
                 stores.AddRange(locations.Value.Where(location => location.Kind == 1 && location.IsActive && Session.CanUseInventoryLocation(location.Id)).OrderBy(location => location.Code));
+
+                // The warehouse can ask for stock too, but nobody upstream holds
+                // it: its request goes to the owner to buy. It is offered as a
+                // destination alongside the stores so there is one place to ask.
+                warehouses.AddRange(locations.Value
+                    .Where(location => location.Kind == 0 && location.IsActive && Session.CanUseInventoryLocation(location.Id))
+                    .OrderBy(location => location.Code));
                 selectedStoreId = Session.WorkLocationId is { } preferred && stores.Any(store => store.Id == preferred)
                     ? preferred : stores.Count == 1 ? stores[0].Id : null;
             }
@@ -475,6 +536,12 @@
         message = null;
         try
         {
+            if (IsWarehouseRequest)
+            {
+                await SendSupplyRequestAsync(storeId);
+                return;
+            }
+
             PosCreateRestockRequest body = new(storeId,
                 [.. draft.Select(line => new PosTransferLineRequest(line.Product.Id, line.Quantity))],
                 warehouseLocationId);
@@ -504,11 +571,64 @@
         finally { sending = false; }
     }
 
+    /// <summary>
+    /// Sends the warehouse's own request. There is no draft stage and nothing to
+    /// submit afterwards: a supply request is raised already waiting on the owner,
+    /// because there is no picking to prepare for.
+    /// </summary>
+    /// <param name="warehouseId">The warehouse asking.</param>
+    private async Task SendSupplyRequestAsync(Guid warehouseId)
+    {
+        PosCreateSupplyRequest body = new(
+            warehouseId,
+            [.. draft.Select(line => new PosSupplyRequestLine(line.Product.Id, line.Quantity))]);
+
+        ApiResult<PosReference> created = await Api.CreateSupplyRequestAsync(body, CancellationToken.None);
+
+        if (!created.IsSuccess || created.Value is null)
+        {
+            message = created.Error ?? "The request could not be sent.";
+            return;
+        }
+
+        draft.Clear();
+        search = string.Empty;
+        historyFilter = "all";
+        activeTab = "history";
+        message = "Supply request sent to the owner, who will order these from a supplier.";
+    }
+
+    /// <summary>Colours a supply request by where it has got to.</summary>
+    /// <param name="status">The request status.</param>
+    /// <returns>The status chip class.</returns>
+    private static string SupplyStatusClass(string status) => status switch
+    {
+        "Submitted" => "pending",
+        "PartiallyOrdered" => "transit",
+        "Ordered" => "approved",
+        _ => string.Empty,
+    };
+
     private async Task LoadRequestsAsync()
     {
         loadingRequests = true;
         try
         {
+            if (warehouses.Count > 0)
+            {
+                // The warehouse's own requests are a different document and do
+                // not come back with the transfers.
+                ApiResult<List<PosSupplyRequest>> supply =
+                    await Api.GetSupplyRequestsAsync(false, CancellationToken.None);
+                supplyRequests.Clear();
+                if (supply.IsSuccess && supply.Value is not null)
+                {
+                    supplyRequests.AddRange(supply.Value
+                        .Where(request => warehouses.Any(w => w.Id == request.DestinationLocationId))
+                        .OrderByDescending(request => request.RequestedAtUtc));
+                }
+            }
+
             ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
             if (!result.IsSuccess || result.Value is null) { message ??= result.Error ?? "Requests could not be loaded."; return; }
             requests.Clear();
@@ -554,7 +674,10 @@
         liveRefresh?.Dispose();
     }
 
-    private string StoreName(Guid id) => stores.FirstOrDefault(store => store.Id == id)?.Name ?? "Store";
+    private string StoreName(Guid id)
+        => stores.FirstOrDefault(store => store.Id == id)?.Name
+            ?? warehouses.FirstOrDefault(warehouse => warehouse.Id == id)?.Name
+            ?? "Store";
     private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
         ? $"Restock request {TransferLabels.ShortId(request.Id)}"
         : request.Number;

@@ -7,9 +7,15 @@ namespace Pos.Application.Organizations;
 /// <summary>
 /// Closes a location. Locations are never deleted: their codes, movements and
 /// receipts are part of the historical ledger, so retirement means marking the
-/// location inactive from a closing business date. Refused while stock or open
-/// documents remain, and never available for the system counterparty rows.
+/// location inactive from a closing business date. The location then accepts no
+/// further operations, while everything it already recorded stays readable.
+/// Outstanding stock and open documents do <em>not</em> block a close, and the
+/// system counterparty rows can never be closed at all.
 /// </summary>
+/// <remarks>
+/// A close is final: nothing reopens a location, and its details and settings
+/// are frozen from that moment.
+/// </remarks>
 /// <param name="LocationId">The location to close.</param>
 /// <param name="ClosingDate">The effective closing business date.</param>
 public sealed record CloseLocationCommand(LocationId LocationId, DateOnly ClosingDate)

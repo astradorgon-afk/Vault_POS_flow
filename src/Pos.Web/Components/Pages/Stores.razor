@@ -76,7 +76,7 @@ else if (report is not null)
                 </div>
 
                 <dl class="st-stats">
-                    <div><dt>Products in</dt><dd>@Quantity(store.IncomingUnits)</dd><small>@store.InboundTransfers inbound transfers</small></div>
+                    <div><dt>Products in</dt><dd>@Quantity(store.IncomingUnits)</dd><small>@InboundSources(store)</small></div>
                     <div><dt>Products out</dt><dd>@Quantity(store.OutgoingUnits)</dd><small>@store.OutboundTransfers outbound transfers</small></div>
                     <div><dt>Supply requests</dt><dd>@store.RestockRequests.ToString("N0", CultureInfo.InvariantCulture)</dd><small>@store.PendingApprovalRequests awaiting approval</small></div>
                     <div><dt>Approved, awaiting dispatch</dt><dd>@store.AwaitingDispatchRequests.ToString("N0", CultureInfo.InvariantCulture)</dd></div>
@@ -84,8 +84,11 @@ else if (report is not null)
                     <div><dt>Last products sent</dt><dd>@LastEventTime(store.LastOutgoingAtUtc)</dd></div>
                 </dl>
 
-                <div class="st-flow-share" role="img" aria-label="@ShareOfMovement(store)% share of product units moved across stores">
-                    <span style="width:@ShareOfMovement(store)%"></span>
+                <div class="st-flow-share" role="img" aria-label="@ShareOfMovement(store)% share of product units moved across stores: @Quantity(store.IncomingUnits) in, @Quantity(store.OutgoingUnits) out">
+                    <span style="width:@ShareOfMovement(store)%">
+                        <i class="st-flow-in" style="width:@DirectionShare(store.IncomingUnits, store)%"></i>
+                        <i class="st-flow-out" style="width:@DirectionShare(store.OutgoingUnits, store)%"></i>
+                    </span>
                 </div>
                 <div class="st-chart-legend"><span><i class="st-chart-in-key"></i>In @Quantity(store.IncomingUnits)</span><span><i class="st-chart-out-key"></i>Out @Quantity(store.OutgoingUnits)</span></div>
                 <div class="st-chart" role="img" aria-label="Incoming and outgoing product units over the selected period">
@@ -99,7 +102,7 @@ else if (report is not null)
                 </div>
 
                 <div class="st-recent-products">
-                    <h3>Latest transfers</h3>
+                    <h3>Latest movement</h3>
                     @if (store.RecentItems.Count == 0)
                     {
                         <p>No product movement or requests in this period.</p>
@@ -249,6 +252,28 @@ else if (report is not null)
     {
         decimal total = report?.Stores.Sum(StoreProductsMoved) ?? 0m;
         return total == 0m ? 0m : decimal.Round(StoreProductsMoved(store) / total * 100m, 0);
+    }
+
+    // Stock arrives two ways. Naming only transfers under a figure that counts
+    // supplier deliveries as well reads as a miscount, so both are named.
+    private static string InboundSources(PosStoreMovement store)
+    {
+        string transfers = $"{store.InboundTransfers} inbound transfer{(store.InboundTransfers == 1 ? "" : "s")}";
+        return store.InboundReceipts == 0
+            ? transfers
+            : $"{transfers} · {store.InboundReceipts} supplier deliver{(store.InboundReceipts == 1 ? "y" : "ies")}";
+    }
+
+    // How much of this store's own movement went one way. The bar's width is the
+    // store's share of every store's movement, which leaves two stores that moved
+    // the same amount looking identical even when one only received and the other
+    // only sent. Colouring the bar by direction, in the same two colours the
+    // legend underneath uses, tells those two apart at a glance.
+    private static string DirectionShare(decimal units, PosStoreMovement store)
+    {
+        decimal moved = StoreProductsMoved(store);
+        return (moved <= 0m ? 0m : decimal.Round(units / moved * 100m, 2))
+            .ToString(CultureInfo.InvariantCulture);
     }
 
     private static string ChartHeight(decimal units, PosStoreMovement store)

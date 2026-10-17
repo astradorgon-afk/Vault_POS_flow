@@ -187,6 +187,39 @@ public interface IPurchaseOrderRepository
         LocationId locationId,
         CancellationToken cancellationToken);
 
+    /// <summary>Gets the kind of an active location, or null when it is unknown or closed.</summary>
+    /// <param name="locationId">The location.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The kind, or <see langword="null"/>.</returns>
+    Task<LocationKind?> GetActiveLocationKindAsync(LocationId locationId, CancellationToken cancellationToken);
+
+    /// <summary>Stages a new warehouse supply request on the context.</summary>
+    /// <param name="request">The aggregate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The persisted identifier.</returns>
+    Task<Result<SupplyRequestId>> AddSupplyRequestAsync(
+        SupplyRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Loads the supply request a purchase order was raised against, tracked, so
+    /// an order that falls through can hand its claim back.
+    /// </summary>
+    /// <param name="purchaseOrderId">The order.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The request, or <see langword="null"/> when the order came from nowhere.</returns>
+    Task<SupplyRequest?> GetSupplyRequestForOrderAsync(
+        PurchaseOrderId purchaseOrderId,
+        CancellationToken cancellationToken);
+
+    /// <summary>Loads a supply request with its lines and orders, tracked.</summary>
+    /// <param name="id">The request identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The request, or <see langword="null"/> when it does not exist.</returns>
+    Task<SupplyRequest?> GetSupplyRequestByIdAsync(
+        SupplyRequestId id,
+        CancellationToken cancellationToken);
+
     /// <summary>Loads the batches named on return lines, so the handler can
     /// match them to products and tracking flags.</summary>
     /// <param name="batchIds">The batch identifiers.</param>

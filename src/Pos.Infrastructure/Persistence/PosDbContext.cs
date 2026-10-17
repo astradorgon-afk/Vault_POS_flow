@@ -165,6 +165,12 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets the supplier return lines.</summary>
     public DbSet<SupplierReturnLine> SupplierReturnLines => Set<SupplierReturnLine>();
 
+    /// <summary>Gets the warehouse supply requests.</summary>
+    public DbSet<SupplyRequest> SupplyRequests => Set<SupplyRequest>();
+
+    /// <summary>Gets the warehouse supply request lines.</summary>
+    public DbSet<SupplyRequestLine> SupplyRequestLines => Set<SupplyRequestLine>();
+
     /// <summary>Gets the transfer orders.</summary>
     public DbSet<Transfer> Transfers => Set<Transfer>();
 

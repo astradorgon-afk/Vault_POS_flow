@@ -229,13 +229,33 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
             client, $"/api/v1/transfers/{requestId:D}/submit", storeStaff);
         requestSubmitted.StatusCode.Should().Be(HttpStatusCode.OK, await requestSubmitted.Content.ReadAsStringAsync());
 
+        // Dispatched but not yet received: the stock is on the truck, so it counts
+        // out of the warehouse and not yet into the store.
+        using HttpResponseMessage inTransit = await GetAsync(client, "/api/v1/dashboard/store-movements", owner);
+        inTransit.StatusCode.Should().Be(HttpStatusCode.OK, await inTransit.Content.ReadAsStringAsync());
+        using JsonDocument inTransitDocument = JsonDocument.Parse(await inTransit.Content.ReadAsStringAsync());
+        JsonElement inTransitStore = inTransitDocument.RootElement.GetProperty("stores")
+            .EnumerateArray()
+            .Single(store => store.GetProperty("locationId").GetGuid() == activeStore.Value);
+        inTransitStore.GetProperty("incomingUnits").GetDecimal().Should().Be(0m);
+        inTransitStore.GetProperty("inboundTransfers").GetInt32().Should().Be(0);
+        inTransitStore.GetProperty("lastIncomingAtUtc").ValueKind.Should().Be(JsonValueKind.Null);
+
+        using HttpResponseMessage receipt = await PostJsonWithTokenAsync(
+            client,
+            $"/api/v1/transfers/{transferId:D}/receive",
+            new { receives = new object[] { new { lineNo = 1, batchId = (Guid?)null, receivedQuantity = 5m, damagedQuantity = 0m } } },
+            storeStaff);
+        receipt.StatusCode.Should().Be(HttpStatusCode.OK, await receipt.Content.ReadAsStringAsync());
+
         using HttpResponseMessage response = await GetAsync(client, "/api/v1/dashboard/store-movements", owner);
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         JsonElement report = document.RootElement;
         report.GetProperty("dispatchedTransferCount").GetInt32().Should().Be(1);
         JsonElement[] stores = [.. report.GetProperty("stores").EnumerateArray()];
-        stores.Should().HaveCount(2);
+        stores.Select(store => store.GetProperty("locationId").GetGuid())
+            .Should().Contain([activeStore.Value, quietStore.Value]);
 
         JsonElement active = stores.Single(store => store.GetProperty("locationId").GetGuid() == activeStore.Value);
         active.GetProperty("incomingUnits").GetDecimal().Should().Be(5m);
@@ -264,6 +284,47 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
         report.GetProperty("recentActivity").EnumerateArray()
             .Select(entry => entry.GetProperty("kind").GetString())
             .Should().Contain(["Store request", "Dispatched transfer"]);
+    }
+
+    [Fact]
+    public async Task ClosedStore_WithActivityInThePeriod_StaysInTheReport()
+    {
+        // Closing a store stops it taking new work; it does not erase what it
+        // did. An owner looking at a period the store was active in must still
+        // find it, or the history of a store that has since closed disappears at
+        // exactly the moment someone goes looking for it.
+        await factory.CreateLocationAsync("SM-HIST-WH", "History Warehouse", LocationKind.MainWarehouse);
+        LocationId store = await factory.CreateLocationAsync("SM-HIST1", "History Store", LocationKind.Store);
+        ProductId product = await ProductAsync("SM-HIST-P");
+        await factory.CreateUserAsync("sm-hist-admin", Roles.Administrator, tier: ApprovalTier.Tier3);
+        await factory.CreateUserAsync("sm-hist-staff", Roles.InventoryStaff, locations: [store]);
+        await factory.CreateUserAsync("sm-hist-owner", Roles.Owner, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string admin = await SignInAsync(client, "sm-hist-admin");
+        string staff = await SignInAsync(client, "sm-hist-staff");
+        string owner = await SignInAsync(client, "sm-hist-owner");
+
+        using HttpResponseMessage requested = await PostJsonWithTokenAsync(
+            client,
+            "/api/v1/transfers/restock-requests",
+            new
+            {
+                storeLocationId = store.Value,
+                lines = new object[] { new { productId = product.Value, quantity = 4m } },
+            },
+            staff);
+        requested.StatusCode.Should().Be(HttpStatusCode.OK, await requested.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage closed = await PostJsonWithTokenAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{store.Value}/close"),
+            new { closingDate = "2026-03-01" },
+            admin);
+        closed.StatusCode.Should().Be(HttpStatusCode.NoContent, await closed.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage movements = await GetAsync(client, "/api/v1/dashboard/store-movements", owner);
+        movements.StatusCode.Should().Be(HttpStatusCode.OK, await movements.Content.ReadAsStringAsync());
+        StoreLocationIds(movements).Should().Contain(store.Value);
     }
 
     [Fact]

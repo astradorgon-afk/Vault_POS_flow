@@ -104,7 +104,7 @@ public static class LocationEndpoints
             .WithName("ListLocationAdministration")
             .WithSummary("Lists physical locations and their operating settings for administrators.");
 
-        group.MapGet("/device-choices", ListAsync)
+        group.MapGet("/device-choices", ListDeviceChoicesAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Administration.ManageDevices)
             {
                 Scope = ScopeSource.None,
@@ -159,6 +159,30 @@ public static class LocationEndpoints
         PosDbContext context,
         CancellationToken cancellationToken)
     {
+        // Closed locations stay in the directory. A closed store's records — its
+        // transfers, counts and receipts — outlive it, and every one of them
+        // names a location that still has to resolve to something a person
+        // recognises rather than a raw identifier. Callers offering a choice
+        // filter on IsActive; callers resolving a name must not.
+        List<LocationDirectorySummary> locations = await context.Locations
+            .AsNoTracking()
+            .Where(l => !l.IsSystemCreated)
+            .OrderBy(l => l.Code)
+            .Select(l => new LocationDirectorySummary(l.Id.Value, l.Code, l.Name, l.Kind, l.IsActive))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(locations);
+    }
+
+    private static async Task<IResult> ListDeviceChoicesAsync(
+        PosDbContext context,
+        CancellationToken cancellationToken)
+    {
+        // A picker, not a directory: a till cannot be assigned to a location
+        // that has stopped trading. This used to share the directory handler,
+        // which is safe only while that handler hides closed locations — and it
+        // no longer does, because history needs their names.
         List<LocationDirectorySummary> locations = await context.Locations
             .AsNoTracking()
             .Where(l => l.IsActive && !l.IsSystemCreated)
@@ -174,9 +198,11 @@ public static class LocationEndpoints
         PosDbContext context,
         CancellationToken cancellationToken)
     {
+        // The administration list is where a closed location is reviewed, so it
+        // carries them too — which is what ClosedOn below was always for.
         List<LocationSummary> locations = await context.Locations
             .AsNoTracking()
-            .Where(l => l.IsActive && !l.IsSystemCreated)
+            .Where(l => !l.IsSystemCreated)
             .OrderBy(l => l.Code)
             .Select(l => new LocationSummary(
                 l.Id.Value,

@@ -22,6 +22,22 @@ else
 {
     <div class="po-compose po-compose-new">
         <div class="po-compose-main">
+            @if (supplyRequest is { } seeded)
+            {
+                <section class="po-seeded" role="note">
+                    <strong>Buying for @seeded.Number</strong>
+                    <span>
+                        The warehouse asked for @seeded.Lines.Count product@(seeded.Lines.Count == 1 ? "" : "s") on
+                        @seeded.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture).
+                        Quantities are what is still to be bought. Choose the supplier and check the costs, then save the order.
+                        Ordering only part of it leaves the rest on the request for a second supplier.
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(seeded.Note))
+                    {
+                        <span class="po-seeded-note">“@seeded.Note”</span>
+                    }
+                </section>
+            }
             <section class="qr-card po-card po-card-details">
                 <div class="po-section-heading">
                     <span class="po-step" aria-hidden="true">01</span>
@@ -247,6 +263,15 @@ else
 @code {
     private const int MaxMatches = 12;
 
+    /// <summary>
+    /// The warehouse supply request this order is being raised against, when the
+    /// owner arrived here from the approvals queue.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "supplyRequest")]
+    public Guid? SupplyRequestId { get; set; }
+
+    private PosSupplyRequest? supplyRequest;
+
     private readonly List<PosSupplier> suppliers = [];
     private readonly List<PosLocation> destinations = [];
     private readonly List<PosOrderableProduct> catalogue = [];
@@ -326,7 +351,7 @@ else
 
             suppliers.AddRange(suppliersTask.Result.Value ?? []);
             destinations.AddRange((locationsTask.Result.Value ?? [])
-                .Where(l => l.Kind is 0 or 1)
+                .Where(l => l.Kind is 0 or 1 && l.IsActive)
                 .OrderBy(l => l.Kind)
                 .ThenBy(l => l.Code, StringComparer.Ordinal));
             foreach (PosUnitOfMeasure unit in unitsTask.Result.Value ?? []) units[unit.Id] = unit;
@@ -336,6 +361,8 @@ else
 
             destinationId = Session.WorkLocationId is { } preferred && destinations.Any(location => location.Id == preferred)
                 ? preferred : destinations.FirstOrDefault()?.Id ?? Guid.Empty;
+
+            await SeedFromSupplyRequestAsync();
             if (suppliersTask.Result is { IsSuccess: false })
             {
                 message = suppliersTask.Result.Error;
@@ -497,6 +524,62 @@ else
 
     private string UnitName(Guid id) => units.TryGetValue(id, out PosUnitOfMeasure? unit) ? unit.Name.ToLowerInvariant() : "unit";
 
+    /// <summary>
+    /// Fills the composer from a warehouse supply request: the lines the
+    /// warehouse asked for, at the quantities still to be bought, delivered to
+    /// the warehouse that asked. The supplier and the costs are left blank —
+    /// deciding those is the whole reason the request came to the owner.
+    /// </summary>
+    private async Task SeedFromSupplyRequestAsync()
+    {
+        if (SupplyRequestId is not { } requestId)
+        {
+            return;
+        }
+
+        ApiResult<PosSupplyRequest> result = await Api.GetSupplyRequestAsync(requestId, CancellationToken.None);
+
+        if (result is not { IsSuccess: true, Value: { } request })
+        {
+            message = result.Error ?? "That supply request could not be opened.";
+            return;
+        }
+
+        supplyRequest = request;
+
+        if (destinations.Any(location => location.Id == request.DestinationLocationId))
+        {
+            destinationId = request.DestinationLocationId;
+        }
+
+        List<string> missing = [];
+
+        foreach (PosSupplyRequestLineView line in request.Lines.Where(l => l.OutstandingQuantity > 0m))
+        {
+            PosOrderableProduct? product = catalogue.FirstOrDefault(p => p.Id == line.ProductId);
+
+            if (product is null)
+            {
+                // The product was retired after the request was raised. Say so
+                // rather than quietly dropping a line the warehouse asked for.
+                missing.Add(FormattableString.Invariant($"line {line.LineNo}"));
+                continue;
+            }
+
+            lines.Add(new DraftLine(product)
+            {
+                Quantity = line.OutstandingQuantity,
+                UnitCost = product.DefaultPurchaseCost ?? 0m,
+                RequestLineNo = line.LineNo,
+            });
+        }
+
+        if (missing.Count > 0)
+        {
+            message = $"Some products on this request are no longer orderable and were left off: {string.Join(", ", missing)}.";
+        }
+    }
+
     private async Task SaveAsync(bool submit)
     {
         if (Missing.Count > 0)
@@ -508,14 +591,33 @@ else
         message = null;
         try
         {
-            ApiResult<PosReference> created = await Api.CreatePurchaseOrderAsync(
-                new PosCreatePurchaseOrder(
-                    useCustomSupplier ? null : supplierId,
-                    destinationId,
-                    [.. lines.Select(l => new PosCreatePurchaseOrderLine(l.Product.Id, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
-                    ExpectedAtUtc: expectedOn is { } day ? new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(8)) : null,
-                    CustomSupplierName: useCustomSupplier ? customSupplierName.Trim() : null),
-                CancellationToken.None);
+            DateTimeOffset? expectedAtUtc = expectedOn is { } day
+                ? new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(8))
+                : null;
+
+            // An order raised against a warehouse request is created through the
+            // request, so the two are written in one transaction and the request
+            // knows what it turned into. Lines typed in on top of a seeded order
+            // are ordinary lines and carry no request line of their own.
+            ApiResult<PosReference> created = supplyRequest is { } request
+                ? await Api.OrderSupplyRequestAsync(
+                    request.Id,
+                    new PosOrderSupplyRequest(
+                        useCustomSupplier ? null : supplierId,
+                        [.. lines.Where(l => l.RequestLineNo is not null)
+                            .Select(l => new PosSupplyRequestOrderLine(
+                                l.RequestLineNo!.Value, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
+                        ExpectedAtUtc: expectedAtUtc,
+                        CustomSupplierName: useCustomSupplier ? customSupplierName.Trim() : null),
+                    CancellationToken.None)
+                : await Api.CreatePurchaseOrderAsync(
+                    new PosCreatePurchaseOrder(
+                        useCustomSupplier ? null : supplierId,
+                        destinationId,
+                        [.. lines.Select(l => new PosCreatePurchaseOrderLine(l.Product.Id, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
+                        ExpectedAtUtc: expectedAtUtc,
+                        CustomSupplierName: useCustomSupplier ? customSupplierName.Trim() : null),
+                    CancellationToken.None);
             if (created is not { IsSuccess: true, Value: { } reference })
             {
                 message = created.Error;
@@ -550,6 +652,9 @@ else
         public decimal Quantity { get; set; }
 
         public decimal UnitCost { get; set; }
+
+        /// <summary>The supply request line this came from, when seeded from one.</summary>
+        public int? RequestLineNo { get; init; }
 
         public decimal Total => Math.Round(Quantity * UnitCost, 2);
 

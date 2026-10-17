@@ -36,6 +36,14 @@ public sealed partial class InventoryCountDetail : IDisposable
     /// <summary>Lines shown at once. A full physical runs to hundreds; a counter works a screen at a time.</summary>
     private const int PageSize = 50;
 
+    /// <summary>
+    /// Lines sent in one save. Head office refuses a request carrying more than
+    /// its own cap of 500, so a sheet longer than that goes up in instalments
+    /// rather than failing whole. Keep this at or under that cap — it mirrors
+    /// InventoryControlRules.MaxLines, which the server owns.
+    /// </summary>
+    private const int SaveBatchSize = 500;
+
     private readonly List<PosLocation> locations = [];
     private readonly Dictionary<Guid, (string Sku, string Name)> productNames = [];
     private readonly Dictionary<Guid, Guid> productCategories = [];
@@ -554,17 +562,16 @@ public sealed partial class InventoryCountDetail : IDisposable
 
     private Task SaveCountsAsync()
         => RunCommandAsync(
-            token => Api.RecordInventoryCountLinesAsync(CountId, sheet.CountedRequests(), token),
+            token => SaveLinesAsync(sheet.CountedRequests(), token),
             "Counts saved.",
-            "The counts on this sheet were not saved");
+            "The sheet was not fully saved");
 
     private Task SubmitAsync()
         => RunCommandAsync(async token =>
         {
             if (sheet.HasUnsavedChanges)
             {
-                ApiResult<PosReference> saved = await Api.RecordInventoryCountLinesAsync(
-                    CountId, sheet.CountedRequests(), token);
+                ApiResult<PosReference> saved = await SaveLinesAsync(sheet.CountedRequests(), token);
                 if (!saved.IsSuccess)
                 {
                     return saved;
@@ -573,6 +580,55 @@ public sealed partial class InventoryCountDetail : IDisposable
 
             return await Api.SubmitInventoryCountAsync(CountId, token);
         }, "Count submitted for approval.", "This sheet was not submitted");
+
+    /// <summary>
+    /// Saves a sheet of any size, in instalments head office will accept.
+    /// </summary>
+    /// <param name="lines">Every counted line on the sheet.</param>
+    /// <param name="token">Cancels with the page.</param>
+    /// <returns>
+    /// The last reference written, or the first refusal — told along with how far
+    /// the sheet got, because each instalment is recorded on its own and a half
+    /// saved sheet is a different thing to recover from than an untouched one.
+    /// </returns>
+    private async Task<ApiResult<PosReference>> SaveLinesAsync(
+        List<PosCountLineRequest> lines, CancellationToken token)
+    {
+        if (lines.Count == 0)
+        {
+            return ApiResult<PosReference>.Failure("There is nothing to save yet — count at least one line first.");
+        }
+
+        ApiResult<PosReference> result = ApiResult<PosReference>.Failure("No instalment was sent.");
+
+        for (int sent = 0; sent < lines.Count; sent += SaveBatchSize)
+        {
+            result = await Api.RecordInventoryCountLinesAsync(
+                CountId, lines.GetRange(sent, Math.Min(SaveBatchSize, lines.Count - sent)), token);
+
+            if (!result.IsSuccess)
+            {
+                string reason = string.IsNullOrWhiteSpace(result.Error)
+                    ? "Head office refused the request without saying why."
+                    : result.Error;
+
+                return ApiResult<PosReference>.Failure(
+                    $"{reason} {ProgressNote(sent, lines.Count)}",
+                    result.ErrorCode);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Says how much of the sheet reached head office before a refusal.</summary>
+    /// <param name="saved">Lines recorded by earlier instalments.</param>
+    /// <param name="total">Lines the save set out to write.</param>
+    /// <returns>A sentence the counter can act on.</returns>
+    private static string ProgressNote(int saved, int total)
+        => saved == 0
+            ? "Nothing was recorded — the sheet is as it was."
+            : $"The first {saved} of {total} lines were recorded; the rest were not. Save again to finish.";
 
     private async Task ApproveAsync()
     {

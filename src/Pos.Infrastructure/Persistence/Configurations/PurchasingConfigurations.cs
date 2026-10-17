@@ -420,3 +420,133 @@ public sealed class DocumentCounterConfiguration : IEntityTypeConfiguration<Docu
         builder.Property(c => c.NextValue).HasColumnName("next_value").IsRequired();
     }
 }
+/// <summary>Maps a warehouse supply request and its lines.</summary>
+public sealed class SupplyRequestConfiguration : IEntityTypeConfiguration<SupplyRequest>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SupplyRequest> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("supply_request", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(r => r.Number).HasColumnName("number").HasMaxLength(DocumentNumber.MaxLength);
+        builder.Property(r => r.DestinationLocationId).HasColumnName("destination_location_id").IsRequired();
+        builder.Property(r => r.Status).HasColumnName("status").HasConversion<short>().IsRequired();
+        builder.Property(r => r.Note).HasColumnName("note").HasMaxLength(SupplyRequest.TextMaxLength);
+        builder.Property(r => r.RequestedByUserId).HasColumnName("requested_by_user_id").IsRequired();
+        builder.Property(r => r.RequestedAtUtc).HasColumnName("requested_at_utc").IsRequired();
+        builder.Property(r => r.DecidedByUserId).HasColumnName("decided_by_user_id");
+        builder.Property(r => r.DecidedAtUtc).HasColumnName("decided_at_utc");
+        builder.Property(r => r.DecisionReason).HasColumnName("decision_reason").HasMaxLength(SupplyRequest.TextMaxLength);
+
+        builder.HasIndex(r => r.Number).IsUnique().HasDatabaseName("ux_supply_request_number");
+
+        // The owner's queue reads open requests newest first, which is the only
+        // access path that runs on every page load.
+        builder.HasIndex(r => new { r.Status, r.RequestedAtUtc })
+            .HasDatabaseName("ix_supply_request_status_requested");
+
+        builder.HasMany(r => r.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.SupplyRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(r => r.Orders)
+            .WithOne()
+            .HasForeignKey(o => o.SupplyRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Maps one requested product on a supply request.</summary>
+public sealed class SupplyRequestLineConfiguration : IEntityTypeConfiguration<SupplyRequestLine>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SupplyRequestLine> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("supply_request_line", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(l => l.Id);
+        builder.Property(l => l.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(l => l.SupplyRequestId).HasColumnName("supply_request_id").IsRequired();
+        builder.Property(l => l.LineNo).HasColumnName("line_no").IsRequired();
+        builder.Property(l => l.ProductId).HasColumnName("product_id").IsRequired();
+        builder.Property(l => l.Note).HasColumnName("note").HasMaxLength(SupplyRequest.TextMaxLength);
+
+        builder.Property(l => l.Quantity)
+            .HasColumnName("quantity")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+
+        builder.Property(l => l.OrderedQuantity)
+            .HasColumnName("ordered_quantity")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+
+        builder.Ignore(l => l.OutstandingQuantity);
+
+        builder.HasIndex(l => new { l.SupplyRequestId, l.LineNo })
+            .IsUnique()
+            .HasDatabaseName("ux_supply_request_line_no");
+    }
+}
+
+/// <summary>Maps the link from a supply request to a purchase order raised for it.</summary>
+public sealed class SupplyRequestOrderConfiguration : IEntityTypeConfiguration<SupplyRequestOrder>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SupplyRequestOrder> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("supply_request_order", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(o => new { o.SupplyRequestId, o.PurchaseOrderId });
+
+        builder.Property(o => o.SupplyRequestId).HasColumnName("supply_request_id").IsRequired();
+        builder.Property(o => o.PurchaseOrderId).HasColumnName("purchase_order_id").IsRequired();
+        builder.Property(o => o.OrderedAtUtc).HasColumnName("ordered_at_utc").IsRequired();
+        builder.Property(o => o.ReleasedAtUtc).HasColumnName("released_at_utc");
+
+        builder.Ignore(o => o.IsReleased);
+
+        // Opening a purchase order shows which request it came from, so the
+        // lookup runs the other way round too.
+        builder.HasIndex(o => o.PurchaseOrderId).HasDatabaseName("ix_supply_request_order_purchase_order");
+
+        builder.HasMany(o => o.Lines)
+            .WithOne()
+            .HasForeignKey(l => new { l.SupplyRequestId, l.PurchaseOrderId })
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Maps how much of each request line one purchase order took.</summary>
+public sealed class SupplyRequestOrderLineConfiguration : IEntityTypeConfiguration<SupplyRequestOrderLine>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SupplyRequestOrderLine> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("supply_request_order_line", PosDbContext.PurchasingSchema);
+
+        builder.HasKey(l => new { l.SupplyRequestId, l.PurchaseOrderId, l.LineNo });
+
+        builder.Property(l => l.SupplyRequestId).HasColumnName("supply_request_id").IsRequired();
+        builder.Property(l => l.PurchaseOrderId).HasColumnName("purchase_order_id").IsRequired();
+        builder.Property(l => l.LineNo).HasColumnName("line_no").IsRequired();
+
+        builder.Property(l => l.Quantity)
+            .HasColumnName("quantity")
+            .HasPrecision(18, Quantity.Scale)
+            .IsRequired();
+    }
+}

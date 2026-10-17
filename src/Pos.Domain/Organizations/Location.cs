@@ -17,7 +17,16 @@ namespace Pos.Domain.Organizations;
 /// </para>
 /// <para>
 /// Locations are never deleted. Closing sets <see cref="IsActive"/> to false and
-/// is only valid once every balance is zero and no documents are open.
+/// records the closing business date. It takes the location out of service — no
+/// transfer, count, adjustment or receipt may touch it afterwards — while every
+/// record it already carries stays readable, and stays in the reports for the
+/// periods it was open.
+/// </para>
+/// <para>
+/// Closing does <em>not</em> require the location to be empty: outstanding stock
+/// and documents left open do not block it, as
+/// <c>Close_WhileStockRemains_Succeeds</c> pins. Nothing reopens a location
+/// either, so a close is final.
 /// </para>
 /// </remarks>
 public sealed class Location : AggregateRoot<LocationId>

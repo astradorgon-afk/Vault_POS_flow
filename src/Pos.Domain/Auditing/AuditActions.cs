@@ -187,8 +187,20 @@ public static class AuditActions
         /// <summary>A purchase order was created.</summary>
         public const string OrderCreated = "purchase.order.created";
 
+        /// <summary>A purchase order was submitted for approval and numbered.</summary>
+        public const string OrderSubmitted = "purchase.order.submitted";
+
         /// <summary>A purchase order was approved.</summary>
         public const string OrderApproved = "purchase.order.approved";
+
+        /// <summary>An approved order was sent to the supplier.</summary>
+        public const string OrderSent = "purchase.order.sent";
+
+        /// <summary>A purchase order was cancelled or withdrawn.</summary>
+        public const string OrderCancelled = "purchase.order.cancelled";
+
+        /// <summary>A purchase order was closed out.</summary>
+        public const string OrderClosed = "purchase.order.closed";
 
         /// <summary>A purchase order was rejected or cancelled.</summary>
         public const string OrderRejected = "purchase.order.rejected";
@@ -201,6 +213,15 @@ public static class AuditActions
 
         /// <summary>A supplier delivered directly to a store.</summary>
         public const string DirectToStoreDelivery = "purchase.direct_to_store";
+
+        /// <summary>The warehouse asked to be restocked.</summary>
+        public const string SupplyRequested = "purchase.supply.requested";
+
+        /// <summary>A supply request was turned into a purchase order.</summary>
+        public const string SupplyOrdered = "purchase.supply.ordered";
+
+        /// <summary>A supply request was turned down or withdrawn.</summary>
+        public const string SupplyClosed = "purchase.supply.closed";
     }
 
     /// <summary>Transfer actions.</summary>

@@ -64,12 +64,22 @@ else
     }
     else
     {
+        <nav class="location-scope" aria-label="Filter locations">
+            <button type="button" class="@(scope == "live" ? "active" : null)" @onclick='() => scope = "live"'>Live <span>@locations.Count(l => l.IsActive)</span></button>
+            <button type="button" class="@(scope == "closed" ? "active" : null)" @onclick='() => scope = "closed"'>Closed <span>@locations.Count(l => !l.IsActive)</span></button>
+            <button type="button" class="@(scope == "all" ? "active" : null)" @onclick='() => scope = "all"'>All <span>@locations.Count</span></button>
+        </nav>
+
         <div class="location-workspace">
             <section class="location-list" aria-label="Locations">
-                @foreach (PosLocationAdmin location in locations)
+                @if (Visible.Count == 0)
                 {
-                    <button type="button" class="location-card @(selected?.Id == location.Id ? "selected" : "")" @onclick="() => SelectLocation(location)" @key="location.Id">
-                        <span class="location-code">@location.Code</span>
+                    <p class="location-scope-empty">@(scope == "closed" ? "No locations have been closed." : "No live locations.")</p>
+                }
+                @foreach (PosLocationAdmin location in Visible)
+                {
+                    <button type="button" class="location-card @(selected?.Id == location.Id ? "selected" : "") @(location.IsActive ? null : "is-closed")" @onclick="() => SelectLocation(location)" @key="location.Id">
+                        <span class="location-code">@location.Code @if (!location.IsActive) { <em class="location-closed-tag">Closed</em> }</span>
                         <strong>@location.Name</strong>
                         <small>@KindName(location.Kind) · @location.TimeZoneId</small>
                         <i>@PolicyName(location.Settings.NegativeStockPolicy)</i>
@@ -81,7 +91,17 @@ else
             {
                 <section class="policy-editor" aria-labelledby="policy-editor-title">
                     <header>
-                        <div><span>@selected.Code · @KindName(selected.Kind)</span><h2 id="policy-editor-title">@selected.Name</h2><p>Open since @selected.OpenedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture) · @selected.TimeZoneId</p></div>
+                        <div>
+                            <span>@selected.Code · @KindName(selected.Kind)</span>
+                            <h2 id="policy-editor-title">@selected.Name</h2>
+                            <p>
+                                Open since @selected.OpenedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture) · @selected.TimeZoneId
+                                @if (!selected.IsActive && selected.ClosedOn is { } closedOn)
+                                {
+                                    <text> · closed @closedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)</text>
+                                }
+                            </p>
+                        </div>
                         <span class="location-kind-badge">@KindName(selected.Kind)</span>
                     </header>
 
@@ -118,7 +138,16 @@ else
                         </footer>
                     </div>
 
-                    @if (CanManageLocations)
+                    @if (!selected.IsActive)
+                    {
+                        <div class="policy-section location-danger">
+                            <div class="policy-section-title"><span>Closed</span><div><strong>This location is retired</strong><small>It takes no new sales, transfers, counts or receipts. Everything it did stays on the record and in the reports for the periods it was open.</small></div></div>
+                            <div class="location-danger-actions">
+                                <a class="location-primary location-history-link" href="@($"/locations/{selected.Id:D}/history")">View its full record →</a>
+                            </div>
+                        </div>
+                    }
+                    else if (CanManageLocations)
                     {
                         <div class="policy-section location-danger">
                             <div class="policy-section-title"><span>Close</span><div><strong>Retire this location</strong><small>Closing stops new sales, transfers and receipts here. History stays intact.</small></div></div>
@@ -167,6 +196,18 @@ else
     private int editKind = 1;
     private string editTimeZone = "Asia/Manila";
     private bool showCloseConfirm;
+    private string scope = "live";
+
+    /// <summary>
+    /// The locations on show. Live by default: a closed location is kept for
+    /// its record, not for day-to-day work, so it does not belong in the way.
+    /// </summary>
+    private List<PosLocationAdmin> Visible => scope switch
+    {
+        "live" => [.. locations.Where(location => location.IsActive)],
+        "closed" => [.. locations.Where(location => !location.IsActive)],
+        _ => locations,
+    };
     private string closeDate = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     private bool CanViewLocations => Session.HasPermission("location.manage");

@@ -2665,6 +2665,156 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("supplier_return_line", "purchasing");
                 });
 
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("DecidedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at_utc");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("decided_by_user_id");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("decision_reason");
+
+                    b.Property<Guid>("DestinationLocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_location_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("number");
+
+                    b.Property<DateTimeOffset>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at_utc");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by_user_id");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasDatabaseName("ux_supply_request_number");
+
+                    b.HasIndex("Status", "RequestedAtUtc")
+                        .HasDatabaseName("ix_supply_request_status_requested");
+
+                    b.ToTable("supply_request", "purchasing");
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("LineNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("line_no");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("note");
+
+                    b.Property<decimal>("OrderedQuantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("ordered_quantity");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<Guid>("SupplyRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("supply_request_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SupplyRequestId", "LineNo")
+                        .IsUnique()
+                        .HasDatabaseName("ux_supply_request_line_no");
+
+                    b.ToTable("supply_request_line", "purchasing");
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestOrder", b =>
+                {
+                    b.Property<Guid>("SupplyRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("supply_request_id");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("purchase_order_id");
+
+                    b.Property<DateTimeOffset>("OrderedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ordered_at_utc");
+
+                    b.Property<DateTimeOffset?>("ReleasedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("released_at_utc");
+
+                    b.HasKey("SupplyRequestId", "PurchaseOrderId");
+
+                    b.HasIndex("PurchaseOrderId")
+                        .HasDatabaseName("ix_supply_request_order_purchase_order");
+
+                    b.ToTable("supply_request_order", "purchasing");
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestOrderLine", b =>
+                {
+                    b.Property<Guid>("SupplyRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("supply_request_id");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("purchase_order_id");
+
+                    b.Property<int>("LineNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("line_no");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.HasKey("SupplyRequestId", "PurchaseOrderId", "LineNo");
+
+                    b.ToTable("supply_request_order_line", "purchasing");
+                });
+
             modelBuilder.Entity("Pos.Domain.Quarantine.QuarantineEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4870,6 +5020,33 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestLine", b =>
+                {
+                    b.HasOne("Pos.Domain.Purchasing.SupplyRequest", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("SupplyRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestOrder", b =>
+                {
+                    b.HasOne("Pos.Domain.Purchasing.SupplyRequest", null)
+                        .WithMany("Orders")
+                        .HasForeignKey("SupplyRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestOrderLine", b =>
+                {
+                    b.HasOne("Pos.Domain.Purchasing.SupplyRequestOrder", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("SupplyRequestId", "PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Pos.Domain.Quarantine.QuarantineEvent", b =>
                 {
                     b.HasOne("Pos.Domain.Quarantine.QuarantineIncident", null)
@@ -5071,6 +5248,18 @@ namespace Pos.Infrastructure.Persistence.Migrations.Postgres
                 });
 
             modelBuilder.Entity("Pos.Domain.Purchasing.SupplierReturn", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequest", b =>
+                {
+                    b.Navigation("Lines");
+
+                    b.Navigation("Orders");
+                });
+
+            modelBuilder.Entity("Pos.Domain.Purchasing.SupplyRequestOrder", b =>
                 {
                     b.Navigation("Lines");
                 });

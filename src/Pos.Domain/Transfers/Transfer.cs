@@ -1050,6 +1050,51 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
     }
 
     /// <summary>
+    /// Abandons a transfer that has not left the source yet.
+    /// </summary>
+    /// <remarks>
+    /// Picking records intent; dispatch is what posts the ledger. So a transfer
+    /// still sitting at Draft, Approved, Picking or Ready has moved no stock and
+    /// can simply be dropped — no reversal, nothing to put back. Without this a
+    /// transfer whose stock was consumed elsewhere between picking and dispatch
+    /// is stranded: it cannot dispatch, and the only cancel there was required
+    /// it to have dispatched first.
+    /// </remarks>
+    /// <param name="now">The current instant.</param>
+    /// <param name="reason">Why it is being abandoned.</param>
+    /// <param name="canceller">Who is abandoning it.</param>
+    /// <returns>Success, or a state or validation error.</returns>
+    public Result CancelBeforeDispatch(DateTimeOffset now, string reason, UserId canceller)
+    {
+        TransferStatus[] allowed =
+        [
+            TransferStatus.Draft,
+            TransferStatus.Submitted,
+            TransferStatus.InReview,
+            TransferStatus.Approved,
+            TransferStatus.Picking,
+            TransferStatus.Ready,
+        ];
+
+        if (!allowed.Contains(Status))
+        {
+            return Result.Failure(TransferErrors.InvalidTransferState(TransferStatus.Ready, Status));
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TransferErrors.CancelReasonRequired);
+        }
+
+        Status = TransferStatus.Cancelled;
+        CancelReason = reason.Trim();
+        CancelledByUserId = canceller;
+        CancelledAtUtc = now;
+        _custodyEvents.Add(Event(TransferCustodyEventKind.DispatchCancelled, canceller, now, reason.Trim()));
+        return Result.Success();
+    }
+
+    /// <summary>
     /// Cancels a dispatched transfer before the destination receives any of it.
     /// The stock returns to available at the source; the handler posts the
     /// reverse ledger group, which the rules engine treats as an approved,

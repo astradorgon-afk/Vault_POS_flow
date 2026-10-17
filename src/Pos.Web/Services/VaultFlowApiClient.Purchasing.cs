@@ -5,6 +5,8 @@ public sealed partial class VaultFlowApiClient
 {
     private const string Orders = "/api/v1/purchasing/orders";
 
+    private const string SupplyRequests = "/api/v1/supply-requests";
+
     /// <summary>Lists purchase orders, newest first; head office returns at most 200.</summary>
     public Task<ApiResult<List<PosPurchaseOrderSummary>>> GetPurchaseOrdersAsync(CancellationToken cancellationToken)
         => GetAsync<List<PosPurchaseOrderSummary>>($"{Orders}?limit=200", cancellationToken);
@@ -135,6 +137,48 @@ public sealed partial class VaultFlowApiClient
             FormattableString.Invariant(
                 $"/api/v1/dashboard/product-performance?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}&rankBy={(byUnits ? "units" : "revenue")}&limit=10"),
             cancellationToken);
+
+    /// <summary>Lists the warehouse's supply requests, newest first.</summary>
+    public Task<ApiResult<List<PosSupplyRequest>>> GetSupplyRequestsAsync(bool openOnly, CancellationToken cancellationToken)
+        => GetAsync<List<PosSupplyRequest>>(
+            FormattableString.Invariant($"{SupplyRequests}?openOnly={(openOnly ? "true" : "false")}"),
+            cancellationToken);
+
+    /// <summary>Gets one supply request with its lines and the orders raised for it.</summary>
+    public Task<ApiResult<PosSupplyRequest>> GetSupplyRequestAsync(Guid requestId, CancellationToken cancellationToken)
+        => GetAsync<PosSupplyRequest>(SupplyRequestPath(requestId), cancellationToken);
+
+    /// <summary>Raises a request for the main warehouse to be restocked.</summary>
+    public Task<ApiResult<PosReference>> CreateSupplyRequestAsync(
+        PosCreateSupplyRequest body, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(SupplyRequests, body, cancellationToken);
+
+    /// <summary>Raises a draft purchase order against a supply request.</summary>
+    public Task<ApiResult<PosReference>> OrderSupplyRequestAsync(
+        Guid requestId, PosOrderSupplyRequest body, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(SupplyRequestPath(requestId, "orders"), body, cancellationToken);
+
+    /// <summary>Turns a supply request down.</summary>
+    public Task<ApiResult<PosReference>> RejectSupplyRequestAsync(
+        Guid requestId, string? reason, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(SupplyRequestPath(requestId, "reject"), new { reason }, cancellationToken);
+
+    /// <summary>Withdraws a supply request.</summary>
+    public Task<ApiResult<PosReference>> CancelSupplyRequestAsync(
+        Guid requestId, string? reason, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(SupplyRequestPath(requestId, "cancel"), new { reason }, cancellationToken);
+
+    /// <summary>Gathers everything one location did, for review after it closes.</summary>
+    public Task<ApiResult<PosLocationHistory>> GetLocationHistoryAsync(
+        Guid locationId, CancellationToken cancellationToken)
+        => GetAsync<PosLocationHistory>(
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}/history"),
+            cancellationToken);
+
+    private static string SupplyRequestPath(Guid requestId, string? action = null)
+        => action is null
+            ? FormattableString.Invariant($"{SupplyRequests}/{requestId:D}")
+            : FormattableString.Invariant($"{SupplyRequests}/{requestId:D}/{action}");
 
     private static string OrderPath(Guid orderId, string? action = null)
         => action is null

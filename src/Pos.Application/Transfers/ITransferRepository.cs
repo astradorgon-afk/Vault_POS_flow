@@ -116,9 +116,11 @@ public interface ITransferRepository
 /// <summary>What a transfer handler needs to know about one location.</summary>
 /// <param name="Kind">The location kind, used to validate ledger states.</param>
 /// <param name="TimeZoneId">The IANA timezone, for the business date.</param>
+/// <param name="IsActive">Whether the location is still open for business.</param>
 public sealed record TransferLocationInfo(
     LocationKind Kind,
-    string TimeZoneId);
+    string TimeZoneId,
+    bool IsActive);
 
 /// <summary>
 /// One available bucket a picking handler may allocate from, with the facts it

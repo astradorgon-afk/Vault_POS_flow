@@ -51,7 +51,7 @@
             {
                 <NavLink class="nav-link" href="restock/fulfillment" @onclick="NotifyNavigation"><AppIcon Name="box-out" /> <span>Restock fulfillment</span></NavLink>
             }
-            @if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock)
+            @if (CanRequestRestock && !CanApproveRestock)
             {
                 <NavLink class="nav-link" href="restock" @onclick="NotifyNavigation"><AppIcon Name="box-in" /> <span>Restock requests</span></NavLink>
             }
@@ -158,7 +158,9 @@
     private bool CanViewCatalog => Session.HasPermission("product.view");
     private bool CanApproveRestock => Session.HasPermission("transfer.approve") &&
         Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
-    private bool CanRequestRestock => Session.WorkLocationKind == 1 &&
+    // Kind 1 is a store asking the warehouse for stock; kind 0 is the warehouse
+    // asking the owner to buy. Different documents, same page, same right.
+    private bool CanRequestRestock => Session.WorkLocationKind is 0 or 1 &&
         Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view");
     private bool CanFulfillRestock => Session.WorkLocationKind == 0 &&
         Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch") &&

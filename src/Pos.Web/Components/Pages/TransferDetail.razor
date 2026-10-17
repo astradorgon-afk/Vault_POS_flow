@@ -296,7 +296,7 @@ else
                         <span class="cs-foot-fact is-key">Units picking now <strong>@Quantity(PickingNowUnits)</strong></span>
                         <span class="cs-foot-fact">Still requested <strong>@Quantity(PickRemainingUnits)</strong></span>
                     </div>
-                    <button type="button" class="cs-btn cs-primary" @onclick="PickAsync" disabled="@(!CanPickNow || acting)">
+                    <button type="button" class="cs-btn cs-primary" @onclick="BeginPickAsync" disabled="@(!CanPickNow || acting)">
                         <AppIcon Name="check" /> @(acting ? "Accepting…" : "Accept request")
                     </button>
                 </div>
@@ -339,6 +339,21 @@ else
                 <div class="open-count-actions owner-dispatch-actions">
                     <button type="button" class="search-action owner-dispatch-cancel" @onclick="CancelOwnerDispatch">Go back</button>
                     <button type="button" class="search-action" @onclick="ConfirmOwnerDispatchAsync" disabled="@acting">Override and dispatch</button>
+                </div>
+            </section>
+        </div>
+    }
+
+    @if (ownerPickConfirmation && IsOwner)
+    {
+        <div class="owner-dispatch-backdrop" @onclick="CancelOwnerPick">
+            <section class="owner-dispatch-dialog" role="alertdialog" aria-modal="true" aria-labelledby="owner-pick-title" tabindex="-1" @onclick:stopPropagation="true">
+                <span class="eyebrow">Owner confirmation</span>
+                <h2 id="owner-pick-title">Pick as owner?</h2>
+                <p>Picking is normally done by Main Inventory staff, off the shelf, counting as they go. Continuing will record these quantities as picked in your name and commit the warehouse to sending them. Nothing moves yet — dispatch does that — but these are the numbers the store will be told to expect.</p>
+                <div class="open-count-actions owner-dispatch-actions">
+                    <button type="button" class="search-action owner-dispatch-cancel" @onclick="CancelOwnerPick">Go back</button>
+                    <button type="button" class="search-action" @onclick="ConfirmOwnerPickAsync" disabled="@acting">Override and record the pick</button>
                 </div>
             </section>
         </div>
@@ -494,6 +509,20 @@ else
         <div class="tr-print">
             <WorkflowPrintButton Document="@BuildPrintReceipt()" />
         </div>
+        @if (ShowCancelBeforeDispatch)
+        {
+            <details class="tr-cancel">
+                <summary>Abandon this transfer <span aria-hidden="true">⌄</span></summary>
+                <p>Nothing has left the warehouse yet, so there is no ledger movement to reverse — the request is simply dropped. Use this when the stock it was picked against is no longer there and the transfer cannot go.</p>
+                <label for="tr-abandon-reason">Reason</label>
+                <textarea id="tr-abandon-reason" rows="3" maxlength="500" placeholder="Explain why it cannot go…"
+                          @bind="cancelReason" @bind:event="oninput"></textarea>
+                <button type="button" class="tr-cancel-submit" @onclick="CancelBeforeDispatchAsync"
+                        disabled="@(acting || string.IsNullOrWhiteSpace(cancelReason))">
+                    @(acting ? "Abandoning…" : "Abandon transfer")
+                </button>
+            </details>
+        }
         @if (ShowCancelDispatch)
         {
             <details class="tr-cancel">
@@ -637,6 +666,7 @@ else
     private bool loading = true;
     private bool acting;
     private bool ownerDispatchConfirmation;
+    private bool ownerPickConfirmation;
 
     [Parameter] public Guid TransferId { get; set; }
 
@@ -665,6 +695,14 @@ else
     private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowReady => Status == "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowDispatch => Status == "Ready" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    // Picking does not move stock, so anything short of Dispatched can simply be
+    // dropped. Without this a transfer whose stock was consumed elsewhere after
+    // picking is stranded: it cannot dispatch, and the only cancel on offer
+    // required it to have dispatched first.
+    private bool ShowCancelBeforeDispatch => Status is "Draft" or "Submitted" or "InReview" or "Approved" or "Picking" or "Ready"
+        && CanPick
+        && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+
     private bool ShowCancelDispatch => Status == "Dispatched" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowReceive => Status is "Dispatched" or "PartiallyReceived" && CanReceive && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.DestinationLocationId)) && receiveRows.Count > 0;
     private bool ShowVerify => Status == "Received" && CanVerify && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.DestinationLocationId));
@@ -788,7 +826,9 @@ else
         {
             // Kind 0 is the Main Warehouse, Kind 1 a store; a transfer's route
             // can start or end at either, and this list resolves both to a name.
-            locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1 && location.IsActive));
+            // Closed locations are included: this list only ever names a route
+            // that was chosen while both ends were open.
+            locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1));
         }
     }
 
@@ -1111,6 +1151,33 @@ else
         return null;
     });
 
+    /// <summary>
+    /// Asks an owner to confirm before picking in place of warehouse staff.
+    /// Picking is the count that the store is later measured against, so an
+    /// owner doing it alone is the same separation-of-duties gap that dispatch
+    /// already warns about.
+    /// </summary>
+    private async Task BeginPickAsync()
+    {
+        if (acting) { return; }
+        if (IsOwner)
+        {
+            ownerPickConfirmation = true;
+            return;
+        }
+
+        await PickAsync();
+    }
+
+    private async Task ConfirmOwnerPickAsync()
+    {
+        if (!IsOwner || !ownerPickConfirmation || acting) { return; }
+        ownerPickConfirmation = false;
+        await PickAsync();
+    }
+
+    private void CancelOwnerPick() => ownerPickConfirmation = false;
+
     private async Task PickAsync() => await RunActionAsync("Recording…", async () =>
     {
         List<PosTransferPickLine> allocations =
@@ -1174,6 +1241,21 @@ else
             return response.Error;
         }
 
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task CancelBeforeDispatchAsync() => await RunActionAsync("Abandoning…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.CancelTransferBeforeDispatchAsync(
+            TransferId, cancelReason.Trim(), CancellationToken.None);
+
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        cancelReason = string.Empty;
         await LoadDetailAsync();
         return null;
     });

@@ -332,6 +332,44 @@ public sealed class TransferTests
     }
 
     [Fact]
+    public void CancelBeforeDispatch_AtReady_AbandonsTheTransfer()
+    {
+        // The case this exists for: picked, ready, and then the stock it was
+        // picked against is gone. Dispatch will refuse, so without this the
+        // transfer is stranded with no action left on it at all.
+        Transfer transfer = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now).Value;
+        transfer.Submit(Requester, Now);
+        transfer.Review(Approver, Now, null);
+        transfer.Approve(Approver, Now);
+        transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
+        transfer.Ready(Picker, Now);
+        transfer.Status.Should().Be(TransferStatus.Ready);
+
+        transfer.CancelBeforeDispatch(Now, "  ", Picker).Error.Code.Should().Be("transfer.cancel_reason_required");
+
+        Result cancelled = transfer.CancelBeforeDispatch(Now, "Stock sold before the truck came", Picker);
+
+        cancelled.IsSuccess.Should().BeTrue(because: string.Join("; ", cancelled.Errors.Select(e => e.Code)));
+        transfer.Status.Should().Be(TransferStatus.Cancelled);
+        transfer.CancelReason.Should().Be("Stock sold before the truck came");
+        transfer.CancelledByUserId.Should().Be(Picker);
+    }
+
+    [Fact]
+    public void CancelBeforeDispatch_AfterDispatch_IsRefused()
+    {
+        // Once stock is on the ledger it has to come back through the reversing
+        // cancel, not this one.
+        Transfer transfer = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now).Value;
+        Dispatched(transfer);
+
+        Result cancelled = transfer.CancelBeforeDispatch(Now, "Too late now", Picker);
+
+        cancelled.IsFailure.Should().BeTrue();
+        transfer.Status.Should().Be(TransferStatus.Dispatched);
+    }
+
+    [Fact]
     public void CancelDispatch_ReturnsToCancelled_OnlyWhenNothingArrived()
     {
         Result<Transfer> result = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now);

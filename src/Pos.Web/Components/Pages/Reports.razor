@@ -54,7 +54,7 @@ else
                 <strong>@Qty(report.IncomingUnits)</strong>
                 <span class="stat-badge is-in" aria-hidden="true"><AppIcon Name="box-in" /></span>
             </div>
-            <small>@report.InboundTransfers inbound transfer@(report.InboundTransfers == 1 ? "" : "s")</small>
+            <small>@InboundSources(report)</small>
         </article>
         <article class="stat-card">
             <span class="stat-label">Outgoing</span>
@@ -283,7 +283,7 @@ else
             {
                 // Create a blank report for the selected location if no data
                 PosLocation chosen = ScopedLocations.First(location => location.Id == locationId);
-                report = new PosStoreMovement(locationId, chosen.Code, chosen.Name, 0, 0, 0, 0, 0, 0, 0, null, null, [], []);
+                report = new PosStoreMovement(locationId, chosen.Code, chosen.Name, 0, 0, 0, 0, 0, 0, 0, 0, null, null, [], []);
             }
         }
         catch (HttpRequestException) { message = "The reporting service is unavailable. Try again shortly."; }
@@ -297,6 +297,16 @@ else
         (fullReport?.From ?? selectedDate.AddDays(-6)).AddDays(bucket).ToString("MMM d", CultureInfo.InvariantCulture);
 
     private static string Qty(decimal qty) => qty % 1m == 0m ? qty.ToString("0", CultureInfo.InvariantCulture) : qty.ToString("0.###", CultureInfo.InvariantCulture);
+
+    // Stock arrives two ways. Naming only transfers under a figure that counts
+    // supplier deliveries as well reads as a miscount, so both are named.
+    private static string InboundSources(PosStoreMovement store)
+    {
+        string transfers = $"{store.InboundTransfers} inbound transfer{(store.InboundTransfers == 1 ? "" : "s")}";
+        return store.InboundReceipts == 0
+            ? transfers
+            : $"{transfers} · {store.InboundReceipts} supplier deliver{(store.InboundReceipts == 1 ? "y" : "ies")}";
+    }
 
     private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
 }

@@ -9,6 +9,7 @@ using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
+using Pos.Domain.Purchasing;
 using Pos.Domain.Sales;
 using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
@@ -38,6 +39,7 @@ public static class StoreMonitoringEndpoints
         public DateOnly PeriodStart { get; } = periodStart;
         public decimal IncomingUnits { get; set; }
         public int InboundTransfers { get; set; }
+        public int InboundReceipts { get; set; }
         public decimal OutgoingUnits { get; set; }
         public int OutboundTransfers { get; set; }
         public int RestockRequests { get; set; }
@@ -121,7 +123,10 @@ public static class StoreMonitoringEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind == LocationKind.Store && l.IsActive)
+            // A store that closed mid-period still rang up the sales it rang up.
+            // Closed stores are loaded and then dropped below unless the period
+            // actually holds trade for them.
+            .Where(l => l.Kind == LocationKind.Store)
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -200,6 +205,16 @@ public static class StoreMonitoringEndpoints
         foreach (Location store in stores)
         {
             var storeDays = days.Where(d => d.LocationId == store.Id).ToList();
+
+            // A closed store earns its row by having traded in the period; an
+            // open one keeps its row even on a quiet week, because a quiet week
+            // is itself worth seeing.
+            if (!store.IsActive && storeDays.Count == 0
+                && refunds.All(r => r.LocationId != store.Id))
+            {
+                continue;
+            }
+
             var completed = storeDays.Where(d => d.Status == SaleStatus.Completed).ToList();
             var voided = storeDays.Where(d => d.Status == SaleStatus.Voided).ToList();
             decimal refunded = refunds.Where(r => r.LocationId == store.Id).Sum(r => r.Amount);
@@ -275,9 +290,12 @@ public static class StoreMonitoringEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
+            // Closed locations are loaded too, and dropped again at the end
+            // unless the period shows them doing something. A store that traded
+            // last month is part of last month's picture; one that closed before
+            // the period began would only be an empty card dragging the totals.
             .Where(location =>
-                (location.Kind == LocationKind.Store || location.Kind == LocationKind.MainWarehouse)
-                && location.IsActive)
+                location.Kind == LocationKind.Store || location.Kind == LocationKind.MainWarehouse)
             .OrderBy(location => location.Kind)
             .ThenBy(location => location.Code)
             .ToListAsync(cancellationToken)
@@ -288,15 +306,36 @@ public static class StoreMonitoringEndpoints
             store => new StoreMovementAccumulator(store, start, end.DayNumber - start.DayNumber + 1));
 
         List<Transfer> transfers = [];
+        List<GoodsReceipt> receipts = [];
         if (movements.Count > 0)
         {
             LocationId[] storeIds = [.. stores.Select(store => store.Id)];
+
+            // Goods off a supplier's truck come in through the same door as a
+            // transfer, so a warehouse that took a delivery today must not read as
+            // having received nothing. Only posted receipts count — a voided one
+            // never reached the ledger.
+            receipts = await context.GoodsReceipts
+                .AsNoTracking()
+                .Where(receipt => storeIds.Contains(receipt.DestinationLocationId))
+                .Where(receipt => receipt.Status == GoodsReceiptStatus.Posted
+                    && receipt.ReceivedAtUtc >= startUtc
+                    && receipt.ReceivedAtUtc < endUtc)
+                .Include(receipt => receipt.Lines)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             transfers = await context.Transfers
                 .AsNoTracking()
                 .Where(transfer => storeIds.Contains(transfer.SourceLocationId) || storeIds.Contains(transfer.DestinationLocationId))
                 .Where(transfer =>
                     (transfer.Mode == TransferMode.StoreRestock && transfer.CreatedAtUtc >= startUtc && transfer.CreatedAtUtc < endUtc)
-                    || (transfer.DispatchedAtUtc != null && transfer.DispatchedAtUtc >= startUtc && transfer.DispatchedAtUtc < endUtc))
+                    || (transfer.DispatchedAtUtc != null && transfer.DispatchedAtUtc >= startUtc && transfer.DispatchedAtUtc < endUtc)
+                    // A transfer that left before the period but arrived inside it
+                    // is this period's intake for the destination, so it has to be
+                    // fetched even though its dispatch falls outside.
+                    || (transfer.ReceivedAtUtc != null && transfer.ReceivedAtUtc >= startUtc && transfer.ReceivedAtUtc < endUtc))
                 .Include(transfer => transfer.Lines)
                 .Include(transfer => transfer.Allocations)
                 .AsSplitQuery()
@@ -320,6 +359,7 @@ public static class StoreMonitoringEndpoints
         ProductId[] productIds = [.. transfers
             .SelectMany(transfer => transfer.Lines)
             .Select(line => line.ProductId)
+            .Concat(receipts.SelectMany(receipt => receipt.Lines).Select(line => line.ProductId))
             .Distinct()];
         List<Product> products = productIds.Length == 0
             ? []
@@ -333,6 +373,33 @@ public static class StoreMonitoringEndpoints
 
         List<StoreMovementActivity> activity = [];
         int dispatchedTransferCount = 0;
+
+        foreach (GoodsReceipt receipt in receipts)
+        {
+            if (!movements.TryGetValue(receipt.DestinationLocationId.Value, out StoreMovementAccumulator? receiving))
+            {
+                continue;
+            }
+
+            // Accepted units only. What was refused as damaged, wrong or expired
+            // was never taken into stock, so counting it here would show goods the
+            // location does not have.
+            decimal acceptedUnits = receipt.Lines.Sum(line => line.QuantityAccepted);
+
+            receiving.IncomingUnits += acceptedUnits;
+            receiving.InboundReceipts++;
+            receiving.LastIncomingAtUtc = Latest(receiving.LastIncomingAtUtc, receipt.ReceivedAtUtc);
+            receiving.AddDailyUnits(receipt.ReceivedAtUtc, acceptedUnits, incoming: true);
+            receiving.AddItems(receipt.Lines
+                .Where(line => line.QuantityAccepted > 0m)
+                .Select(line => new StoreMovementItem(
+                    productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
+                    receipt.Number,
+                    "Received from supplier",
+                    line.QuantityAccepted,
+                    receipt.ReceivedAtUtc)));
+        }
+
         foreach (Transfer transfer in transfers)
         {
             bool requestInPeriod = transfer.Mode == TransferMode.StoreRestock
@@ -342,6 +409,10 @@ public static class StoreMonitoringEndpoints
                 && transfer.DispatchedAtUtc is { } dispatchedAt
                 && dispatchedAt >= startUtc
                 && dispatchedAt < endUtc;
+            bool receiptInPeriod = transfer.Status != TransferStatus.Cancelled
+                && transfer.ReceivedAtUtc is { } receivedAt
+                && receivedAt >= startUtc
+                && receivedAt < endUtc;
             decimal requestedUnits = transfer.Lines.Sum(line => line.RequestedQuantity);
             decimal dispatchedUnits = transfer.Allocations.Sum(allocation => allocation.Quantity);
             Guid sourceId = transfer.SourceLocationId.Value;
@@ -382,6 +453,30 @@ public static class StoreMonitoringEndpoints
                     transfer.CreatedAtUtc));
             }
 
+            // The destination counts what it signed for, when it signed for it.
+            // Crediting the arrival at dispatch would hand a store stock that is
+            // still on the truck, and date the receipt to the moment it left.
+            if (receiptInPeriod
+                && transfer.ReceivedAtUtc is { } actualReceivedAt
+                && movements.TryGetValue(destinationId, out StoreMovementAccumulator? destinationStore))
+            {
+                // Good condition only. Damaged units arrived but are not stock the
+                // destination can sell, and a short allocation never arrived at all.
+                decimal receivedUnits = transfer.Allocations.Sum(allocation => allocation.ReceivedQuantity);
+
+                destinationStore.IncomingUnits += receivedUnits;
+                destinationStore.InboundTransfers++;
+                destinationStore.LastIncomingAtUtc = Latest(destinationStore.LastIncomingAtUtc, actualReceivedAt);
+                destinationStore.AddDailyUnits(actualReceivedAt, receivedUnits, incoming: true);
+                destinationStore.AddItems(TransferItems(
+                    transfer,
+                    productNames,
+                    reference,
+                    "Received",
+                    allocation => allocation.ReceivedQuantity,
+                    actualReceivedAt));
+            }
+
             if (!dispatchInPeriod)
             {
                 continue;
@@ -395,16 +490,13 @@ public static class StoreMonitoringEndpoints
                 sourceStore.OutboundTransfers++;
                 sourceStore.LastOutgoingAtUtc = Latest(sourceStore.LastOutgoingAtUtc, actualDispatchedAt);
                 sourceStore.AddDailyUnits(actualDispatchedAt, dispatchedUnits, incoming: false);
-                sourceStore.AddItems(DispatchedItems(transfer, productNames, reference, "Sent"));
-            }
-
-            if (movements.TryGetValue(destinationId, out StoreMovementAccumulator? destinationStore))
-            {
-                destinationStore.IncomingUnits += dispatchedUnits;
-                destinationStore.InboundTransfers++;
-                destinationStore.LastIncomingAtUtc = Latest(destinationStore.LastIncomingAtUtc, actualDispatchedAt);
-                destinationStore.AddDailyUnits(actualDispatchedAt, dispatchedUnits, incoming: true);
-                destinationStore.AddItems(DispatchedItems(transfer, productNames, reference, "Received"));
+                sourceStore.AddItems(TransferItems(
+                    transfer,
+                    productNames,
+                    reference,
+                    "Sent",
+                    allocation => allocation.Quantity,
+                    actualDispatchedAt));
             }
 
             activity.Add(new StoreMovementActivity(
@@ -423,12 +515,15 @@ public static class StoreMonitoringEndpoints
             });
         }
 
-        List<StoreMovement> storeResults = [.. movements.Values.Select(movement => new StoreMovement(
+        List<StoreMovement> storeResults = [.. movements.Values
+            .Where(movement => movement.Location.IsActive || HasActivity(movement))
+            .Select(movement => new StoreMovement(
             movement.Location.Id.Value,
             movement.Location.Code,
             movement.Location.Name,
             movement.IncomingUnits,
             movement.InboundTransfers,
+            movement.InboundReceipts,
             movement.OutgoingUnits,
             movement.OutboundTransfers,
             movement.RestockRequests,
@@ -452,25 +547,53 @@ public static class StoreMonitoringEndpoints
             [.. activity.OrderByDescending(entry => entry.OccurredAtUtc).Take(60)]));
     }
 
-    private static IEnumerable<StoreMovementItem> DispatchedItems(
+    /// <summary>
+    /// A transfer's lines as movement items: what left the source when it was
+    /// dispatched, or what arrived when the destination received it. The two
+    /// differ in both quantity and instant, so the caller supplies each.
+    /// </summary>
+    /// <param name="transfer">The transfer.</param>
+    /// <param name="productNames">Product names by identifier.</param>
+    /// <param name="reference">The transfer number shown against each item.</param>
+    /// <param name="direction">"Sent" or "Received".</param>
+    /// <param name="quantity">Which allocation quantity to measure.</param>
+    /// <param name="occurredAtUtc">When this end of the move happened.</param>
+    /// <returns>One item per line that moved anything.</returns>
+    private static IEnumerable<StoreMovementItem> TransferItems(
         Transfer transfer,
         IReadOnlyDictionary<Guid, string> productNames,
         string reference,
-        string direction)
+        string direction,
+        Func<TransferPickAllocation, decimal> quantity,
+        DateTimeOffset occurredAtUtc)
     {
-        Dictionary<int, decimal> pickedByLine = transfer.Allocations
+        Dictionary<int, decimal> unitsByLine = transfer.Allocations
             .GroupBy(allocation => allocation.LineNo)
-            .ToDictionary(group => group.Key, group => group.Sum(allocation => allocation.Quantity));
+            .ToDictionary(group => group.Key, group => group.Sum(quantity));
 
         return transfer.Lines
             .Select(line => new StoreMovementItem(
                 productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
                 reference,
                 direction,
-                pickedByLine.GetValueOrDefault(line.LineNo),
-                transfer.DispatchedAtUtc!.Value))
+                unitsByLine.GetValueOrDefault(line.LineNo),
+                occurredAtUtc))
             .Where(item => item.Units > 0m);
     }
+
+    /// <summary>
+    /// Whether a location did anything in the period. Only asked of closed
+    /// locations, which earn their place in the report by what they did rather
+    /// than by still being open.
+    /// </summary>
+    /// <param name="movement">The accumulated figures for one location.</param>
+    /// <returns><see langword="true"/> when the period holds something to show.</returns>
+    private static bool HasActivity(StoreMovementAccumulator movement)
+        => movement.IncomingUnits > 0m
+            || movement.OutgoingUnits > 0m
+            || movement.InboundReceipts > 0
+            || movement.RestockRequests > 0
+            || movement.RecentItems.Count > 0;
 
     private static DateTimeOffset StartOfStoreDayUtc(DateOnly date)
     {
@@ -708,13 +831,17 @@ public sealed record StoreMovementReport(
     IReadOnlyList<StoreMovement> Stores,
     IReadOnlyList<StoreMovementActivity> RecentActivity);
 
-/// <summary>A store's actual dispatched quantities and restock request activity.</summary>
+/// <summary>
+/// A store's product movement over the period: what transfers dispatched in and
+/// out, what suppliers delivered in, and its restock request activity.
+/// </summary>
 public sealed record StoreMovement(
     Guid LocationId,
     string Code,
     string Name,
     decimal IncomingUnits,
     int InboundTransfers,
+    int InboundReceipts,
     decimal OutgoingUnits,
     int OutboundTransfers,
     int RestockRequests,

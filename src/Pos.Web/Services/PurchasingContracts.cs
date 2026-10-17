@@ -239,3 +239,61 @@ public sealed record PosProductRank(
     decimal NetSales,
     decimal Share,
     decimal OnHand);
+
+/// <summary>One product on a new warehouse supply request.</summary>
+public sealed record PosSupplyRequestLine(Guid ProductId, decimal Quantity, string? Note = null);
+
+/// <summary>The body of a new warehouse supply request.</summary>
+public sealed record PosCreateSupplyRequest(
+    Guid WarehouseLocationId,
+    IReadOnlyList<PosSupplyRequestLine> Lines,
+    string? Note = null);
+
+/// <summary>One request line going onto a purchase order.</summary>
+public sealed record PosSupplyRequestOrderLine(
+    int LineNo,
+    Guid UnitOfMeasureId,
+    decimal Quantity,
+    decimal UnitCost);
+
+/// <summary>The body of a purchase order raised against a supply request.</summary>
+public sealed record PosOrderSupplyRequest(
+    Guid? SupplierId,
+    IReadOnlyList<PosSupplyRequestOrderLine> Lines,
+    string? CurrencyCode = null,
+    DateTimeOffset? ExpectedAtUtc = null,
+    string? CustomSupplierName = null);
+
+/// <summary>One line of a supply request, as read.</summary>
+public sealed record PosSupplyRequestLineView(
+    int LineNo,
+    Guid ProductId,
+    decimal Quantity,
+    decimal OrderedQuantity,
+    decimal OutstandingQuantity,
+    string? Note);
+
+/// <summary>A purchase order raised against a supply request.</summary>
+public sealed record PosSupplyRequestOrderView(
+    Guid PurchaseOrderId,
+    string? Number,
+    string Status,
+    DateTimeOffset OrderedAtUtc);
+
+/// <summary>A warehouse supply request, as listed or read.</summary>
+public sealed record PosSupplyRequest(
+    Guid Id,
+    string Number,
+    Guid DestinationLocationId,
+    string Status,
+    string? Note,
+    Guid RequestedByUserId,
+    DateTimeOffset RequestedAtUtc,
+    DateTimeOffset? DecidedAtUtc,
+    string? DecisionReason,
+    IReadOnlyList<PosSupplyRequestLineView> Lines,
+    IReadOnlyList<PosSupplyRequestOrderView> Orders)
+{
+    /// <summary>Gets whether the request still awaits the owner.</summary>
+    public bool IsOpen => Status is "Submitted" or "PartiallyOrdered";
+}

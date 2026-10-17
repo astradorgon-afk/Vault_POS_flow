@@ -501,4 +501,79 @@ private static string ExpectedPhrase(IReadOnlyCollection<PurchaseOrderStatus> ex
         "purchasing.discrepancy_resolve_forbidden",
         FormattableString.Invariant(
             $"Resolving a discrepancy at location {locationId.Value} requires purchase discrepancy-resolution authority there."));
+
+    /// <summary>A referenced supply request does not exist.</summary>
+    /// <param name="id">The identifier that was looked up.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestUnknown(SupplyRequestId id) => Error.NotFound(
+        "purchasing.supply_request_unknown",
+        FormattableString.Invariant($"Supply request {id.Value} was not found."));
+
+    /// <summary>A supply request was raised without a warehouse to deliver to.</summary>
+    public static Error SupplyRequestDestinationInvalid => Error.Validation(
+        "purchasing.supply_request_destination_invalid",
+        "Choose the warehouse the goods are wanted at.");
+
+    /// <summary>A supply request was raised with no products on it.</summary>
+    public static Error SupplyRequestEmpty => Error.Validation(
+        "purchasing.supply_request_empty",
+        "Add at least one product to the request.");
+
+    /// <summary>A supply request note or reason ran past the accepted length.</summary>
+    public static Error SupplyRequestNoteTooLong => Error.Validation(
+        "purchasing.supply_request_note_too_long",
+        FormattableString.Invariant($"Keep the note under {SupplyRequest.TextMaxLength} characters."));
+
+    /// <summary>A supply request line named no product.</summary>
+    /// <param name="lineNo">The line.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestProductInvalid(int lineNo) => Error.Validation(
+        "purchasing.supply_request_product_invalid",
+        FormattableString.Invariant($"Line {lineNo} does not name a product."));
+
+    /// <summary>A supply request line asked for nothing, or for less than nothing.</summary>
+    /// <param name="lineNo">The line.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestQuantityInvalid(int lineNo) => Error.Validation(
+        "purchasing.supply_request_quantity_invalid",
+        FormattableString.Invariant($"Line {lineNo} needs a quantity above zero."));
+
+    /// <summary>The same product was asked for twice on one request.</summary>
+    /// <param name="lineNo">The duplicate line.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestDuplicateLine(int lineNo) => Error.Validation(
+        "purchasing.supply_request_duplicate_line",
+        FormattableString.Invariant($"Line {lineNo} asks for a product already on the request. Combine them into one line."));
+
+    /// <summary>A supply request line does not exist on the request.</summary>
+    /// <param name="lineNo">The line that was named.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestLineUnknown(int lineNo) => Error.Validation(
+        "purchasing.supply_request_line_unknown",
+        FormattableString.Invariant($"Line {lineNo} is not on this request."));
+
+    /// <summary>An order would have placed far more than the request asked for.</summary>
+    /// <param name="lineNo">The line.</param>
+    /// <param name="outstanding">What was still to be bought on it.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestOverOrdered(int lineNo, decimal outstanding) => Error.Validation(
+        "purchasing.supply_request_over_ordered",
+        FormattableString.Invariant(
+            $"Line {lineNo} has {outstanding} still to buy. Ordering this much more would double up on the request."));
+
+    /// <summary>An action needed an open request, and this one is finished with.</summary>
+    /// <param name="actual">The request's current state.</param>
+    /// <returns>The error.</returns>
+    public static Error SupplyRequestNotOpen(SupplyRequestStatus actual) => Error.Conflict(
+        "purchasing.supply_request_not_open",
+        FormattableString.Invariant($"This supply request is {actual} and can no longer be acted on."),
+        new Dictionary<string, object?>
+        {
+            ["actualStatus"] = actual,
+        });
+
+    /// <summary>Turning a request down or withdrawing it needs a reason.</summary>
+    public static Error SupplyRequestReasonRequired => Error.Validation(
+        "purchasing.supply_request_reason_required",
+        "Give a reason of at least five characters, so the warehouse knows where it stands.");
 }

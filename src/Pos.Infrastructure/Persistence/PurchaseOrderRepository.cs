@@ -79,7 +79,9 @@ public sealed class PurchaseOrderRepository(PosDbContext context) : IPurchaseOrd
     public Task<bool> CanReceiveGoodsAsync(LocationId locationId, CancellationToken cancellationToken)
         => context.Locations
             .AsNoTracking()
-            .AnyAsync(l => l.Id == locationId && l.Kind != LocationKind.External, cancellationToken);
+            .AnyAsync(
+                l => l.Id == locationId && l.Kind != LocationKind.External && l.IsActive,
+                cancellationToken);
 
     /// <inheritdoc />
     public async Task<PurchaseReceivingContext?> GetReceivingContextAsync(
@@ -224,7 +226,61 @@ public sealed class PurchaseOrderRepository(PosDbContext context) : IPurchaseOrd
     public Task<bool> IsActiveStoreLocationAsync(LocationId locationId, CancellationToken cancellationToken)
         => context.Locations
             .AsNoTracking()
-            .AnyAsync(l => l.Id == locationId && l.Kind == LocationKind.Store, cancellationToken);
+            .AnyAsync(
+                l => l.Id == locationId && l.Kind == LocationKind.Store && l.IsActive,
+                cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<LocationKind?> GetActiveLocationKindAsync(
+        LocationId locationId,
+        CancellationToken cancellationToken)
+    {
+        LocationKind[] kinds = await context.Locations
+            .AsNoTracking()
+            .Where(l => l.Id == locationId && l.IsActive)
+            .Select(l => l.Kind)
+            .Take(1)
+            .ToArrayAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return kinds.Length == 0 ? null : kinds[0];
+    }
+
+    /// <inheritdoc />
+    public Task<Result<SupplyRequestId>> AddSupplyRequestAsync(
+        SupplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        context.SupplyRequests.Add(request);
+
+        return Task.FromResult(Result<SupplyRequestId>.Success(request.Id));
+    }
+
+    /// <inheritdoc />
+    public Task<SupplyRequest?> GetSupplyRequestForOrderAsync(
+        PurchaseOrderId purchaseOrderId,
+        CancellationToken cancellationToken)
+        => context.SupplyRequests
+            .AsTracking()
+            .Include(r => r.Lines)
+            .Include(r => r.Orders)
+            .ThenInclude(o => o.Lines)
+            .FirstOrDefaultAsync(
+                r => r.Orders.Any(o => o.PurchaseOrderId == purchaseOrderId),
+                cancellationToken);
+
+    /// <inheritdoc />
+    public Task<SupplyRequest?> GetSupplyRequestByIdAsync(
+        SupplyRequestId id,
+        CancellationToken cancellationToken)
+        => context.SupplyRequests
+            .AsTracking()
+            .Include(r => r.Lines)
+            .Include(r => r.Orders)
+            .ThenInclude(o => o.Lines)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
     /// <inheritdoc />
     public Task<Result<DirectDeliveryAuthorizationId>> AddDirectDeliveryAuthorizationAsync(

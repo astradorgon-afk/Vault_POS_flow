@@ -1,0 +1,288 @@
+@page "/locations/{LocationId:guid}/history"
+@attribute [Authorize(Policy = "location.manage")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>@(history?.Name ?? "Location") history · VaultFlow</PageTitle>
+
+<section class="lh-page">
+    <header class="lh-head">
+        <div>
+            <span class="eyebrow">Inventory · location record</span>
+            <h1>@(history?.Name ?? "Location history")</h1>
+            <p>Everything this location did, in one place — what came in and went out, what it sold, what it still holds, and who worked here.</p>
+        </div>
+        <a class="lh-back" href="/locations">← All locations</a>
+    </header>
+
+    @if (loading)
+    {
+        <section class="lh-empty">Gathering the record…</section>
+    }
+    else if (message is not null)
+    {
+        <section class="lh-empty" role="alert">@message</section>
+    }
+    else if (history is { } record)
+    {
+        <section class="lh-identity">
+            <div>
+                <span class="lh-code">@record.Code</span>
+                <strong>@record.Name</strong>
+                <small>@KindName(record.Kind)</small>
+            </div>
+            <div class="lh-dates">
+                <span>Opened <b>@record.OpenedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)</b></span>
+                @if (record.ClosedOn is { } closed)
+                {
+                    <span class="lh-closed-chip">Closed @closed.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)</span>
+                }
+                else
+                {
+                    <span class="lh-open-chip">Still trading</span>
+                }
+            </div>
+        </section>
+
+        @if (record.MovementCount == 0 && record.SaleCount == 0)
+        {
+            <section class="lh-empty">
+                <strong>This location never traded.</strong>
+                <span>No stock ever moved through it and nothing was sold here, so there is no history to show.</span>
+            </section>
+        }
+        else
+        {
+            <section class="lh-figures" aria-label="Lifetime totals">
+                <article class="lh-figure is-in">
+                    <span>Products in</span>
+                    <strong>@Quantity(record.UnitsIn)</strong>
+                    <small>@record.TransfersIn transfer@(Plural(record.TransfersIn)) received · @record.GoodsReceipts deliver@(record.GoodsReceipts == 1 ? "y" : "ies")</small>
+                </article>
+                <article class="lh-figure is-out">
+                    <span>Products out</span>
+                    <strong>@Quantity(record.UnitsOut)</strong>
+                    <small>@record.TransfersOut transfer@(Plural(record.TransfersOut)) dispatched</small>
+                </article>
+                <article class="lh-figure">
+                    <span>Sold here</span>
+                    <strong>@Money(record.SalesNetTotal)</strong>
+                    <small>@record.SaleCount.ToString("N0", CultureInfo.InvariantCulture) completed sale@(Plural(record.SaleCount))</small>
+                </article>
+                <article class="lh-figure @(record.StockRemaining > 0m ? "is-warn" : null)">
+                    <span>Still on its books</span>
+                    <strong>@Quantity(record.StockRemaining)</strong>
+                    <small>@(record.StockRemaining > 0m ? $"{Money(record.StockRemainingValue)} of stock never moved off" : "Nothing left behind")</small>
+                </article>
+            </section>
+
+            <section class="lh-span">
+                <span>Activity ran from <b>@Moment(record.FirstActivityAtUtc)</b> to <b>@Moment(record.LastActivityAtUtc)</b></span>
+                <span>@record.StockCounts stock count@(Plural(record.StockCounts)) · @record.StockAdjustments adjustment@(Plural(record.StockAdjustments)) · @record.MovementCount.ToString("N0", CultureInfo.InvariantCulture) ledger movement@(Plural(record.MovementCount))</span>
+            </section>
+
+            <div class="lh-grid">
+                <section class="lh-card">
+                    <header><h2>How stock moved</h2><p>Every ledger movement this location posted, by reason.</p></header>
+                    @if (record.Movements.Count == 0)
+                    {
+                        <p class="lh-none">No stock ever moved here.</p>
+                    }
+                    else
+                    {
+                        <table class="lh-table">
+                            <thead><tr><th>Reason</th><th class="num">Times</th><th class="num">In</th><th class="num">Out</th></tr></thead>
+                            <tbody>
+                                @foreach (PosLocationHistoryMovement row in record.Movements)
+                                {
+                                    <tr @key="row.MovementType">
+                                        <td>@SplitWords(row.MovementType)</td>
+                                        <td class="num">@row.Movements.ToString("N0", CultureInfo.InvariantCulture)</td>
+                                        <td class="num lh-in">@(row.UnitsIn > 0m ? Quantity(row.UnitsIn) : "—")</td>
+                                        <td class="num lh-out">@(row.UnitsOut > 0m ? Quantity(row.UnitsOut) : "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </section>
+
+                <section class="lh-card">
+                    <header><h2>Who worked here</h2><p>Recorded actions at this location, by person.</p></header>
+                    @if (record.People.Count == 0)
+                    {
+                        <p class="lh-none">No recorded actions name this location.</p>
+                    }
+                    else
+                    {
+                        <table class="lh-table">
+                            <thead><tr><th>Person</th><th class="num">Actions</th><th>Last seen</th></tr></thead>
+                            <tbody>
+                                @foreach (PosLocationHistoryPerson person in record.People)
+                                {
+                                    <tr @key="person.UserId">
+                                        <td>@person.Name</td>
+                                        <td class="num">@person.Actions.ToString("N0", CultureInfo.InvariantCulture)</td>
+                                        <td>@person.LastActionAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </section>
+            </div>
+
+            @if (record.Stock.Count > 0)
+            {
+                <section class="lh-card">
+                    <header>
+                        <h2>Stock left behind</h2>
+                        <p>What this location still holds on the books. Closing does not require a location to be empty, so these quantities are still counted as stock.</p>
+                    </header>
+                    <table class="lh-table">
+                        <thead><tr><th>Product</th><th class="num">Quantity</th><th class="num">Value</th></tr></thead>
+                        <tbody>
+                            @foreach (PosLocationHistoryStock row in record.Stock)
+                            {
+                                <tr @key="row.ProductId">
+                                    <td><strong>@row.Name</strong><small>@row.Sku</small></td>
+                                    <td class="num">@Quantity(row.Quantity)</td>
+                                    <td class="num">@Money(row.Value)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
+            }
+
+            <section class="lh-card">
+                <header><h2>Everything that happened here</h2><p>The full activity log for this location, newest first.</p></header>
+                @if (loadingEntries)
+                {
+                    <p class="lh-none">Loading activity…</p>
+                }
+                else if (entries.Count == 0)
+                {
+                    <p class="lh-none">No activity entries name this location.</p>
+                }
+                else
+                {
+                    <div class="lh-feed">
+                        @foreach (PosAuditLogItem entry in entries)
+                        {
+                            <div class="lh-feed-row" @key="entry.Id">
+                                <div>
+                                    <strong>@AuditLogView.ActionLabel(entry.Action)</strong>
+                                    <small>@(string.IsNullOrWhiteSpace(entry.ActorName) ? "System" : entry.ActorName) · @AuditLogView.RecordLabel(entry.EntityType)</small>
+                                </div>
+                                <span>@entry.OccurredAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</span>
+                            </div>
+                        }
+                    </div>
+                    @if (hasMore)
+                    {
+                        <button type="button" class="lh-more" @onclick="LoadMoreAsync" disabled="@loadingEntries">Show more activity</button>
+                    }
+                }
+            </section>
+        }
+    }
+</section>
+
+@code {
+    private const int PageSize = 50;
+
+    [Parameter] public Guid LocationId { get; set; }
+
+    private readonly List<PosAuditLogItem> entries = [];
+    private PosLocationHistory? history;
+    private bool loading = true;
+    private bool loadingEntries;
+    private bool hasMore;
+    private string? message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        entries.Clear();
+        history = null;
+        message = null;
+
+        try
+        {
+            ApiResult<PosLocationHistory> result = await Api.GetLocationHistoryAsync(LocationId, CancellationToken.None);
+
+            if (result is not { IsSuccess: true, Value: { } record })
+            {
+                message = result.Error ?? "This location's record could not be loaded.";
+                return;
+            }
+
+            history = record;
+        }
+        catch (HttpRequestException)
+        {
+            message = "The service is unavailable. Try again shortly.";
+            return;
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        await LoadMoreAsync();
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        loadingEntries = true;
+        try
+        {
+            ApiResult<PosAuditLogPage> page = await Api.GetAuditLogAsync(
+                category: null, search: null, userId: null, locationId: LocationId,
+                from: null, to: null, entries.Count, PageSize, CancellationToken.None);
+
+            if (page is { IsSuccess: true, Value: { } loaded })
+            {
+                entries.AddRange(loaded.Items);
+                hasMore = entries.Count < loaded.Total;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // The totals above still stand; only the feed is missing.
+            hasMore = false;
+        }
+        finally
+        {
+            loadingEntries = false;
+        }
+    }
+
+    private static string Plural(int count) => count == 1 ? string.Empty : "s";
+
+    private static string KindName(string kind) => kind switch
+    {
+        "MainWarehouse" => "Main warehouse",
+        "Store" => "Retail store",
+        _ => SplitWords(kind),
+    };
+
+    private static string Quantity(decimal value)
+        => value % 1m == 0m
+            ? value.ToString("N0", CultureInfo.InvariantCulture)
+            : value.ToString("N3", CultureInfo.InvariantCulture);
+
+    private static string Money(decimal value)
+        => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
+
+    private static string Moment(DateTimeOffset? instant)
+        => instant is { } moment
+            ? moment.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)
+            : "—";
+
+    private static string SplitWords(string value)
+        => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

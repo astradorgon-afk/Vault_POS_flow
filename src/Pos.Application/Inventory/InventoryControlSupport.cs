@@ -48,7 +48,9 @@ internal static class InventoryControlSupport
             .GetLocationAsync(locationId, cancellationToken)
             .ConfigureAwait(false);
 
-        if (location is null || location.Kind == LocationKind.External)
+        // A closed location posts nothing further — no counts, no adjustments.
+        // Everything it already posted stays on the ledger and stays readable.
+        if (location is null || location.Kind == LocationKind.External || !location.IsActive)
         {
             return Result<PostingLocation>.Failure(InventoryControlErrors.LocationInvalid(locationId));
         }

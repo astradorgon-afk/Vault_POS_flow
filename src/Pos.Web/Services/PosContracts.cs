@@ -670,13 +670,17 @@ public sealed record PosStoreMovementReport(
     IReadOnlyList<PosStoreMovement> Stores,
     IReadOnlyList<PosStoreMovementActivity> RecentActivity);
 
-/// <summary>A store's incoming and outgoing dispatched quantities and requests.</summary>
+/// <summary>
+/// A store's product movement over the period: transfers dispatched in and out,
+/// supplier deliveries received in, and its restock requests.
+/// </summary>
 public sealed record PosStoreMovement(
     Guid LocationId,
     string Code,
     string Name,
     decimal IncomingUnits,
     int InboundTransfers,
+    int InboundReceipts,
     decimal OutgoingUnits,
     int OutboundTransfers,
     int RestockRequests,
@@ -744,3 +748,52 @@ public sealed record PosStockLevel(
     decimal? DaysOfCover,
     string Status,
     DateOnly? LastSoldOn = null);
+
+/// <summary>How much a location moved under one movement type.</summary>
+public sealed record PosLocationHistoryMovement(
+    string MovementType,
+    int Movements,
+    decimal UnitsIn,
+    decimal UnitsOut);
+
+/// <summary>One product still on a location's books.</summary>
+public sealed record PosLocationHistoryStock(
+    Guid ProductId,
+    string Sku,
+    string Name,
+    decimal Quantity,
+    decimal Value);
+
+/// <summary>Someone who worked at a location, and how much.</summary>
+public sealed record PosLocationHistoryPerson(
+    Guid UserId,
+    string Name,
+    int Actions,
+    DateTimeOffset LastActionAtUtc);
+
+/// <summary>Everything one location did, over its whole life.</summary>
+public sealed record PosLocationHistory(
+    Guid LocationId,
+    string Code,
+    string Name,
+    string Kind,
+    bool IsActive,
+    DateOnly OpenedOn,
+    DateOnly? ClosedOn,
+    DateTimeOffset? FirstActivityAtUtc,
+    DateTimeOffset? LastActivityAtUtc,
+    decimal UnitsIn,
+    decimal UnitsOut,
+    int MovementCount,
+    int SaleCount,
+    decimal SalesNetTotal,
+    int TransfersIn,
+    int TransfersOut,
+    int GoodsReceipts,
+    int StockCounts,
+    int StockAdjustments,
+    decimal StockRemaining,
+    decimal StockRemainingValue,
+    IReadOnlyList<PosLocationHistoryMovement> Movements,
+    IReadOnlyList<PosLocationHistoryStock> Stock,
+    IReadOnlyList<PosLocationHistoryPerson> People);

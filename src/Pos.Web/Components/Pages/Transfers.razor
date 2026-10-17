@@ -98,8 +98,8 @@ else
                            @onchange="OnTokenChangedAsync" />
                 </label>
             </div>
-            <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanCreateTransfer && !creating)" />
-            <CameraScanner Enabled="@(CanCreateTransfer && !creating)" />
+            <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanScanIntoDraft && !creating)" />
+            <CameraScanner Enabled="@(CanScanIntoDraft && !creating)" />
             <div class="scan-strip" role="status">
                 <span class="scan-strip-mark" aria-hidden="true">▥</span>
                 <span>Scan products to add them; each scan adds one.</span>
@@ -269,7 +269,7 @@ else
     }
 
     private List<PosLocation> externalLocations =>
-        locations.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code).ToList();
+        locations.Where(l => l.Kind is 0 or 1 && l.IsActive).OrderBy(l => l.Kind).ThenBy(l => l.Code).ToList();
 
     private List<PosLocation> sourceChoices => externalLocations
         .Where(location => Session.CanUseInventoryLocation(location.Id)).ToList();
@@ -295,11 +295,21 @@ else
         }
     }
 
-    private bool CanCreateTransfer =>
+    /// <summary>
+    /// Whether a scan can be taken. Scanning is how products get onto the draft
+    /// and how their quantities climb, so it cannot wait for the draft to be
+    /// complete — only for a route to hang the lines on. Gating it on
+    /// <see cref="CanCreateTransfer"/> made the scanner dead exactly when it was
+    /// needed: on an empty draft, or one whose lines still read zero.
+    /// </summary>
+    private bool CanScanIntoDraft =>
         sourceLocationId is { } source &&
         sourceChoices.Any(location => location.Id == source) &&
         destinationLocationId is { } destination &&
-        source != destination &&
+        source != destination;
+
+    private bool CanCreateTransfer =>
+        CanScanIntoDraft &&
         draftLines.Count > 0 &&
         draftLines.All(line => line.ProductId is not null && line.Quantity > 0m);
 
@@ -354,7 +364,10 @@ else
         // Kind 0 is the Main Warehouse, Kind 1 a store; both can be a transfer
         // route's endpoint. Excluding the warehouse here (as this used to) left
         // it unresolvable by LocationLabel, which falls back to a raw id prefix.
-        locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1 && location.IsActive));
+        // Closed locations are kept so LocationLabel can still name the route of
+        // an old transfer; the pickers below drop them, because no new transfer
+        // may start or end at a closed location.
+        locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1));
     }
 
     private async Task LoadProductsAsync()

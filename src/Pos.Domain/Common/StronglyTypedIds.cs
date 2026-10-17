@@ -1366,3 +1366,51 @@ public readonly record struct ExpiryRunRecordId(Guid Value) : IStronglyTypedId, 
     /// <inheritdoc />
     public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
 }
+
+/// <summary>Identifies a supply request: the main warehouse asking to be restocked.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct SupplyRequestId(Guid Value) : IStronglyTypedId, IComparable<SupplyRequestId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static SupplyRequestId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="SupplyRequestId"/>.</returns>
+    public static SupplyRequestId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(SupplyRequestId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>Identifies one line of a supply request.</summary>
+/// <param name="Value">The underlying UUIDv7 value.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design", "CA1036:Override methods on comparable types",
+    Justification = "Identifier ordering is used only for deterministic sorting.")]
+public readonly record struct SupplyRequestLineId(Guid Value) : IStronglyTypedId, IComparable<SupplyRequestLineId>
+{
+    /// <summary>Gets the unassigned value.</summary>
+    public static SupplyRequestLineId Empty => new(Guid.Empty);
+
+    /// <summary>Creates a new time-ordered identifier.</summary>
+    /// <returns>A new <see cref="SupplyRequestLineId"/>.</returns>
+    public static SupplyRequestLineId New() => new(Guid.CreateVersion7());
+
+    /// <summary>Gets a value indicating whether this identifier is unassigned.</summary>
+    public bool IsEmpty => Value == Guid.Empty;
+
+    /// <inheritdoc />
+    public int CompareTo(SupplyRequestLineId other) => Value.CompareTo(other.Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+}

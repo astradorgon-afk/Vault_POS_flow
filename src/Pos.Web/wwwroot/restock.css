@@ -66,6 +66,14 @@
 .restock-row small { color: var(--muted); font-size: .76rem; }
 .restock-row small.restock-row-hint { color: var(--forest); font-weight: 700; }
 .restock-row-action { color: var(--forest); font-size: .76rem; font-weight: 800; white-space: nowrap; }
+
+/* A warehouse request is not opened like a transfer — the whole row is not a
+   link, the action on it is. */
+.restock-row-static:hover { background: transparent; }
+.restock-order-link { padding: 9px 14px; border: 1px solid var(--forest); border-radius: 9px; color: var(--forest); font-size: .76rem; font-weight: 800; white-space: nowrap; text-decoration: none; }
+.restock-order-link:hover { background: var(--forest); color: #fff; }
+.restock-supply-block { margin-bottom: 16px; }
+.restock-supply-block h3 { margin: 0 0 6px; color: #1b634b; font: 800 .74rem 'Manrope', sans-serif; letter-spacing: .08em; text-transform: uppercase; }
 .restock-status { padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 99px; background: #f1f3ef; color: #53635a; font-size: .72rem; font-weight: 800; white-space: nowrap; }
 .restock-status.pending { border-color: #ebd3a0; background: #fff6dc; color: #8a5a16; }
 .restock-status.approved { border-color: #b6d6c1; background: #e8f5ec; color: #24603f; }

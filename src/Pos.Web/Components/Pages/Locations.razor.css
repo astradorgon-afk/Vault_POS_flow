@@ -52,3 +52,20 @@
 .close-confirm p{margin:0;color:#7a3a34;font-size:.84rem}
 .close-confirm>div{display:flex;gap:10px;justify-content:flex-end}
 @media(max-width:760px){.policy-section footer.policy-actions{align-items:stretch;flex-direction:column}.close-confirm>div{justify-content:stretch}.close-confirm>div button{flex:1}}
+
+/* A closed location stays in the list — an owner still reviews what it did —
+   but must never be mistaken for one that is trading. */
+.location-card.is-closed { opacity: .72; }
+.location-closed-tag { margin-left: 6px; padding: 1px 6px; border-radius: 99px; background: #f1f3ef; color: #6b574b; font-size: .62rem; font-style: normal; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+
+/* Live locations are the working set; closed ones are kept for their record.
+   The list opens on live so a long-retired store never sits between two shops
+   somebody is actually running. */
+.location-scope { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.location-scope button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border: 1px solid var(--line-strong, #d6e0d9); border-radius: 99px; background: #fff; color: var(--muted); font-size: .78rem; font-weight: 800; cursor: pointer; }
+.location-scope button:hover { color: var(--ink); border-color: var(--forest-bright, #2f8f5b); }
+.location-scope button.active { border-color: var(--forest, #1b634b); background: var(--mint-soft, #eef6f0); color: var(--forest, #1b634b); }
+.location-scope button span { padding: 1px 7px; border-radius: 99px; background: #f1f4f1; color: #53635a; font-size: .7rem; font-variant-numeric: tabular-nums; }
+.location-scope-empty { margin: 0; padding: 18px 4px; color: var(--muted); font-size: .82rem; }
+.location-danger-actions { padding: 0 0 2px; }
+.location-history-link { display: inline-block; text-decoration: none; }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
@@ -384,8 +385,56 @@ public sealed class DispatchTransferCommandHandler(
 
         return posted.IsSuccess
             ? Result<TransferOrderId>.Success(transfer.Id)
-            : Result<TransferOrderId>.Failure(posted.Errors);
+            : Result<TransferOrderId>.Failure(NameTheShortfall(posted.Errors, productById));
     }
+
+    /// <summary>
+    /// Rewrites the ledger's shortfall errors so they name the product and say
+    /// what to do about it.
+    /// </summary>
+    /// <remarks>
+    /// The ledger works in identifiers and reports "Available 15, requested 40",
+    /// which is true and useless: a four-line transfer gives no clue which line
+    /// is short. The product is already loaded here to build the movement legs,
+    /// so this is the last point where the number can be given a name. Kept to
+    /// one line — a banner is read at a glance, and the explanation of how the
+    /// stock went missing belongs on the page, not in the error.
+    /// </remarks>
+    /// <param name="errors">What the ledger refused with.</param>
+    /// <param name="productById">The products on this transfer.</param>
+    /// <returns>The same errors, with shortfalls made legible.</returns>
+    private static IReadOnlyList<Error> NameTheShortfall(
+        IReadOnlyList<Error> errors,
+        Dictionary<ProductId, Product> productById)
+        => [.. errors.Select(error =>
+        {
+            if (error.Code != "inventory.insufficient_stock"
+                || error.Metadata is not { } metadata
+                || !metadata.TryGetValue("productId", out object? raw)
+                || raw is not Guid productId)
+            {
+                return error;
+            }
+
+            string name = productById.TryGetValue(new ProductId(productId), out Product? product)
+                ? product.Name
+                : "A picked product";
+
+            decimal available = metadata.TryGetValue("available", out object? a) && a is decimal availableQuantity
+                ? availableQuantity
+                : 0m;
+            decimal requested = metadata.TryGetValue("requested", out object? r) && r is decimal requestedQuantity
+                ? requestedQuantity
+                : 0m;
+
+            return new Error(
+                error.Code,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{name}: picked {requested:0.###}, only {available:0.###} in stock. Re-pick or abandon this transfer."),
+                error.Type,
+                error.Metadata);
+        })];
 
     /// <summary>
     /// Builds the dispatch legs per allocation: the negative available leg and
@@ -427,6 +476,46 @@ public sealed class DispatchTransferCommandHandler(
         }
 
         return legs;
+    }
+}
+
+/// <summary>
+/// Handles <see cref="CancelTransferBeforeDispatchCommand"/>.
+/// </summary>
+/// <remarks>
+/// No ledger work: a transfer that never dispatched never moved anything, so
+/// abandoning it is a state change and nothing more. That is also why this does
+/// not need the approval authority the post-dispatch cancel does.
+/// </remarks>
+public sealed class CancelTransferBeforeDispatchCommandHandler(
+    ITransferRepository transfers,
+    ICurrentUser currentUser,
+    ISystemClock clock) : ICommandHandler<CancelTransferBeforeDispatchCommand, TransferOrderId>
+{
+    /// <inheritdoc />
+    public async Task<Result<TransferOrderId>> HandleAsync(
+        CancelTransferBeforeDispatchCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        Transfer? transfer = await transfers
+            .GetByIdAsync(command.TransferId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (transfer is null)
+        {
+            return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        Result cancelled = transfer.CancelBeforeDispatch(
+            clock.UtcNow,
+            command.Reason,
+            currentUser.UserId ?? UserId.Empty);
+
+        return cancelled.IsFailure
+            ? Result<TransferOrderId>.Failure(cancelled.Errors)
+            : Result<TransferOrderId>.Success(transfer.Id);
     }
 }
 

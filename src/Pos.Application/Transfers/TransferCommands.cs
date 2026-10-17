@@ -136,6 +136,22 @@ public sealed record CancelTransferDispatchCommand(TransferOrderId TransferId, s
 }
 
 /// <summary>
+/// Abandons a transfer that has not been dispatched. Nothing has reached the
+/// ledger yet, so there is nothing to reverse — the request is simply dropped.
+/// </summary>
+/// <param name="TransferId">The transfer.</param>
+/// <param name="Reason">Why it is being abandoned.</param>
+public sealed record CancelTransferBeforeDispatchCommand(TransferOrderId TransferId, string Reason)
+    : ICommand<TransferOrderId>, IAuthorizedMessage
+{
+    /// <summary>
+    /// The same right as picking it: whoever prepares a transfer at the source
+    /// is who discovers it can no longer go.
+    /// </summary>
+    public string RequiredPermission => Permissions.Transfer.Pick;
+}
+
+/// <summary>
 /// Records what arrived at the destination, splitting the in-transit stock into
 /// available, damaged and, for shortfalls, transit variance buckets. Over-receipt
 /// is refused because the ledger has nothing to draw from.

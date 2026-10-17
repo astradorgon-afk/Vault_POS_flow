@@ -56,6 +56,9 @@ public enum DocumentType
 
     /// <summary>Delivery Receipt, prefix <c>DR</c>.</summary>
     DeliveryReceipt = 16,
+
+    /// <summary>Warehouse supply request, prefix <c>SRQ</c>.</summary>
+    SupplyRequest = 17,
 }
 
 /// <summary>
@@ -120,6 +123,7 @@ public readonly partial record struct DocumentNumber
         DocumentType.Receipt => "RCT",
         DocumentType.ExpiryRun => "EXP",
         DocumentType.DeliveryReceipt => "DR",
+        DocumentType.SupplyRequest => "SRQ",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown document type."),
     };
 
