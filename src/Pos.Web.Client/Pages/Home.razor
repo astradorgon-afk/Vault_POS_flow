@@ -854,24 +854,53 @@ else
         }
         ProfileView? profile = profiles.FirstOrDefault(item =>
             item.UserName.Equals(userName.Trim(), StringComparison.OrdinalIgnoreCase));
-        if (profile is null)
-        {
-            error = "No saved data for this account on this device. Sign in online once to prepare it.";
-            return;
-        }
-        if (profile.UnlockMethod == "pin")
+        if (profile?.UnlockMethod == "pin")
         {
             error = "This saved profile uses an older offline PIN. Connect and sign in online to move its saved work to your account password.";
             return;
         }
-        selectedScope = profile.Scope;
-        await UnlockAsync();
+        if (profile is null && !connected)
+        {
+            error = "No saved data for this account on this device. Connect and sign in once to prepare it.";
+            return;
+        }
+        selectedScope = profile?.Scope ?? string.Empty;
+
+        // Signing in online is what gives this device the server session it
+        // syncs through. Unlocking alone left every sync refused until someone
+        // thought to open the online sign-in page, so the online attempt comes
+        // first whenever there is a connection and the saved copy is the
+        // fallback rather than the default.
+        await RunAsync(connected ? "Signing in and downloading…" : "Unlocking saved data…", async () =>
+        {
+            if (!connected) { await UnlockCoreAsync(); return; }
+            OnlineSignInView attempt = await store!.InvokeAsync<OnlineSignInView>(
+                "signInOnline", userName.Trim(), password, twoFactorCode.Trim(), offlinePin);
+            if (attempt.Status == "signed-in" && attempt.Login is not null)
+            {
+                await AdoptSignInAsync(attempt.Login);
+                return;
+            }
+            if (profile is null)
+            {
+                error = attempt.Message ?? "Signing in online was refused, and nothing is saved for this account on this device.";
+                return;
+            }
+            await UnlockCoreAsync();
+            message = $"{attempt.Message} Opened the copy saved on this device — work stays here until signing in online confirms it.";
+        });
         if (unlocked) Navigation.NavigateTo("/");
     }
     private Task OpenWorkspaceAsync() => unlockMode ? UnlockAsync() : LoginAsync();
     private Task LoginAsync() => RunAsync("Signing in and downloading…", async () =>
     {
         LoginView login = await store!.InvokeAsync<LoginView>("login", userName.Trim(), password, twoFactorCode.Trim(), offlinePin);
+        await AdoptSignInAsync(login);
+    });
+
+    /// <summary>Opens the workspace on the account an online sign-in just confirmed.</summary>
+    private async Task AdoptSignInAsync(LoginView login)
+    {
         displayName = login.User.DisplayName; unlocked = true; password = offlinePin = string.Empty;
         currentPermissions = login.User.Permissions;
         currentRoles = login.User.Roles;
@@ -881,8 +910,9 @@ else
         try { snapshot = await store!.InvokeAsync<OfflineSnapshot>("download"); PrepareSnapshot(); }
         catch (Exception ex) { message = $"Signed in. Download needs attention: {UiError.Message(ex)}"; }
         await RefreshStateAsync(); await RefreshOperationsAsync(); await SyncCoreAsync(); message ??= "Workspace ready on this device.";
-    });
-    private Task UnlockAsync() => RunAsync("Unlocking saved data…", async () =>
+    }
+    private Task UnlockAsync() => RunAsync("Unlocking saved data…", UnlockCoreAsync);
+    private async Task UnlockCoreAsync()
     {
         UnlockView result = await store!.InvokeAsync<UnlockView>("unlock", selectedScope, password);
         displayName = result.DisplayName; snapshot = result.Snapshot; unlocked = true; password = string.Empty;
@@ -893,7 +923,7 @@ else
         PrepareSnapshot(); await LoadWorkingAsync(); await RefreshOperationsAsync();
         try { await SyncCoreAsync(); } catch (JSException) { }
         message = "Local workspace unlocked. Shared records still need server confirmation.";
-    });
+    }
     private async Task LoadWorkingAsync()
     {
         purchase = await store!.InvokeAsync<PurchaseWorking?>("loadWorking", "purchase") ?? new();
@@ -1246,6 +1276,9 @@ else
         public short? LocationKind { get; set; } }
     private sealed class ProfileView { public string Scope { get; set; } = string.Empty; public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string UnlockMethod { get; set; } = "password"; public DateTimeOffset LastOnlineUtc { get; set; } }
     private sealed class LoginView { public LoginUser User { get; set; } = new(); }
+
+    /// <summary>What an online sign-in attempt came back with: the account, or why the server did not take it.</summary>
+    private sealed class OnlineSignInView { public string Status { get; set; } = string.Empty; public LoginView? Login { get; set; } public string? Message { get; set; } }
     private sealed class LoginUser { public string DisplayName { get; set; } = string.Empty;
         public List<string> Permissions { get; set; } = [];
 

@@ -75,15 +75,8 @@ public sealed class VaultFlowAuthenticationStateProvider(
             return Anonymous;
         }
 
-        List<Claim> claims =
-        [
-            new(ClaimTypes.NameIdentifier, current.User.Id.ToString("D")),
-            new(ClaimTypes.Name, current.User.DisplayName),
-        ];
-        claims.AddRange(current.User.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
-        claims.AddRange(current.User.Permissions.Select(permission => new Claim("permission", permission)));
-        claims.AddRange(current.User.Locations.Select(location => new Claim("location", location.ToString("D"))));
-
-        return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(claims, "VaultFlowApi")));
+        // The same projection the authorization middleware judges a page load
+        // by, so a reload and a click agree on what this account may open.
+        return new AuthenticationState(WebSessionClaims.Principal(current, "VaultFlowApi"));
     }
 }

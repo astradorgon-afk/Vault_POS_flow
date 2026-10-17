@@ -131,16 +131,29 @@ export async function waitForAppFiles(timeoutMs = 20000) {
 }
 
 async function api(path, options = {}) {
-    const response = await fetch(`/offline/api/${path}`, {
-        credentials: 'same-origin', cache: 'no-store', ...options,
-        headers: { 'X-VaultFlow-PWA': '1', ...(options.headers || {}) },
-    });
+    let response;
+    try {
+        response = await fetch(`/offline/api/${path}`, {
+            credentials: 'same-origin', cache: 'no-store', ...options,
+            headers: { 'X-VaultFlow-PWA': '1', ...(options.headers || {}) },
+        });
+    } catch {
+        // A dropped connection reads as "Failed to fetch" otherwise, which
+        // says nothing to the person holding the device.
+        const unreachable = new Error('The server could not be reached from this device.');
+        unreachable.gateway = true;
+        unreachable.offline = true;
+        throw unreachable;
+    }
     if (!response.ok) {
         let detail;
         try { const body = await response.json(); detail = body.detail || body.message || body.title; }
         catch { /* The server may be unreachable or return no body. */ }
         const error = new Error(detail || `Server returned ${response.status}.`);
         error.status = response.status;
+        // Marks the server as the one who said no, so a caller can fall back
+        // to the saved copy without swallowing a local problem of its own.
+        error.gateway = true;
         throw error;
     }
     return response.status === 204 ? null : response.json();
@@ -248,6 +261,21 @@ export async function login(userName, password, twoFactorCode, offlinePin) {
     try { await navigator.storage?.persist?.(); }
     catch { /* Storage persistence is optional; readiness still shows eviction risk. */ }
     return { user: result.user, scope };
+}
+
+// Signs in against the server when it can be reached. The offline page calls
+// this first: unlocking alone leaves no server session, so every sync after it
+// was refused until someone thought to sign in on the online page. A server
+// that refuses or cannot be reached is reported rather than thrown, because the
+// saved copy on this device is still worth opening; a local unlock problem
+// keeps travelling, since only the operator can resolve it.
+export async function signInOnline(userName, password, twoFactorCode, offlinePin) {
+    try {
+        return { status: 'signed-in', login: await login(userName, password, twoFactorCode, offlinePin) };
+    } catch (error) {
+        if (!error.gateway) throw error;
+        return { status: error.offline ? 'unreachable' : 'refused', message: error.message };
+    }
 }
 
 async function rewrapProfile(profile, oldKey, password) {

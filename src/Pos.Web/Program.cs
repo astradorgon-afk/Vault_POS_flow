@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Net;
 using Pos.Application.Identity;
@@ -31,8 +30,10 @@ builder.Services.AddAuthorizationCore(options =>
             context.User.HasClaim("permission", Permissions.Administration.ManageUsers)
             || context.User.HasClaim("permission", Permissions.Administration.ManageRoles)));
 });
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options => options.LoginPath = "/login");
+// The authorization middleware judges a full page load from HttpContext.User,
+// so the request has to carry the session this browser already holds. Without
+// it every reload of an [Authorize] page was challenged and read as a sign-out.
+builder.Services.AddWebSessionAuthentication();
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<UserSession>();

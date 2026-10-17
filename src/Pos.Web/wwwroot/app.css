@@ -863,7 +863,9 @@ select.qr-field{cursor:pointer}
    four most-used places, and everything clears the notch and the home indicator. */
 .tabbar { display: none; }
 @media (max-width: 900px) {
-  html, body { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+  /* Pull-to-refresh is the phone's reload: overscroll-behavior-y must stay
+     at its default here or dragging down does nothing. */
+  html, body { -webkit-tap-highlight-color: transparent; }
   body { touch-action: manipulation; }
   input, select, textarea { font-size: 16px !important; } /* stops iOS zooming in on focus */
 
