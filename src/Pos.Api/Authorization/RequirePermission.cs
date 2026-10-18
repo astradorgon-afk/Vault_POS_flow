@@ -207,13 +207,12 @@ public sealed class PermissionAuthorizationHandler(
                     $"Endpoint requires permission {requirement.Permission}, which is not in the catalogue."));
         }
 
-        if (requirement.Permission == Permissions.Administration.ViewAudit &&
-            (context.User.IsInRole(Roles.Owner) || context.User.IsInRole(Roles.Administrator)))
-        {
-            context.Succeed(requirement);
-            return;
-        }
-
+        // audit.view used to be conceded here to anyone in the Owner or
+        // Administrator role. Both hold it through their own bundles, so the
+        // shortcut bought nothing — and it outranked the evaluator, which meant
+        // a deny override on audit.view was written, displayed as active and
+        // then quietly ignored by this endpoint. The permission is the only
+        // grant, exactly as every other requirement is judged.
         LocationId? scope = ResolveScope(requirement);
         CancellationToken cancellationToken = httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None;
 

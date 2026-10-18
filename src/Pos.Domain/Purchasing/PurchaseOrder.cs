@@ -228,7 +228,12 @@ public sealed class PurchaseOrder : AggregateRoot<PurchaseOrderId>
         CreatedByUserId = createdBy;
         CreatedAtUtc = createdAtUtc;
         CurrencyCode = currencyCode;
-        ExpectedAtUtc = expectedAtUtc;
+
+        // The name is a promise. A caller may hold the expected delivery at
+        // whatever offset suits it — nine in the morning in Manila, say — but
+        // the column behind this is UTC, and the driver rejects an instant
+        // offered at any other offset outright.
+        ExpectedAtUtc = expectedAtUtc?.ToUniversalTime();
         Status = PurchaseOrderStatus.Draft;
     }
 

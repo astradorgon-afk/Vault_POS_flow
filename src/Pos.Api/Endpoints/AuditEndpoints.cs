@@ -27,13 +27,17 @@ public static class AuditEndpoints
     /// Reading it as UTC put the window eight hours out: "today" began at 08:00
     /// store time, so the morning's activity was missing from a search that had
     /// asked for it, and the rows that did come back grouped under two headings.
+    /// The boundary is handed back at zero offset as well: PostgreSQL holds
+    /// these columns as "timestamp with time zone" and the driver refuses a
+    /// parameter carrying any other offset, so a window built at +08:00 made
+    /// every date-filtered search fail outright instead of narrowing.
     /// </remarks>
     /// <param name="day">The business date as the operator chose it.</param>
-    /// <returns>Midnight of that date where the stores trade.</returns>
+    /// <returns>Midnight of that date where the stores trade, as an instant in UTC.</returns>
     private static DateTimeOffset StartOfBusinessDay(DateOnly day)
     {
         DateTime local = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return new DateTimeOffset(local, BusinessZone.GetUtcOffset(local));
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, BusinessZone));
     }
 
     public static IEndpointRouteBuilder MapAuditEndpoints(this IEndpointRouteBuilder app)

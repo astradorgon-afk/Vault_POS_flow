@@ -421,6 +421,12 @@
 
             if (result is not { IsSuccess: true, Value: { } page })
             {
+                // Drop what was on screen. The chips above the table already
+                // name the filters that were asked for, so leaving the last
+                // successful page under them reads as a filter being ignored.
+                items.Clear();
+                total = 0;
+                offset = 0;
                 message = result.Error ?? "The activity log could not be loaded.";
                 return;
             }

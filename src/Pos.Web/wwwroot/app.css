@@ -499,8 +499,12 @@ select.qr-field{cursor:pointer}
 
 /* ---------- Shell ---------- */
 
+/* "backwards", never "forwards": an animation that keeps filling a transform
+   makes the element a containing block for its fixed-position descendants, so a
+   page's overlays and dialogs get pinned inside the page's own column instead of
+   the viewport. The end state is the default anyway, so nothing is lost. */
 .content > * {
-    animation: vf-rise .28s var(--ease) both;
+    animation: vf-rise .28s var(--ease) backwards;
 }
 
 @keyframes vf-rise {

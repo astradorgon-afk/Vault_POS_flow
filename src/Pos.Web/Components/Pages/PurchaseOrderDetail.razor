@@ -23,7 +23,9 @@
     @if (order is not null)
     {
         <div class="po-head-actions">
-            <WorkflowPrintButton Document="@BuildPrintReceipt(order)" Disabled="@(!receiptsLoaded)" />
+            <WorkflowPrintButton Document="@BuildPrintReceipt(order)"
+                                 ButtonLabel="@(PrintsOrderList ? "Print order list" : "Print receipt")"
+                                 Disabled="@(!receiptsLoaded && !PrintsOrderList)" />
             <div class="po-head-total"><span>Order total</span><strong>@PurchasingText.Money(order.GrandTotal)</strong></div>
         </div>
     }
@@ -87,7 +89,7 @@ else if (order is { } o)
     {
         case "Draft":
             <section class="qr-card po-card po-action">
-                <div><h2>This order is a draft</h2><p>Nothing happens until it is sent for approval.</p></div>
+                <div><h2>This order is a draft</h2><p>@(SkipsApproval ? "Nothing happens until you take it to the sending step." : "Nothing happens until it is sent for approval.")</p></div>
                 <div class="po-buttons">
                     @if (confirmDiscard)
                     {
@@ -98,7 +100,7 @@ else if (order is { } o)
                     else if (Can("purchase.create"))
                     {
                         <button type="button" class="po-btn" @onclick="() => confirmDiscard = true">Discard draft</button>
-                        <button type="button" class="po-btn primary" disabled="@busy" @onclick="SubmitAsync">Send for approval</button>
+                        <button type="button" class="po-btn primary" disabled="@busy" @onclick="SubmitAsync">@(SkipsApproval ? "Continue to sending" : "Send for approval")</button>
                     }
                 </div>
             </section>
@@ -156,8 +158,9 @@ else if (order is { } o)
 
         case "Approved" when Can("purchase.approve"):
             <section class="qr-card po-card po-action">
-                <div><h2>Approved — send it to the supplier</h2><p>Send the order to @SupplierName by e-mail or phone, then mark it as sent so the warehouse can receive it.</p></div>
+                <div><h2>@(SkipsApproval ? "Ready — send it to the supplier" : "Approved — send it to the supplier")</h2><p>Print the list to hand or read out to @SupplierName, or send it by e-mail or phone. Mark it as sent so the warehouse can receive it.</p></div>
                 <div class="po-buttons">
+                    <WorkflowPrintButton Document="@BuildPrintReceipt(o)" ButtonLabel="Print order list" />
                     <button type="button" class="po-btn primary" disabled="@busy" @onclick="SendAsync">Mark as sent to supplier</button>
                 </div>
             </section>
@@ -286,6 +289,32 @@ else if (order is { } o)
                 }
             </ul>
         </section>
+    }
+
+    @if (justSent)
+    {
+        @* The order is on its way, and this is the one moment the buyer is
+           asked where to go next. It is put in front of the page rather than
+           left as a card below it, where it would be scrolled past. The dim
+           area around it does nothing: leaving is a decision, and it is made
+           on one of the two buttons. *@
+        <div class="sent-backdrop">
+            <section class="sent-dialog" role="alertdialog" aria-modal="true" aria-labelledby="sent-title"
+                     tabindex="-1" @onkeydown="OnSentDialogKey">
+                <span class="order-eyebrow">Sent to supplier</span>
+                <h2 id="sent-title">@PurchasingText.OrderName(o.Number) is with @SupplierName</h2>
+                <p>Nothing more is needed here until the goods arrive — come back to this order to record the delivery. If it was handed over the counter and is already here, receive it now.</p>
+                @* The default sits on the right, where this page puts the
+                   button it expects to be pressed. *@
+                <div class="sent-actions">
+                    @if (Can("purchase.receive"))
+                    {
+                        <button type="button" class="po-btn" @onclick="ReceiveNow">Receive the delivery now</button>
+                    }
+                    <button type="button" class="po-btn primary" @ref="backToOrdersButton" @onclick="BackToOrders">Back to purchase orders</button>
+                </div>
+            </section>
+        </div>
     }
 }
 </div>

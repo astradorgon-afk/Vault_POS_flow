@@ -91,6 +91,18 @@ public sealed class RoleAdministrationService(
             return Result.Failure(AdministrationErrors.RoleUnknown(roleId.ToString()));
         }
 
+        // The seeded Owner role is the yardstick the safeguards measure every
+        // other account against: an account outranks a caller when it holds
+        // governance authority the caller lacks, and the owner's is what makes
+        // the owner unadministrable. Leaving it editable makes that protection
+        // circular — whoever can take a permission off this role can lower the
+        // bar they have to clear. It is defined in Roles.DefaultGrants and
+        // changes there, under review, rather than through a checkbox.
+        if (role.IsSystemRole && string.Equals(role.Name, Roles.Owner, StringComparison.Ordinal))
+        {
+            return Result.Failure(AdministrationErrors.OwnerRoleImmutable);
+        }
+
         // A role the caller holds is their own authority, and a role carrying
         // governance authority the caller lacks outranks them.
         bool holdsRole = await context.UserRoles.AsNoTracking()

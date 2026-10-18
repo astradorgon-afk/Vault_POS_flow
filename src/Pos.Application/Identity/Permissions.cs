@@ -399,11 +399,21 @@ public static class Permissions
     /// over the whole business, or over the controls themselves.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Administration refuses to hand one of these to anyone — by role, by role
     /// edit, or by override — unless the administrator holds it too (ADR-0028).
     /// Operational permissions such as selling or counting are deliberately not
     /// here, so an administrator can still set up cashiers and store managers
     /// without being able to sell.
+    /// </para>
+    /// <para>
+    /// The line is "does holding this let someone sign off on something, or
+    /// widen what the business is", not "is this an administration screen". A
+    /// permission that clears a document, releases held stock or settles a
+    /// discrepancy is a decision someone could otherwise hand themselves by
+    /// opening an account and granting it; that is what this set exists to
+    /// stop, so each of those belongs here as much as user.manage does.
+    /// </para>
     /// </remarks>
     public static IReadOnlySet<string> Privileged { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -413,6 +423,7 @@ public static class Permissions
         Administration.ManageLocations,
         Administration.AllLocations,
         Administration.ViewAudit,
+        Catalog.ApproveChanges,
         Inventory.NegativeStock,
         Inventory.RebuildBalances,
         Inventory.ApproveAdjustment,
@@ -420,8 +431,12 @@ public static class Permissions
         Inventory.RunExpiry,
         Purchasing.Approve,
         Purchasing.AuthorizeDirectToStore,
+        Purchasing.ResolveDiscrepancy,
+        Quarantine.Release,
         Transfer.Approve,
         Transfer.IssuePreApproval,
+        Transfer.Reconcile,
+        Transfer.AutoReplenish,
     };
 
     /// <summary>Looks up a permission definition by code.</summary>

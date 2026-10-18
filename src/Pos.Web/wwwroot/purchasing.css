@@ -128,3 +128,227 @@
 @media (prefers-reduced-motion:reduce){
     .po-page *{transition:none!important;animation:none!important}
 }
+
+/* ========================================================================
+   NEW PURCHASE ORDER — the composer, in the mobile prototype's language.
+
+   A progress strip at the top, delivery details that fold down to a
+   one-line glance once they are settled, products as cards rather than a
+   table so a long order reads on a phone, a running total pinned above
+   the tab bar, and the review as a bottom sheet.
+
+   Scoped under .pn so nothing here reaches the order list or the rest of
+   the app shell. >=768px it widens and pairs the detail fields; the shape
+   is otherwise the same on a phone and on a desk.
+   ===================================================================== */
+
+/* The column is centred in whatever room the shell gives it, and carries
+   enough tail padding that the total bar can never settle over the last
+   card's words. */
+.pn{display:flex;flex-direction:column;gap:14px;width:100%;max-width:760px;margin-inline:auto;padding-bottom:18px;color:#1b3027}
+.pn *{box-sizing:border-box}
+.pn button{cursor:pointer;font:inherit}
+.pn-main,.pn-side{display:contents}
+.pn .pn-ico{width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.pn button:focus-visible,.pn input:focus-visible,.pn select:focus-visible{outline:3px solid #93cbae;outline-offset:2px}
+.pn-alert{background:#fdf1ee;border:1px solid #e8c2b8;color:#8c3a2c;border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.6}
+
+/* ---- heading and progress ---------------------------------------------- */
+.pn-intro{display:grid;gap:7px}
+.pn-intro-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pn-intro h1{font-size:26px;letter-spacing:-1px;line-height:1.2;font-weight:800;margin:0}
+.pn-intro>p{color:#718176;font-size:12px;line-height:1.55;margin:0}
+.pn-status{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #dee7dd;color:#7d8f85;border-radius:99px;padding:6px 10px;font-size:10px;font-weight:800;white-space:nowrap}
+.pn-status i{width:6px;height:6px;border-radius:50%;background:currentColor}
+.pn-status.ready{background:#e1f1e6;border-color:#cce4d5;color:#246d48}
+.pn-steps{list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin:8px 0 0;padding:5px;background:#e9efea;border:1px solid #e0e9e2;border-radius:11px}
+.pn-steps li{display:flex;align-items:center;justify-content:center;gap:7px;padding:9px 4px;border-radius:8px;font-size:11px;font-weight:700;color:#8a9a8e;white-space:nowrap}
+.pn-steps li.current{background:#fff;color:#1f6447;box-shadow:0 2px 5px #1f3d2913}
+.pn-steps li.done{color:#397b57}
+.pn-step-num{width:18px;height:18px;display:grid;place-items:center;border-radius:50%;background:#dce5dd;font-size:10px}
+.pn-steps li.current .pn-step-num{background:#d9ede1}
+.pn-steps li.done .pn-step-num{background:#cfe9d8}
+
+/* ---- the warehouse request this order answers -------------------------- */
+.pn-seeded{display:grid;gap:6px;border:1px solid #cddbd0;background:#eef4f0;border-radius:11px;padding:13px 14px;color:#28402f;font-size:11px;line-height:1.6}
+.pn-seeded strong{font-size:13px}
+.pn-seeded-note{font-style:italic;color:#4d6456}
+
+/* ---- cards ------------------------------------------------------------- */
+.pn-card{border:1px solid #dee6de;background:#fff;border-radius:15px;box-shadow:0 3px 12px rgba(30,67,42,.033);padding:17px 16px}
+.pn-card-head{display:flex;align-items:flex-start;gap:11px;margin-bottom:14px}
+.pn-num{width:32px;height:32px;border-radius:10px;background:#e5f2e9;color:#2a7050;display:grid;place-items:center;font-weight:800;font-size:11px;flex:0 0 auto}
+.pn-card-head-main{flex:1;min-width:0}
+.pn-eyebrow{font-size:9px;font-weight:800;color:#5d896c;text-transform:uppercase;letter-spacing:.115em;margin:1px 0 3px}
+.pn-card h2{font-size:16px;line-height:1.2;letter-spacing:-.35px;font-weight:800;margin:0}
+.pn-card-sub{font-size:11px;color:#78877d;margin:6px 0 0;line-height:1.45}
+.pn-chip{background:#f1f5f1;border-radius:99px;padding:6px 9px;color:#647a6a;font-size:10px;font-weight:700;white-space:nowrap}
+.pn-toggle{border:1px solid #d7e4d9;background:#f5f9f5;color:#2a6c4c;border-radius:8px;font-size:11px;font-weight:800;padding:8px 11px;min-height:33px;white-space:nowrap}
+
+/* ---- delivery details: glance, then the fields ------------------------- */
+.pn-glance{border-top:1px solid #edf1ed;padding-top:13px;display:flex;justify-content:space-between;align-items:flex-start;gap:9px}
+.pn-glance-main{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;font-weight:800;color:#304a3a;margin:0}
+.pn-glance-main .pn-ico{width:14px;height:14px;color:#8aa597}
+.pn-glance-date{font-size:11px;color:#788c7d;margin:7px 0 0}
+.pn-glance-badge{background:#eaf6ed;color:#298453;border-radius:99px;padding:5px 7px;font-size:10px;font-weight:780;white-space:nowrap}
+.pn-fields{border-top:1px solid #edf1ed;padding-top:15px;display:grid;gap:15px}
+.pn-field{display:grid;align-content:start;align-self:start;gap:7px;min-width:0}
+.pn-field label{font-size:10px;color:#677b6d;font-weight:800;letter-spacing:.085em;text-transform:uppercase}
+.pn-field label em{font-style:normal;font-weight:600;letter-spacing:.02em;text-transform:none;color:#8a998e}
+.pn-required{color:#b34f3e}
+.pn .pn-control{height:46px;width:100%;min-width:0;border:1px solid #d4dfd6;border-radius:10px;background:#fff;color:#21372b;font-size:13px;font-weight:650;padding:0 13px}
+.pn .pn-control:focus{outline:2px solid #b1d6c0;outline-offset:0;border-color:#3e8861}
+.pn select.pn-control{appearance:none;padding-right:34px}
+.pn-select{display:block;position:relative}
+.pn-select::after{content:"";position:absolute;right:15px;top:50%;margin-top:-5px;width:7px;height:7px;border-right:2px solid #567366;border-bottom:2px solid #567366;transform:rotate(45deg);pointer-events:none}
+.pn-link{border:0;background:none;color:#367352;padding:0;font-size:11px;font-weight:750;text-align:left;justify-self:start}
+.pn-note{display:flex;gap:6px;align-items:center;font-size:11px;color:#7b8d7f;line-height:1.45;margin:0}
+.pn-note .pn-ico{width:14px;height:14px;color:#648773}
+
+/* ---- finding products -------------------------------------------------- */
+.pn-search-row{display:flex;gap:8px;align-items:stretch}
+.pn-search{flex:1;min-width:0;display:flex;align-items:center;gap:9px;height:46px;border:1px solid #d4dfd6;border-radius:10px;background:#fff;padding:0 12px;color:#7e9284}
+.pn-search:focus-within{border-color:#3e8861;box-shadow:0 0 0 3px #29744e1f}
+.pn-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:13px;color:#21372b}
+.pn .camera-scanner{margin:0;flex:0 0 auto}
+.pn .camera-open{height:46px;border:1px solid #1d6548;background:#1c6246;color:#fff;border-radius:10px;padding:0 14px;font-size:12px;font-weight:790}
+.pn .camera-open:disabled{opacity:.5}
+/* The live camera needs the whole width, not the slot its button sat in. */
+.pn-search-row:has(.camera-panel){flex-wrap:wrap}
+.pn .camera-scanner:has(.camera-panel){flex:1 1 100%}
+.pn-scan-hint{font-size:11px;color:#7b8d7f;line-height:1.5;margin:9px 0 0}
+.pn-filterline{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;padding-bottom:12px;border-bottom:1px solid #ecf0eb}
+.pn-filtercopy{font-size:11px;color:#596e5f;line-height:1.4;margin:0}
+.pn-filtercopy strong{color:#284834}
+.pn-switch{width:38px;height:23px;flex:0 0 auto;border:0;background:#d3ddd4;border-radius:30px;padding:0;position:relative}
+.pn-switch::after{content:"";position:absolute;left:3px;top:3px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002;transition:transform .18s}
+.pn-switch.on{background:#28734f}
+.pn-switch.on::after{transform:translateX(15px)}
+.pn-results-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:13px;font-size:10px;font-weight:800;color:#64776a;text-transform:uppercase;letter-spacing:.06em}
+.pn-results-head button{border:0;background:none;color:#377458;font-size:11px;font-weight:730;text-transform:none;letter-spacing:0}
+/* Six rows deep, then it scrolls. The catalogue runs to hundreds of products,
+   and an unbounded list pushes the order itself off the screen; a sliver of the
+   seventh row shows through so it is plain that the list keeps going. */
+.pn-results{--pn-result-rows:6;--pn-result-row:60px;margin-top:4px;max-height:calc(var(--pn-result-rows) * var(--pn-result-row) + 12px);overflow-y:auto;overscroll-behavior:contain;padding-right:6px;scrollbar-width:thin;scrollbar-color:#c2cfc4 transparent}
+.pn-results::-webkit-scrollbar{width:9px}
+.pn-results::-webkit-scrollbar-track{background:transparent}
+.pn-results::-webkit-scrollbar-thumb{background:#c2cfc4;background-clip:content-box;border:2px solid transparent;border-radius:99px}
+.pn-results::-webkit-scrollbar-thumb:hover{background:#a7bbac;background-clip:content-box}
+.pn-result{display:flex;align-items:center;gap:9px;padding:12px 0;border-bottom:1px solid #ecf0ed}
+.pn-result-icon{width:32px;height:32px;flex:0 0 auto;border-radius:8px;display:grid;place-items:center;color:#5a8a68;background:#edf4ee}
+.pn-result-icon .pn-ico{width:17px;height:17px}
+.pn-result-copy{flex:1;min-width:0}
+.pn-result-name{font-size:12px;font-weight:730;line-height:1.25;margin:0}
+.pn-result-meta{font-size:10px;color:#829287;margin:4px 0 0}
+.pn-add-one{flex:0 0 auto;height:35px;min-width:54px;border:1px solid #c5dccb;background:#ebf6ef;color:#1d6644;border-radius:9px;font-size:11px;font-weight:790}
+.pn-added{flex:0 0 auto;background:#eaf6ed;color:#298453;border-radius:99px;padding:6px 9px;font-size:10px;font-weight:780;white-space:nowrap}
+.pn-hint,.pn-none{font-size:11px;color:#8b998e;line-height:1.5;margin:10px 0 0}
+
+/* ---- what is on the order ---------------------------------------------- */
+.pn-empty{text-align:center;padding:20px 7px 4px}
+.pn-empty-icon{width:48px;height:48px;border-radius:15px;background:#edf5ef;color:#7da08a;display:grid;place-items:center;margin:0 auto 10px}
+.pn-empty-icon .pn-ico{width:24px;height:24px}
+.pn-empty strong{display:block;font-size:13px;color:#354b3d;font-weight:790}
+.pn-empty p{font-size:11px;color:#8b998e;line-height:1.5;margin:5px auto 0;max-width:250px}
+.pn-lines{display:grid;gap:9px;margin-top:13px}
+.pn-line{border:1px solid #e1e8e1;background:#fbfcfa;border-radius:11px;padding:12px}
+.pn-line.invalid{border-color:#e3bdb5;background:#fdf6f4}
+.pn-line-top{display:flex;align-items:flex-start;gap:8px}
+.pn-line-info{flex:1;min-width:0}
+.pn-line-title{font-size:12px;font-weight:780;line-height:1.4;word-break:break-word;margin:0}
+.pn-line-sku{font-size:10px;color:#829087;margin:4px 0 0}
+.pn-remove{width:29px;height:29px;flex:0 0 auto;border:0;background:#fff;border-radius:8px;color:#a3736b;display:grid;place-items:center}
+.pn-remove .pn-ico{width:15px;height:15px}
+.pn-line-bottom{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:12px}
+.pn-stepper{display:flex;align-items:center;flex:0 0 auto;background:#fff;border:1px solid #d5e1d6;border-radius:9px;overflow:hidden}
+.pn-stepper button{width:34px;height:33px;border:0;background:#fff;color:#256345;font-size:19px;font-weight:700}
+.pn-stepper button:disabled{color:#a9bcae;cursor:not-allowed}
+.pn-stepper input{width:48px;height:33px;min-width:0;border:0;border-left:1px solid #e3eae4;border-right:1px solid #e3eae4;background:#fff;text-align:center;font-size:12px;font-weight:800;color:#1b3027}
+.pn-line-money{display:grid;gap:5px;justify-items:end;min-width:0}
+.pn-line-money label{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a998e}
+.pn-cost{width:96px;height:33px;border:1px solid #d5e1d6;border-radius:8px;background:#fff;text-align:right;padding:0 9px;font-size:12px;font-weight:700;color:#21372b}
+.pn-line-total{font-size:14px;font-weight:830;letter-spacing:-.2px}
+.pn-line-count{font-size:11px;color:#6f8673;text-align:right;margin:13px 0 0}
+.pn-add-product{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;border:1px dashed #cfdfd1;background:#f9fbf9;color:#346d4a;border-radius:9px;min-height:42px;margin-top:12px;font-size:11px;font-weight:780}
+.pn-add-product .pn-ico{width:14px;height:14px}
+
+/* ---- footing: the tip, what is missing, the running total -------------- */
+.pn-tips{display:flex;gap:9px;border-radius:11px;background:#e8f2eb;padding:11px 12px;color:#5f7869;font-size:11px;line-height:1.55}
+.pn-tips .pn-ico{width:16px;height:16px;color:#33724c;margin-top:1px}
+.pn-tips p{margin:0}
+.pn-missing{margin:0;padding:12px 14px 12px 30px;border:1px solid #ebcb7a;background:#fff7e4;color:#80530b;border-radius:10px;font-size:11px;line-height:1.8}
+.pn-bar{position:sticky;bottom:14px;z-index:5;display:flex;align-items:center;gap:14px;background:rgba(255,255,255,.97);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #dbe4dc;border-radius:13px;padding:11px 14px;box-shadow:0 10px 30px #1a473326}
+.pn-bar-meta{flex:1;min-width:0}
+.pn-bar-meta span{display:block;font-size:10px;color:#789082;font-weight:680;margin-bottom:3px}
+.pn-bar-meta strong{display:block;font-size:19px;font-weight:850;letter-spacing:-.55px;white-space:nowrap}
+.pn-review{height:46px;min-width:150px;flex:0 0 auto;border:0;background:#1d6246;border-radius:11px;color:#fff;font-size:12px;font-weight:830;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 15px}
+.pn-review .pn-ico{width:17px;height:17px}
+.pn-review:disabled{background:#bfd6c7;color:#f9fcfa;cursor:not-allowed}
+
+/* ---- sheets: the new product, and the review --------------------------- */
+.pn-overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;background:rgba(14,33,22,.48)}
+.pn-sheet{width:100%;max-width:520px;max-height:min(88dvh,900px);overflow:auto;background:#fff;border-radius:22px 22px 0 0;padding:13px 21px 28px;box-shadow:0 -15px 55px #0002}
+.pn-handle{width:43px;height:5px;border-radius:9px;background:#d6e0d8;margin:0 auto 16px}
+.pn-sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.pn-sheet h3{font-size:20px;letter-spacing:-.65px;margin:0}
+.pn-sheet-close{width:33px;height:33px;flex:0 0 auto;border:0;background:#f1f5f1;border-radius:10px;color:#587262;display:grid;place-items:center;font-size:19px;line-height:1}
+.pn-sheet-desc{font-size:12px;color:#789083;line-height:1.5;margin:6px 0 16px}
+.pn-sheet .pn-field{margin-top:14px}
+.pn-review-rows{border:1px solid #e5ebe5;border-radius:11px;padding:4px 13px}
+.pn-review-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:11px 0;font-size:12px;border-bottom:1px solid #edf1ed}
+.pn-review-row:last-child{border-bottom:0}
+.pn-review-row span{color:#7e8f82}
+.pn-review-row strong{text-align:right;font-weight:780}
+.pn-review-sub{font-size:10px;color:#65826d;text-transform:uppercase;letter-spacing:.1em;font-weight:820;margin:20px 0 7px}
+.pn-review-total{display:flex;justify-content:space-between;align-items:center;padding-top:15px;margin-top:8px;border-top:1px solid #dce5de}
+.pn-review-total span{font-weight:730}
+.pn-review-total strong{font-size:23px;letter-spacing:-.7px}
+.pn-full-primary{width:100%;height:49px;border:0;background:#174e3a;color:#fff;border-radius:11px;font-size:13px;font-weight:830;margin-top:18px}
+.pn-full-primary:disabled{background:#bfd6c7;color:#f9fcfa;cursor:not-allowed}
+.pn-full-secondary{width:100%;height:44px;border:1px solid #d8e4da;background:#fff;color:#39654b;border-radius:10px;font-size:12px;font-weight:760;margin-top:9px}
+.pn-full-secondary:disabled{opacity:.55;cursor:not-allowed}
+.pn-review-back{display:block;width:100%;text-align:center;margin-top:13px}
+.pn-sheet small{display:block;text-align:center;color:#8a988d;font-size:10px;line-height:1.5;margin-top:11px}
+
+/* ---- phone: clear the tab bar so the total is never under it ----------- */
+@media (max-width:900px){
+    .pn-bar{bottom:calc(78px + env(safe-area-inset-bottom))}
+}
+
+/* ---- desk: wider, and the details sit two to a row --------------------- */
+@media (min-width:768px){
+    .pn{max-width:820px;gap:16px}
+    .pn-intro h1{font-size:32px;letter-spacing:-1.3px}
+    .pn-intro>p{font-size:13px}
+    .pn-card{padding:20px 21px}
+    .pn-fields{grid-template-columns:1fr 1fr;gap:16px 18px}
+    .pn-fields .pn-field:last-child{grid-column:1/-1}
+
+    /* A sheet rising from the bottom edge is a phone gesture. On a desk it is a
+       dialog: centred, clear of the edges, and never cut off by the viewport. */
+    .pn-overlay{align-items:center;padding:28px 24px}
+    .pn-sheet{border-radius:18px;max-height:min(86dvh,820px);padding:20px 24px 26px}
+    .pn-handle{display:none}
+}
+
+/* ---- wide desk: the summary moves into a rail beside the order ---------- */
+/* Narrower than this the column is centred and the total floats at the foot of
+   the screen. Wider, there is room for the two side by side: the page stops
+   leaving half its width empty and the total stops covering the cards. 1320px
+   is the first width where both columns still fit once the app's sidebar and
+   the page padding are taken out. */
+@media (min-width:1320px){
+    .pn{display:grid;grid-template-columns:minmax(0,1fr) 330px;align-items:start;max-width:1180px;column-gap:20px;row-gap:16px;padding-bottom:28px}
+    .pn-alert,.pn-intro,.pn-seeded{grid-column:1/-1}
+    .pn-steps{max-width:620px}
+    .pn-main{grid-column:1;display:flex;flex-direction:column;gap:16px;min-width:0}
+    .pn-side{grid-column:2;display:flex;flex-direction:column;gap:12px;min-width:0;position:sticky;top:80px}
+    .pn-side .pn-bar{order:-1;position:static;flex-direction:column;align-items:stretch;gap:13px;border-radius:15px;padding:15px 16px;background:#fff;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 3px 12px rgba(30,67,42,.033)}
+    .pn-side .pn-bar-meta strong{font-size:23px}
+    .pn-side .pn-review{width:100%}
+    .pn-side .pn-tips{order:1}
+}
+
+@media (prefers-reduced-motion:reduce){
+    .pn *{transition:none!important}
+}

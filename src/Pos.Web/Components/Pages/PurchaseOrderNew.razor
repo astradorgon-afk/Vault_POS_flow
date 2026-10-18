@@ -9,655 +9,388 @@
 
 <PageTitle>New purchase order · VaultFlow</PageTitle>
 
-@if (!string.IsNullOrWhiteSpace(message))
-{
-    <div class="po-alert" role="alert">@message</div>
-}
-
 @if (loading)
 {
     <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading suppliers and products…</p></div></section>
 }
 else
 {
-    <div class="po-compose po-compose-new">
-        <div class="po-compose-main">
-            @if (supplyRequest is { } seeded)
+<div class="pn">
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pn-alert" role="alert">@message</div>
+    }
+
+    <header class="pn-intro">
+        <div class="pn-intro-top">
+            <h1>New order</h1>
+            <span class="pn-status @(IsReady ? "ready" : null)" role="status">
+                <i aria-hidden="true"></i>@(IsReady ? "Ready to review" : "In progress")
+            </span>
+        </div>
+        <p>Set where it is going, add the products, then review it before sending.</p>
+        @* Three stops, so the buyer can see at a glance what is already
+           settled and what the page is still waiting for. *@
+        <ol class="pn-steps" aria-label="Order progress">
+            <li class="@StepState(1)"><span class="pn-step-num" aria-hidden="true">@(DetailsDone ? "✓" : "1")</span>Details</li>
+            <li class="@StepState(2)"><span class="pn-step-num" aria-hidden="true">@(ProductsDone ? "✓" : "2")</span>Products</li>
+            <li class="@StepState(3)"><span class="pn-step-num" aria-hidden="true">3</span>Review</li>
+        </ol>
+    </header>
+
+    @if (supplyRequest is { } seeded)
+    {
+        <section class="pn-seeded" role="note">
+            <strong>Buying for @seeded.Number</strong>
+            <span>
+                The warehouse asked for @seeded.Lines.Count product@(seeded.Lines.Count == 1 ? "" : "s") on
+                @seeded.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture).
+                Quantities are what is still to be bought. Choose the supplier and check the costs, then save the order.
+                Ordering only part of it leaves the rest on the request for a second supplier.
+            </span>
+            @if (!string.IsNullOrWhiteSpace(seeded.Note))
             {
-                <section class="po-seeded" role="note">
-                    <strong>Buying for @seeded.Number</strong>
-                    <span>
-                        The warehouse asked for @seeded.Lines.Count product@(seeded.Lines.Count == 1 ? "" : "s") on
-                        @seeded.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture).
-                        Quantities are what is still to be bought. Choose the supplier and check the costs, then save the order.
-                        Ordering only part of it leaves the rest on the request for a second supplier.
-                    </span>
-                    @if (!string.IsNullOrWhiteSpace(seeded.Note))
-                    {
-                        <span class="po-seeded-note">“@seeded.Note”</span>
-                    }
-                </section>
+                <span class="pn-seeded-note">“@seeded.Note”</span>
             }
-            <section class="qr-card po-card po-card-details">
-                <div class="po-section-heading">
-                    <span class="po-step" aria-hidden="true">01</span>
-                    <div>
-                        <p class="po-section-label">Purchase order settings</p>
-                    </div>
+        </section>
+    }
+
+    @* The order itself on the left; on a wide screen the running total,
+       what is still missing and the approval note move into a rail beside
+       it rather than floating over the cards. *@
+    <div class="pn-main">
+        <section class="pn-card">
+            <div class="pn-card-head">
+                <span class="pn-num" aria-hidden="true">01</span>
+                <div class="pn-card-head-main">
+                    <p class="pn-eyebrow">Order settings</p>
+                    <h2>Delivery details</h2>
                 </div>
-                <div class="po-fields">
-                    <div class="po-field">
-                        <label for="po-supplier">Supplier</label>
+                <button type="button" class="pn-toggle" aria-expanded="@(detailsOpen ? "true" : "false")" @onclick="() => detailsOpen = !detailsOpen">
+                    @(detailsOpen ? "Done" : "Edit details")
+                </button>
+            </div>
+
+            @if (detailsOpen)
+            {
+                <div class="pn-fields">
+                    <div class="pn-field">
+                        <label for="pn-supplier">Supplier <span class="pn-required" aria-hidden="true">*</span></label>
                         @if (useCustomSupplier)
                         {
-                            <input id="po-supplier" type="text" maxlength="128" placeholder="Enter supplier name"
+                            <input id="pn-supplier" class="pn-control" type="text" maxlength="128" placeholder="Enter the supplier's name"
                                    @bind="customSupplierName" @bind:event="oninput" />
                         }
                         else
                         {
-                            <select id="po-supplier" @bind="supplierId" @bind:after="OnSupplierChanged">
-                                <option value="">Choose a supplier…</option>
-                                @foreach (PosSupplier supplier in suppliers.Where(s => s.IsActive).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
-                                {
-                                    <option value="@supplier.Id">@supplier.Name</option>
-                                }
-                            </select>
+                            <span class="pn-select">
+                                <select id="pn-supplier" class="pn-control" @bind="supplierId" @bind:after="OnSupplierChanged">
+                                    <option value="">Choose a supplier…</option>
+                                    @foreach (PosSupplier supplier in suppliers.Where(s => s.IsActive).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        <option value="@supplier.Id">@supplier.Name</option>
+                                    }
+                                </select>
+                            </span>
                         }
-                        <button type="button" class="po-inline-link" @onclick="ToggleCustomSupplier">
-                            @(useCustomSupplier ? "Choose a listed supplier" : "Supplier not listed?")
+                        <button type="button" class="pn-link" @onclick="ToggleCustomSupplier">
+                            @(useCustomSupplier ? "Choose a listed supplier instead" : "Supplier not listed? Type the name")
                         </button>
                     </div>
-                    <label class="po-field">
-                        <span>Deliver to</span>
-                        <select @bind="destinationId">
-                            @foreach (PosLocation location in destinations)
-                            {
-                                <option value="@location.Id">@location.Code · @location.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label class="po-field">
-                        <span>Expected delivery</span>
-                        <input type="date" @bind="expectedOn" />
-                    </label>
-                    <div class="po-field po-date-help">
-                        <span>Expected delivery</span>
-                        <details>
-                            <summary>How is this date set?</summary>
-                            <p>We estimate it from the supplier’s usual lead time. You can change it if they confirm another date.</p>
-                        </details>
+
+                    <div class="pn-field">
+                        <label for="pn-destination">Deliver to <span class="pn-required" aria-hidden="true">*</span></label>
+                        <span class="pn-select">
+                            <select id="pn-destination" class="pn-control" @bind="destinationId">
+                                @foreach (PosLocation location in destinations)
+                                {
+                                    <option value="@location.Id">@location.Code · @location.Name</option>
+                                }
+                            </select>
+                        </span>
+                    </div>
+
+                    <div class="pn-field">
+                        <label for="pn-expected">Expected delivery</label>
+                        <input id="pn-expected" class="pn-control" type="date" @bind="expectedOn" />
+                        <p class="pn-note">
+                            <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></svg>
+                            Estimated from the supplier's usual lead time. Change it if they confirm another date.
+                        </p>
                     </div>
                 </div>
-            </section>
-
-            <section class="qr-card po-card po-card-products">
-                <div class="po-section-heading">
-                    <span class="po-step" aria-hidden="true">02</span>
+            }
+            else
+            {
+                <div class="pn-glance">
                     <div>
-                        <p class="po-section-label">Order lines</p>
-                        <h2>Add products</h2>
-                        <p>Search by product name or SKU, or scan a barcode.</p>
+                        <p class="pn-glance-main">
+                            <span>@SupplierLabel</span>
+                            <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                            <span>@DestinationLabel</span>
+                        </p>
+                        <p class="pn-glance-date">Expected · @ExpectedLabel</p>
                     </div>
-                    <span class="po-line-count">@lines.Count @(lines.Count == 1 ? "line" : "lines")</span>
+                    @if (DetailsDone)
+                    {
+                        <span class="pn-glance-badge">✓ Set</span>
+                    }
                 </div>
-                <ScanTarget OnScan="OnScanned" Enabled="@(!saving)" />
-                <CameraScanner Enabled="@(!saving)" />
-                <p class="po-scan-hint">▥ @(scanNote ?? "Scan a product's barcode to add it; each scan adds one.")</p>
-                <div class="po-finder">
-                    <input type="search" placeholder="Search products by name or SKU" aria-label="Search products"
+            }
+        </section>
+
+        <section class="pn-card">
+            <div class="pn-card-head">
+                <span class="pn-num" aria-hidden="true">02</span>
+                <div class="pn-card-head-main">
+                    <p class="pn-eyebrow">Order lines</p>
+                    <h2>Add products</h2>
+                    <p class="pn-card-sub">Search for an item or scan its barcode.</p>
+                </div>
+                <span class="pn-chip">@lines.Count @(lines.Count == 1 ? "item" : "items")</span>
+            </div>
+
+            <ScanTarget OnScan="OnScanned" Enabled="@(!saving)" />
+
+            <div class="pn-search-row">
+                <label class="pn-search">
+                    <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                    <input type="search" placeholder="Search product or SKU" aria-label="Search products"
                            @bind="productSearch" @bind:event="oninput" @onkeydown="OnFinderKey" />
-                    @if (Supplier is { } forSupplier)
+                </label>
+                <CameraScanner Enabled="@(!saving)" />
+            </div>
+            <p class="pn-scan-hint">@(scanNote ?? "Each scan adds one more of that product.")</p>
+
+            @if (Supplier is { } forSupplier)
+            {
+                <div class="pn-filterline">
+                    <p class="pn-filtercopy">Only products from <strong>@forSupplier.Name</strong></p>
+                    <button type="button" class="pn-switch @(onlySupplierProducts ? "on" : null)" role="switch"
+                            aria-checked="@(onlySupplierProducts ? "true" : "false")"
+                            aria-label="Show only this supplier's products"
+                            @onclick="() => onlySupplierProducts = !onlySupplierProducts"></button>
+                </div>
+            }
+
+            @if (ShowResults)
+            {
+                <div class="pn-results-head">
+                    <span>@(productSearch.Trim().Length > 0 ? "Matching products" : "Available products")</span>
+                    <button type="button" @onclick="CloseResults">Close</button>
+                </div>
+                <div class="pn-results" aria-live="polite">
+                    @foreach (PosOrderableProduct product in Matches)
                     {
-                        <label class="switch-label">
-                            <input type="checkbox" @bind="onlySupplierProducts" />
-                            <span>Only @forSupplier.Name's products</span>
-                        </label>
+                        DraftLine? already = lines.FirstOrDefault(l => l.Product.Id == product.Id);
+                        <div class="pn-result">
+                            <span class="pn-result-icon" aria-hidden="true">
+                                <svg class="pn-ico" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4-9-4Zm0 0v10l9 4 9-4V7M12 11v10" /></svg>
+                            </span>
+                            <div class="pn-result-copy">
+                                <p class="pn-result-name">@product.Name</p>
+                                <p class="pn-result-meta">@product.Sku · @UnitName(product.BaseUnitOfMeasureId)@(product.DefaultPurchaseCost is { } cost ? " · " + PurchasingText.Money(cost) : "")</p>
+                            </div>
+                            @if (already is null)
+                            {
+                                <button type="button" class="pn-add-one" @onclick="() => AddLine(product)">+ Add</button>
+                            }
+                            else
+                            {
+                                <span class="pn-added">✓ @PurchasingText.Quantity(already.Quantity)</span>
+                            }
+                        </div>
                     }
                 </div>
-
-                <div class="po-custom-product">
-                    <button type="button" class="po-inline-link po-custom-product-toggle" aria-expanded="@showCustomProduct" @onclick="ToggleCustomProduct">
-                        @(showCustomProduct ? "Close new product form" : "Product not listed? Add it")
-                    </button>
-                    @if (showCustomProduct)
-                    {
-                    <div class="po-custom-product-fields">
-                        <label class="po-field"><span>Product name</span><input @bind="newProductName" maxlength="128" /></label>
-                        <label class="po-field"><span>SKU <small>(optional; generated if blank)</small></span><input @bind="newProductSku" maxlength="64" /></label>
-                        <label class="po-field"><span>Barcode <small>(optional)</small></span><input @bind="newProductBarcode" maxlength="48" /></label>
-                        <label class="po-field"><span>Category</span>
-                            <select @bind="newProductCategoryId">
-                                <option value="">Choose a category</option>
-                                @foreach (PosCategory category in categories)
-                                {
-                                    <option value="@category.Id">@category.Name</option>
-                                }
-                            </select>
-                        </label>
-                        <label class="po-field"><span>Unit</span>
-                            <select @bind="newProductUnitId">
-                                <option value="">Choose a unit</option>
-                                @foreach (PosUnitOfMeasure unit in units.Values.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
-                                {
-                                    <option value="@unit.Id">@unit.Name (@unit.Code)</option>
-                                }
-                            </select>
-                        </label>
-                        <label class="po-field"><span>Unit cost</span><input type="number" min="0" step="0.01" @bind="newProductCost" /></label>
-                        <button type="button" class="po-btn primary" @onclick="AddCustomProductAsync" disabled="@(saving || !CanAddCustomProduct)">Add product to order</button>
-                    </div>
-                    @if (categories.Count == 0)
-                    {
-                        <p class="po-hint">Product categories are unavailable, so a new product cannot be added right now.</p>
-                    }
-                    }
-                </div>
-
-                @if (Matches.Count > 0)
+                @if (Matches.Count == 0)
                 {
-                    <ul class="po-matches" aria-label="Matching products">
-                        @foreach (PosOrderableProduct product in Matches)
-                        {
-                            DraftLine? existing = lines.FirstOrDefault(l => l.Product.Id == product.Id);
-                            <li>
-                                <div>
-                                    <strong>@product.Name</strong>
-                                    <small>@product.Sku · @UnitName(product.BaseUnitOfMeasureId)@(product.DefaultPurchaseCost is { } cost ? " · " + PurchasingText.Money(cost) : "")</small>
+                    <p class="pn-none">No products match@(onlySupplierProducts && Supplier is { } s ? " among " + s.Name + "'s products — turn the filter off to search everything" : "").</p>
+                }
+                else if (MatchTotal > Matches.Count)
+                {
+                    <p class="pn-hint">Showing @Matches.Count of @MatchTotal. Type more of the name to narrow it down.</p>
+                }
+            }
+
+            @if (lines.Count == 0)
+            {
+                <div class="pn-empty">
+                    <span class="pn-empty-icon" aria-hidden="true">
+                        <svg class="pn-ico" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4-9-4Zm0 0v10l9 4 9-4V7M12 11v10" /></svg>
+                    </span>
+                    <strong>No products added yet</strong>
+                    <p>Find a product above or scan a barcode to start this order.</p>
+                </div>
+            }
+            else
+            {
+                <div class="pn-lines">
+                    @foreach (DraftLine line in lines)
+                    {
+                        <article class="pn-line @(line.IsValid ? null : "invalid")">
+                            <div class="pn-line-top">
+                                <div class="pn-line-info">
+                                    <p class="pn-line-title">@line.Product.Name</p>
+                                    <p class="pn-line-sku">@line.Product.Sku · per @UnitName(line.Product.BaseUnitOfMeasureId)</p>
                                 </div>
-                                @if (existing is null)
-                                {
-                                    <button type="button" class="po-btn" @onclick="() => AddLine(product)">+ Add</button>
-                                }
-                                else
-                                {
-                                    <span class="po-added">✓ @PurchasingText.Quantity(existing.Quantity) on order</span>
-                                }
-                            </li>
-                        }
-                    </ul>
-                    @if (MatchTotal > Matches.Count)
-                    {
-                        <p class="po-hint">Showing @Matches.Count of @MatchTotal. Type more of the name to narrow it down.</p>
+                                <button type="button" class="pn-remove" aria-label="Remove @line.Product.Name" @onclick="() => lines.Remove(line)">
+                                    <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7" /></svg>
+                                </button>
+                            </div>
+                            <div class="pn-line-bottom">
+                                <div class="pn-stepper">
+                                    <button type="button" aria-label="One less" disabled="@(line.Quantity <= 1)" @onclick="() => Step(line, -1)">−</button>
+                                    <input type="number" min="1" step="1" aria-label="Quantity of @line.Product.Name" @bind="line.Quantity" @bind:event="oninput" />
+                                    <button type="button" aria-label="One more" @onclick="() => Step(line, 1)">+</button>
+                                </div>
+                                <div class="pn-line-money">
+                                    <label for="pn-cost-@line.Product.Id">Unit cost</label>
+                                    <input id="pn-cost-@line.Product.Id" class="pn-cost" type="number" min="0" step="0.01"
+                                           @bind="line.UnitCost" @bind:event="oninput" />
+                                    <strong class="pn-line-total">@PurchasingText.Money(line.Total)</strong>
+                                </div>
+                            </div>
+                        </article>
                     }
-                }
-                else if (productSearch.Trim().Length > 0 || onlySupplierProducts)
-                {
-                    <p class="po-hint">No products match@(onlySupplierProducts && Supplier is { } s ? " among " + s.Name + "'s products — untick the box to search everything" : "").</p>
-                }
+                </div>
+                <p class="pn-line-count">@lines.Count @(lines.Count == 1 ? "product" : "products") · @PurchasingText.Quantity(TotalUnits) units</p>
+            }
 
-                @if (lines.Count == 0)
-                {
-                    <div class="po-empty-lines" aria-label="No products added yet">
-                        <svg viewBox="0 0 120 100" aria-hidden="true" focusable="false">
-                            <path d="m25 29 34-17 36 17-35 18-35-18Z" />
-                            <path d="M25 29v39l35 19V47M95 29v25M60 47v40" />
-                            <path d="m39 22 35 18M38 61l9 5" />
-                            <rect x="70" y="53" width="38" height="30" rx="5" />
-                            <path d="M78 61v14m4-14v14m4-14v14m4-14v14m5-14v14m4-14v14" />
-                        </svg>
-                    </div>
-                }
-                else
-                {
-                    <div class="qr-table-wrap">
-                        <table class="qr-table po-lines">
-                            <thead>
-                                <tr><th>Product</th><th class="num">Quantity</th><th class="num">Unit cost</th><th class="num">Line total</th><th><span class="po-sr">Remove</span></th></tr>
-                            </thead>
-                            <tbody>
-                                @foreach (DraftLine line in lines)
-                                {
-                                    <tr class="static @(line.IsValid ? null : "po-invalid")">
-                                        <td><strong>@line.Product.Name</strong><small>@line.Product.Sku · per @UnitName(line.Product.BaseUnitOfMeasureId)</small></td>
-                                        <td class="num">
-                                            <div class="po-stepper">
-                                                <button type="button" aria-label="One less" @onclick="() => Step(line, -1)" disabled="@(line.Quantity <= 1)">−</button>
-                                                <input type="number" min="1" step="1" aria-label="Quantity of @line.Product.Name" @bind="line.Quantity" @bind:event="oninput" />
-                                                <button type="button" aria-label="One more" @onclick="() => Step(line, 1)">+</button>
-                                            </div>
-                                        </td>
-                                        <td class="num"><input class="po-money" type="number" min="0" step="0.01" aria-label="Unit cost of @line.Product.Name" @bind="line.UnitCost" @bind:event="oninput" /></td>
-                                        <td class="num"><strong>@PurchasingText.Money(line.Total)</strong></td>
-                                        <td class="num"><button type="button" class="po-remove" aria-label="Remove @line.Product.Name" @onclick="() => lines.Remove(line)">×</button></td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
-            </section>
+            <button type="button" class="pn-add-product" @onclick="OpenCustomProduct">
+                <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                Product not listed? Add a new item
+            </button>
+        </section>
+    </div>
+
+    <div class="pn-side">
+        <div class="pn-tips">
+            <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></svg>
+            <p>@(SkipsApproval
+                ? "You approve your own purchase orders. Check the quantities before you continue to sending."
+                : "A different team member approves this order before it reaches the supplier.")</p>
         </div>
 
-        <aside class="po-summary qr-card" aria-label="Order summary">
-            <div class="po-summary-heading">
-                <span>Order check</span>
-                <h2>Ready for approval</h2>
-                <p>Complete the required details to send this order to a reviewer.</p>
-            </div>
-            <dl>
-                <div><dt>Supplier</dt><dd>@(useCustomSupplier && !string.IsNullOrWhiteSpace(customSupplierName) ? customSupplierName : Supplier?.Name ?? "—")</dd></div>
-                <div><dt>Deliver to</dt><dd>@(destinations.FirstOrDefault(d => d.Id == destinationId)?.Name ?? "—")</dd></div>
-                <div><dt>Expected</dt><dd>@(expectedOn?.ToString("d MMM yyyy", CultureInfo.InvariantCulture) ?? "—")</dd></div>
-                <div><dt>Lines</dt><dd>@lines.Count · @PurchasingText.Quantity(lines.Sum(l => l.Quantity)) units</dd></div>
-            </dl>
-            <div class="po-total"><span>Order total</span><strong>@PurchasingText.Money(lines.Where(l => l.IsValid).Sum(l => l.Total))</strong></div>
+        @if (Missing.Count > 0)
+        {
+            <ul class="pn-missing">
+                @foreach (string item in Missing) { <li>@item</li> }
+            </ul>
+        }
 
-            @if (Missing.Count > 0)
-            {
-                <ul class="po-missing">
-                    @foreach (string item in Missing) { <li>@item</li> }
-                </ul>
-            }
-
-            <div class="po-summary-actions">
-                <button type="button" class="po-btn primary block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: true)">
-                    @(saving ? "Saving…" : "Send for approval")
-                </button>
-                <button type="button" class="po-btn block" disabled="@(saving || Missing.Count > 0)" @onclick="() => SaveAsync(submit: false)">Save as draft</button>
+        @* The running total follows the buyer down the page: on a long order the
+           figure they are committing to should never be out of sight. On a
+           narrow screen it floats above the tab bar; in the rail it simply
+           stays put while the cards scroll past. *@
+        <div class="pn-bar">
+            <div class="pn-bar-meta">
+                <span>@lines.Count @(lines.Count == 1 ? "product" : "products") · @PurchasingText.Quantity(TotalUnits) units</span>
+                <strong>@PurchasingText.Money(OrderTotal)</strong>
             </div>
-            <p class="po-summary-foot">A different team member approves it before it reaches the supplier.</p>
-        </aside>
+            <button type="button" class="pn-review" disabled="@(saving || Missing.Count > 0)" @onclick="OpenReview">
+                Review order
+                <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+        </div>
     </div>
-}
 
-@code {
-    private const int MaxMatches = 12;
-
-    /// <summary>
-    /// The warehouse supply request this order is being raised against, when the
-    /// owner arrived here from the approvals queue.
-    /// </summary>
-    [SupplyParameterFromQuery(Name = "supplyRequest")]
-    public Guid? SupplyRequestId { get; set; }
-
-    private PosSupplyRequest? supplyRequest;
-
-    private readonly List<PosSupplier> suppliers = [];
-    private readonly List<PosLocation> destinations = [];
-    private readonly List<PosOrderableProduct> catalogue = [];
-    private readonly Dictionary<Guid, PosUnitOfMeasure> units = [];
-    private readonly List<PosCategory> categories = [];
-    private readonly List<DraftLine> lines = [];
-
-    private bool loading = true;
-    private bool saving;
-    private string? message;
-    private Guid? supplierId;
-    private Guid destinationId;
-    private DateOnly? expectedOn;
-    private string productSearch = string.Empty;
-    private bool onlySupplierProducts;
-    private bool useCustomSupplier;
-    private string customSupplierName = string.Empty;
-    private string newProductName = string.Empty;
-    private string newProductSku = string.Empty;
-    private string newProductBarcode = string.Empty;
-    private bool showCustomProduct;
-    private decimal newProductCost;
-    private Guid newProductCategoryId;
-    private Guid newProductUnitId;
-
-    private PosSupplier? Supplier => suppliers.FirstOrDefault(s => s.Id == supplierId);
-    private bool HasSupplier => useCustomSupplier ? !string.IsNullOrWhiteSpace(customSupplierName) : supplierId is not null;
-    private bool CanAddCustomProduct => !string.IsNullOrWhiteSpace(newProductName)
-        && newProductCategoryId != Guid.Empty && newProductUnitId != Guid.Empty && newProductCost >= 0;
-
-    private bool IsStoreDelivery => destinations.FirstOrDefault(d => d.Id == destinationId)?.Kind == 1;
-
-    private IEnumerable<PosOrderableProduct> Candidates
+    @if (customProductOpen)
     {
-        get
-        {
-            string term = productSearch.Trim();
-            return catalogue
-                .Where(p => p.IsActive)
-                .Where(p => !onlySupplierProducts || p.PrimarySupplierId == supplierId)
-                .Where(p => term.Length == 0
-                    || p.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
-                    || p.Sku.Contains(term, StringComparison.OrdinalIgnoreCase));
-        }
+        <div class="pn-overlay" @onclick="CloseCustomProduct">
+            <section class="pn-sheet" role="dialog" aria-modal="true" aria-labelledby="pn-product-title" tabindex="-1"
+                     @ref="sheetElement" @onkeydown="OnSheetKey" @onclick:stopPropagation="true">
+                <div class="pn-handle" aria-hidden="true"></div>
+                <div class="pn-sheet-head">
+                    <h3 id="pn-product-title">Add a new product</h3>
+                    <button type="button" class="pn-sheet-close" aria-label="Close" @onclick="CloseCustomProduct">×</button>
+                </div>
+                <p class="pn-sheet-desc">It is saved to the catalogue and added straight to this order.</p>
+
+                <div class="pn-field"><label for="pn-np-name">Product name</label>
+                    <input id="pn-np-name" class="pn-control" maxlength="128" @bind="newProductName" @bind:event="oninput" /></div>
+                <div class="pn-field"><label for="pn-np-sku">SKU <em>optional — generated if blank</em></label>
+                    <input id="pn-np-sku" class="pn-control" maxlength="64" @bind="newProductSku" /></div>
+                <div class="pn-field"><label for="pn-np-barcode">Barcode <em>optional</em></label>
+                    <input id="pn-np-barcode" class="pn-control" maxlength="48" @bind="newProductBarcode" /></div>
+                <div class="pn-field"><label for="pn-np-category">Category</label>
+                    <span class="pn-select">
+                        <select id="pn-np-category" class="pn-control" @bind="newProductCategory">
+                            <option value="">Choose a category</option>
+                            @foreach (PosCategory category in categories)
+                            {
+                                <option value="@category.Id">@category.Name</option>
+                            }
+                            <option value="@OtherCategoryChoice">Other — none of these fit</option>
+                        </select>
+                    </span>
+                </div>
+                <div class="pn-field"><label for="pn-np-unit">Unit</label>
+                    <span class="pn-select">
+                        <select id="pn-np-unit" class="pn-control" @bind="newProductUnitId">
+                            <option value="">Choose a unit</option>
+                            @foreach (PosUnitOfMeasure unit in units.Values.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <option value="@unit.Id">@unit.Name (@unit.Code)</option>
+                            }
+                        </select>
+                    </span>
+                </div>
+                <div class="pn-field"><label for="pn-np-cost">Unit cost</label>
+                    <input id="pn-np-cost" class="pn-control" type="number" min="0" step="0.01" @bind="newProductCost" @bind:event="oninput" /></div>
+
+                @if (categories.Count == 0)
+                {
+                    <p class="pn-hint">The category list is unavailable. Choose “Other” to buy this product anyway and file it properly later.</p>
+                }
+
+                <button type="button" class="pn-full-primary" disabled="@(saving || !CanAddCustomProduct)" @onclick="AddCustomProductAsync">
+                    @(saving ? "Adding…" : "Create and add to order")
+                </button>
+                <button type="button" class="pn-full-secondary" @onclick="CloseCustomProduct">Cancel</button>
+            </section>
+        </div>
     }
 
-    // Nothing is listed until there is something to narrow by.
-    private List<PosOrderableProduct> Matches => productSearch.Trim().Length == 0 && !onlySupplierProducts
-        ? []
-        : [.. Candidates.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).Take(MaxMatches)];
-
-    private int MatchTotal => Candidates.Count();
-
-    private List<string> Missing
+    @if (reviewOpen)
     {
-        get
-        {
-            List<string> missing = [];
-            if (!HasSupplier) missing.Add(useCustomSupplier ? "Enter a supplier name" : "Choose a supplier");
-            if (destinationId == Guid.Empty) missing.Add("Choose where it is delivered");
-            if (lines.Count == 0) missing.Add("Add at least one product");
-            if (lines.Any(l => !l.IsValid)) missing.Add("Every line needs a quantity above 0 and a cost");
-            return missing;
-        }
+        <div class="pn-overlay" @onclick="CloseReview">
+            <section class="pn-sheet" role="dialog" aria-modal="true" aria-labelledby="pn-review-title" tabindex="-1"
+                     @ref="sheetElement" @onkeydown="OnSheetKey" @onclick:stopPropagation="true">
+                <div class="pn-handle" aria-hidden="true"></div>
+                <div class="pn-sheet-head">
+                    <h3 id="pn-review-title">Review purchase order</h3>
+                    <button type="button" class="pn-sheet-close" aria-label="Close" @onclick="CloseReview">×</button>
+                </div>
+                <p class="pn-sheet-desc">Check the details and the quantities before this becomes an order.</p>
+
+                <div class="pn-review-rows">
+                    <div class="pn-review-row"><span>Supplier</span><strong>@SupplierLabel</strong></div>
+                    <div class="pn-review-row"><span>Deliver to</span><strong>@DestinationLabel</strong></div>
+                    <div class="pn-review-row"><span>Expected delivery</span><strong>@ExpectedLabel</strong></div>
+                </div>
+
+                <p class="pn-review-sub">@lines.Count @(lines.Count == 1 ? "product" : "products") · @PurchasingText.Quantity(TotalUnits) units</p>
+                <div class="pn-review-rows">
+                    @foreach (DraftLine line in lines)
+                    {
+                        <div class="pn-review-row">
+                            <span>@PurchasingText.Quantity(line.Quantity) × @line.Product.Name</span>
+                            <strong>@PurchasingText.Money(line.Total)</strong>
+                        </div>
+                    }
+                </div>
+                <div class="pn-review-total"><span>Order total</span><strong>@PurchasingText.Money(OrderTotal)</strong></div>
+
+                <button type="button" class="pn-full-primary" disabled="@saving" @onclick="() => SaveAsync(submit: true)">
+                    @(saving ? "Saving…" : SkipsApproval ? "Continue to sending" : "Send for approval")
+                </button>
+                <button type="button" class="pn-full-secondary" disabled="@saving" @onclick="() => SaveAsync(submit: false)">Save as a draft instead</button>
+                <button type="button" class="pn-link pn-review-back" @onclick="CloseReview">Back to editing the order</button>
+                <small>@(SkipsApproval
+                    ? "The next screen prints the list and marks it sent to the supplier."
+                    : "A reviewer sees it next; nothing reaches the supplier until they approve it.")</small>
+            </section>
+        </div>
     }
-
-    protected override async Task OnInitializedAsync()
-    {
-        try
-        {
-            Task<ApiResult<List<PosSupplier>>> suppliersTask = Api.GetSuppliersAsync(CancellationToken.None);
-            Task<ApiResult<List<PosLocation>>> locationsTask = Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
-            Task<ApiResult<List<PosUnitOfMeasure>>> unitsTask = Api.GetUnitsAsync(CancellationToken.None);
-            Task<ApiResult<List<PosCategory>>> categoriesTask = Api.GetAsync<List<PosCategory>>("/api/v1/catalog/categories", CancellationToken.None);
-            Task catalogueTask = LoadCatalogueAsync();
-            await Task.WhenAll(suppliersTask, locationsTask, unitsTask, categoriesTask, catalogueTask);
-
-            suppliers.AddRange(suppliersTask.Result.Value ?? []);
-            destinations.AddRange((locationsTask.Result.Value ?? [])
-                .Where(l => l.Kind is 0 or 1 && l.IsActive)
-                .OrderBy(l => l.Kind)
-                .ThenBy(l => l.Code, StringComparer.Ordinal));
-            foreach (PosUnitOfMeasure unit in unitsTask.Result.Value ?? []) units[unit.Id] = unit;
-            categories.AddRange((categoriesTask.Result.Value ?? []).Where(c => c.IsActive).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase));
-            newProductCategoryId = categories.FirstOrDefault()?.Id ?? Guid.Empty;
-            newProductUnitId = units.Keys.FirstOrDefault();
-
-            destinationId = Session.WorkLocationId is { } preferred && destinations.Any(location => location.Id == preferred)
-                ? preferred : destinations.FirstOrDefault()?.Id ?? Guid.Empty;
-
-            await SeedFromSupplyRequestAsync();
-            if (suppliersTask.Result is { IsSuccess: false })
-            {
-                message = suppliersTask.Result.Error;
-            }
-        }
-        catch (HttpRequestException)
-        {
-            message = "Purchasing is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            loading = false;
-        }
-    }
-
-    // The whole catalogue in pages of 200, so searching is instant afterwards.
-    private async Task LoadCatalogueAsync()
-    {
-        const int pageSize = 200;
-        for (int offset = 0; offset < 10_000; offset += pageSize)
-        {
-            ApiResult<List<PosOrderableProduct>> page = await Api.GetOrderableProductsAsync(null, offset, pageSize, CancellationToken.None);
-            if (page is not { IsSuccess: true, Value: { } products })
-            {
-                message = page.Error;
-                return;
-            }
-
-            catalogue.AddRange(products);
-            if (products.Count < pageSize)
-            {
-                return;
-            }
-        }
-    }
-
-    private void OnSupplierChanged()
-    {
-        useCustomSupplier = false;
-        customSupplierName = string.Empty;
-        onlySupplierProducts = supplierId is not null && catalogue.Any(p => p.PrimarySupplierId == supplierId);
-        if (Supplier is { } supplier)
-        {
-            expectedOn = StoreClock.Today.AddDays(Math.Max(1, supplier.LeadTimeDays));
-        }
-    }
-
-    private void ToggleCustomSupplier()
-    {
-        useCustomSupplier = !useCustomSupplier;
-        if (useCustomSupplier) supplierId = null;
-        else customSupplierName = string.Empty;
-        onlySupplierProducts = false;
-        expectedOn = null;
-    }
-
-    private void ToggleCustomProduct() => showCustomProduct = !showCustomProduct;
-
-    private async Task AddCustomProductAsync()
-    {
-        if (!CanAddCustomProduct || saving) return;
-        string sku = string.IsNullOrWhiteSpace(newProductSku)
-            ? $"CUSTOM-{Guid.NewGuid():N}"[..15].ToUpperInvariant()
-            : newProductSku.Trim();
-        string barcode = BarcodeText.Clean(newProductBarcode);
-        saving = true;
-        message = null;
-        try
-        {
-            ApiResult<PosReference> created = await Api.PostAsync<PosReference>("/api/v1/catalog/products", new
-            {
-                sku,
-                name = newProductName.Trim(),
-                categoryId = newProductCategoryId,
-                baseUnitOfMeasureId = newProductUnitId,
-                primarySupplierId = useCustomSupplier ? null : supplierId,
-                defaultPurchaseCost = newProductCost,
-                initialBarcode = barcode.Length == 0 ? null : barcode
-            }, CancellationToken.None);
-            if (created is not { IsSuccess: true, Value: { } productRef })
-            {
-                message = created.Error;
-                return;
-            }
-
-            PosOrderableProduct product = new(productRef.Id, sku, newProductName.Trim(),
-                useCustomSupplier ? null : supplierId, newProductUnitId, newProductCost, false, false, true,
-                barcode.Length == 0 ? [] : [barcode.ToUpperInvariant()]);
-            catalogue.Add(product);
-            AddLine(product);
-            newProductName = string.Empty;
-            newProductSku = string.Empty;
-            newProductBarcode = string.Empty;
-            newProductCost = 0;
-            showCustomProduct = false;
-            scanNote = $"{product.Name} added to the order.";
-        }
-        catch (HttpRequestException)
-        {
-            message = "The product could not be added. Check your connection and product permissions.";
-        }
-        finally { saving = false; }
-    }
-
-    private void OnFinderKey(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && Matches.Count == 1 && lines.All(l => l.Product.Id != Matches[0].Id))
-        {
-            AddLine(Matches[0]);
-            productSearch = string.Empty;
-        }
-        else if (e.Key == "Escape")
-        {
-            productSearch = string.Empty;
-        }
-    }
-
-    private string? scanNote;
-
-    // The catalogue on the page already holds every barcode, so a scan needs no lookup.
-    private void OnScanned(BarcodeScan scan)
-    {
-        IReadOnlyList<string> codes = BarcodeText.LookupVariants(scan.Code);
-        PosOrderableProduct? product = catalogue.FirstOrDefault(p => p.IsActive && (p.Barcodes ?? []).Any(code => codes.Contains(code, StringComparer.OrdinalIgnoreCase)))
-            ?? catalogue.FirstOrDefault(p => p.IsActive && string.Equals(p.Sku, scan.Code, StringComparison.OrdinalIgnoreCase));
-        if (product is null)
-        {
-            newProductBarcode = scan.Code;
-            showCustomProduct = true;
-            scanNote = $"Barcode {scan.Code} is not in the catalog. Enter the product details below to add it to this order.";
-            return;
-        }
-
-        DraftLine? line = lines.FirstOrDefault(l => l.Product.Id == product.Id);
-        if (line is null)
-        {
-            AddLine(product);
-            line = lines[^1];
-        }
-        else
-        {
-            line.Quantity += 1;
-        }
-
-        if (supplierId is not null && product.PrimarySupplierId is { } usual && usual != supplierId)
-        {
-            scanNote = $"{product.Name}: {PurchasingText.Quantity(line.Quantity)} on this order. It usually comes from another supplier.";
-        }
-        else
-        {
-            scanNote = $"{product.Name}: {PurchasingText.Quantity(line.Quantity)} on this order.";
-        }
-    }
-
-    private void AddLine(PosOrderableProduct product)
-        => lines.Add(new DraftLine(product) { Quantity = 1, UnitCost = product.DefaultPurchaseCost ?? 0m });
-
-    private static void Step(DraftLine line, int delta) => line.Quantity = Math.Max(1, line.Quantity + delta);
-
-    private string UnitName(Guid id) => units.TryGetValue(id, out PosUnitOfMeasure? unit) ? unit.Name.ToLowerInvariant() : "unit";
-
-    /// <summary>
-    /// Fills the composer from a warehouse supply request: the lines the
-    /// warehouse asked for, at the quantities still to be bought, delivered to
-    /// the warehouse that asked. The supplier and the costs are left blank —
-    /// deciding those is the whole reason the request came to the owner.
-    /// </summary>
-    private async Task SeedFromSupplyRequestAsync()
-    {
-        if (SupplyRequestId is not { } requestId)
-        {
-            return;
-        }
-
-        ApiResult<PosSupplyRequest> result = await Api.GetSupplyRequestAsync(requestId, CancellationToken.None);
-
-        if (result is not { IsSuccess: true, Value: { } request })
-        {
-            message = result.Error ?? "That supply request could not be opened.";
-            return;
-        }
-
-        supplyRequest = request;
-
-        if (destinations.Any(location => location.Id == request.DestinationLocationId))
-        {
-            destinationId = request.DestinationLocationId;
-        }
-
-        List<string> missing = [];
-
-        foreach (PosSupplyRequestLineView line in request.Lines.Where(l => l.OutstandingQuantity > 0m))
-        {
-            PosOrderableProduct? product = catalogue.FirstOrDefault(p => p.Id == line.ProductId);
-
-            if (product is null)
-            {
-                // The product was retired after the request was raised. Say so
-                // rather than quietly dropping a line the warehouse asked for.
-                missing.Add(FormattableString.Invariant($"line {line.LineNo}"));
-                continue;
-            }
-
-            lines.Add(new DraftLine(product)
-            {
-                Quantity = line.OutstandingQuantity,
-                UnitCost = product.DefaultPurchaseCost ?? 0m,
-                RequestLineNo = line.LineNo,
-            });
-        }
-
-        if (missing.Count > 0)
-        {
-            message = $"Some products on this request are no longer orderable and were left off: {string.Join(", ", missing)}.";
-        }
-    }
-
-    private async Task SaveAsync(bool submit)
-    {
-        if (Missing.Count > 0)
-        {
-            return;
-        }
-
-        saving = true;
-        message = null;
-        try
-        {
-            DateTimeOffset? expectedAtUtc = expectedOn is { } day
-                ? new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(8))
-                : null;
-
-            // An order raised against a warehouse request is created through the
-            // request, so the two are written in one transaction and the request
-            // knows what it turned into. Lines typed in on top of a seeded order
-            // are ordinary lines and carry no request line of their own.
-            ApiResult<PosReference> created = supplyRequest is { } request
-                ? await Api.OrderSupplyRequestAsync(
-                    request.Id,
-                    new PosOrderSupplyRequest(
-                        useCustomSupplier ? null : supplierId,
-                        [.. lines.Where(l => l.RequestLineNo is not null)
-                            .Select(l => new PosSupplyRequestOrderLine(
-                                l.RequestLineNo!.Value, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
-                        ExpectedAtUtc: expectedAtUtc,
-                        CustomSupplierName: useCustomSupplier ? customSupplierName.Trim() : null),
-                    CancellationToken.None)
-                : await Api.CreatePurchaseOrderAsync(
-                    new PosCreatePurchaseOrder(
-                        useCustomSupplier ? null : supplierId,
-                        destinationId,
-                        [.. lines.Select(l => new PosCreatePurchaseOrderLine(l.Product.Id, l.Product.BaseUnitOfMeasureId, l.Quantity, l.UnitCost))],
-                        ExpectedAtUtc: expectedAtUtc,
-                        CustomSupplierName: useCustomSupplier ? customSupplierName.Trim() : null),
-                    CancellationToken.None);
-            if (created is not { IsSuccess: true, Value: { } reference })
-            {
-                message = created.Error;
-                return;
-            }
-
-            string query = string.Empty;
-            if (submit)
-            {
-                ApiResult<PosReference> submitted = await Api.SubmitPurchaseOrderAsync(reference.Id, CancellationToken.None);
-                query = submitted.IsSuccess ? "?done=submitted" : "?done=saved-not-submitted";
-            }
-
-            Navigation.NavigateTo(FormattableString.Invariant($"purchasing/{reference.Id:D}{query}"));
-        }
-        catch (HttpRequestException)
-        {
-            message = "The order could not be saved. Check the connection and try again.";
-        }
-        finally
-        {
-            saving = false;
-        }
-    }
-
-    private sealed record PosCategory(Guid Id, string Code, string Name, int SortOrder, bool IsActive);
-
-    private sealed class DraftLine(PosOrderableProduct product)
-    {
-        public PosOrderableProduct Product { get; } = product;
-
-        public decimal Quantity { get; set; }
-
-        public decimal UnitCost { get; set; }
-
-        /// <summary>The supply request line this came from, when seeded from one.</summary>
-        public int? RequestLineNo { get; init; }
-
-        public decimal Total => Math.Round(Quantity * UnitCost, 2);
-
-        public bool IsValid => Quantity > 0 && UnitCost >= 0;
-    }
+</div>
 }

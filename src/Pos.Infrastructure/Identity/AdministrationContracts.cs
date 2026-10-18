@@ -200,6 +200,11 @@ public static class AdministrationErrors
         "identity.privilege_escalation_forbidden",
         "You can only give an approval tier up to your own.");
 
+    /// <summary>The seeded Owner role is the root of authority and is fixed in code.</summary>
+    public static Error OwnerRoleImmutable { get; } = Error.Forbidden(
+        "identity.owner_role_immutable",
+        "The Owner role is what every other authority is measured against, so its permissions are fixed in code and cannot be edited here.");
+
     /// <summary>The target holds governance authority the caller does not.</summary>
     public static Error TargetOutranksCaller { get; } = Error.Forbidden(
         "identity.target_outranks_caller",

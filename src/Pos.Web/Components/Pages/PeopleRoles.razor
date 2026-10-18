@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = "people.manage")]
 @rendermode InteractiveServer
 @using System.Globalization
+@using Pos.Application.Identity
 @using Pos.Web.Services
 @inject VaultFlowApiClient Api
 @inject UserSession Session
@@ -598,6 +599,7 @@ else
                         <span class="pr-role-head">
                             <strong>@role.Name</strong>
                             @if (role.IsSystemRole) { <span class="pr-flag">System</span> }
+                            @if (role.IsSystemRole && string.Equals(role.Name, Roles.Owner, StringComparison.Ordinal)) { <span class="pr-flag">Not editable</span> }
                         </span>
                         <span class="pr-role-desc">@role.Description</span>
                         <span class="pr-role-meta">@role.Permissions.Count permission@(role.Permissions.Count == 1 ? "" : "s") · @role.MemberCount @(role.MemberCount == 1 ? "person" : "people")</span>
@@ -630,6 +632,7 @@ else
                                     <span class="status-chip status-submitted">@selected.MemberCount @(selected.MemberCount == 1 ? "person" : "people")</span>
                                     <span class="pr-meta">@rolePermissionCodes.Count of @permissions.Count permissions</span>
                                     @if (SelectedRoleIsMine) { <span class="status-chip status-disabled">You hold this role</span> }
+                                    @if (SelectedRoleIsOwner) { <span class="status-chip status-disabled">Not editable</span> }
                                 </div>
                             </div>
                         </div>
@@ -639,6 +642,13 @@ else
                     @if (SelectedRoleIsMine)
                     {
                         <div class="pr-self">You hold this role, so you cannot change its permissions. Ask another administrator.</div>
+                    }
+                    else if (SelectedRoleIsOwner)
+                    {
+                        <div class="pr-self">
+                            The Owner role is what every other authority is measured against, so its permissions are
+                            fixed in code rather than edited here. Change them in <code>Roles.DefaultGrants</code>.
+                        </div>
                     }
 
                     <div class="pr-perm-tools">
@@ -656,7 +666,7 @@ else
                             <div class="pr-card">
                                 <div class="pr-card-head">
                                     <h3>@SplitWords(module.Key) <small>@granted of @module.Count()</small></h3>
-                                    @if (!SelectedRoleIsMine)
+                                    @if (!SelectedRoleIsLocked)
                                     {
                                         <button type="button" class="link-action muted" @onclick="() => SetModule(module, true)" disabled="@(granted == module.Count())">Select all</button>
                                         <button type="button" class="link-action muted" @onclick="() => SetModule(module, false)" disabled="@(granted == 0)">Clear</button>
@@ -668,7 +678,7 @@ else
                                         bool on = rolePermissionCodes.Contains(permission.Code);
                                         bool changed = on != selected.Permissions.Contains(permission.Code);
                                         <label class="pr-perm @(on ? "on" : "") @(changed ? "changed" : "")">
-                                            <input type="checkbox" checked="@on" disabled="@SelectedRoleIsMine" @onchange="() => ToggleRolePermission(permission.Code)" />
+                                            <input type="checkbox" checked="@on" disabled="@SelectedRoleIsLocked" @onchange="() => ToggleRolePermission(permission.Code)" />
                                             <span>
                                                 <strong>@SplitWords(permission.Code)@(permission.IsPrivileged ? " ⛨" : "")</strong>
                                                 <small>@permission.Description</small>
@@ -684,7 +694,7 @@ else
                         }
                     </div>
 
-                    @if (RolePermissionsDirty && !SelectedRoleIsMine)
+                    @if (RolePermissionsDirty && !SelectedRoleIsLocked)
                     {
                         <footer class="pr-pane-foot">
                             <span class="pr-unsaved">@RoleChangeSummary</span>
@@ -797,6 +807,13 @@ else
     private bool IsSelf => selectedUser is { } detail && detail.User.Id == CurrentUserId;
     private bool SelectedRoleIsMine => selectedRole is { } role
         && Session.Current?.User.Roles.Contains(role.Name, StringComparer.Ordinal) == true;
+
+    // The seeded Owner role is what every other authority is measured against,
+    // so it is fixed in Roles.DefaultGrants and the server refuses to edit it.
+    private bool SelectedRoleIsOwner => selectedRole is { IsSystemRole: true } role
+        && string.Equals(role.Name, Roles.Owner, StringComparison.Ordinal);
+
+    private bool SelectedRoleIsLocked => SelectedRoleIsMine || SelectedRoleIsOwner;
     private bool PasswordsMatch => ResetPasswordProblem is null;
 
     // Says what is missing on the button itself, rather than just greying it out.
@@ -1274,7 +1291,7 @@ else
 
     private void RequestCloseRole()
     {
-        if (RolePermissionsDirty && !SelectedRoleIsMine)
+        if (RolePermissionsDirty && !SelectedRoleIsLocked)
         {
             pendingRoleClose = true;
             return;
@@ -1939,7 +1956,7 @@ else
 
     private async Task SaveRolePermissionsAsync()
     {
-        if (selectedRole is not { } role || SelectedRoleIsMine)
+        if (selectedRole is not { } role || SelectedRoleIsLocked)
         {
             return;
         }

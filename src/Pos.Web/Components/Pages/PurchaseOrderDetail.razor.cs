@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Pos.Application.Identity;
 using Pos.Web.Components.Shared;
 using Pos.Web.Services;
@@ -27,6 +28,9 @@ public partial class PurchaseOrderDetail
     private string supplierOrNumber = string.Empty;
     private DateTime? supplierReleasedAt;
     private bool receivingOpen;
+    private bool justSent;
+    private ElementReference backToOrdersButton;
+    private bool focusBackToOrders;
     private bool arrivalConfirmed;
     private bool receiptsLoaded;
     private bool raisingQuarantine;
@@ -57,13 +61,32 @@ public partial class PurchaseOrderDetail
 
     private bool IsOwner => Session.Current?.User.Roles.Contains(Roles.Owner, StringComparer.Ordinal) == true;
 
+    /// <summary>Whether this buyer signs their own orders off; see <see cref="SubmitAsync"/>.</summary>
+    private bool SkipsApproval => IsOwner && Can(Permissions.Purchasing.Approve);
+
     private string SupplierName => supplier?.Name ?? "the supplier";
+
+    /// <summary>
+    /// Whether the printed copy is the buying list rather than the delivery
+    /// record. Nothing has arrived yet, so "received" and "still due" would
+    /// print a column of zeroes; what the supplier and the owner need on the
+    /// page at this point is what was ordered and what it costs.
+    /// </summary>
+    private bool PrintsOrderList => order?.Status is "Draft" or "PendingApproval" or "Approved";
 
     private WorkflowReceipt BuildPrintReceipt(PosPurchaseOrder value)
     {
         WorkflowReceiptLine[] lines = [.. value.Lines.Select(line => new WorkflowReceiptLine(
             line.ProductName ?? "Product",
             line.ProductSku,
+            PrintsOrderList
+            ?
+            [
+                $"{PurchasingText.Quantity(line.OrderedQuantity)} {UnitName(line.UnitOfMeasureId)}",
+                PurchasingText.Money(line.UnitCost),
+                PurchasingText.Money(line.LineTotal),
+            ]
+            :
             [
                 $"{PurchasingText.Quantity(line.OrderedQuantity)} {UnitName(line.UnitOfMeasureId)}",
                 receiptsLoaded ? $"{PurchasingText.Quantity(ReceivedFor(line.Id))} {UnitName(line.UnitOfMeasureId)}" : "Not loaded",
@@ -73,6 +96,14 @@ public partial class PurchaseOrderDetail
         // The supplier's paperwork arrived with a delivery, so the printed
         // order carries it — the latest one, when they presented any.
         List<WorkflowReceiptDetail> details = [];
+        if (PrintsOrderList)
+        {
+            details.Add(new WorkflowReceiptDetail(
+                "Lines",
+                FormattableString.Invariant($"{value.Lines.Count} · {PurchasingText.Quantity(value.Lines.Sum(line => line.OrderedQuantity))} units")));
+            details.Add(new WorkflowReceiptDetail("Order total", PurchasingText.Money(value.GrandTotal)));
+        }
+
         if (receiptsLoaded && receipts.Count > 0 && receipts.MaxBy(r => r.ReceivedAtUtc) is { } latest)
         {
             if (latest.SupplierDeliveryReceiptNumber is { } deliveryReceipt)
@@ -92,7 +123,7 @@ public partial class PurchaseOrderDetail
         }
 
         return new WorkflowReceipt(
-            "Purchase order",
+            PrintsOrderList ? "Purchase order list" : "Purchase order",
             PurchasingText.OrderName(value.Number),
             PurchasingText.Label(value.Status, Outstanding),
             "Supplier",
@@ -103,7 +134,9 @@ public partial class PurchaseOrderDetail
             When(value.CreatedAtUtc),
             "Expected delivery",
             ExpectedDate,
-            ["Ordered", "Received good", "Still due"],
+            PrintsOrderList
+                ? ["Quantity", "Unit cost", "Line total"]
+                : ["Ordered", "Received good", "Still due"],
             lines,
             details);
     }
@@ -159,6 +192,12 @@ public partial class PurchaseOrderDetail
         {
             case "submitted":
                 Tell(true, "Order saved and sent for approval.");
+                break;
+            case "ready-to-send":
+                Tell(true, "Order saved and approved. Print the list if you need it, then send it to the supplier.");
+                break;
+            case "submitted-not-approved":
+                Tell(false, "The order was saved but could not be approved automatically. Approve it below to carry on.");
                 break;
             case "saved-not-submitted":
                 Tell(false, "The order was saved as a draft, but could not be sent for approval. Try again below.");
@@ -417,8 +456,23 @@ public partial class PurchaseOrderDetail
         }
     }
 
-    private Task SubmitAsync() => RunAsync(
-        () => Api.SubmitPurchaseOrderAsync(OrderId, CancellationToken.None), "Sent for approval.");
+    /// <summary>
+    /// Sends a draft on. The owner approves their own orders, so for them this
+    /// takes the signature too and leaves the order at the sending step rather
+    /// than in a queue only they could clear.
+    /// </summary>
+    private Task SubmitAsync() => SkipsApproval
+        ? RunAsync(
+            async () =>
+            {
+                ApiResult<PosReference> submitted = await Api.SubmitPurchaseOrderAsync(OrderId, CancellationToken.None);
+                return submitted.IsSuccess
+                    ? await Api.ApprovePurchaseOrderAsync(OrderId, null, CancellationToken.None)
+                    : submitted;
+            },
+            "Approved. Print the list if you need it, then send it to the supplier.")
+        : RunAsync(
+            () => Api.SubmitPurchaseOrderAsync(OrderId, CancellationToken.None), "Sent for approval.");
 
     private Task ApproveAsync() => RunAsync(
         () => Api.ApprovePurchaseOrderAsync(OrderId, NullIfBlank(decisionNotes), CancellationToken.None),
@@ -427,9 +481,69 @@ public partial class PurchaseOrderDetail
     private Task RejectAsync() => RunAsync(
         () => Api.RejectPurchaseOrderAsync(OrderId, decisionNotes.Trim(), CancellationToken.None), "Order rejected.");
 
-    private Task SendAsync() => RunAsync(
-        () => Api.SendPurchaseOrderAsync(OrderId, CancellationToken.None),
-        "Marked as sent. Record the delivery here when it arrives.");
+    /// <summary>
+    /// Marks the order as sent, then asks what to do next in a dialog. The
+    /// goods are normally days away, so the buyer is usually finished here —
+    /// but an order handed over the counter can be received on the spot, and
+    /// both ways out are one click from the confirmation.
+    /// </summary>
+    private async Task SendAsync()
+    {
+        await RunAsync(
+            () => Api.SendPurchaseOrderAsync(OrderId, CancellationToken.None),
+            "Marked as sent to the supplier.");
+
+        if (order is { Status: "Ordered" })
+        {
+            justSent = true;
+            receivingOpen = false;
+            focusBackToOrders = true;
+        }
+    }
+
+    /// <summary>Takes the default way out: back to the list of orders.</summary>
+    private void BackToOrders() => Navigation.NavigateTo("purchasing");
+
+    /// <summary>
+    /// Escape leaves the way the first button does. The order is already
+    /// sent, so there is nothing to lose by stepping away from the dialog.
+    /// </summary>
+    private void OnSentDialogKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            BackToOrders();
+        }
+    }
+
+    /// <summary>Closes the dialog and opens the receiving form behind it.</summary>
+    private void ReceiveNow()
+    {
+        justSent = false;
+        receivingOpen = true;
+    }
+
+    /// <summary>
+    /// Puts the cursor on the default choice once the dialog is on screen,
+    /// so Enter takes the buyer back to the list and Escape does the same.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusBackToOrders)
+        {
+            return;
+        }
+
+        focusBackToOrders = false;
+        try
+        {
+            await backToOrdersButton.FocusAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The confirmation was replaced before the focus call landed.
+        }
+    }
 
     private Task CloseAsync() => RunAsync(
         () => Api.ClosePurchaseOrderAsync(OrderId, NullIfBlank(endReason), CancellationToken.None), "Order closed.");
