@@ -1,27 +1,31 @@
 @page "/admin/locations"
 @attribute [Authorize(Policy = "location.manage")]
 @rendermode InteractiveServer
-@using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 
 <PageTitle>Locations · VaultFlow</PageTitle>
 
-<section class="locations-head">
+<nav class="lx-crumbs" aria-label="Breadcrumb">
+    <span>Administration</span><i aria-hidden="true"></i><span>Operating rules</span><i aria-hidden="true"></i><span>Locations</span>
+</nav>
+
+<header class="lx-top">
     <div>
-        <span class="eyebrow">Administration · operating rules</span>
         <h1>Locations</h1>
-        <p>Manage warehouses, stores, and the rules that protect their stock.</p>
+        <p>Manage your warehouses, stores, and the stock rules that keep them running.</p>
     </div>
     @if (CanManageLocations)
     {
-        <button class="location-primary" type="button" @onclick="ToggleCreate">@(showCreate ? "Close form" : "Add location")</button>
+        <button class="lx-primary" type="button" @onclick="OpenCreate">
+            <span class="lx-btn-icon" aria-hidden="true"><AppIcon Name="plus" /></span><span>Add location</span>
+        </button>
     }
-</section>
+</header>
 
 @if (!CanViewLocations)
 {
-    <section class="locations-blocked" role="alert">
+    <section class="lx-blocked" role="alert">
         <span>Access required</span>
         <h2>This account cannot view locations.</h2>
         <p>Ask an administrator for catalogue or location administration access.</p>
@@ -29,431 +33,296 @@
 }
 else
 {
-    @if (showCreate)
+    @if (!string.IsNullOrWhiteSpace(message) && !ModalOpen)
     {
-        <section class="location-create" aria-labelledby="create-location-title">
-            <header><div><span>New operating unit</span><h2 id="create-location-title">Add a physical location</h2></div><p>New locations start on VaultFlow's conservative defaults. Tune the policy after creation.</p></header>
-            <div class="location-create-grid">
-                <label><span>Code</span><input maxlength="16" @bind="newCode" placeholder="STORE3" /></label>
-                <label><span>Name</span><input maxlength="64" @bind="newName" placeholder="Quezon Avenue" /></label>
-                <label><span>Kind</span><select @bind="newKind"><option value="1">Retail store</option><option value="0">Main warehouse</option></select></label>
-                <label><span>IANA timezone</span><input @bind="newTimeZone" placeholder="Asia/Manila" /></label>
+        <div class="lx-message" role="status">@message</div>
+    }
+
+    <section class="lx-stats" aria-label="Location overview">
+        <article>
+            <div>
+                <span class="lx-stat-title">Total locations</span>
+                <strong>@locations.Count</strong>
+                <small>@ActiveCount active · @ClosedCount closed</small>
             </div>
-            <footer><span>Give the location a clear code and timezone for stock activity.</span><button class="location-primary" type="button" @onclick="CreateLocationAsync" disabled="@(!CanCreate || working)">@(working ? "Creating…" : "Create location")</button></footer>
-        </section>
-    }
-
-    @if (!string.IsNullOrWhiteSpace(message))
-    {
-        <div class="locations-message" role="status">@message</div>
-    }
-
-    <section class="location-summary" aria-label="Location summary">
-        <article><span>Physical locations</span><strong>@locations.Count</strong><small>@locations.Count(location => location.Kind == 1) stores · @locations.Count(location => location.Kind == 0) warehouse</small></article>
-        <article><span>Strict stock policy</span><strong>@locations.Count(location => location.Settings.NegativeStockPolicy == 0)</strong><small>locations prohibit negative stock</small></article>
-        <article><span>Direct delivery</span><strong>@locations.Count(location => location.Settings.AllowsDirectSupplierDelivery)</strong><small>locations permit supplier-to-store receipts</small></article>
+            <span class="lx-stat-icon" aria-hidden="true"><AppIcon Name="location" /></span>
+        </article>
+        <article>
+            <div>
+                <span class="lx-stat-title">Strict stock policy</span>
+                <strong>@StrictCount</strong>
+                <small>locations prohibit negative stock</small>
+            </div>
+            <span class="lx-stat-icon" aria-hidden="true"><AppIcon Name="void" /></span>
+        </article>
+        <article>
+            <div>
+                <span class="lx-stat-title">Direct delivery</span>
+                <strong>@DirectDeliveryCount</strong>
+                <small>locations receive straight from suppliers</small>
+            </div>
+            <span class="lx-stat-icon" aria-hidden="true"><AppIcon Name="box-in" /></span>
+        </article>
     </section>
 
     @if (loading)
     {
-        <section class="locations-empty">Loading operating policy…</section>
+        <section class="lx-placeholder">Loading operating policy…</section>
     }
     else if (locations.Count == 0)
     {
-        <section class="locations-empty"><strong>No physical locations found.</strong></section>
+        <section class="lx-placeholder"><strong>No physical locations found.</strong></section>
     }
     else
     {
-        <nav class="location-scope" aria-label="Filter locations">
-            <button type="button" class="@(scope == "live" ? "active" : null)" @onclick='() => scope = "live"'>Live <span>@locations.Count(l => l.IsActive)</span></button>
-            <button type="button" class="@(scope == "closed" ? "active" : null)" @onclick='() => scope = "closed"'>Closed <span>@locations.Count(l => !l.IsActive)</span></button>
-            <button type="button" class="@(scope == "all" ? "active" : null)" @onclick='() => scope = "all"'>All <span>@locations.Count</span></button>
-        </nav>
-
-        <div class="location-workspace">
-            <section class="location-list" aria-label="Locations">
-                @if (Visible.Count == 0)
-                {
-                    <p class="location-scope-empty">@(scope == "closed" ? "No locations have been closed." : "No live locations.")</p>
-                }
-                @foreach (PosLocationAdmin location in Visible)
-                {
-                    <button type="button" class="location-card @(selected?.Id == location.Id ? "selected" : "") @(location.IsActive ? null : "is-closed")" @onclick="() => SelectLocation(location)" @key="location.Id">
-                        <span class="location-code">@location.Code @if (!location.IsActive) { <em class="location-closed-tag">Closed</em> }</span>
-                        <strong>@location.Name</strong>
-                        <small>@KindName(location.Kind) · @location.TimeZoneId</small>
-                        <i>@PolicyName(location.Settings.NegativeStockPolicy)</i>
-                    </button>
-                }
-            </section>
-
-            @if (selected is not null)
-            {
-                <section class="policy-editor" aria-labelledby="policy-editor-title">
-                    <header>
-                        <div>
-                            <span>@selected.Code · @KindName(selected.Kind)</span>
-                            <h2 id="policy-editor-title">@selected.Name</h2>
-                            <p>
-                                Open since @selected.OpenedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture) · @selected.TimeZoneId
-                                @if (!selected.IsActive && selected.ClosedOn is { } closedOn)
-                                {
-                                    <text> · closed @closedOn.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)</text>
-                                }
-                            </p>
-                        </div>
-                        <span class="location-kind-badge">@KindName(selected.Kind)</span>
-                    </header>
-
-                    @if (CanManageLocations)
+        <div class="lx-workspace">
+            <aside class="lx-side" aria-label="Location navigation">
+                <div class="lx-side-top">
+                    <div class="lx-side-head">
+                        <h2>Your locations</h2>
+                        <span class="lx-pill">@locations.Count total</span>
+                    </div>
+                    <div class="lx-search">
+                        <span class="lx-search-icon" aria-hidden="true"><AppIcon Name="search" /></span>
+                        <input type="search" aria-label="Search locations" placeholder="Search by name or code…"
+                               value="@search" @oninput="OnSearchChanged" />
+                    </div>
+                    @* Live locations are the working set; closed ones are kept for
+                       their record. The list opens on live so a long-retired store
+                       never sits between two shops somebody is actually running. *@
+                    <div class="lx-filters" role="group" aria-label="Filter location status">
+                        <button type="button" class="@(scope == "all" ? "active" : null)" @onclick='() => SetScope("all")'>All <span>@locations.Count</span></button>
+                        <button type="button" class="@(scope == "live" ? "active" : null)" @onclick='() => SetScope("live")'>Active <span>@ActiveCount</span></button>
+                        <button type="button" class="@(scope == "closed" ? "active" : null)" @onclick='() => SetScope("closed")'>Closed <span>@ClosedCount</span></button>
+                    </div>
+                </div>
+                <nav class="lx-list" aria-label="Select a location">
+                    @if (Visible.Count == 0)
                     {
-                        <div class="policy-section">
-                            <div class="policy-section-title"><span>Details</span><div><strong>Identity</strong><small>The code, name, kind and timezone reports, receipts and transfers refer to.</small></div></div>
-                            <div class="policy-fields two-columns">
-                                <label><span>Code</span><input maxlength="16" @bind="editCode" placeholder="STORE3" /></label>
-                                <label><span>Name</span><input maxlength="64" @bind="editName" placeholder="Quezon Avenue" /></label>
-                                <label><span>Kind</span><select @bind="editKind"><option value="1">Retail store</option><option value="0">Main warehouse</option></select></label>
-                                <label><span>IANA timezone</span><input @bind="editTimeZone" placeholder="Asia/Manila" /></label>
-                            </div>
-                            <footer class="policy-actions">
-                                <span>@(CanSaveDetails ? "Details save across the whole organization." : "Enter a code, name and IANA timezone to save.")</span>
-                                <button class="location-primary" type="button" @onclick="SaveDetailsAsync" disabled="@(!CanSaveDetails || working)">@(working ? "Saving…" : "Save details")</button>
-                            </footer>
-                        </div>
+                        <p class="lx-list-empty">@EmptyListText</p>
                     }
+                    @foreach (PosLocationAdmin item in Visible)
+                    {
+                        <button type="button" @key="item.Id" @onclick="() => SelectLocation(item)"
+                                class="lx-row @(selected?.Id == item.Id ? "selected" : null) @(item.IsActive ? null : "is-closed")"
+                                aria-current="@(selected?.Id == item.Id ? "true" : "false")">
+                            <span class="lx-row-icon" aria-hidden="true"><AppIcon Name="@(item.Kind == 0 ? "box" : "sale")" /></span>
+                            <span class="lx-row-body">
+                                <span class="lx-row-code">@item.Code</span>
+                                <span class="lx-row-name">@item.Name</span>
+                                <span class="lx-row-meta">@(item.IsActive ? KindName(item.Kind) : "Closed location")</span>
+                            </span>
+                            <span class="lx-row-arrow" aria-hidden="true"><AppIcon Name="arrow" /></span>
+                        </button>
+                    }
+                </nav>
+                <p class="lx-side-foot">@SideFootText</p>
+            </aside>
 
-                    <div class="policy-section">
-                        <div class="policy-section-title"><span>Stock</span><div><strong>Inventory rules</strong><small>Control negative stock, expiry alerts, and direct deliveries.</small></div></div>
-                        <div class="policy-fields two-columns">
-                            <label><span>Negative-stock policy</span><select @bind="editNegativePolicy" disabled="@(!CanManageSettings)"><option value="0">Prohibit</option><option value="1">Allow with permission</option><option value="2">Offline only, central review</option></select></label>
-                            <label><span>Expiry warning</span><div class="unit-input"><input type="number" min="0" max="3650" @bind="editExpiryDays" disabled="@(!CanManageSettings)" /><i>days</i></div></label>
-                            <label class="policy-check"><input type="checkbox" @bind="editDirectDelivery" disabled="@(!CanManageSettings)" /><span><strong>Allow direct supplier delivery</strong><small>Stock may arrive at this location without first passing through MAIN.</small></span></label>
+            @if (selected is { } location)
+            {
+                <article class="lx-editor" aria-label="Location settings">
+                    <div class="lx-editor-top">
+                        <p class="lx-overline">@location.Code · @KindName(location.Kind)</p>
+                        <div class="lx-editor-title">
+                            <h2>@location.Name</h2>
+                            <span class="lx-badge @(location.IsActive ? null : "is-closed")">@(location.IsActive ? "Active" : "Closed")</span>
                         </div>
-                        <footer class="policy-actions">
-                            <span>@(CanManageSettings ? "Changes to stock rules take effect for this location after saving." : "You can review this location's inventory rules.")</span>
-                            @if (CanManageSettings)
+                        <p class="lx-editor-sub">
+                            <span class="lx-sub-icon" aria-hidden="true"><AppIcon Name="location" /></span>
+                            <span>@TimelineLine(location)</span>
+                            @if (Dirty)
                             {
-                                <button class="location-primary" type="button" @onclick="SaveSettingsAsync" disabled="@working">@(working ? "Saving…" : "Save stock rules")</button>
+                                <span class="lx-unsaved">Unsaved changes</span>
                             }
-                        </footer>
+                        </p>
                     </div>
 
-                    @if (!selected.IsActive)
-                    {
-                        <div class="policy-section location-danger">
-                            <div class="policy-section-title"><span>Closed</span><div><strong>This location is retired</strong><small>It takes no new sales, transfers, counts or receipts. Everything it did stays on the record and in the reports for the periods it was open.</small></div></div>
-                            <div class="location-danger-actions">
-                                <a class="location-primary location-history-link" href="@($"/locations/{selected.Id:D}/history")">View its full record →</a>
+                    <section class="lx-section">
+                        <div class="lx-section-head">
+                            <span class="lx-section-icon" aria-hidden="true"><AppIcon Name="location" /></span>
+                            <div>
+                                <h3>Location details</h3>
+                                <p>The code, name, kind and timezone that reports, receipts and transfers refer to.</p>
                             </div>
                         </div>
+                        <div class="lx-fields">
+                            <label class="lx-field">
+                                <span>Location code</span>
+                                <input class="lx-control" maxlength="16" placeholder="STORE3" disabled="@DetailsReadOnly" @bind="editCode" @bind:event="oninput" />
+                                <small>Unique identifier used in inventory records.</small>
+                            </label>
+                            <label class="lx-field">
+                                <span>Location name</span>
+                                <input class="lx-control" maxlength="64" placeholder="Quezon Avenue" disabled="@DetailsReadOnly" @bind="editName" @bind:event="oninput" />
+                            </label>
+                            <label class="lx-field">
+                                <span>Location type</span>
+                                <select class="lx-control" disabled="@DetailsReadOnly" @bind="editKind">
+                                    <option value="1">Retail store</option>
+                                    <option value="0">Main warehouse</option>
+                                </select>
+                            </label>
+                            <label class="lx-field">
+                                <span>IANA timezone</span>
+                                <input class="lx-control" placeholder="Asia/Manila" disabled="@DetailsReadOnly" @bind="editTimeZone" @bind:event="oninput" />
+                                <small>The clock every stock movement here is stamped with.</small>
+                            </label>
+                        </div>
+                    </section>
+
+                    <section class="lx-section">
+                        <div class="lx-section-head">
+                            <span class="lx-section-icon" aria-hidden="true"><AppIcon Name="settings" /></span>
+                            <div>
+                                <h3>Inventory rules</h3>
+                                <p>How stock is controlled here: negative balances, expiry warnings and direct deliveries.</p>
+                            </div>
+                        </div>
+                        <div class="lx-fields">
+                            <label class="lx-field">
+                                <span>Negative-stock policy</span>
+                                <select class="lx-control" disabled="@SettingsReadOnly" @bind="editNegativePolicy">
+                                    <option value="0">Prohibit negative stock</option>
+                                    <option value="1">Allow with permission</option>
+                                    <option value="2">Offline only, central review</option>
+                                </select>
+                                <small>Prohibit refuses any posting that would take this location below zero.</small>
+                            </label>
+                            <label class="lx-field">
+                                <span>Expiry warning</span>
+                                <span class="lx-suffixed">
+                                    <input class="lx-control" type="number" min="0" max="3650" disabled="@SettingsReadOnly" @bind="editExpiryDays" />
+                                    <i>days</i>
+                                </span>
+                                <small>Warn this many days before a batch expires.</small>
+                            </label>
+                        </div>
+                        <div class="lx-switch-row">
+                            <div>
+                                <strong>Allow direct supplier delivery</strong>
+                                <p>Stock may arrive here from a supplier without first passing through MAIN.</p>
+                            </div>
+                            <button type="button" role="switch" aria-label="Allow direct supplier delivery"
+                                    class="lx-switch @(editDirectDelivery ? "on" : null)"
+                                    aria-checked="@(editDirectDelivery ? "true" : "false")"
+                                    disabled="@SettingsReadOnly" @onclick="ToggleDirectDelivery"></button>
+                        </div>
+                    </section>
+
+                    @* A closed location is kept for its record, not for day-to-day
+                       work, so the only thing on offer here is the record itself. *@
+                    @if (!location.IsActive)
+                    {
+                        <section class="lx-zone">
+                            <div>
+                                <h3>This location is retired</h3>
+                                <p>It takes no new sales, transfers, counts or receipts. Everything it did stays on the record and in the reports for the periods it was open.</p>
+                            </div>
+                            <a class="lx-secondary" href="@($"/locations/{location.Id:D}/history")">View its full record</a>
+                        </section>
                     }
                     else if (CanManageLocations)
                     {
-                        <div class="policy-section location-danger">
-                            <div class="policy-section-title"><span>Close</span><div><strong>Retire this location</strong><small>Closing stops new sales, transfers and receipts here. History stays intact.</small></div></div>
-                            @if (!showCloseConfirm)
-                            {
-                                <footer class="policy-actions">
-                                    <span>Close @selected.Name to stop new operations here. Existing stock and documents stay on the record.</span>
-                                    <button class="location-danger-button" type="button" @onclick="ToggleCloseConfirm">Close location</button>
-                                </footer>
-                            }
-                            else
-                            {
-                                <div class="close-confirm" role="alertdialog" aria-label="Confirm closing this location">
-                                    <label><span>Effective closing date</span><input type="date" value="@closeDate" @onchange="OnCloseDateChanged" /></label>
-                                    <p>@selected.Name stops accepting operations from that date. Locations are retired rather than deleted, so their ledger history remains.</p>
-                                    <div>
-                                        <button class="location-secondary" type="button" @onclick="ToggleCloseConfirm" disabled="@working">Cancel</button>
-                                        <button class="location-danger-button" type="button" @onclick="CloseLocationAsync" disabled="@(working || !CanClose)">@(working ? "Closing…" : "Close this location")</button>
-                                    </div>
-                                </div>
-                            }
-                        </div>
+                        <section class="lx-zone is-danger">
+                            <div>
+                                <h3>Close this location</h3>
+                                <p>Stop new operations here while keeping inventory history, receipts and transfers available for audit. Locations are retired rather than deleted.</p>
+                            </div>
+                            <button class="lx-danger" type="button" @onclick="OpenCloseConfirm">Close location</button>
+                        </section>
                     }
-                </section>
+
+                    <footer class="lx-actions">
+                        <span>@Caption</span>
+                        <div>
+                            <button class="lx-secondary" type="button" disabled="@(!Dirty || working)" @onclick="DiscardChanges">Discard</button>
+                            <button class="lx-primary" type="button" disabled="@(!CanSave)" @onclick="SaveAsync">
+                                <span class="lx-btn-icon" aria-hidden="true"><AppIcon Name="check" /></span><span>@(working ? "Saving…" : "Save changes")</span>
+                            </button>
+                        </div>
+                    </footer>
+                </article>
             }
         </div>
     }
 }
 
-@code {
-    private readonly List<PosLocationAdmin> locations = [];
-    private PosLocationAdmin? selected;
-    private bool loading = true;
-    private bool working;
-    private bool showCreate;
-    private string? message;
-    private string newCode = string.Empty;
-    private string newName = string.Empty;
-    private int newKind = 1;
-    private string newTimeZone = "Asia/Manila";
-    private int editNegativePolicy;
-    private bool editDirectDelivery;
-    private int editExpiryDays;
-    private string editCode = string.Empty;
-    private string editName = string.Empty;
-    private int editKind = 1;
-    private string editTimeZone = "Asia/Manila";
-    private bool showCloseConfirm;
-    private string scope = "live";
-
-    /// <summary>
-    /// The locations on show. Live by default: a closed location is kept for
-    /// its record, not for day-to-day work, so it does not belong in the way.
-    /// </summary>
-    private List<PosLocationAdmin> Visible => scope switch
-    {
-        "live" => [.. locations.Where(location => location.IsActive)],
-        "closed" => [.. locations.Where(location => !location.IsActive)],
-        _ => locations,
-    };
-    private string closeDate = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-
-    private bool CanViewLocations => Session.HasPermission("location.manage");
-    private bool CanManageLocations => Session.Current?.User.Permissions.Contains("location.manage", StringComparer.Ordinal) == true;
-    private bool CanManageSettings => Session.Current?.User.Permissions.Contains("settings.manage", StringComparer.Ordinal) == true;
-    private bool CanCreate => !string.IsNullOrWhiteSpace(newCode) && !string.IsNullOrWhiteSpace(newName) && !string.IsNullOrWhiteSpace(newTimeZone);
-    private bool CanSaveDetails => !string.IsNullOrWhiteSpace(editCode) && !string.IsNullOrWhiteSpace(editName) && !string.IsNullOrWhiteSpace(editTimeZone);
-    private bool CanClose => DateOnly.TryParse(closeDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
-
-    protected override async Task OnInitializedAsync()
-    {
-        if (!CanViewLocations)
-        {
-            loading = false;
-            return;
-        }
-
-        await LoadLocationsAsync();
-    }
-
-    private async Task LoadLocationsAsync(Guid? keepSelected = null)
-    {
-        loading = true;
-        try
-        {
-            ApiResult<List<PosLocationAdmin>> result = await Api.GetLocationAdministrationAsync(CancellationToken.None);
-            if (!result.IsSuccess || result.Value is null)
+@if (showCreate && CanManageLocations)
+{
+    <div class="lx-scrim" @onclick="TryDismissCreate"></div>
+    <div class="lx-modal" role="dialog" aria-modal="true" aria-labelledby="lx-create-title"
+         tabindex="-1" @ref="createRef" @onkeydown="OnCreateKey">
+        <header class="lx-modal-head">
+            <span class="lx-modal-mark" aria-hidden="true"><AppIcon Name="plus" /></span>
+            <div>
+                <h2 id="lx-create-title">Add a location</h2>
+                <p>Set up a new warehouse or retail store. New locations start on VaultFlow's conservative defaults.</p>
+            </div>
+            <button type="button" class="lx-modal-close" aria-label="Close" @onclick="CloseCreate">&times;</button>
+        </header>
+        <div class="lx-modal-body">
+            <label class="lx-field">
+                <span>Location code</span>
+                <input class="lx-control" maxlength="16" placeholder="STORE3" @bind="newCode" @bind:event="oninput" />
+                <small>Letters, numbers, underscores and hyphens.</small>
+            </label>
+            <label class="lx-field">
+                <span>Location name</span>
+                <input class="lx-control" maxlength="64" placeholder="Quezon Avenue" @bind="newName" @bind:event="oninput" />
+            </label>
+            <div class="lx-fields">
+                <label class="lx-field">
+                    <span>Location type</span>
+                    <select class="lx-control" @bind="newKind">
+                        <option value="1">Retail store</option>
+                        <option value="0">Main warehouse</option>
+                    </select>
+                </label>
+                <label class="lx-field">
+                    <span>IANA timezone</span>
+                    <input class="lx-control" placeholder="Asia/Manila" @bind="newTimeZone" @bind:event="oninput" />
+                </label>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(message))
             {
-                message = result.Error;
-                return;
+                <p class="lx-error" role="alert">@message</p>
             }
+        </div>
+        <footer class="lx-modal-foot">
+            <button class="lx-secondary" type="button" disabled="@working" @onclick="CloseCreate">Cancel</button>
+            <button class="lx-primary" type="button" disabled="@(!CanCreate || working)" @onclick="CreateLocationAsync">@(working ? "Creating…" : "Create location")</button>
+        </footer>
+    </div>
+}
 
-            locations.Clear();
-            locations.AddRange(result.Value.OrderBy(location => location.Kind).ThenBy(location => location.Code));
-            Guid? targetId = keepSelected ?? selected?.Id;
-            PosLocationAdmin? target = targetId is { } id ? locations.FirstOrDefault(location => location.Id == id) : locations.FirstOrDefault();
-            if (target is not null)
+@if (showCloseConfirm && CanManageLocations && selected is { IsActive: true } closing)
+{
+    <div class="lx-scrim" @onclick="TryDismissClose"></div>
+    <div class="lx-modal" role="alertdialog" aria-modal="true" aria-labelledby="lx-close-title"
+         tabindex="-1" @ref="closeRef" @onkeydown="OnCloseKey">
+        <header class="lx-modal-head">
+            <span class="lx-modal-mark is-danger" aria-hidden="true"><AppIcon Name="warning" /></span>
+            <div>
+                <h2 id="lx-close-title">Close @closing.Name?</h2>
+                <p>Review the impact before continuing.</p>
+            </div>
+            <button type="button" class="lx-modal-close" aria-label="Close" @onclick="ToggleCloseConfirm">&times;</button>
+        </header>
+        <div class="lx-modal-body">
+            <p class="lx-warning">@closing.Name stops accepting sales, transfers, counts and receipts from the effective date. Existing stock and documents stay on the record, so review pending transfers before you continue.</p>
+            <label class="lx-field">
+                <span>Effective closing date</span>
+                <input class="lx-control" type="date" value="@closeDate" @onchange="OnCloseDateChanged" />
+            </label>
+            @if (!string.IsNullOrWhiteSpace(message))
             {
-                SelectLocation(target);
+                <p class="lx-error" role="alert">@message</p>
             }
-        }
-        catch (HttpRequestException)
-        {
-            message = "The location service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            loading = false;
-        }
-    }
-
-    private async Task CreateLocationAsync()
-    {
-        if (!CanManageLocations || !CanCreate)
-        {
-            message = "Enter a code, name and IANA timezone.";
-            return;
-        }
-
-        working = true;
-        message = null;
-        try
-        {
-            ApiResult<PosReference> result = await Api.CreateLocationAsync(
-                new PosCreateLocationRequest(newCode.Trim().ToUpperInvariant(), newName.Trim(), newKind, newTimeZone.Trim()),
-                CancellationToken.None);
-            if (!result.IsSuccess || result.Value is null)
-            {
-                message = result.Error;
-                return;
-            }
-
-            newCode = string.Empty;
-            newName = string.Empty;
-            newKind = 1;
-            newTimeZone = "Asia/Manila";
-            showCreate = false;
-            // LoadLocationsAsync re-runs SelectLocation, which clears message,
-            // so set the success text AFTER the reload.
-            await LoadLocationsAsync(result.Value.Id);
-            message ??= "The location was created with conservative operating defaults.";
-        }
-        catch (HttpRequestException)
-        {
-            message = "The location service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            working = false;
-        }
-    }
-
-    private async Task SaveSettingsAsync()
-    {
-        if (!CanManageSettings || selected is not { } location)
-        {
-            return;
-        }
-
-        if (editExpiryDays < 0 || editExpiryDays > 3650)
-        {
-            message = "Expiry warning must be between 0 and 3650 days.";
-            return;
-        }
-
-        PosLocationSettings settings = location.Settings with
-        {
-            NegativeStockPolicy = editNegativePolicy,
-            AllowsDirectSupplierDelivery = editDirectDelivery,
-            ExpiryWarningDays = editExpiryDays,
-        };
-
-        working = true;
-        message = null;
-        try
-        {
-            ApiResult<string> result = await Api.UpdateLocationSettingsAsync(location.Id, settings, CancellationToken.None);
-            if (!result.IsSuccess)
-            {
-                message = result.Error;
-            }
-            else
-            {
-                // LoadLocationsAsync re-runs SelectLocation, which clears
-                // message, so set the success text AFTER the reload.
-                await LoadLocationsAsync(location.Id);
-                message ??= $"Stock rules saved for {location.Name}.";
-            }
-        }
-        catch (HttpRequestException)
-        {
-            message = "The location service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            working = false;
-        }
-    }
-
-    private async Task SaveDetailsAsync()
-    {
-        if (!CanManageLocations || selected is not { } location)
-        {
-            return;
-        }
-
-        if (!CanSaveDetails)
-        {
-            message = "Enter a code, name and IANA timezone.";
-            return;
-        }
-
-        working = true;
-        message = null;
-        try
-        {
-            ApiResult<string> result = await Api.UpdateLocationAsync(
-                location.Id,
-                new PosUpdateLocationRequest(
-                    editCode.Trim().ToUpperInvariant(),
-                    editName.Trim(),
-                    editKind,
-                    editTimeZone.Trim()),
-                CancellationToken.None);
-
-            if (!result.IsSuccess)
-            {
-                message = result.Error;
-                return;
-            }
-
-            // LoadLocationsAsync re-runs SelectLocation, which clears message,
-            // so set the success text AFTER the reload.
-            await LoadLocationsAsync(location.Id);
-            message ??= $"Details saved for {editName.Trim()}.";
-        }
-        catch (HttpRequestException)
-        {
-            message = "The location service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            working = false;
-        }
-    }
-
-    private async Task CloseLocationAsync()
-    {
-        if (!CanManageLocations || selected is not { } location)
-        {
-            return;
-        }
-
-        if (!DateOnly.TryParse(closeDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly effective))
-        {
-            message = "Choose the effective closing date.";
-            return;
-        }
-
-        working = true;
-        message = null;
-        try
-        {
-            ApiResult<string> result = await Api.CloseLocationAsync(location.Id, effective, CancellationToken.None);
-            if (!result.IsSuccess)
-            {
-                message = result.Error;
-                return;
-            }
-
-            showCloseConfirm = false;
-            // A closed location leaves the directory, so clear the selection
-            // before reloading rather than leaving the panel pointed at a row
-            // the list no longer returns.
-            selected = null;
-            await LoadLocationsAsync();
-            message ??= $"{location.Name} was closed. It no longer appears in the directory.";
-        }
-        catch (HttpRequestException)
-        {
-            message = "The location service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            working = false;
-        }
-    }
-
-    private void SelectLocation(PosLocationAdmin location)
-    {
-        selected = location;
-        editNegativePolicy = location.Settings.NegativeStockPolicy;
-        editDirectDelivery = location.Settings.AllowsDirectSupplierDelivery;
-        editExpiryDays = location.Settings.ExpiryWarningDays;
-        editCode = location.Code;
-        editName = location.Name;
-        editKind = location.Kind;
-        editTimeZone = location.TimeZoneId;
-        showCloseConfirm = false;
-        closeDate = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        message = null;
-    }
-
-    private void ToggleCreate() { showCreate = !showCreate; message = null; }
-    private void ToggleCloseConfirm() { showCloseConfirm = !showCloseConfirm; message = null; }
-    private void OnCloseDateChanged(ChangeEventArgs e) => closeDate = e.Value?.ToString() ?? string.Empty;
-    private static string KindName(int kind) => kind == 0 ? "Main warehouse" : "Retail store";
-    private static string PolicyName(int policy) => policy switch { 0 => "Negative stock prohibited", 1 => "Permission override", 2 => "Offline review", _ => "Custom policy" };
+        </div>
+        <footer class="lx-modal-foot">
+            <button class="lx-secondary" type="button" disabled="@working" @onclick="ToggleCloseConfirm">Cancel</button>
+            <button class="lx-danger" type="button" disabled="@(working || !CanClose)" @onclick="CloseLocationAsync">@(working ? "Closing…" : "Close this location")</button>
+        </footer>
+    </div>
 }
