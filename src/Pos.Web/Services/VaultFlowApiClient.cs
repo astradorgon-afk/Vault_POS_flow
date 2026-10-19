@@ -1,7 +1,7 @@
 namespace Pos.Web.Services;
 
 /// <summary>Calls the VaultFlow HTTP API for the interactive web application.</summary>
-public sealed partial class VaultFlowApiClient(HttpClient http, UserSession session)
+public sealed partial class VaultFlowApiClient(HttpClient http, UserSession session, ForwardedCaller caller)
 {
     /// <summary>Signs in with a username, password and optional two-factor code.</summary>
     public Task<ApiResult<SignInResponse>> SignInAsync(
@@ -17,10 +17,11 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
         string? twoFactorCode,
         CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await http.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new { userName, password, twoFactorCode },
-            cancellationToken).ConfigureAwait(false);
+        using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/api/v1/auth/login", UriKind.Relative));
+        request.Content = JsonContent.Create(new { userName, password, twoFactorCode });
+        caller.ApplyTo(request);
+        using HttpResponseMessage response = await http
+            .SendAsync(request, cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -68,6 +69,7 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
     public HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
         HttpRequestMessage request = new(method, new Uri(path, UriKind.Relative));
+        caller.ApplyTo(request);
         if (session.IsAuthenticated && session.Current is { } current)
         {
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
@@ -194,6 +196,7 @@ public sealed partial class VaultFlowApiClient(HttpClient http, UserSession sess
 
             using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/api/v1/auth/refresh", UriKind.Relative));
             request.Content = JsonContent.Create(new { current.RefreshToken });
+            caller.ApplyTo(request);
             using HttpResponseMessage response = await http
                 .SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

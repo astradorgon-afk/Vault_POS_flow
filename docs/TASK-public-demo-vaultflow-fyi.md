@@ -34,6 +34,11 @@ when set, and `tools/Pos.DemoData` reads it from `VAULTFLOW_DEMO_PASSWORD`.
 one-shot `demodata` service. The code is copied to the server, but the API
 image has **not** been rebuilt yet.
 
+**Committed, not yet on the server:** the web host now passes each visitor's
+address to the API (see "Shared login limit" below). This needs the newer
+`compose.prod.yaml` and rebuilt **web** and **api** images, so copy the branch
+over again before step 1 and build both: `$C up -d --build api web`.
+
 ## Next steps
 
 ### 1. Load the demo data (server)
@@ -41,7 +46,7 @@ image has **not** been rebuilt yet.
 ```sh
 cd ~/vaultflow
 C="docker compose -f compose.yaml -f compose.prod.yaml -f compose.demo.yaml"
-DEMO_SEED=true $C up -d --build api
+DEMO_SEED=true $C up -d --build api web
 docker logs --since 2m vaultflow-api-1 | grep -i "seed complete\|development account"
 $C --profile seed run --rm demodata      # roughly 10–30 min for 30 days
 $C up -d api                              # seeding off again
@@ -77,15 +82,33 @@ sharing any login:
 
 ### 4. Known issues worth a code change
 
-- **Shared login limit.** All public sign-ins reach the API from the web
-  container's address, so they share one login rate limit of 10 per 5
-  minutes. A busy demo will hit it. Options: forward the client IP from the web
-  host, or partition the login limiter by user name.
+- **Shared login limit — fixed in code, needs deploying.** Every public sign-in
+  reached the API from the web container's address. That meant one shared
+  limit of 10 sign-ins per 5 minutes. Worse, 20 failed sign-ins from that one
+  address locked *every* visitor out for 15 minutes. The web host now sends the
+  visitor's address and scheme to the API as `X-Forwarded-For` and
+  `X-Forwarded-Proto` (`src/Pos.Web/Services/ForwardedCaller.cs`). It trusts
+  the tunnel's `X-Forwarded-For` only from the networks listed in
+  `ForwardedHeaders:KnownNetworks`, which `compose.prod.yaml` sets to Docker's
+  private ranges. To check after deploying, sign in once with a wrong password,
+  then look at the newest row: `docker compose ... exec postgres psql -U
+  pos_migrator -d vaultflow -c 'select ip_address, attempted_at_utc from
+  core.login_attempt order by attempted_at_utc desc limit 1'`. It should show
+  your own public address, not a `172.x` one.
 - **No 2FA enrolment on the web.** The web login can only take a 2FA code; it
   cannot enrol an authenticator, so Production admins are locked out unless 2FA
   is off. That is why `Security__RequireTwoFactorForAdmins=false` is set here.
-- **HTTPS redirect warning.** The API logs "Failed to determine the https port
-  for redirect" on every request. It is harmless behind the tunnel.
+- **HTTPS redirect warning — should stop after deploying.** The API logged
+  "Failed to determine the https port for redirect" on every request, because
+  the web host called it over plain HTTP. The forwarded `X-Forwarded-Proto:
+  https` now tells it the visitor was already on HTTPS. The `demodata` run still
+  calls the API directly, so expect the warning while it seeds.
+- **API trusts any forwarded address.** `src/Pos.Api/Program.cs` clears the
+  known proxy lists, so the API takes `X-Forwarded-For` from anyone who can
+  reach it. On this deployment only the web container can. On the Render
+  preview, where the API is public, a caller could pick their own rate-limit
+  bucket. Populate the API's known networks from configuration when that
+  matters.
 
 ## Updating the server after new commits
 

@@ -17,6 +17,13 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       Api__BaseAddress: http://api:8080
+      # Caddy, and the Cloudflare tunnel in compose.demo.yaml, reach the web host
+      # from this stack's Docker network, whose range Docker picks from these.
+      # Trusting them lets the visitor's address through to the API's sign-in
+      # limits. The web port is never published beyond the host, so nothing
+      # outside the stack can claim an address this way.
+      ForwardedHeaders__KnownNetworks__0: 172.16.0.0/12
+      ForwardedHeaders__KnownNetworks__1: 192.168.0.0/16
     volumes:
       - dataprotection-keys:/app/keys
     tmpfs:

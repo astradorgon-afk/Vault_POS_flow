@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Net;
 using Pos.Application.Identity;
@@ -37,6 +38,9 @@ builder.Services.AddWebSessionAuthentication();
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<UserSession>();
+builder.Services.AddScoped<ForwardedCaller>();
+builder.Services.AddScoped<CircuitHandler, ForwardedCallerCircuitHandler>();
+builder.Services.AddTransient<ForwardedCallerHandler>();
 builder.Services.AddScoped<NotificationStore>();
 builder.Services.AddScoped<OfflineReadinessNotice>();
 builder.Services.AddScoped<PageTrail>();
@@ -49,7 +53,7 @@ builder.Services.AddHttpClient("pwa-api", (services, client) =>
     // The snapshot download pages through the catalog and open orders, so this
     // one is allowed longer than a screen would wait.
     client.Timeout = TimeSpan.FromSeconds(120);
-});
+}).AddHttpMessageHandler<ForwardedCallerHandler>();
 builder.Services.AddBarcodeScanning(perSession: true);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<WebSessions>();
@@ -77,8 +81,11 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 var forwarded = new ForwardedHeadersOptions
 {
-    ForwardedHeaders = ForwardedHeaders.XForwardedProto
+    // The address goes on to the API as the caller (see ForwardedCaller), so
+    // its sign-in limits count each browser rather than this server.
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 };
+TrustedProxies.AddFrom(forwarded, app.Configuration);
 if (app.Environment.IsDevelopment())
 {
     // Docker Desktop forwards local ngrok/Caddy requests from an address owned
@@ -100,6 +107,11 @@ if (app.Environment.IsDevelopment())
 // connects from loopback. The framework's default loopback trust applies
 // outside Development; never trust arbitrary peers.
 app.UseForwardedHeaders(forwarded);
+app.Use((context, next) =>
+{
+    context.RequestServices.GetRequiredService<ForwardedCaller>().CaptureFrom(context);
+    return next(context);
+});
 
 if (!app.Environment.IsDevelopment())
 {
