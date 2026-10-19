@@ -14,6 +14,10 @@ using Pos.DemoData;
 // month of sales, customers and the shared development accounts (password
 // cash1234). Running it again is safe: store-days that already have sales are
 // skipped, and the back-office activity is posted once unless --force is given.
+//
+// A public demo seeds the accounts with Seeding:DevelopmentAccountPassword
+// instead; pass the same secret in VAULTFLOW_DEMO_PASSWORD (an environment
+// variable, so it never shows in the process list).
 
 string apiUrl = "http://localhost:5177";
 int days = 30;

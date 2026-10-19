@@ -206,6 +206,13 @@ public sealed class SeedingOptions
     /// standard-role authority and a published credential.
     /// </summary>
     public bool EnableDevelopmentAccounts { get; set; }
+
+    /// <summary>
+    /// Gets or sets the password the development accounts share. Null keeps the
+    /// published development password; a public demo supplies its own secret so
+    /// the seeded accounts are not open to anyone who has read the source.
+    /// </summary>
+    public string? DevelopmentAccountPassword { get; set; }
 }
 
 /// <summary>

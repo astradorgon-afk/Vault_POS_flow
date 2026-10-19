@@ -1,0 +1,60 @@
+# Public demo overlay (https://vaultflow.fyi). Start with:
+# docker compose -f compose.yaml -f compose.prod.yaml -f compose.demo.yaml --profile tunnel up -d --build
+#
+# Only the web host is reachable from outside, and only through the Cloudflare
+# tunnel. The API, Postgres and the Caddy proxy (whose /api route would expose
+# the raw API) are not published.
+#
+# Demo data, once, with DEMO_ACCOUNT_PASSWORD (12+ characters) set in .env:
+#   DEMO_SEED=true docker compose ... up -d api
+#   docker compose ... --profile seed run --rm demodata
+#   docker compose ... up -d api     (seeding off again, so restarts keep passwords people change)
+services:
+  proxy:
+    profiles: ["disabled"]
+
+  api:
+    environment:
+      # compose.yaml passes the bootstrap password but not the name to create.
+      BootstrapOwner__UserName: owner
+      # The web login cannot enrol an authenticator, so admins could not sign
+      # in at all with this on.
+      Security__RequireTwoFactorForAdmins: "false"
+      Database__SeedDevelopmentData: ${DEMO_SEED:-false}
+      Seeding__EnableDevelopmentAccounts: ${DEMO_SEED:-false}
+      Seeding__DevelopmentAccountPassword: ${DEMO_ACCOUNT_PASSWORD:-}
+
+  web:
+    ports:
+      # Loopback only. The tunnel (on the host network) is the sole public way in.
+      - "127.0.0.1:5400:8080"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: always
+    # The dashboard rejects bare service names like web:8080, so the route
+    # targets http://localhost:5400 and the tunnel shares the host's loopback.
+    network_mode: host
+    command: tunnel --no-autoupdate run
+    environment:
+      # Compose interpolates this even while the profile is off, so it cannot be required.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - web
+
+  demodata:
+    image: mcr.microsoft.com/dotnet/sdk:10.0-alpine
+    profiles: ["seed"]
+    # The host user, so the build output in the checkout stays editable.
+    user: "${DEMO_UID:-1000}"
+    working_dir: /src
+    environment:
+      HOME: /tmp
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      VAULTFLOW_DEMO_PASSWORD: ${DEMO_ACCOUNT_PASSWORD:-}
+    volumes:
+      - .:/src
+    command: ["dotnet", "run", "--project", "tools/Pos.DemoData", "--configuration", "Release", "--", "--api", "http://api:8080", "--days", "${DEMO_DAYS:-30}"]
+    depends_on:
+      - api
