@@ -189,6 +189,18 @@ public static class AuthenticationErrors
         "This session has been ended for security reasons. Sign in again.",
         ErrorType.Unauthenticated);
 
+    /// <summary>The account is still on its default password and must replace it before signing in.</summary>
+    public static Error PasswordChangeRequired { get; } = new(
+        "auth.password_change_required",
+        "This account is still using its default password. Choose a new password to continue.",
+        ErrorType.Forbidden);
+
+    /// <summary>A required password change was asked for on an account that has none pending.</summary>
+    public static Error PasswordChangeNotRequired { get; } = new(
+        "auth.password_change_not_required",
+        "This account does not need a password change. Sign in normally.",
+        ErrorType.Forbidden);
+
     /// <summary>The account has no PIN configured.</summary>
     public static Error PinNotConfigured { get; } = new(
         "auth.pin_not_configured",

@@ -41,6 +41,9 @@ public enum LoginFailureReason
 
     /// <summary>Too many attempts from this address or for this account.</summary>
     RateLimited = 7,
+
+    /// <summary>The password was right but is a default that must be replaced first.</summary>
+    PasswordChangeRequired = 8,
 }
 
 /// <summary>

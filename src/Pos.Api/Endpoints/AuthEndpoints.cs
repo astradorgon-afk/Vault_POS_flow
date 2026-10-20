@@ -37,6 +37,12 @@ public sealed record TwoFactorSetupBody(string UserName, string Password);
 /// <param name="Code">The current code from the authenticator app.</param>
 public sealed record TwoFactorEnableBody(string UserName, string Password, string Code);
 
+/// <summary>The body that replaces a default password before the first sign-in.</summary>
+/// <param name="UserName">The username.</param>
+/// <param name="CurrentPassword">The default password.</param>
+/// <param name="NewPassword">The password to use from now on.</param>
+public sealed record RequiredPasswordChangeBody(string UserName, string CurrentPassword, string NewPassword);
+
 /// <summary>What the caller is told about themselves.</summary>
 /// <param name="UserId">Their identifier.</param>
 /// <param name="DisplayName">Their display name.</param>
@@ -113,6 +119,14 @@ public static class AuthEndpoints
             .WithSummary("Confirms the first authenticator code, turns two-factor on, returns recovery codes.")
             .WithMetadata(new PublicEndpointAttribute(
                 "An account required to use two-factor cannot obtain a token until it has enrolled."));
+
+        group.MapPost("/password/required-change", ChangeRequiredPasswordAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth-login")
+            .WithName("ChangeRequiredPassword")
+            .WithSummary("Replaces a default password for an account that cannot sign in until it does.")
+            .WithMetadata(new PublicEndpointAttribute(
+                "An account on a default password cannot obtain a token until it has replaced it."));
 
         group.MapGet("/me", GetCurrentUserAsync)
             .RequireAuthorization()
@@ -225,6 +239,21 @@ public static class AuthEndpoints
 
         return result.IsSuccess
             ? TypedResults.Ok(new { recoveryCodes = result.Value })
+            : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
+    }
+
+    private static async Task<IResult> ChangeRequiredPasswordAsync(
+        [FromBody] RequiredPasswordChangeBody body,
+        IRequiredPasswordChange passwords,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        Result result = await passwords
+            .ChangeAsync(body.UserName, body.CurrentPassword, body.NewPassword, cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? TypedResults.NoContent()
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 

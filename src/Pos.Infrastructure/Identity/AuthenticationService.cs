@@ -134,6 +134,19 @@ public sealed class AuthenticationService(
             return Result<AuthenticationResult>.Failure(AuthenticationErrors.InvalidCredentials);
         }
 
+        // A default password gets no session at all: it is published, so
+        // anything signed in on it would be signed in for anyone.
+        if ((await users.GetClaimsAsync(user).ConfigureAwait(false))
+            .Any(c => c.Type == DefaultPasswordClaims.ChangeRequired))
+        {
+            await RecordFailureAsync(
+                identifierHash, LoginFailureReason.PasswordChangeRequired, LoginMethod.Password,
+                userId, request.DeviceId, request.IpAddress, request.UserAgent, cancellationToken)
+                .ConfigureAwait(false);
+
+            return Result<AuthenticationResult>.Failure(AuthenticationErrors.PasswordChangeRequired);
+        }
+
         // Accounts that can change other people's authority must have a second
         // factor. Decided by what the account can do, never by a role name.
         if (_security.RequireTwoFactorForAdmins

@@ -398,6 +398,9 @@ internal static class DatabaseStartup
 
         BootstrapOwnerSeeder bootstrap = scope.ServiceProvider.GetRequiredService<BootstrapOwnerSeeder>();
         await bootstrap.SeedAsync(CancellationToken.None).ConfigureAwait(false);
+
+        DefaultOwnerPasswordSeeder defaultPassword = scope.ServiceProvider.GetRequiredService<DefaultOwnerPasswordSeeder>();
+        await defaultPassword.SeedAsync(CancellationToken.None).ConfigureAwait(false);
     }
 }
 

@@ -23,9 +23,12 @@ Cloudflare tunnel from the home server.
 - **Cloudflare:** the tunnel is `VaultFlow`. Its route `vaultflow.fyi ->
   http://localhost:5400` must stay `http`. The DNS record is `@ CNAME
   <tunnel-id>.cfargotunnel.com`, proxied; deleting the route deletes it.
-- **Sign-in today:** `owner` with `BOOTSTRAP_OWNER_PASSWORD` from the server's
-  `.env`. 2FA for admins is off on this deployment, because the web login
-  cannot enrol an authenticator.
+- **Sign-in today:** `owner` / `cash1234`. `compose.demo.yaml` sets
+  `DefaultOwnerPassword__*`, so the API refuses that password a session and the
+  login page makes the first sign-in choose a new one (12+ characters). After
+  that the account carries a `vaultflow:default_password_retired` claim and
+  restarts never put the default back. 2FA for admins is off on this
+  deployment, because the web login cannot enrol an authenticator.
 
 **Committed but not yet running on the server:** commit `68545a3` adds
 `Seeding:DevelopmentAccountPassword`. It replaces the published `cash1234`

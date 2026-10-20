@@ -15,6 +15,12 @@
 <PageTitle>Sign in · VaultFlow</PageTitle>
 
 <LoginSurface>
+        @if (passwordChangeRequired)
+        {
+            <RequiredPasswordChange UserName="@userName.Trim()" CurrentPassword="@password" OnChanged="PasswordChangedAsync" OnCancel="() => passwordChangeRequired = false" />
+        }
+        else
+        {
         <form @onsubmit="SignInAsync" @onsubmit:preventDefault="true">
             <header><span class="eyebrow">Secure workspace</span><h2>Welcome back <span class="wave" aria-hidden="true">👋</span></h2><p>Use your VaultFlow account to open the operations console.</p></header>
             @if (!showOfflineSetupModal && !string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
@@ -78,6 +84,7 @@
             @if (!interactive) { <p class="login-help" role="status">Preparing the sign-in form…</p> }
             else if (!onlineAuthenticated) { <p class="login-help">VaultFlow will confirm when this device is ready for offline use.</p> }
         </form>
+        }
         @if (showOfflineSetupModal)
         {
             <div class="offline-setup-backdrop" style="position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;overflow-y:auto;padding:12px;background:rgba(13,35,24,.64)">
@@ -116,6 +123,7 @@
     private bool offlineDataPrepared;
     private bool offlineReady;
     private bool showOfflineSetupModal;
+    private bool passwordChangeRequired;
     private string? oldSecretKind;
     private string oldSecret = string.Empty;
     private string enrolmentCode = string.Empty;
@@ -239,7 +247,8 @@
             ApiResult<SignInResponse> result = await Api.SignInAsync(userName.Trim(), password, twoFactorCode?.Trim(), CancellationToken.None);
             if (!result.IsSuccess)
             {
-                error = result.Error;
+                passwordChangeRequired = result.ErrorCode == "auth.password_change_required";
+                error = passwordChangeRequired ? null : result.Error;
                 if (error?.Contains("two-factor", StringComparison.OrdinalIgnoreCase) == true)
                     optionsOpen = true;
                 return;
@@ -279,6 +288,14 @@
         {
             busy = false;
         }
+    }
+
+    /// <summary>Signs in with the password that just replaced the default.</summary>
+    private async Task PasswordChangedAsync(string newPassword)
+    {
+        password = newPassword;
+        passwordChangeRequired = false;
+        await SignInAsync();
     }
 
     private async Task PrepareOfflineAsync()

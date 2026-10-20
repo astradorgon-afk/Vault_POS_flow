@@ -257,6 +257,9 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(BootstrapOwnerOptions.SectionName))
             .ValidateDataAnnotations();
 
+        services.AddOptions<DefaultOwnerPasswordOptions>()
+            .Bind(configuration.GetSection(DefaultOwnerPasswordOptions.SectionName));
+
         return services;
     }
 
@@ -432,6 +435,8 @@ public static class DependencyInjection
         services.TryAddScoped<ITwoFactorEnrolment, TwoFactorEnrolmentService>();
         services.TryAddScoped<IdentitySeeder>();
         services.TryAddScoped<BootstrapOwnerSeeder>();
+        services.TryAddScoped<DefaultOwnerPasswordSeeder>();
+        services.TryAddScoped<IRequiredPasswordChange, RequiredPasswordChangeService>();
         services.TryAddScoped<DevelopmentDataSeeder>();
 
         return services;
