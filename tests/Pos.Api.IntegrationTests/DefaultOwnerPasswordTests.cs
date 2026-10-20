@@ -94,4 +94,35 @@ public sealed class DefaultOwnerPasswordTests
                 "/api/v1/auth/password/required-change",
                 new { userName = "dp-owner", currentPassword, newPassword });
     }
+
+    [Fact]
+    public async Task WithTheMinimumLoweredToOne_AnyNonEmptyPasswordReplacesTheDefault()
+    {
+        await using PosApiFactory host = new(new Dictionary<string, string?>
+        {
+            ["DefaultOwnerPassword__Enabled"] = "true",
+            ["DefaultOwnerPassword__UserName"] = "dp-short",
+            ["DefaultOwnerPassword__Password"] = DefaultPassword,
+            ["Security__MinimumPasswordLength"] = "1",
+        });
+        await host.InitializeAsync();
+
+        await host.CreateUserAsync("dp-short", Roles.Owner, tier: ApprovalTier.Unlimited);
+        using HttpClient client = host.CreateClient();
+        using (IServiceScope scope = host.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<DefaultOwnerPasswordSeeder>().SeedAsync(CancellationToken.None);
+        }
+
+        using (HttpResponseMessage changed = await client.PostAsJsonAsync(
+            "/api/v1/auth/password/required-change",
+            new { userName = "dp-short", currentPassword = DefaultPassword, newPassword = "7" }))
+        {
+            changed.StatusCode.Should().Be(HttpStatusCode.NoContent, await changed.Content.ReadAsStringAsync());
+        }
+
+        using HttpResponseMessage signedIn = await client.PostAsJsonAsync(
+            "/api/v1/auth/login", new { userName = "dp-short", password = "7" });
+        signedIn.StatusCode.Should().Be(HttpStatusCode.OK, await signedIn.Content.ReadAsStringAsync());
+    }
 }

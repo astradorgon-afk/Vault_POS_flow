@@ -382,7 +382,9 @@ public static class DependencyInjection
             options.Password.RequireLowercase = false;
             options.Password.RequireUppercase = false;
             options.Password.RequireNonAlphanumeric = false;
-            options.Password.RequiredUniqueChars = 4;
+            // Never more distinct characters than the length allows, so a
+            // deployment that lowers the minimum lowers this with it.
+            options.Password.RequiredUniqueChars = Math.Min(4, security.MinimumPasswordLength);
 
             options.Lockout.DefaultLockoutTimeSpan = security.LockoutDuration;
             options.Lockout.MaxFailedAccessAttempts = security.MaxFailedAccessAttempts;

@@ -15,12 +15,6 @@
 <PageTitle>Sign in · VaultFlow</PageTitle>
 
 <LoginSurface>
-        @if (passwordChangeRequired)
-        {
-            <RequiredPasswordChange UserName="@userName.Trim()" CurrentPassword="@password" OnChanged="PasswordChangedAsync" OnCancel="() => passwordChangeRequired = false" />
-        }
-        else
-        {
         <form @onsubmit="SignInAsync" @onsubmit:preventDefault="true">
             <header><span class="eyebrow">Secure workspace</span><h2>Welcome back <span class="wave" aria-hidden="true">👋</span></h2><p>Use your VaultFlow account to open the operations console.</p></header>
             @if (!showOfflineSetupModal && !string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
@@ -84,6 +78,9 @@
             @if (!interactive) { <p class="login-help" role="status">Preparing the sign-in form…</p> }
             else if (!onlineAuthenticated) { <p class="login-help">VaultFlow will confirm when this device is ready for offline use.</p> }
         </form>
+        @if (passwordChangeRequired)
+        {
+            <RequiredPasswordChange UserName="@userName.Trim()" CurrentPassword="@password" OnChanged="PasswordChangedAsync" OnCancel="() => passwordChangeRequired = false" />
         }
         @if (showOfflineSetupModal)
         {

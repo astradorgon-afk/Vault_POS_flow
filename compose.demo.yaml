@@ -21,11 +21,13 @@ services:
       # in at all with this on.
       Security__RequireTwoFactorForAdmins: "false"
       # The demo starts on owner / cash1234. The API refuses that password a
-      # session and makes the first sign-in choose a new one (12+ characters);
-      # once replaced, restarts never put the default back.
+      # session and makes the first sign-in choose a new one; once replaced,
+      # restarts never put the default back.
       DefaultOwnerPassword__Enabled: "true"
       DefaultOwnerPassword__UserName: owner
       DefaultOwnerPassword__Password: cash1234
+      # No length or character rules on the demo; a password only has to be non-empty.
+      Security__MinimumPasswordLength: "1"
       Database__SeedDevelopmentData: ${DEMO_SEED:-false}
       Seeding__EnableDevelopmentAccounts: ${DEMO_SEED:-false}
       Seeding__DevelopmentAccountPassword: ${DEMO_ACCOUNT_PASSWORD:-}

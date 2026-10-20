@@ -82,7 +82,7 @@ public sealed class SecurityOptions
     public int PasswordHashIterations { get; set; } = 600_000;
 
     /// <summary>Gets or sets the minimum password length.</summary>
-    [Range(8, 128)]
+    [Range(1, 128)]
     public int MinimumPasswordLength { get; set; } = 12;
 
     /// <summary>Gets or sets the minimum cashier PIN length.</summary>

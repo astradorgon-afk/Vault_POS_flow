@@ -25,7 +25,8 @@ Cloudflare tunnel from the home server.
   <tunnel-id>.cfargotunnel.com`, proxied; deleting the route deletes it.
 - **Sign-in today:** `owner` / `cash1234`. `compose.demo.yaml` sets
   `DefaultOwnerPassword__*`, so the API refuses that password a session and the
-  login page makes the first sign-in choose a new one (12+ characters). After
+  login page makes the first sign-in choose a new one in a modal. The demo sets
+  `Security__MinimumPasswordLength=1`, so any non-empty password is accepted. After
   that the account carries a `vaultflow:default_password_retired` claim and
   restarts never put the default back. 2FA for admins is off on this
   deployment, because the web login cannot enrol an authenticator.
