@@ -7,37 +7,21 @@
 @inject NavigationManager Navigation
 
 <PageTitle>Stock counts · VaultFlow</PageTitle>
-<div class="inventory-workflow web-workflow">
+<div class="inventory-workflow web-workflow counts-page">
 
-<div class="office-head">
+<div class="office-head counts-head">
     <div>
         <p class="office-kicker">Inventory control</p>
         <h1 class="office-title">Stock counts</h1>
-        <p class="office-lead">Open a count, record the sheet, then submit it for approval. Approving the count posts the variance to stock.</p>
+        <p class="office-lead">Open a sheet, count what is on the shelf, then submit it for approval. Approving posts the variance to stock.</p>
     </div>
-    <div class="head-pickers">
-        <label class="location-picker">
-            <span>Store</span>
-            <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
-                    @onchange="OnLocationChangedAsync" disabled="@loadingLocations">
-                <option value="">Select a store</option>
-                @foreach (PosLocation location in locations)
-                {
-                    <option value="@location.Id">@location.Code · @location.Name</option>
-                }
-            </select>
-        </label>
-        <label class="location-picker">
-            <span>Status</span>
-            <select @bind="selectedStatus" @bind:after="LoadCountsAsync" disabled="@(selectedLocationId is null)">
-                <option value="">All states</option>
-                @foreach (string statusName in StatusNames)
-                {
-                    <option value="@statusName">@SplitWords(statusName)</option>
-                }
-            </select>
-        </label>
-    </div>
+    @if (CanViewInventory && CanCount)
+    {
+        <button type="button" class="counts-new @(showNew ? "is-open" : null)" aria-expanded="@(showNew ? "true" : "false")"
+                aria-controls="new-count" @onclick="ToggleNew" disabled="@(selectedLocationId is null)">
+            @(showNew ? "Close" : "+ New count")
+        </button>
+    }
 </div>
 
 @if (!CanViewInventory)
@@ -50,17 +34,34 @@
 }
 else
 {
-    <section class="search-strip">
-        <span>
-            @(counts.Count) count@(counts.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")
-            @if (AwaitingApproval > 0)
+    @* Which store, and which sheets: the two choices the page turns on, in one
+       bar. Each status shows how many sheets it holds, so "is anything waiting
+       for me?" is answered before a click. *@
+    <section class="counts-bar" aria-label="Choose counts">
+        <label class="counts-store">
+            <span>Store</span>
+            <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
+                    @onchange="OnLocationChangedAsync" disabled="@loadingLocations">
+                <option value="">Select a store</option>
+                @foreach (PosLocation location in locations)
+                {
+                    <option value="@location.Id">@location.Code · @location.Name</option>
+                }
+            </select>
+        </label>
+        <div class="counts-tabs" role="group" aria-label="Show counts">
+            @foreach ((string Status, string Label) tab in StatusTabs)
             {
-                <b class="awaiting-flag">@AwaitingApproval awaiting approval</b>
+                <button type="button" class="counts-tab @(selectedStatus == tab.Status ? "is-on" : null) @(tab.Status == "PendingApproval" && CountFor(tab.Status) > 0 ? "is-attention" : null)"
+                        aria-pressed="@(selectedStatus == tab.Status ? "true" : "false")"
+                        disabled="@(selectedLocationId is null)" @onclick="() => selectedStatus = tab.Status">
+                    @tab.Label <b>@CountFor(tab.Status).ToString("N0", CultureInfo.InvariantCulture)</b>
+                </button>
             }
-        </span>
-        <button type="button" class="search-action" @onclick="LoadCountsAsync"
-                disabled="@(loading || selectedLocationId is null)">
-            @(loading ? "Loading…" : "Refresh")
+        </div>
+        <button type="button" class="counts-refresh" @onclick="LoadCountsAsync" disabled="@(loading || selectedLocationId is null)"
+                title="Refresh" aria-label="Refresh counts">
+            <AppIcon Name="sync" />
         </button>
     </section>
 
@@ -69,84 +70,101 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
-    @if (CanCount)
+    @if (CanCount && showNew && selectedLocationId is not null)
     {
-        <section class="open-count">
-            <div class="open-count-title">
-                <strong>Open a count</strong>
-                <span>Pick what the sheet covers. A manager can count and approve their own store end-to-end.</span>
+        <section id="new-count" class="counts-new-panel" aria-labelledby="new-count-title">
+            <header>
+                <h2 id="new-count-title">New count at @StoreLabel</h2>
+                <p>Pick what the sheet covers. A manager can count and approve their own store end-to-end.</p>
+            </header>
+            <div class="counts-kinds" role="radiogroup" aria-label="What to count">
+                @foreach (CountKindOption option in KindOptions)
+                {
+                    <button type="button" role="radio" class="counts-kind @(selectedKind == option.Value ? "is-on" : null)"
+                            aria-checked="@(selectedKind == option.Value ? "true" : "false")" @onclick="() => ChooseKind(option.Value)">
+                        <strong>@option.Label</strong>
+                        <span>@option.Hint</span>
+                    </button>
+                }
             </div>
-            <div class="open-count-fields">
-                <label class="location-picker">
-                    <span>Kind</span>
-                    <select value="@selectedKind" @onchange="OnKindChangedAsync">
-                        @foreach (CountKindOption option in KindOptions)
-                        {
-                            <option value="@option.Value">@option.Label</option>
-                        }
-                    </select>
-                </label>
-                <label class="location-picker">
-                    <span>Category</span>
-                    <select value="@(selectedCategoryId?.ToString() ?? string.Empty)"
-                            @onchange="OnCategoryChangedAsync"
-                            disabled="@(selectedKind != 2 && selectedKind != 3)">
-                        <option value="">@(CategoryOptions.Count > 0 ? "Select a category" : "Categories unavailable")</option>
-                        @foreach (PosCategory category in CategoryOptions)
-                        {
-                            <option value="@category.Id">@category.Code · @category.Name</option>
-                        }
-                    </select>
-                </label>
-                <label class="location-picker">
-                    <span>Note</span>
-                    <input type="text" @bind="openNote" placeholder="Optional" />
+            <div class="counts-new-fields">
+                @if (selectedKind is KindCycle or KindCategory)
+                {
+                    <label class="counts-field">
+                        <span>Category</span>
+                        <select value="@(selectedCategoryId?.ToString() ?? string.Empty)" @onchange="OnCategoryChangedAsync"
+                                disabled="@(CategoryOptions.Count == 0)">
+                            <option value="">@(CategoryOptions.Count > 0 ? "Select a category" : "Categories unavailable")</option>
+                            @foreach (PosCategory category in CategoryOptions)
+                            {
+                                <option value="@category.Id">@category.Code · @category.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+                <label class="counts-field">
+                    <span>Note <em>optional</em></span>
+                    <input type="text" @bind="openNote" placeholder="e.g. Monthly shelf count" />
                 </label>
             </div>
-            @if (selectedKind is 2 or 3 && CategoryOptions.Count == 0)
+            @if (selectedKind is KindCycle or KindCategory && CategoryOptions.Count == 0)
             {
                 <div class="open-count-hint" role="note">
                     The catalogue is unavailable to this account, so category (and cycle) counts cannot be scoped here. Use a full count instead.
                 </div>
             }
-            <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="OpenCountAsync"
-                        disabled="@(!CanOpenCount || opening)">
-                    @(opening ? "Opening…" : "Open count")
+            <footer>
+                <button type="button" class="counts-cancel" @onclick="ToggleNew">Cancel</button>
+                <button type="button" class="search-action" @onclick="OpenCountAsync" disabled="@(!CanOpenCount || opening)">
+                    @(opening ? "Opening…" : "Open count sheet")
                 </button>
-            </div>
+            </footer>
         </section>
     }
 
     <section class="results-panel" aria-live="polite">
-        @if (loading)
+        @if (selectedLocationId is null)
+        {
+            <div class="results-empty"><strong>Choose a store.</strong><span>Its count sheets appear here.</span></div>
+        }
+        else if (loading)
         {
             <div class="results-empty">Loading counts…</div>
         }
-        else if (counts.Count == 0)
+        else if (VisibleCounts.Count == 0)
         {
-            <div class="results-empty"><strong>No counts yet.</strong><span>Choose a store, then open a count or find existing sheets.</span></div>
+            <div class="results-empty">
+                <strong>@(counts.Count == 0 ? "No counts at this store yet." : $"No {TabLabel(selectedStatus).ToLowerInvariant()} counts.")</strong>
+                @if (counts.Count == 0 && CanCount && !showNew)
+                {
+                    <button type="button" class="search-action counts-empty-action" @onclick="ToggleNew">Open the first count</button>
+                }
+            </div>
         }
         else
         {
-            <table class="sales-table counts-table">
+            <table class="sales-table counts-table rt-stack">
                 <thead>
-                    <tr><th>COUNT #</th><th>Kind</th><th>Status</th><th>Counted</th><th>Variance</th><th>Created</th><th>Posted</th></tr>
+                    <tr><th>Count</th><th>Status</th><th>Progress</th><th>Variance</th><th>Created</th><th>Posted</th></tr>
                 </thead>
                 <tbody>
-                    @foreach (PosInventoryCountSummary count in counts)
+                    @foreach (PosInventoryCountSummary count in VisibleCounts)
                     {
                         <tr class="office-row-click @(count.Status == "PendingApproval" ? "row-awaiting" : null)" @key="count.Id" @onclick="() => OpenCount(count.Id)">
-                            <td class="sale-number"><a href="@($"/inventory/counts/{count.Id:D}")" @onclick:stopPropagation="true">@count.Number</a></td>
-                            <td>@SplitWords(count.Kind)</td>
-                            <td><span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span></td>
-                            <td class="counted-cell">
-                                <span>@count.CountedLines / @count.Lines</span>
-                                <span class="counted-bar"><b style="width:@(Percent(count).ToString("0.#", CultureInfo.InvariantCulture))%"></b></span>
+                            <td class="sale-number rt-primary">
+                                <a href="@($"/inventory/counts/{count.Id:D}")" @onclick:stopPropagation="true">@count.Number</a>
+                                <small>@SplitWords(count.Kind)</small>
                             </td>
-                            <td>@Money(count.TotalAbsoluteVarianceValue)</td>
-                            <td>@count.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td>@(count.PostedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td data-label="Status"><span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span></td>
+                            <td class="counted-td" data-label="Progress">
+                                <div class="counted-cell">
+                                    <span>@count.CountedLines.ToString("N0", CultureInfo.InvariantCulture) of @count.Lines.ToString("N0", CultureInfo.InvariantCulture) lines</span>
+                                    <span class="counted-bar"><b style="width:@(Percent(count).ToString("0.#", CultureInfo.InvariantCulture))%"></b></span>
+                                </div>
+                            </td>
+                            <td data-label="Variance">@Money(count.TotalAbsoluteVarianceValue)</td>
+                            <td data-label="Created">@count.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="rt-hide-sm" data-label="Posted">@(count.PostedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                         </tr>
                     }
                 </tbody>
@@ -162,15 +180,22 @@ else
     private const int KindCycle = 2;
     private const int KindCategory = 3;
 
-    private static readonly string[] StatusNames = ["Counting", "PendingApproval", "Posted", "Cancelled"];
+    private static readonly (string Status, string Label)[] StatusTabs =
+    [
+        (string.Empty, "All"),
+        ("Counting", "Counting"),
+        ("PendingApproval", "Awaiting approval"),
+        ("Posted", "Posted"),
+        ("Cancelled", "Cancelled"),
+    ];
 
-    private sealed record CountKindOption(int Value, string Label);
+    private sealed record CountKindOption(int Value, string Label, string Hint);
 
     private static readonly CountKindOption[] KindOptions =
     [
-        new(KindFullPhysical, "Full physical"),
-        new(KindCycle, "Cycle (by category)"),
-        new(KindCategory, "Category"),
+        new(KindFullPhysical, "Full physical", "Every product at the store."),
+        new(KindCycle, "Cycle", "One category, on a rotation."),
+        new(KindCategory, "Category", "One category, as a one-off."),
     ];
 
     private readonly List<PosLocation> locations = [];
@@ -186,8 +211,8 @@ else
     private bool loadingLocations = true;
     private bool loading;
     private bool opening;
+    private bool showNew;
     private string? message;
-    private string searchedLabel = string.Empty;
 
     private bool CanViewInventory => Session.HasPermission("inventory.view");
     private bool CanCount => Session.HasPermission("inventory.count");
@@ -199,6 +224,22 @@ else
         (selectedKind is KindCycle or KindCategory
             ? selectedCategoryId is not null
             : true);
+
+    /// <summary>The sheets on the chosen status tab. Every status is loaded at
+    /// once so each tab can say how many it holds.</summary>
+    private List<PosInventoryCountSummary> VisibleCounts => string.IsNullOrEmpty(selectedStatus)
+        ? counts
+        : [.. counts.Where(count => count.Status == selectedStatus)];
+
+    private int CountFor(string status) => string.IsNullOrEmpty(status)
+        ? counts.Count
+        : counts.Count(count => count.Status == status);
+
+    private static string TabLabel(string status) => StatusTabs.FirstOrDefault(tab => tab.Status == status).Label ?? status;
+
+    private string StoreLabel => locations.FirstOrDefault(location => location.Id == selectedLocationId) is { } store
+        ? store.Name
+        : "this store";
 
     protected override async Task OnInitializedAsync()
     {
@@ -261,14 +302,24 @@ else
     {
         selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) && locations.Any(location => location.Id == id) ? id : null;
         counts.Clear();
-        searchedLabel = string.Empty;
         message = null;
+        if (selectedLocationId is null)
+        {
+            showNew = false;
+        }
+
         return selectedLocationId is null ? Task.CompletedTask : LoadCountsAsync();
     }
 
-    private void OnKindChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    private void ToggleNew()
     {
-        selectedKind = int.TryParse(e.Value?.ToString(), out int value) ? value : KindFullPhysical;
+        showNew = !showNew;
+        message = null;
+    }
+
+    private void ChooseKind(int kind)
+    {
+        selectedKind = kind;
         selectedCategoryId = null;
         message = null;
     }
@@ -293,7 +344,7 @@ else
         {
             ApiResult<List<PosInventoryCountSummary>> response = await Api.GetInventoryCountsAsync(
                 locationId,
-                string.IsNullOrWhiteSpace(selectedStatus) ? null : selectedStatus,
+                null,
                 CancellationToken.None);
             if (!response.IsSuccess || response.Value is null)
             {
@@ -302,13 +353,6 @@ else
             }
 
             counts.AddRange(response.Value);
-            searchedLabel = string.IsNullOrWhiteSpace(selectedStatus)
-                ? "all states"
-                : SplitWords(selectedStatus);
-            if (counts.Count == 0)
-            {
-                message = "No counts matched that store and state.";
-            }
         }
         catch (HttpRequestException)
         {
@@ -380,8 +424,6 @@ else
 
     private static string Money(decimal value)
         => value.ToString("C", CultureInfo.GetCultureInfo("en-PH"));
-
-    private int AwaitingApproval => counts.Count(count => count.Status == "PendingApproval");
 
     private static double Percent(PosInventoryCountSummary count)
         => count.Lines == 0 ? 0d : count.CountedLines * 100d / count.Lines;

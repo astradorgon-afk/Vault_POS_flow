@@ -83,27 +83,36 @@ else
     <div class="cs-layout">
         <div class="cs-main">
             <section class="cs-card">
-                <div class="cs-card-head">
+                <div class="cs-card-head cnt-sheet-head">
                     <div>
-                        <div class="cs-eyebrow">Physical count</div>
-                        <h2>Count what is on the shelf</h2>
-                        <p>Enter the quantity found for each line. Every line needs a number before the sheet can be submitted.</p>
+                        <h2>Count sheet</h2>
+                        <p>Enter what is on the shelf for every line, then submit the sheet for approval.</p>
                     </div>
-                    <span class="cs-count">@sheet.CountedLines of @sheet.TotalLines</span>
+                    @if (IsCounting && CanCount)
+                    {
+                        <button type="button" class="cs-btn" disabled="@busy" @onclick="MatchAllToSystem">
+                            <AppIcon Name="check" /> Match all to system
+                        </button>
+                    }
                 </div>
 
                 @if (IsCounting && CanCount)
                 {
-                    <div class="cs-toolbar">
-                        <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each line</span>
-                        <button type="button" class="cs-btn" disabled="@busy" @onclick="MatchAllToSystem">
-                            <AppIcon Name="check" /> Match all to system
-                        </button>
-                    </div>
-                    @* A wedge scanner types wherever focus is, so it needs no row. *@
-                    <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan. Each scan adds one unit to that product's line.</p>
-                    <p class="cs-note">@(scanNote ?? "Variance is counted − system. A shortfall writes stock off when the count is approved, so recount before submitting anything you are unsure of.")</p>
+                    @* Only real feedback earns a line here; the standing advice folds away. *@
+                    @if (scanNote is not null)
+                    {
+                        <p class="cnt-scan-note" role="status"><AppIcon Name="camera" /> @scanNote</p>
+                    }
+                    <details class="cnt-howto">
+                        <summary>How counting works</summary>
+                        <ul>
+                            <li>Counted is what is physically on the shelf, not the difference. Enter 0 when none was found.</li>
+                            <li>Scan with the camera button on a line, or with a handheld scanner: click outside any field, then scan. Each scan adds one unit to that product's line.</li>
+                            <li>Variance is counted − system. A shortfall writes stock off when the count is approved, so recount anything you are unsure of.</li>
+                        </ul>
+                    </details>
 
+                    @* A wedge scanner types wherever focus is, so it needs no row. *@
                     <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
                 }
 
@@ -140,7 +149,7 @@ else
                 </section>
 
                 <div class="cs-table-head" aria-hidden="true">
-                    <span>Product</span><span>System</span><span>Counted</span><span>Variance</span><span>Actions</span>
+                    <span>Product</span><span>System</span><span>Counted</span><span>Variance</span><span></span>
                 </div>
 
                 <div class="cs-rows" aria-live="polite">
@@ -164,6 +173,7 @@ else
                                         {
                                             <text> · lot @ShortId(batchId)</text>
                                         }
+                                        <span class="cnt-when">· @(line.CountedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "not counted yet")</span>
                                     </div>
                                     @if (line.IsRepeatVariance)
                                     {
@@ -171,7 +181,7 @@ else
                                     }
                                 </div>
 
-                                <div class="cs-due-cell"><span class="cs-due is-quiet">@Quantity(line.SystemQuantity)</span></div>
+                                <div class="cs-due-cell"><span class="cnt-label">System</span><span class="cs-due is-quiet">@Quantity(line.SystemQuantity)</span></div>
 
                                 <div class="cs-qty-cell" data-label="COUNTED">
                                     @if (IsCounting && CanCount)
@@ -187,8 +197,10 @@ else
                                             <button type="button" aria-label="One more @ProductDisplayName(line.ProductId)"
                                                     @onclick="() => Step(line, 1m)">+</button>
                                         </div>
-                                        <button type="button" class="cs-text-btn" disabled="@(sheet.Quantity(line) == line.SystemQuantity)"
-                                                @onclick="() => MatchSystem(line)">Match system @Quantity(line.SystemQuantity)</button>
+                                        @if (sheet.Quantity(line) != line.SystemQuantity)
+                                        {
+                                            <button type="button" class="cs-text-btn" @onclick="() => MatchSystem(line)">Match system @Quantity(line.SystemQuantity)</button>
+                                        }
                                         @if (LineError(line.LineNo) is { } lineError)
                                         {
                                             <p class="cs-line-error" role="alert"><AppIcon Name="alert" /> @lineError</p>
@@ -209,12 +221,11 @@ else
                                 <div class="cs-actions">
                                     @if (IsCounting && CanCount)
                                     {
-                                        <button type="button" class="cs-row-scan" @onclick="() => OpenScan(line)"
+                                        <button type="button" class="cs-row-scan" @onclick="() => OpenScan(line)" title="Scan barcode"
                                                 aria-label="Scan barcode for @ProductDisplayName(line.ProductId)">
-                                            <AppIcon Name="camera" /> Scan barcode
+                                            <AppIcon Name="camera" />
                                         </button>
                                     }
-                                    <span class="cs-sku">@(line.CountedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "Not counted")</span>
                                 </div>
                             </article>
                         }
@@ -241,10 +252,6 @@ else
                     </nav>
                 }
 
-                <div class="cs-helper">
-                    <AppIcon Name="info" />
-                    Counted is what is physically on the shelf, not the difference. Enter zero when none of a product was found.
-                </div>
             </section>
         </div>
 
@@ -331,6 +338,29 @@ else
         </aside>
     </div>
 
+    @* Under 1100px the summary column sits above the rows, so after a page of
+       counting its buttons are a long scroll away. This bar keeps progress and
+       the next step on screen; it is hidden where the column is beside the rows. *@
+    @if ((IsCounting && CanCount) || (IsPendingApproval && CanApproveCount))
+    {
+        <div class="cnt-dock" role="region" aria-label="Count actions">
+            <div class="cnt-dock-status">
+                <strong>@sheet.CountedLines of @sheet.TotalLines counted</strong>
+                <span>@(sheet.HasUnsavedChanges ? "Unsaved changes" : $"Net variance {Money(sheet.NetVarianceValue)}")</span>
+            </div>
+            @if (IsCounting && CanCount)
+            {
+                <button type="button" class="cs-btn @(sheet.HasUnsavedChanges ? "cs-primary" : null)" @onclick="SaveCountsAsync" disabled="@(busy || !sheet.HasUnsavedChanges)">@(busy ? "Saving…" : "Save")</button>
+                <button type="button" class="cs-btn @(sheet.HasUnsavedChanges ? null : "cs-primary")" @onclick="SubmitAsync" disabled="@(busy || !sheet.IsComplete)">Submit</button>
+            }
+            else
+            {
+                <button type="button" class="cs-btn" @onclick="ToggleReject" disabled="@busy">Send back</button>
+                <button type="button" class="cs-btn cs-primary" @onclick="ToggleApprove" disabled="@busy"><AppIcon Name="check" /> Approve</button>
+            }
+        </div>
+    }
+
     @* Rendered by the app rather than a native dialog, which would need interop. *@
     @if (scanLine is { } scanning)
     {
@@ -357,7 +387,8 @@ else
        what it is about to post before it does it. *@
     @if (approving)
     {
-        <section class="reason-editor confirm-post" role="alertdialog" aria-labelledby="confirm-post-title">
+        <div class="cs-dlg-scrim" @onclick="DismissPrompt"></div>
+        <section class="cs-dlg reason-editor confirm-post" role="alertdialog" aria-modal="true" aria-labelledby="confirm-post-title">
             <strong id="confirm-post-title">Post this variance to stock?</strong>
             <p>
                 @sheet.VaryingLines of @sheet.TotalLines line@(sheet.TotalLines == 1 ? "" : "s") disagree with the ledger,
@@ -373,7 +404,8 @@ else
 
     @if (cancelling)
     {
-        <section class="reason-editor">
+        <div class="cs-dlg-scrim" @onclick="DismissPrompt"></div>
+        <section class="cs-dlg reason-editor" role="dialog" aria-modal="true" aria-labelledby="cancel-reason">
             <label class="reason-label" for="cancel-reason">Reason for cancelling</label>
             <input id="cancel-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
             <div class="reason-actions">
@@ -385,7 +417,8 @@ else
 
     @if (rejecting)
     {
-        <section class="reason-editor">
+        <div class="cs-dlg-scrim" @onclick="DismissPrompt"></div>
+        <section class="cs-dlg reason-editor" role="dialog" aria-modal="true" aria-labelledby="reject-reason">
             <label class="reason-label" for="reject-reason">Reason for sending back</label>
             <input id="reject-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Say what needs recounting" />
             <div class="reason-actions">

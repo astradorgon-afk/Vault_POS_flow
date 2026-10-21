@@ -1,18 +1,91 @@
-.head-pickers { display:flex; gap:12px; flex-wrap:wrap; }
 .search-action { min-width:130px; height:42px; padding:0 17px; border:0; border-radius:9px; background:var(--forest); color:#fff; font-weight:800; cursor:pointer; }
 .search-action:hover { background:var(--forest-bright); }
 .search-action:disabled { opacity:.5; cursor:default; }
 .open-count-hint { margin-top:12px; padding:11px 13px; border-left:3px solid var(--amber); background:var(--amber-soft); color:#6d5420; font-size:.82rem; }
-.open-count-actions { margin-top:14px; display:flex; justify-content:flex-end; }
-/* A count waiting on a signature is the one row someone has to act on. */
-.awaiting-flag { margin-left:9px; padding:3px 10px; border-radius:99px; background:var(--amber-soft); color:#6d5420; font-weight:800; font-size:.72rem; }
+
+/* Header: the page's one primary action sits with its title. */
+.counts-head { align-items:flex-end; }
+.counts-new { flex:none; min-height:44px; padding:0 18px; border:0; border-radius:10px; background:var(--forest); color:#fff; font-weight:800; font-size:.86rem; cursor:pointer; }
+.counts-new:hover:enabled { background:var(--forest-bright); }
+.counts-new.is-open { border:1px solid var(--line-strong); background:#fff; color:var(--ink); }
+.counts-new:disabled { opacity:.5; cursor:default; }
+
+/* Store and status in one bar. The tabs scroll sideways on a narrow screen
+   rather than wrapping into a second ragged row. */
+.counts-bar { display:flex; align-items:center; gap:12px; margin:0 0 14px; padding:10px; border:1px solid var(--line); border-radius:14px; background:#fff; box-shadow:var(--shadow-card); }
+.counts-store { display:flex; align-items:center; gap:10px; flex:0 1 280px; min-width:0; color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.counts-store select { flex:1 1 auto; min-width:0; height:40px; padding:0 10px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--ink); font-size:.86rem; font-weight:700; letter-spacing:0; text-transform:none; }
+.counts-tabs { display:flex; gap:4px; flex:1 1 auto; min-width:0; overflow-x:auto; scrollbar-width:none; }
+.counts-tabs::-webkit-scrollbar { display:none; }
+.counts-tab { display:inline-flex; align-items:center; gap:7px; flex:none; height:40px; padding:0 12px; border:0; border-radius:9px; background:transparent; color:var(--muted); font-weight:800; font-size:.8rem; white-space:nowrap; cursor:pointer; }
+.counts-tab:hover:enabled { background:var(--mint-soft); color:var(--forest); }
+.counts-tab b { min-width:22px; padding:2px 7px; border-radius:99px; background:#f0f3f0; color:var(--muted); font-size:.7rem; text-align:center; font-variant-numeric:tabular-nums; }
+.counts-tab.is-on { background:var(--forest); color:#fff; }
+.counts-tab.is-on b { background:rgba(255,255,255,.18); color:#fff; }
+/* Sheets waiting on a signature are the ones someone has to act on. */
+.counts-tab.is-attention:not(.is-on) b { background:var(--amber); color:#3f2d06; }
+.counts-tab:disabled { opacity:.5; cursor:default; }
+.counts-refresh { display:grid; place-items:center; flex:none; width:40px; height:40px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--forest); cursor:pointer; }
+.counts-refresh:hover:enabled { background:var(--mint-soft); }
+.counts-refresh:disabled { opacity:.5; cursor:default; }
+.counts-refresh ::deep svg { width:18px; height:18px; }
+
+/* New count: what to count as three described choices, not a bare dropdown. */
+.counts-new-panel { display:grid; gap:16px; margin:0 0 14px; padding:20px; border:1px solid #cfe2d6; border-radius:14px; background:#fbfdfb; box-shadow:var(--shadow-card); }
+.counts-new-panel header h2 { margin:0; font:700 1.05rem 'Manrope',sans-serif; letter-spacing:-.02em; color:var(--ink); }
+.counts-new-panel header p { margin:4px 0 0; color:var(--muted); font-size:.82rem; }
+.counts-kinds { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.counts-kind { display:grid; gap:3px; min-height:64px; padding:12px 14px; border:1px solid var(--line-strong); border-radius:11px; background:#fff; color:var(--ink); text-align:left; cursor:pointer; }
+.counts-kind strong { font-size:.88rem; }
+.counts-kind span { color:var(--muted); font-size:.76rem; }
+.counts-kind:hover { border-color:var(--forest-bright); }
+.counts-kind.is-on { border-color:var(--forest); background:var(--mint-soft); box-shadow:inset 0 0 0 1px var(--forest); }
+.counts-new-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.counts-field { display:grid; gap:6px; min-width:0; color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.counts-field em { font-style:normal; font-weight:600; letter-spacing:0; text-transform:none; }
+.counts-field :is(select,input) { width:100%; min-width:0; height:44px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--ink); font-size:.88rem; font-weight:600; letter-spacing:0; text-transform:none; }
+.counts-new-panel footer { display:flex; justify-content:flex-end; gap:10px; }
+.counts-cancel { min-height:42px; padding:0 16px; border:0; border-radius:9px; background:transparent; color:var(--muted); font-weight:800; cursor:pointer; }
+.counts-cancel:hover { color:var(--ink); }
+
+/* The list. A count waiting on a signature is the one row someone has to act on. */
+.results-panel { border:1px solid var(--line); border-radius:14px; background:#fff; overflow:hidden; min-height:200px; box-shadow:var(--shadow-card); }
+.results-empty { min-height:200px; display:grid; place-content:center; justify-items:center; gap:10px; padding:24px; color:var(--muted); text-align:center; }
+.results-empty strong { color:var(--ink); }
+.counts-empty-action { min-width:0; }
+.counts-table .sale-number { display:grid; gap:2px; }
+.counts-table .sale-number small { color:var(--muted); font-size:.74rem; font-weight:600; }
 .row-awaiting td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
-.counted-cell { display:grid; gap:5px; min-width:92px; }
+.counted-cell { display:grid; gap:5px; min-width:110px; }
 .counted-cell span:first-child { font-variant-numeric:tabular-nums; }
-.counted-bar { display:block; height:4px; border-radius:99px; background:#ecefec; overflow:hidden; }
+.counted-bar { display:block; width:100%; height:5px; border-radius:99px; background:#ecefec; overflow:hidden; }
 .counted-bar b { display:block; height:100%; border-radius:99px; background:var(--forest); }
 
-.results-panel { border:1px solid var(--line); border-radius:18px; background:#fff; overflow:hidden; min-height:260px; box-shadow:var(--shadow-card); }
-.results-empty { min-height:260px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
-.results-empty span { margin-top:5px; font-size:.82rem; }
-@media(max-width:620px){.office-head{align-items:stretch;flex-direction:column}}
+@media(max-width:900px) {
+    .counts-bar { flex-wrap:wrap; }
+    .counts-store { flex:1 1 100%; }
+    .counts-tabs { flex:1 1 0; }
+}
+
+@media(max-width:640px) {
+    .counts-head { flex-direction:column; align-items:stretch; }
+    .counts-new { width:100%; }
+    .counts-bar { padding:8px; gap:8px; }
+    .counts-store > span { display:none; }
+    .counts-kinds { grid-template-columns:1fr; gap:8px; }
+    .counts-kind { min-height:56px; }
+    .counts-new-panel { padding:16px; }
+    .counts-new-panel footer { flex-direction:column-reverse; }
+    .counts-new-panel footer .search-action { width:100%; min-height:48px; }
+    /* Phone cards: the count number leads, status beside progress beneath. */
+    .row-awaiting td:first-child { box-shadow:none; }
+    .row-awaiting { box-shadow:inset 3px 0 0 var(--amber); }
+    /* Status rides beside the count number instead of taking a labelled row. */
+    .counts-table tr { grid-template-columns:minmax(0,1fr) auto; }
+    .counts-table td.sale-number { grid-column:1; }
+    .counts-table td.sale-number a { white-space:nowrap; }
+    .counts-table td:nth-child(2) { grid-column:2; grid-row:1; justify-self:end; align-self:start; }
+    .counts-table td:nth-child(2)::before { content:none; }
+    .counts-table td.counted-td { grid-column:1 / -1; justify-items:stretch; }
+    .counted-cell { min-width:0; }
+}

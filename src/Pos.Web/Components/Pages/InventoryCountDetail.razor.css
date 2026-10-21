@@ -45,3 +45,101 @@
     .sheet-toolbar{flex-direction:column;align-items:stretch}
     .action-button{flex:1 1 140px}
 }
+
+/* ---- Count sheet ------------------------------------------------------------
+   The shared cs- sheet (count-sheet.css) also dresses transfer picking and the
+   offline workspace, so everything below is scoped to this page. The aim is a
+   sheet that reads like a ledger: one short heading, the finders, then rows at
+   a scannable height with the commit buttons always in reach. */
+.cnt-sheet-head { align-items:flex-start; padding-bottom:16px; }
+.cnt-sheet-head p { max-width:60ch; }
+.cnt-sheet-head .cs-btn { flex:none; }
+
+/* What the last scan did. The standing advice moved into the disclosure. */
+.cnt-scan-note { display:flex; align-items:center; gap:8px; margin:0 24px 12px; padding:10px 12px; border-radius:8px; background:#edf5ef; color:#1b634b; font-size:.78rem; font-weight:600; }
+.cnt-scan-note ::deep svg { width:16px; height:16px; flex:none; }
+
+.cnt-howto { margin:0 24px 16px; border:1px solid #e6ede3; border-radius:9px; background:#f8faf7; }
+.cnt-howto summary { display:flex; align-items:center; gap:8px; min-height:40px; padding:0 12px; color:#1b634b; font-size:.76rem; font-weight:700; list-style:none; cursor:pointer; }
+.cnt-howto summary::-webkit-details-marker { display:none; }
+.cnt-howto summary::before { content:"i"; display:grid; place-items:center; width:18px; height:18px; flex:none; border-radius:50%; background:#dcebe1; font:800 .66rem/1 'DM Sans',sans-serif; }
+.cnt-howto summary::after { content:"⌄"; margin-left:auto; color:#73817b; }
+.cnt-howto[open] summary::after { content:"⌃"; }
+.cnt-howto ul { margin:0; padding:0 16px 12px 38px; color:#61766a; font-size:.74rem; line-height:1.65; }
+
+/* The finders sit inside the card's own margins instead of running to its edge. */
+.sheet-toolbar { margin:0; padding:0 24px 16px; }
+.sheet-filter { height:38px; }
+
+/* Rows at ledger height: product, the system figure, the count, its effect,
+   and a single scan button. */
+.cs-table-head, .cs-row { grid-template-columns:minmax(0,1fr) 52px 120px 104px 40px; gap:12px; align-items:center; }
+.cs-row { min-height:0; padding:13px 24px; }
+.cs-product { padding-top:0; }
+.cs-name { line-height:1.4; }
+.cnt-when { margin-left:3px; color:#98a69e; }
+.cnt-label { display:none; }
+.cs-due-cell { padding-top:0; }
+.cs-qty-cell { display:grid; justify-items:start; gap:2px; }
+.cs-text-btn { margin-top:2px; padding:2px 0; }
+.cs-derived { margin-top:3px; }
+.cs-actions { padding-top:0; justify-items:end; }
+.cs-actions .cs-row-scan { width:40px; height:40px; min-height:0; padding:0; justify-content:center; border-radius:9px; }
+.cs-actions .cs-row-scan ::deep svg { width:18px; height:18px; }
+
+/* Commit bar for phones and tablets; see the markup for why. */
+.cnt-dock { display:none; }
+
+/* The three confirmations open as dialogs over the sheet. */
+.cs-dlg.reason-editor { margin:0; padding:22px; gap:12px; }
+.cs-dlg.reason-editor .reason-actions { flex-wrap:wrap; }
+
+@media(max-width:1100px) {
+    .cnt-dock { position:sticky; bottom:16px; z-index:30; display:flex; align-items:center; gap:10px; margin-top:16px; padding:10px 10px 10px 16px; border:1px solid #d6e0d9; border-radius:14px; background:rgba(255,255,255,.97); box-shadow:0 14px 34px -14px rgba(21,60,43,.38); }
+    .cnt-dock-status { display:grid; gap:1px; min-width:0; margin-right:auto; }
+    .cnt-dock-status strong { color:#17382d; font-size:.84rem; font-variant-numeric:tabular-nums; }
+    .cnt-dock-status span { overflow:hidden; color:#73817b; font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
+    .cnt-dock .cs-btn { min-height:44px; padding-inline:16px; font-size:.82rem; }
+    .cnt-dock .cs-btn ::deep svg { width:16px; height:16px; }
+}
+
+/* Under 900px the tab bar owns the bottom edge; the commit bar sits above it. */
+@media(max-width:900px) {
+    .cnt-dock { bottom:calc(78px + env(safe-area-inset-bottom)); }
+}
+
+/* Phones: a line is two rows. Name and scan on top; then the system figure,
+   the count and its effect side by side, so a sheet scrolls at a few lines a
+   screen instead of one. */
+@media(max-width:780px) {
+    .cnt-sheet-head { flex-direction:column; align-items:stretch; padding-inline:16px; }
+    .cnt-sheet-head .cs-btn { width:100%; min-height:44px; }
+    .cnt-scan-note, .cnt-howto { margin-inline:16px; }
+    .sheet-toolbar { padding-inline:16px; }
+    .sheet-search, .sheet-category { flex:0 0 auto; }
+
+    .cs-row { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:"prod prod scan" "sys qty var"; gap:10px 14px; padding:14px 16px; }
+    .cs-row > .cs-product { grid-area:prod; padding-right:0; }
+    .cs-actions { grid-area:scan; display:block; padding:0; border:0; }
+    .cs-actions .cs-row-scan { width:44px; height:44px; min-height:44px; border:1px solid #d6e5da; background:#edf5ef; }
+    .cs-due-cell { grid-area:sys; position:static; display:grid; gap:4px; align-self:start; }
+    .cnt-label { display:block; color:#73817b; font-size:.6rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    .cs-qty-cell { grid-area:qty; align-self:start; }
+    .cs-qty-cell::before { margin-bottom:4px; font-size:.6rem; }
+    .cs-stepper { width:132px; height:44px; }
+    .cs-second-cell { grid-area:var; align-self:start; justify-self:end; text-align:right; }
+    .cs-second-label { margin:0 0 4px; font-size:.6rem; }
+    .cs-derived { justify-content:flex-end; margin-top:4px; }
+
+    .office-head > .status-chip { align-self:flex-start; }
+    .cnt-dock { padding:8px 8px 8px 14px; }
+    .cnt-dock .cs-btn { padding-inline:14px; }
+    .cs-dlg.reason-editor .reason-actions { flex-direction:column-reverse; }
+    .cs-dlg.reason-editor .action-button { flex:0 0 auto; width:100%; min-height:46px; }
+}
+
+@media(max-width:360px) {
+    .cs-row { gap:10px; padding-inline:12px; }
+    .cs-stepper { width:116px; }
+    .cnt-dock-status span { display:none; }
+}
