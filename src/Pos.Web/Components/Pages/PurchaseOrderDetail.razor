@@ -166,25 +166,22 @@ else if (order is { } o)
             </section>
             break;
 
+        case "Ordered" or "PartiallyReceived" when Can("purchase.receive") && receivingOpen && ReceivingDateAllowed && receiptsLoaded:
+            @ReceivePanel(o)
+            break;
+
         case "Ordered" or "PartiallyReceived" when Can("purchase.receive"):
             <section class="qr-card po-card order-next">
                 <div><span class="order-eyebrow">Next step · receiving</span><h2>@(o.Status == "PartiallyReceived" ? "Waiting for the remaining goods" : "Waiting for delivery")</h2>
-                    @if (!receivingOpen)
-                    {
-                        <p>@(o.ExpectedAtUtc is null ? "Deliver to" : $"Expected {ExpectedDate} at") @LocationName(o.DestinationLocationId).</p>
-                    }
+                    <p>@(o.ExpectedAtUtc is null ? "Deliver to" : $"Expected {ExpectedDate} at") @LocationName(o.DestinationLocationId).</p>
                     @if (!ReceivingDateAllowed)
                     {
                         <p class="receiving-date-note">Receiving is available after the order is sent. Check the order date if it is in the future.</p>
                     }
                     @if (!receiptsLoaded) { <p class="receiving-date-note">Delivery history is unavailable. Reload before recording stock.</p> }
                 </div>
-                <button type="button" class="po-btn primary" disabled="@(busy || !ReceivingDateAllowed || !receiptsLoaded)" @onclick="() => receivingOpen = !receivingOpen">@(receivingOpen ? "Close receiving form" : "Receive a delivery")</button>
+                <button type="button" class="po-btn primary" disabled="@(busy || !ReceivingDateAllowed || !receiptsLoaded)" @onclick="() => receivingOpen = true">Receive a delivery</button>
             </section>
-            @if (receivingOpen && ReceivingDateAllowed && receiptsLoaded)
-            {
-                @ReceivePanel(o)
-            }
             break;
 
         case "FullyReceived":
@@ -328,21 +325,26 @@ else if (order is { } o)
     private RenderFragment ReceivePanel(PosPurchaseOrder o) => __builder =>
     {
         <section class="qr-card po-card po-receive-panel">
-            <div class="po-receive-top">
+            <header class="po-receive-top">
                 <div>
+                    <span class="order-eyebrow">Receiving · @ReceivingToday.ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
                     <h2>Count this delivery</h2>
-                    <p>Receiving @ReceivingToday.ToString("d MMM yyyy", CultureInfo.InvariantCulture)</p>
+                    <p>@LocationName(o.DestinationLocationId)</p>
                 </div>
+                <button type="button" class="po-btn po-receive-close" disabled="@busy" @onclick="() => receivingOpen = false">Close</button>
+            </header>
+            @if (IsSameDayDelivery)
+            {
+                <p class="receiving-date-note po-receive-notice">Sent today. Continue only if the goods are already here.</p>
+            }
+
+            <div class="po-receive-section">
+                <h3>Items</h3>
                 <div class="po-receive-progress" role="progressbar" aria-label="Lines accounted for" aria-valuemin="0" aria-valuemax="@receiving.Count" aria-valuenow="@AccountedCount">
-                    <span><strong>@AccountedCount/@receiving.Count</strong> lines done</span>
+                    <span><strong>@AccountedCount of @receiving.Count</strong> done</span>
                     <i><b style="width:@(receiving.Count == 0 ? 0 : AccountedCount * 100 / receiving.Count)%"></b></i>
                 </div>
             </div>
-            @if (IsSameDayDelivery)
-            {
-                <p class="receiving-date-note">Sent today. Continue only if the goods are already here.</p>
-            }
-
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
             <div class="po-receive-scan">
                 <CameraScanner Enabled="@(!busy)" />
@@ -434,12 +436,14 @@ else if (order is { } o)
                     </label>
                 </div>
             </details>
-            <label class="switch-label arrival-confirmation"><input type="checkbox" @bind="arrivalConfirmed" /><span>@(IsSameDayDelivery ? "Same-day delivery: the goods are physically here and I checked the counts." : "The goods are physically here and I checked the counts.")</span></label>
-            <div class="po-buttons po-receive-foot">
-                <span class="po-hint">@ReceiveSummary</span>
-                <button type="button" class="po-btn primary" disabled="@(busy || !CanRecord)" @onclick="RecordDeliveryAsync">
-                    @(AccountedCount < receiving.Count ? $"Account for {receiving.Count - AccountedCount} more line{(receiving.Count - AccountedCount == 1 ? "" : "s")}" : "Record delivery")
-                </button>
+            <div class="po-receive-finish">
+                <label class="switch-label arrival-confirmation"><input type="checkbox" @bind="arrivalConfirmed" /><span>@(IsSameDayDelivery ? "Same-day delivery: the goods are physically here and I checked the counts." : "The goods are physically here and I checked the counts.")</span></label>
+                <div class="po-buttons po-receive-foot">
+                    <span class="po-hint">@ReceiveSummary</span>
+                    <button type="button" class="po-btn primary" disabled="@(busy || !CanRecord)" @onclick="RecordDeliveryAsync">
+                        @(AccountedCount < receiving.Count ? $"Account for {receiving.Count - AccountedCount} more line{(receiving.Count - AccountedCount == 1 ? "" : "s")}" : "Record delivery")
+                    </button>
+                </div>
             </div>
         </section>
     };
