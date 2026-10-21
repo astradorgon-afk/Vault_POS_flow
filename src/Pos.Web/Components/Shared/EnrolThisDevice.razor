@@ -1,0 +1,68 @@
+@inject DeviceSelfEnrolment SelfEnrolment
+
+@* For someone who may manage devices: sets this browser up for offline use
+   without an enrollment code. Their signed-in session is the approval. *@
+<div class="offline-setup-enrollment">
+    <p>Your account can set up devices, so no enrollment code is needed. This browser will be listed under Devices, where it can be suspended or revoked at any time.</p>
+    @if (!string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
+    @if (LocationId is null)
+    {
+        <label for="enrol-location">Location for this device</label>
+        <select id="enrol-location" value="@(chosen?.ToString() ?? string.Empty)" @onchange="e => chosen = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null" disabled="@working">
+            <option value="">Select a location</option>
+            @foreach (PosSignInLocation location in Locations)
+            {
+                <option value="@location.Id">@location.Code · @location.Name (@(location.Kind == 0 ? "Warehouse" : "Store"))</option>
+            }
+        </select>
+    }
+    <button type="button" class="offline-setup-submit" @onclick="EnrolAsync" disabled="@(working || (LocationId ?? chosen) is null)">@(working ? "Preparing offline access…" : "Use this device offline")</button>
+</div>
+
+@code {
+    /// <summary>The locations the device may be placed at.</summary>
+    [Parameter] public IReadOnlyList<PosSignInLocation> Locations { get; set; } = [];
+
+    /// <summary>The location already chosen at sign-in, if any.</summary>
+    [Parameter] public Guid? LocationId { get; set; }
+
+    /// <summary>Whether the page is busy with something else.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>Called with the one-time code to finish enrolment the usual way.</summary>
+    [Parameter] public EventCallback<string> OnCode { get; set; }
+
+    private Guid? chosen;
+    private bool issuing;
+    private string? error;
+
+    private bool working => Busy || issuing;
+
+    private async Task EnrolAsync()
+    {
+        if (working || (LocationId ?? chosen) is not { } location)
+        {
+            return;
+        }
+
+        error = null;
+        issuing = true;
+        ApiResult<string> code;
+        try
+        {
+            code = await SelfEnrolment.IssueCodeAsync(location, CancellationToken.None);
+        }
+        finally
+        {
+            issuing = false;
+        }
+
+        if (!code.IsSuccess)
+        {
+            error = code.Error;
+            return;
+        }
+
+        await OnCode.InvokeAsync(code.Value);
+    }
+}

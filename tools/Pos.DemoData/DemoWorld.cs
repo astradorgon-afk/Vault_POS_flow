@@ -36,7 +36,13 @@ internal sealed record DemoRegister(
 /// </summary>
 internal sealed class DemoWorld
 {
-    public const string Password = "cash1234";
+    /// <summary>The development accounts' shared password: the published one, or
+    /// VAULTFLOW_DEMO_PASSWORD when the API was seeded with
+    /// Seeding:DevelopmentAccountPassword (a public demo).</summary>
+    public static readonly string Password =
+        Environment.GetEnvironmentVariable("VAULTFLOW_DEMO_PASSWORD") is { Length: > 0 } configured
+            ? configured
+            : "cash1234";
 
     private const int WindowsPlatform = 1;
     private const int AndroidPlatform = 2;

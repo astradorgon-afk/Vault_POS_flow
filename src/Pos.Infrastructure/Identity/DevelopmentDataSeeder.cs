@@ -696,6 +696,8 @@ public sealed class DevelopmentDataSeeder(
             ];
 
         DateTimeOffset now = clock.UtcNow;
+        string? configuredPassword = _seeding.Value.DevelopmentAccountPassword;
+        string password = string.IsNullOrWhiteSpace(configuredPassword) ? DevelopmentPassword : configuredPassword;
 
         foreach ((string userName, string displayName, string role, ApprovalTier tier, string? locationCode) in accounts)
         {
@@ -706,7 +708,7 @@ public sealed class DevelopmentDataSeeder(
                 // Keep every development account on the shared password: when the
                 // constant changes, existing accounts are rotated to it so the
                 // credential set stays uniform and the demo never splits by age.
-                if (!await users.CheckPasswordAsync(existing, DevelopmentPassword).ConfigureAwait(false))
+                if (!await users.CheckPasswordAsync(existing, password).ConfigureAwait(false))
                 {
                     // The identity setup is AddIdentityCore-based and registers no
                     // token providers, so a token-based reset is not available.
@@ -722,7 +724,7 @@ public sealed class DevelopmentDataSeeder(
                     }
 
                     IdentityResult added = await users
-                        .AddPasswordAsync(existing, DevelopmentPassword)
+                        .AddPasswordAsync(existing, password)
                         .ConfigureAwait(false);
 
                     if (!added.Succeeded)
@@ -761,7 +763,7 @@ public sealed class DevelopmentDataSeeder(
                 CreatedByUserId = Guid.Empty,
             };
 
-            IdentityResult created = await users.CreateAsync(account, DevelopmentPassword).ConfigureAwait(false);
+            IdentityResult created = await users.CreateAsync(account, password).ConfigureAwait(false);
 
             if (!created.Succeeded)
             {
@@ -838,13 +840,20 @@ public sealed class DevelopmentDataSeeder(
             logger.LogWarning("Retired obsolete development account {UserName}.", userName);
         }
 
-        if (_accountsCreated > 0)
+        if (_accountsCreated > 0 && password == DevelopmentPassword)
         {
             logger.LogWarning(
                 "Created {Count} development account(s). The shared development password is '{Password}'. " +
                 "Seeding:EnableDevelopmentAccounts must stay off everywhere else.",
                 _accountsCreated,
                 DevelopmentPassword);
+        }
+        else if (_accountsCreated > 0)
+        {
+            // A configured password is a secret; it is never written to the log.
+            logger.LogWarning(
+                "Created {Count} development account(s) with the configured Seeding:DevelopmentAccountPassword.",
+                _accountsCreated);
         }
     }
 
