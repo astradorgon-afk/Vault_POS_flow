@@ -67,6 +67,9 @@ builder.Services.AddHttpClient<VaultFlowApiClient>((services, client) =>
     // seconds is far past the point where a screen should say so and stop.
     client.Timeout = TimeSpan.FromSeconds(30);
 });
+builder.Services.AddScoped<DeviceSelfEnrolment>();
+builder.Services.AddOptions<DeviceSelfEnrolmentOptions>()
+    .BindConfiguration(DeviceSelfEnrolmentOptions.SectionName);
 builder.Services.AddOptions<ApiOptions>()
     .BindConfiguration(ApiOptions.SectionName)
     .Validate(options => options.BaseAddress.IsAbsoluteUri, "Api:BaseAddress must be an absolute URI.")

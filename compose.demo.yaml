@@ -33,6 +33,10 @@ services:
       Seeding__DevelopmentAccountPassword: ${DEMO_ACCOUNT_PASSWORD:-}
 
   web:
+    environment:
+      # A device manager's sign-in sets the browser up for offline use without
+      # asking for an enrollment code; the device still shows under Devices.
+      DeviceEnrolment__AutoEnrol: "true"
     ports:
       # Loopback only. The tunnel (on the host network) is the sole public way in.
       - "127.0.0.1:5400:8080"

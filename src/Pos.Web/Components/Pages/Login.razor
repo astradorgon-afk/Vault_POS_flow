@@ -11,6 +11,7 @@
 @inject Pos.Web.Pwa.PwaLoginHandoffs Handoffs
 @inject Pos.Web.Security.OneUseTokens<Pos.Web.Security.PendingWebSignIn> PendingSignIns
 @inject Pos.Web.Services.OfflineReadinessNotice OfflineNotice
+@inject DeviceSelfEnrolment SelfEnrol
 
 <PageTitle>Sign in · VaultFlow</PageTitle>
 
@@ -91,6 +92,11 @@
                     <p id="offline-setup-description">You can use your online workspace now. Offline use is unavailable until this device is registered and prepared.</p>
                     @if (!string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
                     <button type="button" class="offline-setup-continue" @onclick="ContinueOnlineAsync" disabled="@busy">@(deviceEnrolled ? "Continue online" : "Continue online without enrolling")</button>
+                    @if (!deviceEnrolled && SelfEnrol.CanEnrolThisDevice)
+                    {
+                        <EnrolThisDevice Locations="locationChoices" LocationId="@(selectedLocationId ?? Session.WorkLocationId)" Busy="busy" OnCode="EnrolWithCodeAsync" />
+                    }
+                    else {
                     <div class="offline-setup-enrollment">
                         @if (!deviceEnrolled)
                         {
@@ -100,6 +106,7 @@
                         }
                         <button type="button" class="offline-setup-submit" @onclick="PrepareOfflineAsync" disabled="@(busy || (!deviceEnrolled && string.IsNullOrWhiteSpace(enrolmentCode)))">@(busy ? "Preparing offline access…" : deviceEnrolled ? "Retry offline setup" : "Enroll and prepare offline access")</button>
                     </div>
+                    }
                 </section>
             </div>
         }
@@ -295,6 +302,8 @@
         await SignInAsync();
     }
 
+    private Task EnrolWithCodeAsync(string code) { enrolmentCode = code; return PrepareOfflineAsync(); }
+
     private async Task PrepareOfflineAsync()
     {
         busy = true;
@@ -309,6 +318,9 @@
             }
             if (!deviceEnrolled)
             {
+                if (string.IsNullOrWhiteSpace(enrolmentCode) && SelfEnrol.AutoEnrol
+                    && (selectedLocationId ?? Session.WorkLocationId ?? locationChoices.FirstOrDefault()?.Id) is { } home)
+                    enrolmentCode = (await SelfEnrol.IssueCodeAsync(home, CancellationToken.None)).Value ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(enrolmentCode))
                 {
                     showOfflineSetupModal = true;
