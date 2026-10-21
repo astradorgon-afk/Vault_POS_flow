@@ -169,14 +169,17 @@ else if (order is { } o)
         case "Ordered" or "PartiallyReceived" when Can("purchase.receive"):
             <section class="qr-card po-card order-next">
                 <div><span class="order-eyebrow">Next step · receiving</span><h2>@(o.Status == "PartiallyReceived" ? "Waiting for the remaining goods" : "Waiting for delivery")</h2>
-                    <p>Expected @ExpectedDate.ToLowerInvariant(). Record only the goods that physically arrive at @LocationName(o.DestinationLocationId).</p>
+                    @if (!receivingOpen)
+                    {
+                        <p>@(o.ExpectedAtUtc is null ? "Deliver to" : $"Expected {ExpectedDate} at") @LocationName(o.DestinationLocationId).</p>
+                    }
                     @if (!ReceivingDateAllowed)
                     {
                         <p class="receiving-date-note">Receiving is available after the order is sent. Check the order date if it is in the future.</p>
                     }
                     @if (!receiptsLoaded) { <p class="receiving-date-note">Delivery history is unavailable. Reload before recording stock.</p> }
                 </div>
-                <button type="button" class="po-btn primary" disabled="@(busy || !ReceivingDateAllowed || !receiptsLoaded)" @onclick="() => receivingOpen = !receivingOpen">@(receivingOpen ? "Hide receiving form" : "Receive a delivery")</button>
+                <button type="button" class="po-btn primary" disabled="@(busy || !ReceivingDateAllowed || !receiptsLoaded)" @onclick="() => receivingOpen = !receivingOpen">@(receivingOpen ? "Close receiving form" : "Receive a delivery")</button>
             </section>
             @if (receivingOpen && ReceivingDateAllowed && receiptsLoaded)
             {
@@ -324,26 +327,27 @@ else if (order is { } o)
     // marked as not in this delivery before it can be recorded.
     private RenderFragment ReceivePanel(PosPurchaseOrder o) => __builder =>
     {
-        <section class="qr-card po-card">
-            <div class="po-card-head">
+        <section class="qr-card po-card po-receive-panel">
+            <div class="po-receive-top">
                 <div>
                     <h2>Count this delivery</h2>
-                    <p>Go through the delivery line by line. Mark each line as arrived in full, enter what you counted, or mark it as not in this delivery.</p>
-                    <p>Receiving date: <strong>@ReceivingToday.ToString("d MMM yyyy", CultureInfo.InvariantCulture)</strong>. The actual recording time is saved with the receipt.</p>
-                    @if (IsSameDayDelivery)
-                    {
-                        <p class="receiving-date-note">Same-day delivery: this order was sent today. Continue only if the supplier has already delivered the goods.</p>
-                    }
+                    <p>Receiving @ReceivingToday.ToString("d MMM yyyy", CultureInfo.InvariantCulture)</p>
                 </div>
-                <div class="po-meter" role="progressbar" aria-valuemin="0" aria-valuemax="@receiving.Count" aria-valuenow="@AccountedCount">
-                    <strong>@AccountedCount of @receiving.Count</strong><span>lines accounted for</span>
-                    <i style="width:@(receiving.Count == 0 ? 0 : AccountedCount * 100 / receiving.Count)%"></i>
+                <div class="po-receive-progress" role="progressbar" aria-label="Lines accounted for" aria-valuemin="0" aria-valuemax="@receiving.Count" aria-valuenow="@AccountedCount">
+                    <span><strong>@AccountedCount/@receiving.Count</strong> lines done</span>
+                    <i><b style="width:@(receiving.Count == 0 ? 0 : AccountedCount * 100 / receiving.Count)%"></b></i>
                 </div>
             </div>
+            @if (IsSameDayDelivery)
+            {
+                <p class="receiving-date-note">Sent today. Continue only if the goods are already here.</p>
+            }
 
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
-            <CameraScanner Enabled="@(!busy)" />
-            <p class="po-scan-hint">▥ @(scanNote ?? "Scan items as you unpack: each scan counts one more of that product.")</p>
+            <div class="po-receive-scan">
+                <CameraScanner Enabled="@(!busy)" />
+                <p role="status">@(scanNote ?? "Each scan adds one of that product.")</p>
+            </div>
             @if (quarantineLines.Count > 0)
             {
                 <section class="po-quarantine" aria-label="Goods not on this order">
@@ -376,24 +380,33 @@ else if (order is { } o)
                     <div class="po-receive-line @(line.Mode == ReceiveMode.None ? "" : "done") @(line.Problem is null ? "" : "bad")">
                         <div class="po-receive-what">
                             <strong>@line.Line.LineNo. @(line.Line.ProductName ?? "Product")</strong>
-                            <small>@line.Line.ProductSku · ordered @PurchasingText.Quantity(line.Line.OrderedQuantity) · <b>@PurchasingText.Quantity(line.Due) still due</b></small>
+                            <small>@line.Line.ProductSku · <b>@PurchasingText.Quantity(line.Due) due</b>@(line.Due != line.Line.OrderedQuantity ? $" of {PurchasingText.Quantity(line.Line.OrderedQuantity)} ordered" : "")</small>
                         </div>
                         <div class="po-choice" role="radiogroup" aria-label="Line @line.Line.LineNo">
-                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.All) ? "true" : "false")" class="@(line.Mode == ReceiveMode.All ? "on" : null)" disabled="@(line.Due <= 0)" @onclick="() => SetMode(line, ReceiveMode.All)">✓ All @PurchasingText.Quantity(line.Due) arrived</button>
-                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.Counted) ? "true" : "false")" class="@(line.Mode == ReceiveMode.Counted ? "on" : null)" @onclick="() => SetMode(line, ReceiveMode.Counted)">Enter counts</button>
-                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.Missing) ? "true" : "false")" class="@(line.Mode == ReceiveMode.Missing ? "on missing" : null)" @onclick="() => SetMode(line, ReceiveMode.Missing)">Not in this delivery</button>
+                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.All) ? "true" : "false")" class="@(line.Mode == ReceiveMode.All ? "on" : null)" disabled="@(line.Due <= 0)" @onclick="() => SetMode(line, ReceiveMode.All)">✓ All arrived</button>
+                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.Counted) ? "true" : "false")" class="@(line.Mode == ReceiveMode.Counted ? "on" : null)" @onclick="() => SetMode(line, ReceiveMode.Counted)">Count</button>
+                            <button type="button" role="radio" aria-checked="@((line.Mode == ReceiveMode.Missing) ? "true" : "false")" class="@(line.Mode == ReceiveMode.Missing ? "on missing" : null)" @onclick="() => SetMode(line, ReceiveMode.Missing)">Not here</button>
                         </div>
                         @if (line.Mode == ReceiveMode.Counted)
                         {
                             <div class="po-counts">
                                 <label><span>Received</span><input type="number" min="0" @bind="line.Received" @bind:event="oninput" /></label>
-                                <label><span>of which damaged</span><input type="number" min="0" @bind="line.Damaged" @bind:event="oninput" /></label>
-                                <label><span>wrong item</span><input type="number" min="0" @bind="line.WrongItem" @bind:event="oninput" /></label>
-                                <label><span>expired</span><input type="number" min="0" @bind="line.Expired" @bind:event="oninput" /></label>
-                                <label><span>Unit cost on invoice</span><input type="number" min="0" step="0.01" @bind="line.UnitCost" @bind:event="oninput" /></label>
-                                <label><span>Lot <em>optional</em></span><input type="text" @bind="line.Lot" /></label>
-                                <label><span>Expires <em>optional</em></span><input type="date" @bind="line.ExpiresOn" /></label>
+                                <label><span>Unit cost</span><input type="number" min="0" step="0.01" @bind="line.UnitCost" @bind:event="oninput" /></label>
                             </div>
+                            @if (line.ShowDetails || line.HasDetails)
+                            {
+                                <div class="po-counts">
+                                    <label><span>Damaged</span><input type="number" min="0" @bind="line.Damaged" @bind:event="oninput" /></label>
+                                    <label><span>Wrong item</span><input type="number" min="0" @bind="line.WrongItem" @bind:event="oninput" /></label>
+                                    <label><span>Expired</span><input type="number" min="0" @bind="line.Expired" @bind:event="oninput" /></label>
+                                    <label><span>Lot</span><input type="text" @bind="line.Lot" /></label>
+                                    <label><span>Expires on</span><input type="date" @bind="line.ExpiresOn" /></label>
+                                </div>
+                            }
+                            @if (!line.HasDetails)
+                            {
+                                <button type="button" class="po-link-toggle" aria-expanded="@(line.ShowDetails ? "true" : "false")" @onclick="() => line.ShowDetails = !line.ShowDetails">@(line.ShowDetails ? "Hide damage, lot and expiry" : "+ Damage, lot or expiry")</button>
+                            }
                             @if (line.Problem is { } problem)
                             {
                                 <small class="po-problem">@problem</small>
@@ -403,23 +416,26 @@ else if (order is { } o)
                 }
             </div>
 
-            <label class="switch-label"><input type="checkbox" @bind="documentsMissing" /><span>The delivery note or invoice is missing</span></label>
-            <div class="po-lines-grid po-supplier-docs">
-                <label>
-                    <span>Supplier DR number <em>optional</em></span>
-                    <input type="text" maxlength="40" @bind="supplierDrNumber" placeholder="As printed on their delivery receipt" />
-                </label>
-                <label>
-                    <span>Supplier OR number <em>optional</em></span>
-                    <input type="text" maxlength="40" @bind="supplierOrNumber" placeholder="As printed on their official receipt" />
-                </label>
-                <label>
-                    <span>Released by supplier <em>optional</em></span>
-                    <input type="datetime-local" @bind="supplierReleasedAt" />
-                </label>
-            </div>
-            <label class="switch-label arrival-confirmation"><input type="checkbox" @bind="arrivalConfirmed" /><span>@(IsSameDayDelivery ? "I confirm this is a genuine same-day delivery: the goods have physically arrived and I have checked the quantities." : "I confirm these goods have physically arrived and the quantities above have been checked.")</span></label>
-            <div class="po-buttons">
+            <details class="po-paperwork">
+                <summary>Supplier paperwork <span>@PaperworkSummary</span></summary>
+                <div class="po-supplier-docs">
+                    <label class="switch-label"><input type="checkbox" @bind="documentsMissing" /><span>No delivery note or invoice came with the goods</span></label>
+                    <label>
+                        <span>DR number</span>
+                        <input type="text" maxlength="40" @bind="supplierDrNumber" placeholder="From their delivery receipt" />
+                    </label>
+                    <label>
+                        <span>OR number</span>
+                        <input type="text" maxlength="40" @bind="supplierOrNumber" placeholder="From their official receipt" />
+                    </label>
+                    <label>
+                        <span>Released by supplier</span>
+                        <input type="datetime-local" @bind="supplierReleasedAt" />
+                    </label>
+                </div>
+            </details>
+            <label class="switch-label arrival-confirmation"><input type="checkbox" @bind="arrivalConfirmed" /><span>@(IsSameDayDelivery ? "Same-day delivery: the goods are physically here and I checked the counts." : "The goods are physically here and I checked the counts.")</span></label>
+            <div class="po-buttons po-receive-foot">
                 <span class="po-hint">@ReceiveSummary</span>
                 <button type="button" class="po-btn primary" disabled="@(busy || !CanRecord)" @onclick="RecordDeliveryAsync">
                     @(AccountedCount < receiving.Count ? $"Account for {receiving.Count - AccountedCount} more line{(receiving.Count - AccountedCount == 1 ? "" : "s")}" : "Record delivery")

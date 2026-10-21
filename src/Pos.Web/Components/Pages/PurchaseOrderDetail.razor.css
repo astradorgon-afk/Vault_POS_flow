@@ -36,16 +36,40 @@
 .purchase-detail .po-delivery-head strong { color: var(--forest); font-size: .85rem; }
 .purchase-detail .po-delivery li { padding: 10px 0 0; line-height: 1.6; }
 .purchase-detail .po-delivery li small { display: block; text-align: right; font-size: .7rem; }
-.purchase-detail .po-counts { grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
-.purchase-detail .po-counts label { min-width: 0; }
-.purchase-detail .po-counts input { box-sizing: border-box; width: 100%; min-width: 0; background: #fff; color: var(--ink); font: inherit; font-weight: 700; }
-.purchase-detail .po-supplier-docs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 14px 0 0; }
-.purchase-detail .po-supplier-docs label { display: grid; gap: 5px; min-width: 0; }
-.purchase-detail .po-supplier-docs span { color: #445249; font-size: .76rem; font-weight: 800; }
-.purchase-detail .po-supplier-docs em { color: var(--muted); font-style: normal; font-weight: 600; margin-left: 4px; }
-.purchase-detail .po-supplier-docs input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 42px; padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font: inherit; font-weight: 600; }
-.purchase-detail .po-supplier-docs input:focus { outline: 2px solid rgba(36,90,66,.35); border-color: var(--forest-bright); }
-.purchase-detail .arrival-confirmation { padding: 16px; margin: 16px 0; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--mint-soft); align-items: flex-start; line-height: 1.55; }
+.po-receive-panel .po-receive-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; }
+.po-receive-panel .po-receive-top h2 { margin: 0 0 3px; }
+.po-receive-panel .po-receive-top p { margin: 0; font-size: .8rem; }
+.po-receive-progress { display: grid; gap: 6px; min-width: 150px; }
+.po-receive-progress span { color: var(--muted); font-size: .76rem; font-weight: 700; }
+.po-receive-progress strong { color: var(--ink); font: 800 .95rem 'Manrope', sans-serif; margin-right: 3px; }
+.po-receive-progress i { display: block; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.po-receive-progress b { display: block; height: 100%; border-radius: 99px; background: var(--forest); transition: width .2s; }
+.po-receive-scan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 16px 0 12px; }
+.po-receive-scan ::deep .camera-scanner { margin: 0; }
+.po-receive-scan ::deep .camera-scanner:has(.camera-panel) { flex: 1 1 100%; }
+.po-receive-panel .po-receive-scan p { flex: 1 1 160px; margin: 0; font-size: .8rem; }
+.po-receive-panel .po-receive-line { gap: 12px; }
+.po-receive-panel .po-receive-what strong { font-size: .95rem; }
+.po-receive-panel .po-choice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.po-receive-panel .po-choice button { min-height: 40px; padding: 4px 6px; line-height: 1.15; }
+.po-receive-panel .po-counts { grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
+.po-receive-panel .po-counts label { min-width: 0; }
+.po-receive-panel .po-counts input { box-sizing: border-box; width: 100%; min-width: 0; height: 42px; background: #fff; color: var(--ink); font: inherit; font-weight: 700; }
+.po-receive-panel .po-counts input:focus, .po-supplier-docs input:focus { outline: 2px solid rgba(36,90,66,.35); border-color: var(--forest-bright); }
+.po-link-toggle { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--forest-bright); font: 700 .78rem 'DM Sans', sans-serif; cursor: pointer; }
+.po-link-toggle:hover { text-decoration: underline; }
+.po-paperwork { margin: 14px 0 0; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.po-paperwork summary { display: flex; align-items: center; gap: 8px; padding: 13px 14px; color: var(--ink); font-size: .86rem; font-weight: 800; cursor: pointer; list-style: none; }
+.po-paperwork summary::-webkit-details-marker { display: none; }
+.po-paperwork summary span { margin-left: auto; color: var(--muted); font-size: .76rem; font-weight: 600; }
+.po-paperwork summary::after { content: '▾'; color: var(--muted); transition: transform .15s; }
+.po-paperwork[open] summary::after { transform: rotate(180deg); }
+.po-supplier-docs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); padding: 2px 14px 14px; }
+.po-supplier-docs .switch-label { grid-column: 1 / -1; }
+.po-supplier-docs label:not(.switch-label) { display: grid; gap: 5px; min-width: 0; }
+.po-supplier-docs label:not(.switch-label) > span { color: #445249; font-size: .76rem; font-weight: 800; }
+.po-supplier-docs input:not([type=checkbox]) { box-sizing: border-box; width: 100%; min-width: 0; min-height: 42px; padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font: inherit; font-weight: 600; }
+.purchase-detail .arrival-confirmation { padding: 12px 14px; margin: 14px 0; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--mint-soft); align-items: flex-start; line-height: 1.55; }
 .purchase-detail .arrival-confirmation input { margin-top: 3px; min-width: 20px; min-height: 20px; }
 .purchase-detail button:focus-visible, .purchase-detail summary:focus-visible, .purchase-detail input:focus-visible { outline: 3px solid var(--forest-bright); outline-offset: 3px; }
 .purchase-detail .qr-table-wrap { max-width: 100%; overflow-x: auto; }
@@ -72,6 +96,10 @@
     .purchase-detail .order-next > button { width: 100%; }
     .purchase-detail .po-delivery li { flex-direction: column; gap: 3px; }
     .purchase-detail .po-delivery li small { text-align: left; }
+    .purchase-detail .po-receive-panel { padding: 16px; }
+    .po-receive-progress { flex: 1 1 100%; }
+    .purchase-detail .po-receive-foot { flex-direction: column; align-items: stretch; gap: 8px; }
+    .purchase-detail .po-receive-foot .po-hint { text-align: center; }
 }
 .po-quarantine { display:grid; gap:12px; margin:18px 0; padding:18px; border:1px solid #d5a673; border-radius:14px; background:#fff8ee; }
 .po-quarantine h3 { margin:0; font-size:1rem; }

@@ -174,6 +174,22 @@ public partial class PurchaseOrderDetail
         && receiving.All(line => line.Problem is null)
         && receiving.Any(line => line.ArrivingQuantity > 0);
 
+    private string PaperworkSummary
+    {
+        get
+        {
+            if (documentsMissing)
+            {
+                return "Missing";
+            }
+
+            int filled = (string.IsNullOrWhiteSpace(supplierDrNumber) ? 0 : 1)
+                + (string.IsNullOrWhiteSpace(supplierOrNumber) ? 0 : 1)
+                + (supplierReleasedAt is null ? 0 : 1);
+            return filled > 0 ? $"{filled} added" : "Optional";
+        }
+    }
+
     private string ReceiveSummary
     {
         get
@@ -690,7 +706,12 @@ public partial class PurchaseOrderDetail
 
         public DateOnly? ExpiresOn { get; set; }
 
+        public bool ShowDetails { get; set; }
+
         public decimal IssueQuantity => Damaged + WrongItem + Expired;
+
+        // Damage, lot and expiry stay visible once anything is entered so a value is never hidden.
+        public bool HasDetails => IssueQuantity != 0 || !string.IsNullOrWhiteSpace(Lot) || ExpiresOn is not null;
 
         public decimal ArrivingQuantity => Mode switch
         {
