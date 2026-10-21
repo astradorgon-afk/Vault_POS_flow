@@ -37,6 +37,12 @@ services:
       # A device manager's sign-in sets the browser up for offline use without
       # asking for an enrollment code; the device still shows under Devices.
       DeviceEnrolment__AutoEnrol: "true"
+      # The tunnel terminates HTTPS and reaches the container from the Docker
+      # bridge, not loopback, so X-Forwarded-Proto is ignored by default and
+      # the app thinks it is serving http. The offline gateway then refuses
+      # every PWA request, because the browser's https Origin does not match.
+      # Safe to trust: the container is only reachable through 127.0.0.1:5400.
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
     ports:
       # Loopback only. The tunnel (on the host network) is the sole public way in.
       - "127.0.0.1:5400:8080"
