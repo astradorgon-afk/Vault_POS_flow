@@ -51,7 +51,7 @@
         }
         else
         {
-            <table class="sales-table">
+            <table class="sales-table rt-stack">
                 <thead>
                     <tr><th>Location</th><th>Product</th><th>Attempts</th><th>Total shortfall</th><th>First seen</th><th>Last seen</th></tr>
                 </thead>
@@ -59,18 +59,18 @@
                     @foreach (PosNegativeStockAttemptSummaryRow row in summaryRows)
                     {
                         <tr @key="@((row.LocationId, row.ProductId))">
-                            <td>@(row.LocationCode ?? ShortId(row.LocationId))</td>
-                            <td>
+                            <td data-label="Location">@(row.LocationCode ?? ShortId(row.LocationId))</td>
+                            <td class="rt-primary">
                                 <div class="product-name">@(row.ProductName ?? "—")</div>
                                 @if (row.Sku is { Length: > 0 } sku)
                                 {
                                     <div class="product-sku">@sku</div>
                                 }
                             </td>
-                            <td class="sheet-number sheet-loss">@row.Attempts</td>
-                            <td class="sheet-number">@row.TotalShortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@row.FirstAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@row.LastAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-number sheet-loss" data-label="Attempts">@row.Attempts</td>
+                            <td class="sheet-number" data-label="Total shortfall">@row.TotalShortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted" data-label="First seen">@row.FirstAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted" data-label="Last seen">@row.LastAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                         </tr>
                     }
                 </tbody>
@@ -85,7 +85,7 @@
         }
         else
         {
-            <table class="sales-table">
+            <table class="sales-table rt-stack">
                 <thead>
                     <tr><th>When</th><th>Location</th><th>Product</th><th>State</th><th>Requested</th><th>Available</th><th>Shortfall</th><th>Policy</th><th>Reference</th></tr>
                 </thead>
@@ -93,21 +93,21 @@
                     @foreach (PosNegativeStockAttemptView attempt in attempts)
                     {
                         <tr @key="attempt.Id">
-                            <td class="sheet-muted">@attempt.AttemptedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td>@(attempt.LocationCode ?? ShortId(attempt.LocationId))</td>
-                            <td>
+                            <td class="sheet-muted" data-label="When">@attempt.AttemptedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td data-label="Location">@(attempt.LocationCode ?? ShortId(attempt.LocationId))</td>
+                            <td class="rt-primary">
                                 <div class="product-name">@(attempt.ProductName ?? "—")</div>
                                 @if (attempt.Sku is { Length: > 0 } sku)
                                 {
                                     <div class="product-sku">@sku</div>
                                 }
                             </td>
-                            <td class="sheet-muted">@SplitWords(attempt.State)</td>
-                            <td class="sheet-number">@attempt.RequestedQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-number">@attempt.AvailableQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-number sheet-loss">@attempt.Shortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@SplitWords(attempt.Policy)</td>
-                            <td class="sheet-muted">@attempt.ReferenceNumber</td>
+                            <td class="sheet-muted" data-label="State">@SplitWords(attempt.State)</td>
+                            <td class="sheet-number" data-label="Requested">@attempt.RequestedQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-number" data-label="Available">@attempt.AvailableQuantity.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-number sheet-loss" data-label="Shortfall">@attempt.Shortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted rt-hide-sm" data-label="Policy">@SplitWords(attempt.Policy)</td>
+                            <td class="sheet-muted" data-label="Reference">@attempt.ReferenceNumber</td>
                         </tr>
                     }
                 </tbody>

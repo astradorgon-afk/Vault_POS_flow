@@ -201,6 +201,8 @@ h1:focus { outline: none; }
 .ov-trend{display:inline-flex;align-items:center;gap:3px;color:var(--forest-bright);font-size:.78rem}.ov-trend svg{width:13px;stroke-width:2.4}.ov-trend.is-down{color:var(--danger)}.ov-trend.is-flat{color:var(--muted)}
 .ov-spark{flex:1 1 40px;min-width:0;max-width:104px;height:34px;overflow:hidden}.ov-spark-line{fill:none;stroke:#3c9a68;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}.ov-spark-area{fill:#3c9a68;opacity:.08}
 @container (max-width:200px){.ov-spark{display:none}}
+/* A KPI card squeezed into half a phone keeps the number and drops the icon. */
+@container (max-width:180px){.ov-kpi-icon{display:none}.ov-kpi-label{align-items:flex-start;white-space:normal;line-height:1.25}.ov-kpi strong{margin:6px 0 8px;font-size:1.5rem}}
 .ov-grid{margin-top:16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:16px;align-items:start}.ov-grid>*{min-width:0}
 .ov-main{container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr);gap:16px;min-width:0}.ov-grid-compact{grid-template-columns:repeat(2,minmax(0,1fr))}.ov-main:empty{display:none}.ov-grid-compact:has(.ov-main:empty){grid-template-columns:1fr}
 .ov-card{min-width:0;padding:18px;border:1px solid var(--line);border-radius:14px;background:#fff}.ov-card h2{margin:0;font:700 1rem 'Manrope';letter-spacing:-.01em}.ov-card p{margin:2px 0 0;color:var(--muted);font-size:.78rem}
@@ -227,7 +229,7 @@ h1:focus { outline: none; }
 .ov-pill{flex:0 0 auto;padding:3px 8px;border-radius:99px;font-size:.64rem;font-weight:700}.ov-pill.tone-ok{background:#e1f4e8;color:#23704a}.ov-pill.tone-muted{background:#eef0ee;color:#5d6a62}.ov-pill.tone-info{background:#e6f0f7;color:#2c5f86}.ov-pill.tone-warn{background:var(--amber-soft);color:#86600f}.ov-pill.tone-bad{background:#fbe7e5;color:var(--danger)}
 .ov-empty{padding:24px 4px;text-align:center}
 @media(max-width:1180px){.ov-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ov-grid{grid-template-columns:1fr}}
-@media(max-width:650px){.ov-hero-art{display:none}.ov-kpis{grid-template-columns:1fr}.ov-chart-axis,.ov-chart-plot{height:160px}.ov-stock-stats{flex-direction:column;gap:10px}.ov-stock-stats>div{padding:0;border:0}}
+@media(max-width:650px){.ov-hero-art{display:none}.ov-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.ov-kpi{min-height:0;padding:14px}.ov-chart-axis,.ov-chart-plot{height:160px}.ov-stock-stats{flex-direction:column;gap:10px}.ov-stock-stats>div{padding:0;border:0}}
 
 /* Notifications ---------------------------------------------------------- */
 .nt-hero-art{position:relative;flex:0 1 auto;width:clamp(170px,17vw,240px);min-width:0;margin:-10px 0 -18px}.nt-hero-art svg{display:block;width:100%;height:auto}
@@ -882,7 +884,8 @@ select.qr-field{cursor:pointer}
 
   .top-row { min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0; }
   .menu-button { display: none !important; }
-  .content { padding: 18px 16px calc(96px + env(safe-area-inset-bottom)); }
+  /* --page-gutter lets full-bleed strips (.sk-tabs) reach the edges exactly. */
+  .content { --page-gutter: 16px; padding: 18px var(--page-gutter) calc(96px + env(safe-area-inset-bottom)); }
   .content > * { animation: page-in .18s ease-out; }
 
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
@@ -919,7 +922,7 @@ select.qr-field{cursor:pointer}
   .sk-head { margin-bottom: 10px; }
   .qr-head p.sk-live { margin-top: 0; }
 
-  .sk-tabs { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px 12px; padding: 0 16px 4px; scroll-snap-type: x proximity; scrollbar-width: none; }
+  .sk-tabs { flex-wrap: nowrap; overflow-x: auto; margin: 0 calc(-1 * var(--page-gutter, 16px)) 12px; padding: 0 var(--page-gutter, 16px) 4px; scroll-snap-type: x proximity; scrollbar-width: none; }
   .sk-tabs::-webkit-scrollbar { display: none; }
   .sk-tabs button { flex: 0 0 auto; min-height: 38px; padding: 0 12px; border-radius: 99px; scroll-snap-align: start; font-size: .84rem; white-space: nowrap; }
   .sk-tabs button span { font-size: .6rem; }
@@ -998,6 +1001,51 @@ select.qr-field{cursor:pointer}
 @media (max-width: 650px) {
   .restock-low > header { align-items: flex-start; flex-direction: column; }
   .restock-low-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  /* Card, panel and row padding stacked to ~48px a side; give the rows that room back. */
+  .qr-card { padding: 16px; }
+  .restock-low { padding: 10px; }
+  .restock-low-row { padding: 10px; gap: 10px; }
   .restock-low-status { grid-column: 2; justify-self: start; }
   .restock-low-avail, .restock-low-suggest { grid-column: 3; }
+}
+
+/* Read by screen readers, never drawn. Bootstrap 5 dropped .sr-only. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* Responsive foundation --------------------------------------------------
+   Shared by every console page and the offline workspace, so phones get one
+   consistent behaviour instead of a breakpoint per screen. Pages keep their
+   compact desktop sizing; these only take over below 640px, where a thumb
+   replaces the mouse. */
+@media (max-width: 640px) {
+  /* Touch targets: nothing a finger has to hit is shorter than 44px. */
+  :is(.app-main, .workspace, .tabbar) :is(button, select, input:not([type=checkbox]):not([type=radio]):not([type=range]), a.text-link, a.quiet-link, a.page-back, a.ov-button, .st-card footer a) { min-height: 44px; }
+  :is(.app-main, .workspace) :is(a.text-link, a.quiet-link) { display: inline-flex; align-items: center; }
+  :is(.app-main, .workspace) :is(input[type=checkbox], input[type=radio]) { width: 20px; height: 20px; }
+
+  /* Location and status pickers in page headers and form rows fill the row
+     instead of holding a desktop minimum that pushes past a narrow screen. */
+  :is(.app-main .content, .workspace) :is(.head-pickers, .open-count-fields) .location-picker { flex: 1 1 100%; min-width: 0; }
+  :is(.app-main .content, .workspace) .location-picker :is(select, input) { width: 100%; min-width: 0; }
+
+  /* Detail panel headings stack their eyebrow over the title instead of
+     spreading them to opposite edges of a narrow card. */
+  .detail-panel > header { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+  /* Tables marked .rt-stack become one card per row. Each cell names its
+     column through data-label; .rt-primary leads the card, .rt-wide takes the
+     full width, .rt-hide-sm drops detail that matters only at a desk. The
+     structural properties are !important because page styles size these
+     tables for desktop with more specific selectors. */
+  table.rt-stack, table.rt-stack tbody { display: block !important; width: 100% !important; min-width: 0 !important; }
+  table.rt-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  table.rt-stack tr { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 14px 16px; border-top: 1px solid var(--line); }
+  table.rt-stack tbody tr:first-child { border-top: 0; }
+  table.rt-stack td { display: grid !important; align-content: start; justify-items: start; gap: 2px; width: auto !important; min-width: 0; padding: 0 !important; border: 0 !important; text-align: left !important; white-space: normal !important; overflow-wrap: anywhere; }
+  table.rt-stack td[data-label]::before { content: attr(data-label); color: var(--muted); font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  table.rt-stack td.rt-primary, table.rt-stack td.rt-wide { grid-column: 1 / -1; }
+  table.rt-stack td.rt-primary { font-size: .95rem; font-weight: 700; }
+  table.rt-stack td.rt-primary::before { content: none; }
+  table.rt-stack .rt-hide-sm { display: none !important; }
+  table.rt-stack td:empty { display: none !important; }
 }

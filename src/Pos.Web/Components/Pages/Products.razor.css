@@ -212,7 +212,20 @@
 .product-status.is-active { background:#e1f8ec; color:#1b8a59; }
 .product-status.is-inactive { background:#f4ebeb; color:#a45e5e; }
 .product-chevron { margin-left:2px; color:#a3b7c0; font-size:1.3rem; line-height:1; }
-.catalog-nocode { color:#9b7a3d; font-size:.7rem; font-weight:700; }
+.catalog-nocode { color:#9b7a3d; font-size:.7rem; font-weight:700; }
+/* When the list itself gets narrow, a row stops squeezing name, barcode and
+   status onto one line: the name gets the full width (up to two lines) and
+   the barcode and status drop beneath it. Measured on the list, not the
+   viewport, so it also holds when the list sits in a narrow column. */
+.category-products { container-type:inline-size; }
+@container (max-width:460px) {
+    .catalog-product { flex-wrap:wrap; row-gap:7px; }
+    .product-identity { flex-basis:100%; }
+    .product-identity strong { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; white-space:normal; }
+    .product-meta { flex:1 1 100%; }
+    .product-meta code { max-width:none; }
+    .product-chevron { margin-left:auto; }
+}
 @media(max-width:620px){
     .catalog-page .office-head{align-items:stretch;flex-direction:column}
     .search-strip{gap:12px}

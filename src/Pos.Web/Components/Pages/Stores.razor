@@ -149,16 +149,16 @@ else if (report is not null)
         else
         {
             <div class="st-ledger-scroll">
-                <table class="st-ledger">
+                <table class="st-ledger rt-stack">
                     <thead><tr><th>Reference</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead>
                     <tbody>
                         @foreach (PosStoreMovementActivity entry in report.RecentActivity)
                         {
                             <tr @key="(entry.TransferId, entry.Kind)">
-                                <td><a href="@($"transfers/{entry.TransferId:D}")"><strong>@entry.Reference</strong><small>@entry.Kind · @entry.SourceLocationName → @entry.DestinationLocationName</small>@if (entry.DeliveryReceiptNumber is { } deliveryReceipt) { <small>DR @deliveryReceipt</small> }</a></td>
-                                <td><strong>@Quantity(entry.ProductUnits)</strong><small>@(entry.Kind == "Store request" ? "requested" : "units sent")</small></td>
-                                <td><span class="st-activity-status @ActivityStatusClass(entry.Status)">@SplitWords(entry.Status)</span></td>
-                                <td><time>@entry.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</time></td>
+                                <td class="rt-primary"><a href="@($"transfers/{entry.TransferId:D}")"><strong>@entry.Reference</strong><small>@entry.Kind · @entry.SourceLocationName → @entry.DestinationLocationName</small>@if (entry.DeliveryReceiptNumber is { } deliveryReceipt) { <small>DR @deliveryReceipt</small> }</a></td>
+                                <td data-label="Quantity"><strong>@Quantity(entry.ProductUnits)</strong><small>@(entry.Kind == "Store request" ? "requested" : "units sent")</small></td>
+                                <td data-label="Status"><span class="st-activity-status @ActivityStatusClass(entry.Status)">@SplitWords(entry.Status)</span></td>
+                                <td data-label="Date"><time>@entry.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</time></td>
                             </tr>
                         }
                     </tbody>

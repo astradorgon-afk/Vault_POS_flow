@@ -125,7 +125,7 @@
                 <span>Showing @((offset + 1).ToString("N0", CultureInfo.InvariantCulture))–@Math.Min(offset + pageSize, total).ToString("N0", CultureInfo.InvariantCulture) · newest first · store time</span>
             </header>
             <div class="audit-table-scroll">
-                <table>
+                <table class="rt-stack">
                     <thead><tr><th>Time</th><th>Activity</th><th>Who</th><th>Location</th><th>Record</th><th><span class="audit-sr">Details</span></th></tr></thead>
                     @foreach (IGrouping<DateOnly, PosAuditLogItem> day in DayGroups)
                     {
@@ -140,12 +140,12 @@
                             @foreach (PosAuditLogItem item in day)
                             {
                                 <tr @key="item.Id" class="audit-row @(selected?.Id == item.Id ? "is-selected" : null)" @onclick="() => Open(item)">
-                                    <td class="audit-when">
+                                    <td class="audit-when" data-label="Time">
                                         <strong>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm", CultureInfo.InvariantCulture)</strong>
                                         <small>@AuditLogView.Ago(item.OccurredAtUtc)</small>
                                     </td>
-                                    <td><span class="audit-action">@AuditLogView.ActionLabel(item.Action)</span><small class="audit-code">@item.Action</small></td>
-                                    <td>
+                                    <td class="rt-primary"><span class="audit-action">@AuditLogView.ActionLabel(item.Action)</span><small class="audit-code">@item.Action</small></td>
+                                    <td data-label="Who">
                                         @if (item.UserId is not null)
                                         {
                                             <button type="button" class="audit-person" title="Show only this person's activity"
@@ -157,12 +157,12 @@
                                         }
                                         <small>@AuditLogView.RoleLabel(item.RoleSnapshot)</small>
                                     </td>
-                                    <td>@(item.LocationName ?? "Business-wide")</td>
-                                    <td class="audit-record">
+                                    <td data-label="Location">@(item.LocationName ?? "Business-wide")</td>
+                                    <td class="audit-record" data-label="Record">
                                         <strong>@AuditLogView.RecordLabel(item.EntityType)</strong>
                                         @if (!string.IsNullOrWhiteSpace(item.RecordSummary)) { <small class="audit-record-summary">@item.RecordSummary</small> }
                                     </td>
-                                    <td class="audit-open">
+                                    <td class="audit-open rt-wide">
                                         <button type="button" class="audit-open-button" @onclick:stopPropagation="true" @onclick="() => Open(item)">
                                             Details<span aria-hidden="true">›</span>
                                         </button>

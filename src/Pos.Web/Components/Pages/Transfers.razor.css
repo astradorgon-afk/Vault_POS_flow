@@ -27,4 +27,5 @@
 .results-panel { border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; min-height:260px; }
 .results-empty { min-height:260px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
 .results-empty span { margin-top:5px; font-size:.82rem; }
-@media(max-width:620px){.office-head{align-items:stretch;flex-direction:column}.transfer-line{flex-wrap:wrap}.line-product-field{flex-basis:100%;}}
+@media(max-width:620px){.office-head{align-items:stretch;flex-direction:column}.transfer-line{flex-wrap:wrap}.line-product-field{flex-basis:100%;}}/* Phones: what is already moving matters more than starting something new. */
+@media(max-width:640px){.transfers-flow{display:flex;flex-direction:column}.transfers-flow>.results-panel{order:-1;margin-bottom:16px}}

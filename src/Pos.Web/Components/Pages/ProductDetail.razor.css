@@ -61,5 +61,6 @@
 
 @media(max-width:620px){
     .office-head{align-items:stretch;flex-direction:column}
+    .office-head>.status-chip{align-self:flex-start}
     .barcode-table{min-width:560px}
 }

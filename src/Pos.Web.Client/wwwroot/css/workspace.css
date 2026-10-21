@@ -60,7 +60,7 @@
 .tab-item.offline-unavailable small { position:absolute; top:0; right:0; padding:1px 4px; border-radius:99px; background:#fff1d5; color:#765115; font-size:.51rem; }
 .notice { background:#e4f2e8; color:#254c34; }
 @media(max-width:900px) {
-    .workspace.content { padding:18px 16px calc(96px + env(safe-area-inset-bottom)); }
+    .workspace.content { --page-gutter:16px; padding:18px var(--page-gutter) calc(96px + env(safe-area-inset-bottom)); }
     .nav-heading { display:block; }
     .nav-link.offline-unavailable { display:flex; }
     .sidebar-footer .sign-out { display:flex; }
@@ -74,7 +74,7 @@
     .top-actions .operator { display:none; }
     .top-actions .notification-bell { display:none; }
     .connection-pill { font-size:.64rem; }
-    .workspace.content { padding:18px 14px calc(96px + env(safe-area-inset-bottom)); }
+    .workspace.content { --page-gutter:14px; padding:18px var(--page-gutter) calc(96px + env(safe-area-inset-bottom)); }
     .line-row,.receiving-line,.stock-row { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .panel { padding:1rem; }
 }

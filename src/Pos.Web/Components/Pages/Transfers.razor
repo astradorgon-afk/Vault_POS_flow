@@ -49,6 +49,8 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
+    @* On phones the list leads and the request form follows; see Transfers.razor.css. *@
+    <div class="transfers-flow">
     @if (CanRequestTransfers)
     {
         <section class="open-count">
@@ -190,7 +192,7 @@ else
         }
         else
         {
-            <table class="sales-table counts-table">
+            <table class="sales-table counts-table rt-stack">
                 <thead>
                     <tr><th>NUMBER</th><th>Status</th><th>Route</th><th>Lines</th><th>Value</th><th>Created</th><th>Released</th><th>DR</th><th>Received</th></tr>
                 </thead>
@@ -198,27 +200,28 @@ else
                     @foreach (PosTransferSummary transfer in visibleTransfers)
                     {
                         <tr class="office-row-click" @key="transfer.Id" @onclick="() => OpenTransfer(transfer.Id)">
-                            <td class="sale-number"><a href="@($"/transfers/{transfer.Id:D}")" @onclick:stopPropagation="true">@transfer.Number</a></td>
-                            <td>
+                            <td class="sale-number rt-primary"><a href="@($"/transfers/{transfer.Id:D}")" @onclick:stopPropagation="true">@transfer.Number</a></td>
+                            <td data-label="Status">
                                 <span class="@StatusChipClass(transfer.Status)">@SplitWords(transfer.Status)</span>
                                 @if (AwaitingReceive(transfer.Status) && CanReceive)
                                 {
                                     <span class="status-chip sc-dispatched">awaiting receipt</span>
                                 }
                             </td>
-                            <td>@LocationLabel(transfer.SourceLocationId) → @LocationLabel(transfer.DestinationLocationId)</td>
-                            <td>@transfer.LineCount</td>
-                            <td>@Money(transfer.TotalValue)</td>
-                            <td>@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td>@(transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
-                            <td>@(transfer.DeliveryReceiptNumber ?? "—")</td>
-                            <td>@(transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td class="rt-wide" data-label="Route">@LocationLabel(transfer.SourceLocationId) → @LocationLabel(transfer.DestinationLocationId)</td>
+                            <td data-label="Lines">@transfer.LineCount</td>
+                            <td data-label="Value">@Money(transfer.TotalValue)</td>
+                            <td data-label="Created">@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="rt-hide-sm" data-label="Released">@(transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td class="rt-hide-sm" data-label="DR">@(transfer.DeliveryReceiptNumber ?? "—")</td>
+                            <td data-label="Received">@(transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
                         </tr>
                     }
                 </tbody>
             </table>
         }
     </section>
+    </div>
 }
 
 </div>

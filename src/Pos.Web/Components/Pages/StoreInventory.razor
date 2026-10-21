@@ -512,7 +512,13 @@ else if (report is not null)
             }
 
             report = response.Value;
-            Navigation.NavigateTo(FormattableString.Invariant($"inventory/stock?store={locationId:D}"), replace: true);
+
+            // Only when the address is stale: during prerender a navigation is an
+            // HTTP redirect, and redirecting to the same address loops forever.
+            if (QueryStore != locationId)
+            {
+                Navigation.NavigateTo(FormattableString.Invariant($"inventory/stock?store={locationId:D}"), replace: true);
+            }
         }
         catch (HttpRequestException)
         {

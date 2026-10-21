@@ -84,7 +84,7 @@ else
             }
             else
             {
-                <table class="pr-table">
+                <table class="pr-table rt-stack">
                     <thead>
                         <tr>
                             <th scope="col">Person</th>
@@ -99,7 +99,7 @@ else
                         @foreach (PosUserSummary user in VisibleUsers)
                         {
                             <tr class="@(user.IsActive ? "" : "is-disabled") @(selectedUserId == user.Id ? "is-current" : "")" @onclick="() => RequestOpenUserAsync(user.Id)">
-                                <td>
+                                <td class="rt-primary">
                                     <div class="pr-who">
                                         <span class="pr-avatar" aria-hidden="true">@Initials(user.DisplayName)</span>
                                         <div>
@@ -108,24 +108,24 @@ else
                                         </div>
                                     </div>
                                 </td>
-                                <td>
+                                <td data-label="Roles">
                                     <div class="chip-row">
                                         @if (user.Roles.Count == 0) { <span class="pr-muted">No role</span> }
                                         @foreach (string role in user.Roles) { <span class="pr-chip">@role</span> }
                                     </div>
                                 </td>
-                                <td>
+                                <td data-label="Locations">
                                     <div class="chip-row">
                                         @if (user.LocationIds.Count == 0) { <span class="pr-muted">All locations</span> }
                                         @foreach (string place in LocationLabels(user.LocationIds)) { <span class="pr-chip place">@place</span> }
                                     </div>
                                 </td>
-                                <td>
+                                <td data-label="Status">
                                     @if (!user.IsActive) { <span class="status-chip status-disabled">Disabled</span> }
                                     else if (user.TwoFactorEnabled) { <span class="status-chip status-submitted">Active · 2FA</span> }
                                     else { <span class="status-chip status-approved">Active</span> }
                                 </td>
-                                <td class="pr-muted">@(user.LastLoginAtUtc is { } last ? last.InStoreTime().ToString("d MMM, h:mm tt", CultureInfo.InvariantCulture) : "Never")</td>
+                                <td class="pr-muted rt-hide-sm" data-label="Last sign-in">@(user.LastLoginAtUtc is { } last ? last.InStoreTime().ToString("d MMM, h:mm tt", CultureInfo.InvariantCulture) : "Never")</td>
                                 <td class="pr-row-action">
                                     <button type="button" class="pr-btn" aria-label="Edit @user.DisplayName"
                                             @onclick="() => RequestOpenUserAsync(user.Id)" @onclick:stopPropagation="true">Edit</button>

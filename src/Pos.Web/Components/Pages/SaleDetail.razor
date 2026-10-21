@@ -44,7 +44,7 @@ else if (sale is not null)
     <div class="detail-grid">
         <section class="detail-panel">
             <header><span class="eyebrow">Transaction</span><h2>Lines <em>@sale.Lines.Count</em></h2></header>
-            <table class="lines-table">
+            <table class="lines-table rt-stack">
                 <thead>
                     <tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Discount</th><th class="num">VAT</th><th class="num">Net</th></tr>
                 </thead>
@@ -52,16 +52,16 @@ else if (sale is not null)
                     @foreach (PosSaleLineDetail line in sale.Lines)
                     {
                         <tr @key="line.LineNumber">
-                            <td>@line.LineNumber</td>
-                            <td>
+                            <td class="rt-hide-sm" data-label="#">@line.LineNumber</td>
+                            <td class="rt-primary">
                                 <strong>@line.ProductName</strong>
                                 @if (!string.IsNullOrWhiteSpace(line.Barcode)) { <small>@line.Barcode</small> }
                             </td>
-                            <td class="num">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
-                            <td class="num">@Money(line.UnitPrice)</td>
-                            <td class="num">@(line.Discount > 0m ? $"- {Money(line.Discount)}" : "—")</td>
-                            <td class="num">@Money(line.Vat)</td>
-                            <td class="num"><strong>@Money(line.NetAmount)</strong></td>
+                            <td class="num" data-label="Qty">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                            <td class="num" data-label="Price">@Money(line.UnitPrice)</td>
+                            <td class="num" data-label="Discount">@(line.Discount > 0m ? $"- {Money(line.Discount)}" : "—")</td>
+                            <td class="num" data-label="VAT">@Money(line.Vat)</td>
+                            <td class="num" data-label="Net"><strong>@Money(line.NetAmount)</strong></td>
                         </tr>
                     }
                 </tbody>
@@ -82,17 +82,17 @@ else if (sale is not null)
             }
             else
             {
-                <table class="payments-table">
+                <table class="payments-table rt-stack">
                     <thead><tr><th>Method</th><th class="num">Amount</th><th class="num">Tendered</th><th class="num">Change</th><th>Reference</th></tr></thead>
                     <tbody>
                         @foreach (PosSalePaymentDetail payment in sale.Payments)
                         {
                             <tr @key="payment.Method">
-                                <td><span class="method-chip">@payment.Method</span></td>
-                                <td class="num"><strong>@Money(payment.Amount)</strong></td>
-                                <td class="num">@(payment.Tendered is { } tendered ? Money(tendered) : "—")</td>
-                                <td class="num">@(payment.Change is { } change ? Money(change) : "—")</td>
-                                <td>@(payment.ProviderReference ?? "—")</td>
+                                <td class="rt-primary"><span class="method-chip">@payment.Method</span></td>
+                                <td class="num" data-label="Amount"><strong>@Money(payment.Amount)</strong></td>
+                                <td class="num" data-label="Tendered">@(payment.Tendered is { } tendered ? Money(tendered) : "—")</td>
+                                <td class="num" data-label="Change">@(payment.Change is { } change ? Money(change) : "—")</td>
+                                <td class="rt-wide" data-label="Reference">@(payment.ProviderReference ?? "—")</td>
                             </tr>
                         }
                     </tbody>

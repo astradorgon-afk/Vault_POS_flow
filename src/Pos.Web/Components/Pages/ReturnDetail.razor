@@ -46,7 +46,7 @@ else if (salesReturn is not null)
 
     <section class="detail-panel">
         <header><span class="eyebrow">Accepted goods</span><h2>Lines <em>@salesReturn.Lines.Count</em></h2></header>
-        <table class="lines-table">
+        <table class="lines-table rt-stack">
             <thead>
                 <tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Net</th><th class="num">Disposed</th><th class="num">Pending</th></tr>
             </thead>
@@ -54,16 +54,16 @@ else if (salesReturn is not null)
                 @foreach (PosReturnLineDetail line in salesReturn.Lines)
                 {
                     <tr @key="line.LineNumber">
-                        <td>@line.LineNumber</td>
-                        <td>
+                        <td class="rt-hide-sm" data-label="#">@line.LineNumber</td>
+                        <td class="rt-primary">
                             <strong>@line.ProductName</strong>
                             @if (!string.IsNullOrWhiteSpace(line.BatchCode)) { <small>Batch @line.BatchCode@(line.BatchExpiresOn is { } expiry ? $" · expires {expiry.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}" : "")</small> }
                         </td>
-                        <td class="num">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
-                        <td class="num">@Money(line.UnitPrice)</td>
-                        <td class="num"><strong>@Money(line.NetAmount)</strong></td>
-                        <td class="num">@line.DispositionedQuantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
-                        <td class="num">@line.PendingDispositionQuantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                        <td class="num" data-label="Qty">@line.Quantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                        <td class="num" data-label="Unit price">@Money(line.UnitPrice)</td>
+                        <td class="num" data-label="Net"><strong>@Money(line.NetAmount)</strong></td>
+                        <td class="num" data-label="Disposed">@line.DispositionedQuantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                        <td class="num" data-label="Pending">@line.PendingDispositionQuantity.ToString("0.###", CultureInfo.InvariantCulture)</td>
                     </tr>
                 }
             </tbody>
@@ -140,18 +140,18 @@ else if (salesReturn is not null)
         }
         else
         {
-            <table class="payments-table">
+            <table class="payments-table rt-stack">
                 <thead><tr><th>#</th><th>Method</th><th class="num">Amount</th><th class="num">Tendered</th><th>Reference</th><th>When</th></tr></thead>
                 <tbody>
                     @foreach (PosReturnRefundDetail refund in salesReturn.Refunds)
                     {
                         <tr @key="refund.Id">
-                            <td>@refund.Id.ToString("D")[..8]</td>
-                            <td><span class="method-chip">@refund.Method</span></td>
-                            <td class="num"><strong>@Money(refund.Amount)</strong></td>
-                            <td class="num">@(refund.Tendered is { } tendered ? Money(tendered) : "—")</td>
-                            <td>@(refund.ProviderReference ?? "—")</td>
-                            <td>@refund.RefundedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="rt-hide-sm" data-label="#">@refund.Id.ToString("D")[..8]</td>
+                            <td class="rt-primary"><span class="method-chip">@refund.Method</span></td>
+                            <td class="num" data-label="Amount"><strong>@Money(refund.Amount)</strong></td>
+                            <td class="num" data-label="Tendered">@(refund.Tendered is { } tendered ? Money(tendered) : "—")</td>
+                            <td data-label="Reference">@(refund.ProviderReference ?? "—")</td>
+                            <td data-label="When">@refund.RefundedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                         </tr>
                     }
                 </tbody>
