@@ -1,0 +1,38 @@
+name: vaultflow-gateway
+
+services:
+  gateway:
+    image: ${HAPROXY_IMAGE:?Set the tested HAProxy image digest in homelab.env}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-5400}:8080"
+      - "127.0.0.1:5481:8081"
+      - "127.0.0.1:5490:8082"
+    volumes:
+      - ./build/docker/homelab-main.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - vaultflow
+
+  # Host networking preserves the Tailscale source address for the allowlist.
+  # Docker's published-port proxy rewrites it to the bridge gateway address.
+  api-link:
+    image: ${HAPROXY_IMAGE:?Set the tested HAProxy image digest in homelab.env}
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./build/docker/homelab-api-link.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  vaultflow:
+    external: true
+    name: vaultflow_default

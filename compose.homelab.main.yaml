@@ -1,0 +1,5 @@
+# Apply LAST, after compose.demo.yaml. The gateway owns the tunnel's port 5400.
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:5402:8080"
