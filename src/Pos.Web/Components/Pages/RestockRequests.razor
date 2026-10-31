@@ -11,7 +11,7 @@
 
 <section class="restock-page">
     <header class="restock-head">
-        <div><span class="eyebrow">Inventory · store supplies</span><h1>Restock requests</h1><p>Ask the main warehouse for the products your store needs. The owner reviews the request before stock is picked.</p></div>
+        <div><h1>Restock requests</h1><p>The owner approves each request before stock is picked.</p></div>
         <div class="restock-tabs" role="tablist" aria-label="Restock request views">
             <button type="button" role="tab" id="restock-tab-new" aria-controls="restock-panel-new" aria-selected="@(activeTab == "new" ? "true" : "false")" class="@(activeTab == "new" ? "active" : null)" @onclick='() => activeTab = "new"'>New request</button>
             <button type="button" role="tab" id="restock-tab-history" aria-controls="restock-panel-history" aria-selected="@(activeTab == "history" ? "true" : "false")" class="@(activeTab == "history" ? "active" : null)" @onclick='() => activeTab = "history"'>

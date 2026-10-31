@@ -8,7 +8,7 @@
 .timeline-summary { display: flex; align-items: baseline; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .timeline-summary span { color: var(--signal); font-size: .72rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
 .timeline-summary strong { font-size: 1.1rem; color: var(--text); }
-.timeline-summary small { margin-left: auto; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .7rem; }
+.timeline-summary small { margin-left: auto; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .72rem; }
 
 .timeline-track { position: relative; padding: 24px 0 0 28px; }
 .timeline-track::before { position: absolute; top: 30px; bottom: 20px; left: 7px; width: 2px; background: rgba(230, 224, 209, .2); content: ""; }

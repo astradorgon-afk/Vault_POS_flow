@@ -29,9 +29,9 @@
 /* ---- Route --------------------------------------------------------------- */
 .transfer-route { display: grid; grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); align-items: center; gap: 7px; margin-bottom: 17px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
 .transfer-route-stop { display: grid; gap: 5px; min-width: 0; }
-.transfer-route-stop > span { color: var(--muted); font-size: .59rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.transfer-route-stop > span { color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .transfer-route-stop > strong { color: var(--ink); font: 700 .98rem 'DM Sans', sans-serif; overflow-wrap: anywhere; }
-.transfer-route-stop > small { color: var(--muted); font-size: .66rem; line-height: 1.4; overflow-wrap: anywhere; }
+.transfer-route-stop > small { color: var(--muted); font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
 .transfer-route-arrow { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: var(--signal-soft); color: var(--forest-bright); font-size: 1.05rem; font-weight: 800; }
 
 /* ---- In-transit notice --------------------------------------------------- */
@@ -48,25 +48,25 @@
 
 /* ---- Review note --------------------------------------------------------- */
 .note-box { margin-bottom: 17px; padding: 12px 14px; border-left: 3px solid var(--cyan); border-radius: 0 10px 10px 0; background: var(--cyan-soft); color: var(--text-2); font-size: .82rem; }
-.note-box span { display: block; margin-bottom: 3px; color: var(--forest-bright); font-size: .59rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
+.note-box span { display: block; margin-bottom: 3px; color: var(--forest-bright); font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
 
 /* ---- Overview stats ------------------------------------------------------ */
 .transfer-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .transfer-summary > div { display: grid; gap: 7px; min-height: 73px; padding: 14px 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
-.transfer-summary span { color: var(--muted); font-size: .59rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.transfer-summary span { color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .transfer-summary strong { color: var(--ink); font: 700 .78rem/1.5 'DM Sans'; overflow-wrap: anywhere; }
 
 /* ---- Line items ---------------------------------------------------------- */
 .line-item-cards { display: grid; gap: 10px; }
 .line-item { display: grid; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
 .line-item-top { display: flex; align-items: flex-start; gap: 10px; }
-.line-item-num { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: #eff4ef; color: #446650; font-size: .7rem; font-weight: 700; }
+.line-item-num { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: #eff4ef; color: #446650; font-size: .72rem; font-weight: 700; }
 .line-item-name { display: grid; gap: 9px; justify-items: start; min-width: 0; }
 .line-item-name h3 { margin: 0; color: var(--ink); font: 700 .82rem/1.45 'DM Sans', sans-serif; overflow-wrap: anywhere; }
 /* The prototype trays the three movement counts on a soft tile. */
 .line-quantities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 12px 9px; border-radius: 9px; background: #f5f7f4; text-align: center; }
 .line-quantities > div { display: grid; gap: 5px; }
-.line-quantities small { color: var(--muted); font-size: .59rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.line-quantities small { color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .line-quantities strong { color: #163e2c; font: 700 1.06rem 'DM Sans'; }
 .line-item-foot { display: flex; justify-content: space-between; gap: 12px; color: #728176; font-size: .72rem; }
 .line-item-foot b { color: #293b2f; margin-left: 6px; }
@@ -80,7 +80,7 @@
 .tr-event.future i { background: #d8ded8; border-color: #fff; }
 .tr-event > div { display: grid; gap: 5px; min-width: 0; padding-bottom: 5px; }
 .tr-event strong { color: var(--ink); font-size: .78rem; }
-.tr-event span { color: #75857b; font-size: .66rem; overflow-wrap: anywhere; }
+.tr-event span { color: #75857b; font-size: .72rem; overflow-wrap: anywhere; }
 
 /* ---- Action panels ------------------------------------------------------- */
 .action-panel { margin-bottom: 17px; padding: 17px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-card); }
@@ -111,7 +111,7 @@
 .restock-approval-line > div { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .restock-approval-line strong { color: var(--ink); font-size: .85rem; }
 .restock-approval-line small { color: var(--muted); font-size: .74rem; }
-.restock-approval-line label { display: grid; gap: 5px; color: var(--muted); font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.restock-approval-line label { display: grid; gap: 5px; color: var(--muted); font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 .restock-approval-line input { box-sizing: border-box; width: 125px; height: 40px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--field); color: var(--ink); font: 700 .84rem 'DM Sans', sans-serif; }
 .restock-approval-hint { margin: 0 0 12px; color: var(--muted); font-size: .76rem; }
 

@@ -40,7 +40,7 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color:
 .scanner-row label { min-width: 220px; }
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
-.form-grid label, .scanner-row label, .line-row label, .receiving-line label { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.form-grid label, .scanner-row label, .line-row label, .receiving-line label { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .form-grid input, .form-grid select, .scanner-row input, .scanner-row select,
 .line-row input, .receiving-line input {
     box-sizing: border-box; width: 100%; min-width: 0; height: 44px; padding: 0 12px;
@@ -74,8 +74,8 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color:
 .cs-card-head p { margin: 6px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 .cs-card-icon { display: grid; place-items: center; color: var(--muted); }
 .cs-card-icon svg { width: 17px; height: 17px; }
-.cs-eyebrow { margin-bottom: 5px; color: var(--forest); font-size: .64rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
-.cs-optional { padding: 3px 8px; border-radius: 5px; background: #f1f4f1; color: var(--muted); font-size: .66rem; font-weight: 600; }
+.cs-eyebrow { margin-bottom: 5px; color: var(--forest); font-size: .72rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.cs-optional { padding: 3px 8px; border-radius: 5px; background: #f1f4f1; color: var(--muted); font-size: .72rem; font-weight: 600; }
 .cs-count { padding: 4px 11px; border-radius: 99px; background: #f1f4f1; color: var(--muted); font-size: .72rem; font-weight: 800; white-space: nowrap; }
 
 .cs-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 0 18px 14px; }
@@ -100,15 +100,15 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color:
 .cs-row > .cs-product { grid-column: 1 / -1; padding-right: 74px; }
 .cs-name { font-size: .92rem; font-weight: 700; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
 .cs-sku { margin-top: 4px; color: var(--muted); font-size: .74rem; }
-.cs-flag { margin-top: 5px; color: var(--forest); font-size: .68rem; font-weight: 700; }
+.cs-flag { margin-top: 5px; color: var(--forest); font-size: .72rem; font-weight: 700; }
 .cs-flag.is-warn { color: #86662a; }
 
 .cs-due-cell { position: absolute; top: 18px; right: 18px; }
 .cs-due { display: inline-block; padding: 4px 11px; border-radius: 6px; background: var(--mint-soft); color: var(--forest); font-size: .78rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.cs-due::after { content: " due"; font-size: .66rem; font-weight: 600; }
+.cs-due::after { content: " due"; font-size: .72rem; font-weight: 600; }
 
 .cs-qty-cell { grid-column: 1; grid-row: 2; min-width: 0; }
-.cs-qty-cell::before { content: attr(data-label); display: block; margin-bottom: 8px; color: var(--muted); font-size: .66rem; font-weight: 800; letter-spacing: .08em; }
+.cs-qty-cell::before { content: attr(data-label); display: block; margin-bottom: 8px; color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
 .cs-stepper { display: flex; align-items: stretch; width: 100%; height: 48px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; overflow: hidden; isolation: isolate; }
 .cs-stepper button { flex: 0 0 38px; width: 38px; min-height: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0; background: #f4f8f3; color: var(--forest); font-size: 1.2rem; line-height: 1; cursor: pointer; }
 .cs-stepper button:hover:enabled { background: var(--mint-soft); }
@@ -121,7 +121,7 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color:
 
 .cs-second-cell { grid-column: 2; grid-row: 2; min-width: 0; }
 .cs-second-field { display: block; margin: 0; width: 100%; }
-.cs-second-label { display: block; margin: 0 0 8px; color: var(--muted); font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.cs-second-label { display: block; margin: 0 0 8px; color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .cs-second-input { display: block; }
 .cs-second-input input { width: 100%; min-width: 0; height: 48px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-size: 1rem; font-weight: 700; text-align: center; appearance: textfield; font-variant-numeric: tabular-nums; }
 .cs-second-input input::-webkit-inner-spin-button, .cs-second-input input::-webkit-outer-spin-button { appearance: none; margin: 0; }
@@ -177,7 +177,7 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color:
    that the phone layout above stands. */
 @media (min-width: 1100px) {
     .cs-layout { grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; }
-    .cs-table-head { display: grid; grid-template-columns: minmax(160px, 1fr) 54px 118px 104px 112px; gap: 14px; padding: 11px 18px; border-block: 1px solid var(--line); background: #f8faf8; color: var(--muted); font-size: .64rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .cs-table-head { display: grid; grid-template-columns: minmax(160px, 1fr) 54px 118px 104px 112px; gap: 14px; padding: 11px 18px; border-block: 1px solid var(--line); background: #f8faf8; color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
     .cs-row { grid-template-columns: minmax(160px, 1fr) 54px 118px 104px 112px; gap: 14px; align-items: start; min-height: 132px; padding: 22px 18px; }
     .cs-row > .cs-product { grid-column: auto; padding-right: 0; padding-top: 3px; }
     .cs-name { font-size: .86rem; }
@@ -192,7 +192,7 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; accent-color:
     .cs-second-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
     .cs-second-input input { height: 42px; font-size: .9rem; }
     .cs-actions { grid-column: auto; grid-row: auto; grid-template-columns: 1fr; gap: 7px; padding-top: 4px; border-top: 0; }
-    .cs-actions button { justify-content: flex-start; min-height: 30px; padding: 2px 0; border: 0; border-radius: 0; background: none; font-size: .7rem; font-weight: 600; white-space: nowrap; }
+    .cs-actions button { justify-content: flex-start; min-height: 30px; padding: 2px 0; border: 0; border-radius: 0; background: none; font-size: .72rem; font-weight: 600; white-space: nowrap; }
     .cs-actions button:hover:enabled { background: none; }
     .cs-actions .cs-row-scan { justify-content: center; min-height: 34px; padding: 6px 7px; border: 1px solid #d6e5da; border-radius: 7px; background: var(--mint-soft); font-size: .72rem; font-weight: 800; }
     .cs-field :is(input, select) { height: 42px; font-size: .82rem; }

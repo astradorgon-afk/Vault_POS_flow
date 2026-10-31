@@ -17,7 +17,7 @@
 
 <LoginSurface>
         <form @onsubmit="SignInAsync" @onsubmit:preventDefault="true">
-            <header><span class="eyebrow">Secure workspace</span><h2>Welcome back <span class="wave" aria-hidden="true">👋</span></h2><p>Use your VaultFlow account to open the operations console.</p></header>
+            <header><h2>Welcome back</h2></header>
             @if (!showOfflineSetupModal && !string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
             <label for="username">Username or email</label>
             <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" @bind:event="oninput" disabled="@busy" />
@@ -77,7 +77,7 @@
 
             <button type="submit" disabled="@(busy || !interactive)">@(busy ? "Preparing workspace…" : awaitingOldSecret ? "Move saved work" : offlineReady ? "Open workspace" : onlineAuthenticated ? offlineDataPrepared ? "Check offline files" : "Prepare offline access" : "Open workspace")</button>
             @if (!interactive) { <p class="login-help" role="status">Preparing the sign-in form…</p> }
-            else if (!onlineAuthenticated) { <p class="login-help">VaultFlow will confirm when this device is ready for offline use.</p> }
+            
         </form>
         @if (passwordChangeRequired)
         {

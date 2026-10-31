@@ -289,7 +289,7 @@
 
 /* Daily sales report */
 .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.7rem; }
-.method-tag { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #d5efec; border: 1px solid rgba(134, 197, 193, 0.35); background: rgba(57, 105, 103, 0.16); }
+.method-tag { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #d5efec; border: 1px solid rgba(134, 197, 193, 0.35); background: rgba(57, 105, 103, 0.16); }
 
 /* Goods receiving */
 .receiving-form { display: flex; flex-direction: column; gap: 0.9rem; }
@@ -329,7 +329,7 @@
 .receiving-scan .scan-field { display: grid; gap: 0.28rem; flex: 1 1 16rem; min-width: 0; }
 .receiving-scan .scan-field span {
     color: var(--signal);
-    font-size: 0.6rem;
+    font-size: .72rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -620,7 +620,7 @@
 }
 .pos-blocked>span {
     color: #ee837a;
-    font-size: .7rem;
+    font-size: .72rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: .1em;
@@ -630,7 +630,7 @@
     display: grid;
     gap: 6px;
     color: var(--muted);
-    font-size: .7rem;
+    font-size: .72rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .08em;
@@ -752,7 +752,7 @@
 .inv-bar b { position: absolute; top: -0.2rem; width: 2px; height: 0.8rem; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: 0.55; }
 .inv-facts { margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem; }
 .inv-facts div { display: grid; gap: 0.1rem; }
-.inv-facts dt { color: var(--faint); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.inv-facts dt { color: var(--faint); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .inv-facts dd { margin: 0; color: var(--text); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
 .inv-notes { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 0.75rem; padding-top: 0.45rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.76rem; }
 
@@ -840,7 +840,7 @@
         font-weight: 600;
     }
     .office-mobile-nav-link > span { color: var(--cyan); font-size: 1.2rem; line-height: 1; }
-    .office-mobile-nav-link small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.66rem; }
+    .office-mobile-nav-link small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .72rem; }
     .office-mobile-nav-link.active { border-color: var(--signal-line); background: var(--signal-soft); color: var(--signal-bright); }
     .office-mobile-nav-link.active > span { color: var(--signal-bright); }
 

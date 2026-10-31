@@ -20,7 +20,6 @@ else if (salesReturn is not null)
 {
     <section class="sale-head">
         <div>
-            <span class="eyebrow">After-sales</span>
             <h1>Return @salesReturn.Number</h1>
             <p>
                 @if (salesReturn.IsBlind)
@@ -29,7 +28,7 @@ else if (salesReturn is not null)
                 }
                 @if (salesReturn.SaleId is { } saleId)
                 {
-                    <a href="@($"sales/{saleId:D}")">original sale</a>
+                    <a class="return-sale-link" href="@($"sales/{saleId:D}")">original sale</a>
                     <span> · </span>
                 }
                 @salesReturn.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ·
@@ -45,7 +44,7 @@ else if (salesReturn is not null)
     }
 
     <section class="detail-panel">
-        <header><span class="eyebrow">Accepted goods</span><h2>Lines <em>@salesReturn.Lines.Count</em></h2></header>
+        <header><h2>Lines <em>@salesReturn.Lines.Count</em></h2></header>
         <table class="lines-table rt-stack">
             <thead>
                 <tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Net</th><th class="num">Disposed</th><th class="num">Pending</th></tr>
@@ -133,7 +132,7 @@ else if (salesReturn is not null)
     }
 
     <section class="detail-panel refund-history">
-        <header><span class="eyebrow">History</span><h2>Refunds <em>@salesReturn.Refunds.Count</em></h2></header>
+        <header><h2>Refunds <em>@salesReturn.Refunds.Count</em></h2></header>
         @if (salesReturn.Refunds.Count == 0)
         {
             <div class="panel-empty">No refunds yet.</div>

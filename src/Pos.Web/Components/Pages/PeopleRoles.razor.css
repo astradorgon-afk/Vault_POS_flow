@@ -14,7 +14,7 @@
 
 .pr-table-card { border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow-x:auto; }
 .pr-table { width:100%; border-collapse:collapse; }
-.pr-table th { position:sticky; top:0; padding:11px 14px; border-bottom:1px solid var(--line); background:#f7f9f7; color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.07em; text-align:left; text-transform:uppercase; white-space:nowrap; }
+.pr-table th { position:sticky; top:0; padding:11px 14px; border-bottom:1px solid var(--line); background:#f7f9f7; color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.07em; text-align:left; text-transform:uppercase; white-space:nowrap; }
 .pr-table td { padding:11px 14px; border-bottom:1px solid var(--line); font-size:.84rem; vertical-align:middle; }
 .pr-table tbody tr { cursor:pointer; transition:background .12s; }
 .pr-table tbody tr:hover { background:#f4f8f5; }
@@ -31,7 +31,7 @@
 .pr-row-action { width:1%; text-align:right; }
 .pr-row-action .pr-btn { min-height:30px; }
 .pr-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-.pr-flag { padding:1px 6px; border-radius:99px; background:#e6f0f7; color:#2c5f86; font-size:.62rem; font-weight:800; letter-spacing:.03em; }
+.pr-flag { padding:1px 6px; border-radius:99px; background:#e6f0f7; color:#2c5f86; font-size:.72rem; font-weight:800; letter-spacing:.03em; }
 .pr-empty { padding:44px 18px; display:grid; gap:6px; justify-items:center; text-align:center; color:var(--muted); font-size:.84rem; }
 .pr-empty strong { color:var(--ink); }
 
@@ -46,7 +46,7 @@
 .pr-role-head { display:flex; gap:8px; align-items:center; justify-content:space-between; }
 .pr-role-head strong { font:700 .98rem 'DM Sans'; color:var(--forest); }
 .pr-role-desc { color:var(--muted); font-size:.8rem; line-height:1.45; }
-.pr-role-meta { color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.pr-role-meta { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
 
 /* Dialog */
 .pr-overlay { position:fixed; inset:0; z-index:100; padding:clamp(12px,4vh,40px) 16px; display:grid; place-items:center; background:rgba(16,34,25,.42); backdrop-filter:blur(2px); animation:pr-fade .14s ease-out; }
@@ -72,7 +72,7 @@
 .pr-tabs button:hover { color:var(--forest); }
 .pr-tabs button.on { color:var(--forest); border-bottom-color:var(--forest); }
 .pr-dot { width:7px; height:7px; border-radius:50%; background:var(--amber); }
-.pr-count { min-width:18px; padding:0 5px; border-radius:99px; background:#eef0ee; color:#5d6a62; font-size:.66rem; text-align:center; }
+.pr-count { min-width:18px; padding:0 5px; border-radius:99px; background:#eef0ee; color:#5d6a62; font-size:.72rem; text-align:center; }
 
 .pr-pane-body { flex:1; overflow-y:auto; padding:16px 18px 22px; display:grid; gap:14px; align-content:start; }
 .pr-pane-foot { padding:12px 18px; border-top:1px solid var(--line); background:#fbfcfb; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -224,7 +224,7 @@ small.bad, .pr-field small.bad { color:var(--danger); }
 .nc-role strong { font-size:.88rem; }
 .nc-role small { color:var(--muted); font-size:.76rem; line-height:1.35; }
 .nc-info { margin:0; padding:9px 12px; border-radius:9px; background:#e6f0f7; color:#2c5f86; font-size:.82rem; }
-.nc-home { padding:1px 8px; border-radius:99px; background:var(--forest); color:#fff; font-size:.66rem; font-weight:800; }
+.nc-home { padding:1px 8px; border-radius:99px; background:var(--forest); color:#fff; font-size:.72rem; font-weight:800; }
 .nc-password { display:flex; gap:8px; flex-wrap:wrap; }
 .nc-password input { flex:1 1 240px; height:42px; padding:0 12px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; font:600 .95rem ui-monospace, Consolas, monospace; letter-spacing:.03em; }
 .nc-password input:focus { outline:2px solid rgba(36,90,66,.35); border-color:var(--forest-bright); }

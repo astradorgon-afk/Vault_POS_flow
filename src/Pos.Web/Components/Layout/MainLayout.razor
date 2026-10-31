@@ -9,7 +9,7 @@
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-<div class="app-shell">
+<div class="app-shell" @onkeydown="OnShellKeyDown">
     <aside id="primary-navigation" class="sidebar @(navigationOpen ? "is-open" : string.Empty)">
         <NavMenu OnNavigate="CloseNavigation" />
     </aside>
@@ -19,13 +19,13 @@
         <button class="nav-scrim" type="button" aria-label="Close navigation" @onclick="CloseNavigation"></button>
     }
 
-    <main class="app-main">
+    @{ PagePlace place = Trail.Current; }
+    <main class="app-main @(place.Parent is null ? "is-top-level" : null)">
         <header class="top-row">
             <button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@(navigationOpen ? "true" : "false")" @onclick="ToggleNavigation">
                 <AppIcon Name="menu" />
             </button>
 
-            @{ PagePlace place = Trail.Current; }
             <div class="workspace-context">
                 @if (place.Parent is { } parent)
                 {
@@ -113,7 +113,7 @@
                     <span>More</span>
                     @if (Notifications.UnreadCount > 0)
                     {
-                        <b class="tab-badge" aria-label="@Notifications.UnreadCount unread">@BadgeCount</b>
+                        <b class="tab-badge" aria-hidden="true"></b>
                     }
                 </button>
             </nav>
@@ -128,6 +128,14 @@
 
 @code {
     private bool navigationOpen;
+
+    private void OnShellKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && navigationOpen)
+        {
+            navigationOpen = false;
+        }
+    }
 
     private string BadgeCount => Notifications.UnreadCount > 99
         ? "99+"

@@ -32,7 +32,7 @@
 .code-desk-hit strong,.code-desk-miss strong { color:var(--ink); }
 .code-desk-hit span,.code-desk-miss span { color:var(--muted); font-size:.82rem; }
 .code-desk-hit a { color:var(--forest); text-decoration:underline; text-underline-offset:3px; }
-.code-desk-badge { flex:none; padding:4px 11px; border-radius:99px; font-weight:800; font-size:.66rem; letter-spacing:.06em; text-transform:uppercase; }
+.code-desk-badge { flex:none; padding:4px 11px; border-radius:99px; font-weight:800; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; }
 .code-desk-badge.is-known { background:var(--mint); color:var(--forest); }
 .code-desk-badge.is-unknown { background:var(--amber); color:#4a3a10; }
 .code-desk-actions { display:flex; gap:9px; flex-wrap:wrap; width:100%; margin-top:6px; }
@@ -205,14 +205,14 @@
 .product-identity strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.845rem; font-weight:600; letter-spacing:-.005em; }
 .product-identity small { color:#8ba4af; font-size:.73rem; }
 .product-meta { display:flex; align-items:center; gap:9px; flex:none; }
-.product-meta code { max-width:124px; overflow:hidden; padding:5px 9px; border-radius:7px; background:#eff4f5; color:#8099a5; font:500 .69rem 'DM Sans',sans-serif; text-overflow:ellipsis; white-space:nowrap; }
-.catalog-more { color:#7795a3; font-size:.65rem; }
-.product-status { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px; font-size:.69rem; font-weight:500; white-space:nowrap; }
+.product-meta code { max-width:124px; overflow:hidden; padding:5px 9px; border-radius:7px; background:#eff4f5; color:#8099a5; font:500 .72rem 'DM Sans',sans-serif; text-overflow:ellipsis; white-space:nowrap; }
+.catalog-more { color:#7795a3; font-size:.72rem; }
+.product-status { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px; font-size:.72rem; font-weight:500; white-space:nowrap; }
 .product-status::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
 .product-status.is-active { background:#e1f8ec; color:#1b8a59; }
 .product-status.is-inactive { background:#f4ebeb; color:#a45e5e; }
 .product-chevron { margin-left:2px; color:#a3b7c0; font-size:1.3rem; line-height:1; }
-.catalog-nocode { color:#9b7a3d; font-size:.7rem; font-weight:700; }
+.catalog-nocode { color:#9b7a3d; font-size:.72rem; font-weight:700; }
 /* When the list itself gets narrow, a row stops squeezing name, barcode and
    status onto one line: the name gets the full width (up to two lines) and
    the barcode and status drop beneath it. Measured on the list, not the

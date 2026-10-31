@@ -37,9 +37,9 @@
 .cs-card-head p{margin:6px 0 0;color:#73817b;font-size:.76rem}
 .cs-card-icon{display:grid;place-items:center;color:#8a9f90}
 .cs-card-icon svg{width:17px;height:17px}
-.cs-eyebrow{margin-bottom:5px;color:#1b634b;font-size:.63rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
-.cs-optional{padding:3px 7px;border-radius:4px;background:#f3f5f2;color:#73817b;font-size:.63rem;font-weight:500}
-.cs-count{padding:4px 10px;border-radius:20px;background:#f0f4f0;color:#73817b;font-size:.7rem}
+.cs-eyebrow{margin-bottom:5px;color:#1b634b;font-size:.72rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
+.cs-optional{padding:3px 7px;border-radius:4px;background:#f3f5f2;color:#73817b;font-size:.72rem;font-weight:500}
+.cs-count{padding:4px 10px;border-radius:20px;background:#f0f4f0;color:#73817b;font-size:.72rem}
 
 .cs-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px 20px}
 .cs-scan-hint{display:flex;align-items:center;gap:8px;color:#73817b;font-size:.72rem;line-height:1.5}
@@ -58,7 +58,7 @@
 /* Five columns on the desktop table; the header labels them once rather than
    repeating a label inside every row. */
 .cs-table-head,.cs-row{display:grid;grid-template-columns:minmax(160px,1fr) 46px 118px 104px 112px;gap:14px;align-items:start}
-.cs-table-head{padding:11px 24px;border-block:1px solid #e2e9e4;background:#f8faf8;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.cs-table-head{padding:11px 24px;border-block:1px solid #e2e9e4;background:#f8faf8;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .cs-row{min-height:138px;padding:24px;border-bottom:1px solid #e2e9e4}
 .cs-rows .cs-row:last-child{border-bottom:0}
 /* Screens with nothing to put in the actions column drop it rather than leave
@@ -69,7 +69,7 @@
 .cs-product{min-width:0;padding-top:3px}
 .cs-name{font-size:.84rem;font-weight:600;line-height:1.55;color:#23392f;overflow-wrap:anywhere}
 .cs-sku{margin-top:4px;color:#73817b;font-size:.72rem}
-.cs-flag{display:inline-block;margin-top:5px;color:#1b634b;font-size:.65rem}
+.cs-flag{display:inline-block;margin-top:5px;color:#1b634b;font-size:.72rem}
 .cs-flag.is-warn{color:#86662a}
 
 .cs-due-cell{padding-top:7px}
@@ -86,7 +86,7 @@
 .cs-stepper:focus-within{outline:2px solid #91bfa3;outline-offset:2px}
 .cs-stepper input:focus-visible{outline:0}
 .cs-stepper input.is-dirty{background:#fffaf0;color:#7a5a18}
-.cs-text-btn{margin-top:5px;padding:4px 0 0;border:0;background:transparent;color:#1b634b;font-size:.66rem;font-weight:600;cursor:pointer}
+.cs-text-btn{margin-top:5px;padding:4px 0 0;border:0;background:transparent;color:#1b634b;font-size:.72rem;font-weight:600;cursor:pointer}
 .cs-text-btn:disabled{opacity:.45;cursor:not-allowed}
 
 .cs-second-field{display:block;margin:0;width:100%}
@@ -95,7 +95,7 @@
 .cs-second-input input{width:100%;min-width:0;height:42px;padding:8px 10px;border:1px solid #d6e0d9;border-radius:7px;background:#fff;color:#17382d;font-size:.88rem;font-weight:600;text-align:center;appearance:textfield;font-variant-numeric:tabular-nums}
 .cs-second-input input::-webkit-inner-spin-button,.cs-second-input input::-webkit-outer-spin-button{appearance:none;margin:0}
 /* The derived number the counter actually cares about. */
-.cs-derived{display:flex;align-items:center;gap:5px;margin-top:9px;color:#1b634b;font-size:.66rem;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cs-derived{display:flex;align-items:center;gap:5px;margin-top:9px;color:#1b634b;font-size:.72rem;white-space:nowrap;font-variant-numeric:tabular-nums}
 .cs-derived::before{content:"";width:4px;height:4px;flex:none;border-radius:50%;background:#75a487}
 .cs-derived.is-up{color:#1b634b}
 .cs-derived.is-up::before{background:#75a487}
@@ -105,14 +105,14 @@
 .cs-derived.is-flat::before{background:#b8c3ba}
 
 .cs-actions{display:grid;gap:7px;padding-top:4px;min-width:0}
-.cs-actions button{display:flex;align-items:center;gap:6px;min-height:26px;padding:2px 0;border:0;background:none;color:#5d7364;font-size:.66rem;white-space:nowrap;text-align:left;cursor:pointer}
+.cs-actions button{display:flex;align-items:center;gap:6px;min-height:26px;padding:2px 0;border:0;background:none;color:#5d7364;font-size:.72rem;white-space:nowrap;text-align:left;cursor:pointer}
 .cs-actions button:hover{color:#17382d}
 .cs-actions button:disabled{opacity:.45;cursor:not-allowed}
 .cs-actions svg{width:14px;height:14px;flex:none}
 .cs-actions .cs-row-scan{justify-content:center;padding:6px 7px;min-height:34px;border:1px solid #d6e5da;border-radius:6px;background:#edf5ef;color:#1b634b;font-weight:600}
 .cs-actions .cs-row-scan:hover{background:#e0eee3}
 
-.cs-helper{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid #e2e9e4;background:#fbfcfa;color:#73817b;font-size:.7rem;line-height:1.6}
+.cs-helper{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid #e2e9e4;background:#fbfcfa;color:#73817b;font-size:.72rem;line-height:1.6}
 .cs-helper svg{width:14px;height:14px;flex:none}
 
 .cs-form{padding:0 24px 24px}
@@ -134,7 +134,7 @@
 .cs-progress>div{height:100%;background:#418b65;transition:width .2s}
 .cs-submit{width:100%;min-height:43px;font-size:.78rem}
 .cs-submit+.cs-submit{margin-top:8px}
-.cs-summary-foot{margin:9px 0 0;color:#73817b;font-size:.68rem;text-align:center}
+.cs-summary-foot{margin:9px 0 0;color:#73817b;font-size:.72rem;text-align:center}
 
 /* Pages that already have their own side column carry the running total and the
    commit button in a footer strip instead, so the counter still sees both
@@ -164,7 +164,7 @@
 
 /* The offending row can be well off-screen on a paged sheet, so the complaint
    is repeated under the field it is about. */
-.cs-line-error{display:flex;align-items:flex-start;gap:6px;margin:7px 0 0;color:#8d382e;font-size:.68rem;line-height:1.45}
+.cs-line-error{display:flex;align-items:flex-start;gap:6px;margin:7px 0 0;color:#8d382e;font-size:.72rem;line-height:1.45}
 .cs-line-error svg{width:12px;height:12px;flex:none;margin-top:1px}
 
 .cs-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:14px 24px;border-top:1px solid #e2e9e4;background:#fbfcfa}
@@ -182,7 +182,7 @@
 .cs-dlg-lead{margin:0 0 18px;color:#73817b;font-size:.76rem;line-height:1.6}
 .cs-dlg .cs-code-input{font-family:ui-monospace,Consolas,monospace;letter-spacing:.04em}
 .cs-dlg footer{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}
-.cs-dlg-status{margin-right:auto;color:#73817b;font-size:.7rem;text-align:left}
+.cs-dlg-status{margin-right:auto;color:#73817b;font-size:.72rem;text-align:left}
 .cs-dlg .camera-scanner{margin:0 0 16px}
 .cs-dlg .camera-open{width:100%;min-height:42px;border:1px solid #d6e0d9;border-radius:7px;background:#edf5ef;color:#1b634b;font-size:.78rem;font-weight:600}
 .cs-dlg .camera-open:hover:not(:disabled){background:#e0eee3}
@@ -211,15 +211,15 @@
     .cs-name{font-size:.9rem}
     .cs-due-cell{position:absolute;top:22px;right:20px;padding:0}
     .cs-qty-cell{grid-column:1;grid-row:2}
-    .cs-qty-cell::before{content:attr(data-label);display:block;margin-bottom:8px;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.08em}
+    .cs-qty-cell::before{content:attr(data-label);display:block;margin-bottom:8px;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.08em}
     .cs-stepper{width:100%;height:48px}
     .cs-stepper button{flex-basis:34px;width:34px;font-size:1.15rem}
     .cs-stepper input{font-size:1rem}
     .cs-second-cell{grid-column:2;grid-row:2}
-    .cs-second-label{position:static;width:auto;height:auto;clip:auto;display:block;margin:0 0 8px;overflow:visible;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+    .cs-second-label{position:static;width:auto;height:auto;clip:auto;display:block;margin:0 0 8px;overflow:visible;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
     .cs-second-input input{height:48px;font-size:1rem}
-    .cs-text-btn{min-height:36px;font-size:.7rem}
-    .cs-derived{margin-top:10px;font-size:.7rem;white-space:normal}
+    .cs-text-btn{min-height:36px;font-size:.72rem}
+    .cs-derived{margin-top:10px;font-size:.72rem;white-space:normal}
     /* Row actions become real targets once they are the only way in. */
     .cs-actions{grid-column:1/-1;grid-row:3;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-top:12px;border-top:1px solid #e2e9e4}
     .cs-actions button{justify-content:center;min-height:44px;padding:7px 8px;border:1px solid #e2e9e4;border-radius:6px;background:#fafcf9;font-size:.72rem;white-space:normal}
@@ -248,6 +248,17 @@
     .cs-help,.cs-note{margin-inline:16px}
     .cs-row,.cs-table--lean .cs-row{padding:20px 16px}
     .cs-due-cell{top:20px;right:16px}
+}
+
+/* Beside a side column a sheet can be narrower than its five columns, so the
+   row actions take their own line instead of running out of the card. */
+.cs-card:has(>.cs-rows){container-type:inline-size}
+@media(min-width:781px){
+    @container (max-width:660px){
+        .cs-table-head,.cs-row{grid-template-columns:minmax(160px,1fr) 46px 118px 104px}
+        .cs-table-head>:nth-child(5){display:none}
+        .cs-actions{grid-column:1/-1}
+    }
 }
 
 @media(prefers-reduced-motion:reduce){.cs-progress>div,.cs-btn{transition:none}}

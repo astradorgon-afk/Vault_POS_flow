@@ -11,9 +11,7 @@
 <div class="po-page">
     <header class="po-heading">
         <div>
-            <span class="eyebrow">▣ &nbsp; Purchasing</span>
             <h1>Purchase orders</h1>
-            <p>Manage orders, approvals and deliveries.</p>
         </div>
         @if (Session.HasPermission("purchase.create"))
         {
@@ -39,11 +37,6 @@
     }
 
     <section>
-        <div class="po-section-head">
-            <h2>Orders</h2>
-            <span>@orders.Count total</span>
-        </div>
-
         <nav class="po-chips" aria-label="Filter by order status">
             @foreach ((string key, string label) in StageFilters)
             {
@@ -54,6 +47,7 @@
             }
         </nav>
 
+        <div class="po-filters-row">
         <div class="po-toolbar" role="search">
             <label class="po-search">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
@@ -68,7 +62,6 @@
 
         <div id="po-filters" class="po-filter-panel @(filtersOpen ? null : "po-collapsed")">
             <label>
-                Supplier
                 <select aria-label="Supplier" @bind="supplierFilter" @bind:after="FirstPage">
                     <option value="">All suppliers</option>
                     @foreach (PosSupplier supplier in suppliers.Values.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
@@ -78,7 +71,6 @@
                 </select>
             </label>
             <label>
-                Destination
                 <select aria-label="Deliver to" @bind="destinationFilter" @bind:after="FirstPage">
                     <option value="">All destinations</option>
                     @foreach (PosLocation location in locations.Values.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code))
@@ -87,6 +79,7 @@
                     }
                 </select>
             </label>
+        </div>
         </div>
 
         @if (loading)

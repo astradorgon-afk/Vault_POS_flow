@@ -21,7 +21,6 @@ else if (sale is not null)
 {
     <section class="sale-head">
         <div>
-            <span class="eyebrow">Point of sale</span>
             <h1>Sale @sale.Number</h1>
             <p>
                 @(storeName is null ? "Unknown store" : storeName) ·
@@ -43,7 +42,7 @@ else if (sale is not null)
 
     <div class="detail-grid">
         <section class="detail-panel">
-            <header><span class="eyebrow">Transaction</span><h2>Lines <em>@sale.Lines.Count</em></h2></header>
+            <header><h2>Lines <em>@sale.Lines.Count</em></h2></header>
             <table class="lines-table rt-stack">
                 <thead>
                     <tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Discount</th><th class="num">VAT</th><th class="num">Net</th></tr>
@@ -75,7 +74,7 @@ else if (sale is not null)
         </section>
 
         <section class="detail-panel">
-            <header><span class="eyebrow">Settlement</span><h2>Payments <em>@sale.Payments.Count</em></h2></header>
+            <header><h2>Payments <em>@sale.Payments.Count</em></h2></header>
             @if (sale.Payments.Count == 0)
             {
                 <div class="panel-empty">No payments recorded.</div>
@@ -104,7 +103,6 @@ else if (sale is not null)
     <section class="receipt-panel">
         <header>
             <div>
-                <span class="eyebrow">Receipt</span>
                 <h2>Receipt copy</h2>
             </div>
             <div class="receipt-actions">
@@ -123,7 +121,7 @@ else if (sale is not null)
         }
         else if (!loadingReceipt)
         {
-            <div class="receipt-empty">Press <strong>View receipt</strong> to see the receipt as the register printed it.</div>
+            <div class="receipt-empty">Shown as the register printed it.</div>
         }
     </section>
 }

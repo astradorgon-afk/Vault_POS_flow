@@ -9,14 +9,12 @@
 
 <header class="report-page-head">
     <div>
-        <span class="eyebrow">Daily snapshot</span>
-        <h1>Inventory operations</h1>
-        <p>Review one business date: transfers in/out, restock requests, and stock movements for this @(SelectedIsWarehouse ? "warehouse" : "location").</p>
+        <h1>Daily reports</h1>
     </div>
     <div class="report-pickers">
-        <label><span>Location</span><select @bind="selectedLocationId"><option value="">Select a location</option>@foreach (PosLocation location in ScopedLocations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
-        <label><span>Business date</span><input type="date" @bind="selectedDate" /></label>
-        <button type="button" @onclick="LoadReportAsync" disabled="@(!CanLoad || loading)">@(loading ? "Loading…" : "Open report")</button>
+        <label><span>Location</span><select @bind="selectedLocationId" @bind:after="LoadReportAsync">@foreach (PosLocation location in ScopedLocations){<option value="@location.Id">@location.Code · @location.Name</option>}</select></label>
+        <label><span>Business date</span><input type="date" @bind="selectedDate" @bind:after="LoadReportAsync" /></label>
+        <button type="button" @onclick="LoadReportAsync" disabled="@(!CanLoad || loading)">@(loading ? "Loading…" : "Refresh")</button>
     </div>
 </header>
 
@@ -102,27 +100,27 @@ else
             }
             else
             {
-                <table class="activity-table">
+                <table class="activity-table rt-stack">
                     <thead><tr><th>Time</th><th>Reference</th><th>Type</th><th>Route</th><th class="is-numeric">Units</th></tr></thead>
                     <tbody>
                         @foreach (PosStoreMovementActivity item in VisibleActivity)
                         {
                             bool incoming = item.DestinationLocationId == SelectedId;
                             <tr>
-                                <td>@item.OccurredAtUtc.InStoreTime().ToString("HH:mm", CultureInfo.InvariantCulture)</td>
-                                <td>
+                                <td data-label="Time">@item.OccurredAtUtc.InStoreTime().ToString("HH:mm", CultureInfo.InvariantCulture)</td>
+                                <td class="rt-primary">
                                     <span class="activity-ref">@item.Reference</span>
                                     @if (!string.IsNullOrWhiteSpace(item.DeliveryReceiptNumber))
                                     {
                                         <small class="activity-dr">DR @item.DeliveryReceiptNumber</small>
                                     }
                                 </td>
-                                <td>
+                                <td data-label="Type">
                                     <span class="activity-kind">@SplitWords(item.Kind)</span>
                                     <span class="direction @(incoming ? "incoming" : "outgoing")">@(incoming ? "Incoming" : "Outgoing")</span>
                                 </td>
-                                <td class="activity-route">@item.SourceLocationName <span aria-hidden="true">→</span> @item.DestinationLocationName</td>
-                                <td class="is-numeric @(item.Kind.StartsWith("Dispatched", StringComparison.OrdinalIgnoreCase) ? (incoming ? "units-in" : "units-out") : null)">
+                                <td class="activity-route rt-wide" data-label="Route">@item.SourceLocationName <span aria-hidden="true">→</span> @item.DestinationLocationName</td>
+                                <td data-label="Units" class="is-numeric @(item.Kind.StartsWith("Dispatched", StringComparison.OrdinalIgnoreCase) ? (incoming ? "units-in" : "units-out") : null)">
                                     @(item.Kind.StartsWith("Dispatched", StringComparison.OrdinalIgnoreCase) ? (incoming ? "+" : "−") : string.Empty)@Qty(item.ProductUnits)
                                 </td>
                             </tr>
@@ -187,16 +185,16 @@ else
         }
         else
         {
-            <table class="items-table">
+            <table class="items-table rt-stack">
                 <thead><tr><th>Product</th><th>Reference</th><th>Direction</th><th class="is-numeric">Units</th></tr></thead>
                 <tbody>
                     @foreach (PosStoreMovementItem item in report.RecentItems)
                     {
                         <tr>
-                            <td>@item.ProductName</td>
-                            <td>@item.Reference</td>
-                            <td><span class="direction @(item.Direction.Equals("Sent", StringComparison.OrdinalIgnoreCase) ? "outgoing" : "incoming")">@item.Direction</span></td>
-                            <td class="is-numeric">@Qty(item.Units)</td>
+                            <td class="rt-primary">@item.ProductName</td>
+                            <td data-label="Reference">@item.Reference</td>
+                            <td data-label="Direction"><span class="direction @(item.Direction.Equals("Sent", StringComparison.OrdinalIgnoreCase) ? "outgoing" : "incoming")">@item.Direction</span></td>
+                            <td class="is-numeric" data-label="Units">@Qty(item.Units)</td>
                         </tr>
                     }
                 </tbody>
@@ -254,7 +252,9 @@ else
             ApiResult<List<PosLocation>> result = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
             if (!result.IsSuccess || result.Value is null) { message = result.Error; return; }
             locations.AddRange(result.Value.OrderBy(location => location.Code));
-            if (ScopedLocations.Count == 1) { selectedLocationId = ScopedLocations[0].Id.ToString(); await LoadReportAsync(); }
+            // Open on the session's location, or the first one, so a report is what the page shows first.
+            PosLocation? opening = ScopedLocations.FirstOrDefault(location => location.Id == Session.WorkLocationId) ?? ScopedLocations.FirstOrDefault();
+            if (opening is not null) { selectedLocationId = opening.Id.ToString(); await LoadReportAsync(); }
         }
         catch (HttpRequestException) { message = "The reporting service is unavailable. Try again shortly."; }
     }

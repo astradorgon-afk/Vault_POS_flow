@@ -12,16 +12,14 @@
 
 <div class="office-head tr-head">
     <div class="tr-head-copy">
-        <p class="office-kicker">@(IsStoreRestock ? "Store supplies" : "Transfer")</p>
         <div class="tr-title-row">
-            <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferLabels.ShortId(TransferId)}" : "Transfer" : detail.Transfer.Number)</h1>
+            <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferLabels.ShortId(TransferId)}" : $"Transfer {TransferLabels.ShortId(TransferId)}" : detail.Transfer.Number)</h1>
             <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
             @if (IsEmergency)
             {
                 <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
             }
         </div>
-        <p class="office-lead">@(IsStoreRestock ? "The owner reviews the store request before the warehouse picks and dispatches it." : "Follow the stock from the source shelf to your receiving bay — and record every arrival honestly.")</p>
     </div>
 </div>
 
@@ -109,9 +107,6 @@ else
             <h2>Items in transit</h2>
             <span>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</span>
         </div>
-        <p class="tr-hint">@(detail.Transfer.DispatchedAtUtc is null
-            ? "Follow each product from the request through picking and dispatch."
-            : "Compare dispatched quantities with what the store actually receives.")</p>
         <div class="line-item-cards">
             @foreach (PosTransferLineView line in detail.Lines)
             {
@@ -224,20 +219,19 @@ else
                     <div>
                         <div class="cs-eyebrow">Warehouse pick</div>
                         <h2>Pick the stock</h2>
-                        <p>Enter or scan the quantity actually picked for each product. Uncounted products stay at zero.</p>
+                        <p>Uncounted products stay at zero.</p>
                     </div>
                     <span class="cs-count">@PickedLines of @pickRows.Count</span>
                 </div>
 
                 <div class="cs-toolbar">
-                    <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
                     <button type="button" class="cs-btn" disabled="@acting" @onclick="PickAllRequested">
                         <AppIcon Name="check" /> Pick all requested
                     </button>
                 </div>
                 @* A wedge scanner types wherever focus is, so it needs no row. *@
                 <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
-                <p class="cs-note">@(message is null ? "Each scan adds one unit to the product it belongs to. A line cannot be picked past what the store requested." : message)</p>
+                <p class="cs-note">@(message is null ? "A line cannot be picked past what the store requested." : message)</p>
 
                 <ScanTarget OnScan="OnScannedAsync" />
 
@@ -373,7 +367,6 @@ else
                 </div>
 
                 <div class="cs-toolbar">
-                    <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
                     <button type="button" class="cs-btn" disabled="@acting" @onclick="ReceiveAllAwaiting">
                         <AppIcon Name="check" /> Mark all arrived good
                     </button>

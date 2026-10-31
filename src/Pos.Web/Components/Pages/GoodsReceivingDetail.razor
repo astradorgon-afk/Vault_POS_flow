@@ -58,19 +58,17 @@
                             <div>
                                 <div class="eyebrow">New delivery</div>
                                 <h2>Count what arrived</h2>
-                                <p>Enter the quantities received in this delivery.</p>
                             </div>
                         </div>
 
                         <div class="toolbar">
-                            <span class="scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
                             <button type="button" class="btn" disabled="@saving" @onclick="FillAllDue">
                                 <AppIcon Name="check" /> Mark all arrived
                             </button>
                         </div>
                         @* A wedge scanner types wherever focus is, so it needs no row. *@
                         <p class="scanner-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
-                        <p class="damage-help">Count all arrived units, then enter how many are damaged. Usable = arrived − damaged and anything reported as an issue.</p>
+                        <p class="damage-help">Usable = arrived − damaged and anything reported as an issue.</p>
 
                         <ScanTarget OnScan="OnScannedAsync" Enabled="@(!saving)" />
 

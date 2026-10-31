@@ -1,0 +1,173 @@
+/* The console's shared interface rules, loaded last so one decision applies to
+   every page: how a page is titled, what a button or field looks like at rest,
+   on focus and when disabled, and how lists hold up in a narrow column. Page
+   stylesheets keep only what is particular to that page. */
+
+/* ---------- Page titles ----------
+   A page opens with its name, an optional single line, then its controls. The
+   rules key off the h1 so any new page inherits them without a class. */
+.app-main .content h1 {
+    margin: 0;
+    color: var(--ink);
+    font: 800 clamp(1.35rem, 1.2rem + .55vw, 1.75rem)/1.2 'Manrope', sans-serif;
+    letter-spacing: -.025em;
+}
+.app-main .content h1 + p {
+    max-width: 62ch;
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: .875rem;
+    line-height: 1.45;
+}
+.app-main .content :is(.office-head, .pos-head, .sale-head, .qr-head, .audit-head, .fleet-head, .receiving-head, .restock-head, .sync-page-head, .report-page-head, .po-heading, .lx-top, .lh-head, .timeline-head, .pa-head) {
+    margin-bottom: 18px;
+}
+
+/* A header's filters read as controls beside the title, not a card of their own. */
+.app-main .content .head-pickers {
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+}
+
+/* On a phone the top bar already names a top-level page, so the big title gives
+   its height back to the content. It stays for screen readers. */
+@media (max-width: 640px) {
+    .app-main.is-top-level .content :is(.office-head, .pos-head, .qr-head, .audit-head, .fleet-head, .receiving-head, .restock-head, .sync-page-head, .report-page-head, .po-heading, .lx-top, .pa-head, .approvals-page header) h1,
+    .app-main.is-top-level .content :is(.approvals-page, .catalog-page) > header h1 {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+    /* With the title out of the flow an empty wrapper must not hold open a gap. */
+    .app-main.is-top-level .content :is(.office-head, .pos-head, .qr-head, .audit-head, .fleet-head, .receiving-head, .restock-head, .sync-page-head, .report-page-head, .po-heading, .lx-top, .pa-head) > div:first-child:has(> h1:only-child) { display: contents; }
+    .app-main .content h1 + p { font-size: .84rem; }
+
+    /* Header filters pair up: store on its own line, the dates side by side. */
+    .app-main .content .head-pickers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: end; width: 100%; }
+    .app-main .content .head-pickers > :first-child:nth-last-child(4),
+    .app-main .content .head-pickers > .search-action { grid-column: 1 / -1; }
+    .app-main .content .office-head { flex-direction: row; align-items: flex-end; }
+
+    /* A refresh is a small action beside the title line, not a full-width bar. */
+    .app-main .content :is(.restock-head, .receiving-head) { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 0; border-bottom: 0; }
+    .app-main .content .restock-head:has(.restock-tabs) { flex-direction: column; align-items: stretch; }
+    .app-main .content :is(.restock-refresh, .receiving-secondary) { flex: none; width: auto; margin-left: auto; padding: 0 14px; }
+
+    /* Tapped rows keep a clean card: no tint behind individual cells. */
+    table.rt-stack tr:hover td { background: none !important; }
+
+    /* A card's record link and any fold-out are finger-sized. */
+    table.rt-stack td.rt-primary a { display: inline-flex; align-items: center; min-height: 44px; }
+    .app-main .content summary { display: flex; align-items: center; min-height: 44px; }
+    .app-main .content .return-sale-link { display: inline-flex; align-items: center; min-height: 44px; }
+    .app-main .content input[type="checkbox"] { width: 20px; height: 20px; }
+    .st-activity > header > a { min-height: 44px; }
+
+    /* A stacked table's total becomes one full-width line. */
+    table.rt-stack tfoot { display: block; }
+    table.rt-stack tfoot tr { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); }
+    table.rt-stack tfoot td { padding: 0; border: 0; }
+    .app-main .content :is(.office-head, .pos-head, .sale-head, .qr-head, .audit-head, .fleet-head, .receiving-head, .restock-head, .sync-page-head, .report-page-head, .po-heading, .lx-top, .lh-head, .timeline-head, .pa-head) {
+        margin-bottom: 12px;
+    }
+}
+
+/* ---------- Buttons ---------- */
+:is(.search-action, .po-btn, .counts-new, .receiving-secondary, .restock-refresh, .counts-refresh) {
+    transition: background-color .15s, border-color .15s, color .15s;
+}
+
+/* A disabled primary stays solid and quiet. Fading the green read as broken. */
+.app-main .content :is(.search-action, .po-btn.primary, .counts-new, .report-pickers button, .ad-primary):disabled {
+    border-color: var(--line-strong);
+    background: #e6ebe6;
+    color: #5f6c64;
+    opacity: 1;
+    cursor: not-allowed;
+}
+
+/* Destructive actions look different at rest, not only after a click. */
+.po-btn.danger-ghost:hover:not(:disabled) { border-color: var(--danger); background: #fbe7e5; color: #8a342d; }
+
+/* ---------- Fields and focus ---------- */
+:is(.app-main, .tabbar, .sidebar) :is(a, button, summary, select, input, textarea, [role="button"]):focus-visible {
+    outline: 2px solid var(--forest-bright);
+    outline-offset: 2px;
+}
+.sidebar :is(a, button):focus-visible { outline-color: var(--mint); }
+#main-content:focus-visible { outline: none; }
+
+/* ---------- Lists ---------- */
+.app-main .content :is(.sale-number, .sales-table td:first-child a) { white-space: nowrap; }
+.app-main .content .sales-table td a { color: var(--forest); font-weight: 700; }
+
+/* Keep links in a row reachable without a pointer, and show which row is hovered. */
+.app-main .content tbody tr.office-row-click:hover { background: #f4f8f5; }
+
+/* Transfers carries nine columns, so it sheds the two least-read ones when its
+   own column narrows, however wide the window is. */
+.transfers-flow > .results-panel,
+.results-panel:has(> .sales-table),
+.qr-results .qr-table-wrap,
+.pr-table-card,
+.audit-table-scroll { container-type: inline-size; }
+@container (max-width: 1180px) {
+    .rt-hide-lg { display: none; }
+}
+@container (max-width: 1320px) {
+    .qr-table.sk-table :is(th, td) { padding-left: 10px; padding-right: 10px; }
+}
+@container (max-width: 980px) {
+    .rt-hide-md { display: none; }
+    .sales-table :is(th, td) { padding-left: 8px; padding-right: 8px; }
+}
+/* Some lists shed one column on a tablet. Phones use cards, which keep it. */
+@media (min-width: 641px) {
+    /* A flex cell ignores its colspan, and the day heading would set the Time column's width. */
+    .audit-table-scroll .audit-day th { display: table-cell; }
+    .audit-table-scroll .audit-day th > span { margin-left: 9px; }
+    .audit-table-scroll .audit-day small { float: right; }
+
+    @container (max-width: 980px) {
+        .app-main .content .audit-table-scroll :is(thead th, td) { padding-left: 10px; padding-right: 10px; }
+        .rt-hide-tablet,
+        .pr-table :is(th, td):nth-child(5),
+        .audit-table-scroll thead th:nth-child(4),
+        .audit-table-scroll td:nth-child(4) { display: none; }
+    }
+}
+
+/* Goods receiving beside its side column: row actions take their own line, as in
+   count-sheet.css. Here because the page's scoped styles keep their own copy. */
+.app-main .content .card:has(> .table-head) { container-type: inline-size; }
+@media (min-width: 781px) {
+    @container (max-width: 660px) {
+        .app-main .content :is(.table-head, .product-row) { grid-template-columns: minmax(160px, 1fr) 46px 118px 104px; }
+        .app-main .content .table-head > :nth-child(5) { display: none; }
+        .app-main .content .action-stack { grid-column: 1 / -1; }
+    }
+}
+
+/* A list that still cannot fit scrolls inside its panel. Clipping would lose columns. */
+.app-main .content :is(.results-panel, .detail-panel) { overflow-x: auto; }
+.tr-more { margin-top: 10px; color: var(--muted); font-size: .8rem; }
+.tr-more summary { width: fit-content; min-height: 24px; color: var(--forest-bright); font-weight: 700; cursor: pointer; }
+.tr-more .location-picker { display: block; margin-top: 8px; max-width: 280px; }
+.tr-more input { width: 100%; }
+
+/* Purchase orders: search and its two filters share one line on a desk. */
+.po-page .po-filters-row { display: grid; gap: 10px; }
+@media (min-width: 900px) {
+    .po-page .po-filters-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+    .po-page .po-filters-row .po-filter-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- Motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+    :is(.search-action, .po-btn, .counts-new, .receiving-secondary, .restock-refresh, .counts-refresh) { transition: none; }
+}

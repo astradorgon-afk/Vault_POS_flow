@@ -11,9 +11,8 @@
 
 <div class="office-head counts-head">
     <div>
-        <p class="office-kicker">Inventory control</p>
         <h1 class="office-title">Stock counts</h1>
-        <p class="office-lead">Open a sheet, count what is on the shelf, then submit it for approval. Approving posts the variance to stock.</p>
+        <p class="office-lead">Approving a count posts its variance to stock.</p>
     </div>
     @if (CanViewInventory && CanCount)
     {
@@ -42,7 +41,6 @@ else
             <span>Store</span>
             <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
                     @onchange="OnLocationChangedAsync" disabled="@loadingLocations">
-                <option value="">Select a store</option>
                 @foreach (PosLocation location in locations)
                 {
                     <option value="@location.Id">@location.Code · @location.Name</option>
@@ -255,8 +253,8 @@ else
             await LoadCategoriesAsync();
         }
 
-        // A store already chosen for this session, or the only one this account
-        // has, needs no second act of selection before the page says anything.
+        // The page opens on the session's store, or the first one, so a list of
+        // sheets is the first thing it shows; the picker switches between them.
         if (selectedLocationId is not null)
         {
             await LoadCountsAsync();
@@ -275,9 +273,9 @@ else
 
         locations.AddRange(response.Value.Where(location =>
             location.Kind == 1 && location.IsActive && Session.CanUseInventoryLocation(location.Id)));
-        selectedLocationId = Session.WorkLocationId is { } preferred
-            ? locations.Any(location => location.Id == preferred) ? preferred : null
-            : locations.Count == 1 ? locations[0].Id : null;
+        selectedLocationId = Session.WorkLocationId is { } preferred && locations.Any(location => location.Id == preferred)
+            ? preferred
+            : locations.FirstOrDefault()?.Id;
         if (locations.Count == 0)
         {
             message = "No active store is available to this account.";

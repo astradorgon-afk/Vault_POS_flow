@@ -11,36 +11,8 @@
 
 <section class="ov-hero" aria-labelledby="overview-title">
     <div class="ov-hero-copy">
-        <span class="eyebrow">@DayGreeting,</span>
-        <h1 id="overview-title">@Greeting</h1>
-        <p>@WorkspaceDescription</p>
+        <h1 id="overview-title">@DayGreeting@GreetingName</h1>
     </div>
-    <svg class="ov-hero-art" viewBox="0 0 340 170" aria-hidden="true" focusable="false">
-        <ellipse cx="96" cy="128" rx="58" ry="30" fill="#d6ebdd" transform="rotate(-24 96 128)" />
-        <ellipse cx="292" cy="112" rx="48" ry="24" fill="#d6ebdd" transform="rotate(-52 292 112)" />
-        <ellipse cx="190" cy="160" rx="130" ry="10" fill="#cfe4d6" />
-        <path d="M58 36l3 8 8 3-8 3-3 8-3-8-8-3 8-3z M300 22l2.4 6 6 2.4-6 2.4-2.4 6-2.4-6-6-2.4 6-2.4z M84 12l1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6 4-1.6z" fill="#9fcbb0" />
-        <rect x="128" y="76" width="140" height="80" rx="3" fill="#f3faf5" stroke="#9cc6ab" stroke-width="1.5" />
-        <path d="M118 44l18-30h124l18 30z" fill="#2f7a55" />
-        <g>
-            <rect x="118" y="44" width="20" height="24" fill="#2f7a55" />
-            <rect x="138" y="44" width="20" height="24" fill="#f3faf5" />
-            <rect x="158" y="44" width="20" height="24" fill="#2f7a55" />
-            <rect x="178" y="44" width="20" height="24" fill="#f3faf5" />
-            <rect x="198" y="44" width="20" height="24" fill="#2f7a55" />
-            <rect x="218" y="44" width="20" height="24" fill="#f3faf5" />
-            <rect x="238" y="44" width="20" height="24" fill="#2f7a55" />
-            <rect x="258" y="44" width="20" height="24" fill="#f3faf5" />
-            <path d="M118 68a10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0z" fill="#2f7a55" />
-        </g>
-        <rect x="154" y="98" width="40" height="58" rx="2" fill="#2f7a55" />
-        <rect x="160" y="104" width="28" height="22" rx="1" fill="#8fc4a3" />
-        <circle cx="184" cy="132" r="2" fill="#d6ebdd" />
-        <rect x="210" y="98" width="42" height="32" rx="2" fill="#bfe0cb" stroke="#2f7a55" stroke-width="3" />
-        <path d="M231 98v32" stroke="#2f7a55" stroke-width="2" />
-        <path d="M112 156h14l-2-18h-10z" fill="#2f7a55" />
-        <path d="M119 138c-6-8-10-16-6-24 4 6 6 14 6 24z M119 138c2-10 6-18 13-22-1 9-5 17-13 22z M119 138c-1-12 0-22 4-30 3 10 1 20-4 30z" fill="#4f9a70" />
-    </svg>
 </section>
 
 @if (loadingDashboard || loadingStores)
@@ -274,17 +246,15 @@ else
 
 <section class="workbench" aria-labelledby="workbench-title">
     <div class="section-heading">
-        <div><span class="eyebrow">Your tools</span><h2 id="workbench-title">Quick actions</h2></div>
-        <span class="permission-note">Only actions assigned to you are shown</span>
+        <h2 id="workbench-title">Quick actions</h2>
     </div>
 
     <div class="task-grid">
         @foreach (DashboardAction action in Actions)
         {
-            <a class="task-card @(action == Actions[0] ? "task-primary" : string.Empty)" href="@action.Href">
+            <a class="task-card" href="@action.Href" title="@action.Description">
                 <span class="task-icon"><AppIcon Name="@action.Icon" /></span>
-                <span class="task-copy"><strong>@action.Title</strong><small>@action.Description</small></span>
-                <AppIcon Name="arrow" CssClass="task-arrow" />
+                <span>@action.Title</span>
             </a>
         }
     </div>
@@ -348,7 +318,7 @@ else
         _ => "Good evening",
     };
 
-    private string Greeting => $"Welcome back, {FirstName}.";
+    private string GreetingName => $", {FirstName}";
     private string FirstName => Session.Current?.User.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "there";
     private string ScopeLabel => Session.WorkLocationName is { Length: > 0 } chosen ? chosen
         : Session.Current?.User.HasAllLocations == true && Session.HasPermission("location.manage")
@@ -364,13 +334,6 @@ else
         _ => "Operations overview",
     };
 
-    private string WorkspaceDescription => (CanManageUsers, CanViewInventory, CanCreateSale) switch
-    {
-        (true, _, _) => "Here's your stock position and the work across your locations.",
-        (_, true, false) => "Here's your stock position and the movement inside your assigned scope.",
-        (_, _, true) => "Here's what's happening with your store today.",
-        _ => "Here's the activity included in your current access.",
-    };
 
     private PosStoreMovementReport? storeReport;
     private PosStoreMovementReport? previousStoreReport;
@@ -463,7 +426,7 @@ else
             IEnumerable<ActivityItem> notices = Notifications.Items.Select(item => new ActivityItem(
                 item.Severity >= 2 ? "alert" : "bell",
                 item.Title,
-                item.Body,
+                DisplayText.TidyQuantities(item.Body),
                 item.CreatedAtUtc,
                 item.Severity switch { 3 => "Critical", 2 => "Attention", _ => "Info" },
                 item.Severity switch { 3 => "bad", 2 => "warn", _ => "info" },

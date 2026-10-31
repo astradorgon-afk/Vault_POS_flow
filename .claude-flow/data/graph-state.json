@@ -1,58 +1,215 @@
 {
   "version": 1,
-  "updatedAt": 1793375862935,
-  "nodeCount": 6,
+  "updatedAt": 1793412883909,
+  "nodeCount": 12,
   "nodes": {
     "mem-bash-heredoc-unreliable-----0": {
       "id": "mem-bash-heredoc-unreliable-----0",
       "category": "bash-heredoc-unreliable",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.6300000000000001,
+      "accessCount": 3,
       "createdAt": 1790790810893
     },
     "mem-docker-desktop-stale-sockets-----0": {
       "id": "mem-docker-desktop-stale-sockets-----0",
       "category": "docker-desktop-stale-sockets",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.7900000000000003,
+      "accessCount": 7,
       "createdAt": 1790790810903
     },
     "mem-hook-stray-redirect-files-----0": {
       "id": "mem-hook-stray-redirect-files-----0",
       "category": "hook-stray-redirect-files",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.6300000000000001,
+      "accessCount": 3,
       "createdAt": 1790790810911
     },
     "mem-MEMORY----bash-heredocs-are-unreliabl-0": {
       "id": "mem-MEMORY----bash-heredocs-are-unreliabl-0",
       "category": "core",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.8000000000000003,
+      "accessCount": 6,
       "createdAt": 1790790810919
     },
     "mem-second-vaultflow-checkout-----0": {
       "id": "mem-second-vaultflow-checkout-----0",
       "category": "second-vaultflow-checkout",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.8000000000000003,
+      "accessCount": 6,
       "createdAt": 1790790810930
     },
     "insight-1790842201511-0xbe": {
       "id": "insight-1790842201511-0xbe",
       "category": "insights",
-      "confidence": 0.5,
+      "confidence": 0.21,
       "accessCount": 0,
       "createdAt": 1790842201511
+    },
+    "insight-1793382734642-vke2": {
+      "id": "insight-1793382734642-vke2",
+      "category": "insights",
+      "confidence": 0.7500000000000002,
+      "accessCount": 5,
+      "createdAt": 1793382734642
+    },
+    "insight-1793382734642-1loi": {
+      "id": "insight-1793382734642-1loi",
+      "category": "insights",
+      "confidence": 0.7500000000000002,
+      "accessCount": 5,
+      "createdAt": 1793382734642
+    },
+    "insight-1793412883904-snht": {
+      "id": "insight-1793412883904-snht",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1793412883904
+    },
+    "insight-1793412883904-hj1i": {
+      "id": "insight-1793412883904-hj1i",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1793412883904
+    },
+    "insight-1793412883904-otk5": {
+      "id": "insight-1793412883904-otk5",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1793412883904
+    },
+    "insight-1793412883904-j8xu": {
+      "id": "insight-1793412883904-j8xu",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1793412883904
     }
   },
-  "edges": [],
+  "edges": [
+    {
+      "sourceId": "insight-1790842201511-0xbe",
+      "targetId": "insight-1793412883904-snht",
+      "type": "similar",
+      "weight": 0.5
+    },
+    {
+      "sourceId": "insight-1790842201511-0xbe",
+      "targetId": "insight-1793412883904-hj1i",
+      "type": "similar",
+      "weight": 0.3950617283950617
+    },
+    {
+      "sourceId": "insight-1790842201511-0xbe",
+      "targetId": "insight-1793412883904-j8xu",
+      "type": "similar",
+      "weight": 0.43243243243243246
+    },
+    {
+      "sourceId": "insight-1793382734642-vke2",
+      "targetId": "insight-1793382734642-1loi",
+      "type": "similar",
+      "weight": 0.9754098360655737
+    },
+    {
+      "sourceId": "insight-1793382734642-vke2",
+      "targetId": "insight-1793412883904-snht",
+      "type": "similar",
+      "weight": 0.3875968992248062
+    },
+    {
+      "sourceId": "insight-1793382734642-vke2",
+      "targetId": "insight-1793412883904-hj1i",
+      "type": "similar",
+      "weight": 0.3424657534246575
+    },
+    {
+      "sourceId": "insight-1793382734642-vke2",
+      "targetId": "insight-1793412883904-otk5",
+      "type": "similar",
+      "weight": 0.9834710743801653
+    },
+    {
+      "sourceId": "insight-1793382734642-vke2",
+      "targetId": "insight-1793412883904-j8xu",
+      "type": "similar",
+      "weight": 0.3597122302158273
+    },
+    {
+      "sourceId": "insight-1793382734642-1loi",
+      "targetId": "insight-1793412883904-snht",
+      "type": "similar",
+      "weight": 0.3953488372093023
+    },
+    {
+      "sourceId": "insight-1793382734642-1loi",
+      "targetId": "insight-1793412883904-hj1i",
+      "type": "similar",
+      "weight": 0.3401360544217687
+    },
+    {
+      "sourceId": "insight-1793382734642-1loi",
+      "targetId": "insight-1793412883904-otk5",
+      "type": "similar",
+      "weight": 0.9754098360655737
+    },
+    {
+      "sourceId": "insight-1793382734642-1loi",
+      "targetId": "insight-1793412883904-j8xu",
+      "type": "similar",
+      "weight": 0.3669064748201439
+    },
+    {
+      "sourceId": "insight-1793412883904-snht",
+      "targetId": "insight-1793412883904-hj1i",
+      "type": "similar",
+      "weight": 0.6463414634146342
+    },
+    {
+      "sourceId": "insight-1793412883904-snht",
+      "targetId": "insight-1793412883904-otk5",
+      "type": "similar",
+      "weight": 0.3875968992248062
+    },
+    {
+      "sourceId": "insight-1793412883904-snht",
+      "targetId": "insight-1793412883904-j8xu",
+      "type": "similar",
+      "weight": 0.855072463768116
+    },
+    {
+      "sourceId": "insight-1793412883904-hj1i",
+      "targetId": "insight-1793412883904-otk5",
+      "type": "similar",
+      "weight": 0.3424657534246575
+    },
+    {
+      "sourceId": "insight-1793412883904-hj1i",
+      "targetId": "insight-1793412883904-j8xu",
+      "type": "similar",
+      "weight": 0.5934065934065934
+    },
+    {
+      "sourceId": "insight-1793412883904-otk5",
+      "targetId": "insight-1793412883904-j8xu",
+      "type": "similar",
+      "weight": 0.3597122302158273
+    }
+  ],
   "pageRanks": {
-    "mem-bash-heredoc-unreliable-----0": 0.16666666666666666,
-    "mem-docker-desktop-stale-sockets-----0": 0.16666666666666666,
-    "mem-hook-stray-redirect-files-----0": 0.16666666666666666,
-    "mem-MEMORY----bash-heredocs-are-unreliabl-0": 0.16666666666666666,
-    "mem-second-vaultflow-checkout-----0": 0.16666666666666666,
-    "insight-1790842201511-0xbe": 0.16666666666666666
+    "mem-bash-heredoc-unreliable-----0": 0.04901366832992294,
+    "mem-docker-desktop-stale-sockets-----0": 0.04901366832992294,
+    "mem-hook-stray-redirect-files-----0": 0.04901366832992294,
+    "mem-MEMORY----bash-heredocs-are-unreliabl-0": 0.04901366832992294,
+    "mem-second-vaultflow-checkout-----0": 0.04901366832992294,
+    "insight-1790842201511-0xbe": 0.04901366832992294,
+    "insight-1793382734642-vke2": 0.04901366832992294,
+    "insight-1793382734642-1loi": 0.05734598658576126,
+    "insight-1793412883904-snht": 0.08341920038247204,
+    "insight-1793412883904-hj1i": 0.10705464032844994,
+    "insight-1793412883904-otk5": 0.13866568561985126,
+    "insight-1793412883904-j8xu": 0.2704188087740051
   }
 }

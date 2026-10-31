@@ -9,7 +9,7 @@
 
 <section class="restock-page">
     <header class="restock-head">
-        <div><span class="eyebrow">Owner approvals · inventory</span><h1>Restock approvals</h1><p>Review supply requests from your stores and your warehouse. A store's request is filled from warehouse stock; the warehouse's own request is filled by buying from a supplier.</p></div>
+        <div><h1>Restock approvals</h1><p>Store requests ship from the warehouse; warehouse requests are bought from a supplier.</p></div>
         <button type="button" class="restock-refresh" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
 

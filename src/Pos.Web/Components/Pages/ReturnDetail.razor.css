@@ -1,8 +1,8 @@
 .sale-head p { margin:0; color:var(--muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .sale-head p a { color:var(--forest); font-weight:700; }
-.blind-chip { padding:3px 9px; border-radius:999px; background:#f6e7e5; color:#8b3b35; font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+.blind-chip { padding:3px 9px; border-radius:999px; background:#f6e7e5; color:#8b3b35; font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 .remaining { display:grid; justify-items:end; font:700 1.7rem 'Manrope'; color:var(--forest); flex:none; }
-.remaining span { font:700 .66rem 'DM Sans'; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; }
+.remaining span { font:700 .72rem 'DM Sans'; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; }
 .pos-message { margin:14px 0; padding:11px 13px; border-left:3px solid var(--amber); background:#fff8e6; color:#6d5420; font-size:.84rem; }
 .detail-panel { margin-bottom:18px; border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; }
 .panel-empty { padding:30px; color:var(--muted); }
@@ -15,7 +15,7 @@
 .dispose-row:last-child { border-bottom:0; }
 .dispose-product { display:grid; }
 .dispose-product small { color:var(--muted); }
-.dispose-field { display:grid; gap:5px; color:var(--muted); font-size:.64rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em; }
+.dispose-field { display:grid; gap:5px; color:var(--muted); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em; }
 .dispose-field select,.dispose-field input.qty-input { height:40px; padding:0 10px; border:1px solid #cbd5cd; border-radius:8px; text-transform:none; letter-spacing:0; font-size:.86rem; }
 .dispose-field input.qty-input { width:110px; text-align:right; font-weight:600; }
 .dispose-field .note-input { width:100%; }

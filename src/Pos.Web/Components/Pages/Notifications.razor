@@ -11,23 +11,7 @@
 
 <section class="ov-hero nt-hero" aria-labelledby="notifications-title">
     <div class="ov-hero-copy">
-        <span class="eyebrow">Stay informed</span>
-        <h1 id="notifications-title">What needs attention now.</h1>
-        <p>Alerts stay here until you read them. Live delivery adds new events without replacing the durable record.</p>
-    </div>
-    <div class="nt-hero-art" aria-hidden="true">
-        <svg viewBox="0 0 260 150" focusable="false">
-            <ellipse cx="190" cy="92" rx="70" ry="44" fill="#d6ebdd" transform="rotate(-30 190 92)" />
-            <path d="M78 40l14 12 M66 70h18 M78 100l14-12" stroke="#4f9a70" stroke-width="5" stroke-linecap="round" />
-            <rect x="112" y="30" width="96" height="100" rx="18" fill="#f3faf5" stroke="#cfe4d6" stroke-width="2" transform="rotate(6 160 80)" />
-            <path d="M160 48c-15 0-24 11-24 25v17l-8 10h64l-8-10V73c0-14-9-25-24-25z" fill="#2f7a55" />
-            <path d="M151 106a9 9 0 0 0 18 0z" fill="#2f7a55" />
-            <circle cx="160" cy="46" r="5" fill="#2f7a55" />
-        </svg>
-        @if (Store.UnreadCount > 0)
-        {
-            <b>@Badge(Store.UnreadCount)</b>
-        }
+        <h1 id="notifications-title">Notifications</h1>
     </div>
 </section>
 
@@ -71,9 +55,7 @@
             @if (Store.UnreadCount > Store.Items.Count)
             {
                 <p class="nt-more">
-                    Newest first — this list holds the @(Store.Items.Count.ToString("N0")) most recent alerts.
-                    @Store.UnreadCount.ToString("N0") are still unread overall, so the badge also counts older
-                    alerts beyond this list.
+                    Showing the latest @(Store.Items.Count.ToString("N0")) · @Store.UnreadCount.ToString("N0") unread in total
                 </p>
             }
             @foreach (PosNotification item in Visible)
@@ -86,7 +68,7 @@
                     <span class="nt-icon tone-@Tone(item)"><AppIcon Name="@Icon(item)" /></span>
                     <div class="nt-copy">
                         <h2>@item.Title</h2>
-                        <p>@item.Body</p>
+                        <p>@DisplayText.TidyQuantities(item.Body)</p>
                         <small><AppIcon Name="location" /> @LocationName(item.LocationId) <i>·</i> @Category(item)</small>
                     </div>
                     <div class="nt-meta">

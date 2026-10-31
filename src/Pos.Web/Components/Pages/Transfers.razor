@@ -11,9 +11,8 @@
 
 <div class="office-head">
     <div>
-        <p class="office-kicker">Inventory command</p>
         <h1 class="office-title">Transfers</h1>
-        <p class="office-lead">Move stock between your stores and the main warehouse, and record what arrives at the door.</p>
+        <p class="office-lead">@visibleTransfers.Count transfer@(visibleTransfers.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")</p>
     </div>
     <div class="head-pickers">
         <label class="location-picker">
@@ -26,6 +25,12 @@
                 }
             </select>
         </label>
+        @if (CanViewTransfers && CanRequestTransfers)
+        {
+            <button type="button" class="po-btn @(showNew ? null : "primary")" aria-expanded="@(showNew ? "true" : "false")" aria-controls="new-transfer" @onclick="() => showNew = !showNew">
+                @(showNew ? "Close" : "+ New transfer")
+            </button>
+        }
     </div>
 </div>
 
@@ -39,28 +44,18 @@
 }
 else
 {
-    <section class="search-strip">
-        <span>@visibleTransfers.Count transfer@(visibleTransfers.Count == 1 ? "" : "s")@(searchedLabel.Length > 0 ? $" · {searchedLabel}" : "")</span>
-        <span class="search-note">Available on the destination store once a dispatch leaves the source.</span>
-    </section>
-
     @if (!string.IsNullOrWhiteSpace(message))
     {
         <div class="pos-message" role="status">@message</div>
     }
 
-    @* On phones the list leads and the request form follows; see Transfers.razor.css. *@
     <div class="transfers-flow">
-    @if (CanRequestTransfers)
+    @if (CanRequestTransfers && showNew)
     {
-        <section class="open-count">
+        <section class="open-count" id="new-transfer">
             <div class="open-count-title">
-                <strong>Request a transfer</strong>
-                <span>
-                    @(SourceKnown
-                        ? $"Shipping from {SourceLabel} — pick a destination, then search what's in stock here to add it."
-                        : "Choose the route, then add the lines.") The transfer is created as a draft for someone to review.
-                </span>
+                <strong>New transfer</strong>
+                <span>Saved as a draft for review. Stock becomes available at the destination once dispatched.</span>
             </div>
             <div class="open-count-fields">
                 @if (SourceKnown)
@@ -93,18 +88,21 @@ else
                         }
                     </select>
                 </label>
+            </div>
+            <details class="tr-more" open="@(preApprovalTokenId.Length > 0)">
+                <summary>Pre-approval token</summary>
                 <label class="location-picker">
-                    <span>Pre-approval token</span>
+                    <span class="sr-only">Pre-approval token</span>
                     <input type="text" placeholder="Optional token id"
                            value="@preApprovalTokenId"
                            @onchange="OnTokenChangedAsync" />
                 </label>
-            </div>
+            </details>
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanScanIntoDraft && !creating)" />
             <CameraScanner Enabled="@(CanScanIntoDraft && !creating)" />
             <div class="scan-strip" role="status">
                 <span class="scan-strip-mark" aria-hidden="true">▥</span>
-                <span>Scan products to add them; each scan adds one.</span>
+                <span>Each scan adds one.</span>
                 
             </div>
             <div class="transfer-lines">
@@ -134,7 +132,7 @@ else
                             }
                             else
                             {
-                                <input type="text" class="line-product-search" placeholder="Search this location's stock by name or SKU…"
+                                <input type="text" class="line-product-search" placeholder="Search stock by name or SKU…" aria-label="Search stock by name or SKU"
                                        value="@draftLines[lineIndex].Search"
                                        @oninput="(e) => OnLineSearchChanged(lineIndex, e)" />
                                 @if (draftLines[lineIndex].Search.Trim().Length > 0)
@@ -159,12 +157,12 @@ else
                                 }
                             }
                         </div>
-                        <input class="line-quantity" type="number" min="0" step="1" placeholder="Qty"
+                        <input class="line-quantity" type="number" min="0" step="1" placeholder="Qty" aria-label="Quantity"
                                value="@draftLines[lineIndex].Quantity"
                                @onchange="(e) => OnLineQuantityChanged(lineIndex, e)" />
                         @if (draftLines.Count > 1)
                         {
-                            <button type="button" class="line-remove" @onclick="() => RemoveLine(lineIndex)">✕</button>
+                            <button type="button" class="line-remove" aria-label="Remove line" @onclick="() => RemoveLine(lineIndex)">✕</button>
                         }
                     </div>
                 }
@@ -188,19 +186,19 @@ else
         }
         else if (visibleTransfers.Count == 0)
         {
-            <div class="results-empty"><strong>No transfers yet.</strong><span>Request one, or wait for a dispatch to arrive at your store.</span></div>
+            <div class="results-empty"><strong>No transfers to show.</strong><span>Try another state, or create a new transfer.</span></div>
         }
         else
         {
             <table class="sales-table counts-table rt-stack">
                 <thead>
-                    <tr><th>NUMBER</th><th>Status</th><th>Route</th><th>Lines</th><th>Value</th><th>Created</th><th>Released</th><th>DR</th><th>Received</th></tr>
+                    <tr><th>Number</th><th>Status</th><th>Route</th><th>Lines</th><th>Value</th><th>Created</th><th class="rt-hide-md">Released</th><th class="rt-hide-md">DR</th><th>Received</th></tr>
                 </thead>
                 <tbody>
                     @foreach (PosTransferSummary transfer in visibleTransfers)
                     {
                         <tr class="office-row-click" @key="transfer.Id" @onclick="() => OpenTransfer(transfer.Id)">
-                            <td class="sale-number rt-primary"><a href="@($"/transfers/{transfer.Id:D}")" @onclick:stopPropagation="true">@transfer.Number</a></td>
+                            <td class="sale-number rt-primary"><a href="@($"/transfers/{transfer.Id:D}")" @onclick:stopPropagation="true">@(string.IsNullOrWhiteSpace(transfer.Number) ? $"Draft {TransferLabels.ShortId(transfer.Id)}" : transfer.Number)</a></td>
                             <td data-label="Status">
                                 <span class="@StatusChipClass(transfer.Status)">@SplitWords(transfer.Status)</span>
                                 @if (AwaitingReceive(transfer.Status) && CanReceive)
@@ -211,10 +209,10 @@ else
                             <td class="rt-wide" data-label="Route">@LocationLabel(transfer.SourceLocationId) → @LocationLabel(transfer.DestinationLocationId)</td>
                             <td data-label="Lines">@transfer.LineCount</td>
                             <td data-label="Value">@Money(transfer.TotalValue)</td>
-                            <td data-label="Created">@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td class="rt-hide-sm" data-label="Released">@(transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
-                            <td class="rt-hide-sm" data-label="DR">@(transfer.DeliveryReceiptNumber ?? "—")</td>
-                            <td data-label="Received">@(transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td data-label="Created" title="@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)">@transfer.CreatedAtUtc.InStoreTime().ToString("MMM d", CultureInfo.InvariantCulture)</td>
+                            <td class="rt-hide-sm rt-hide-md" data-label="Released" title="@transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)">@(transfer.DispatchedAtUtc?.InStoreTime().ToString("MMM d", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td class="rt-hide-sm rt-hide-md" data-label="DR">@(transfer.DeliveryReceiptNumber ?? "—")</td>
+                            <td data-label="Received" title="@transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)">@(transfer.ReceivedAtUtc?.InStoreTime().ToString("MMM d", CultureInfo.InvariantCulture) ?? "—")</td>
                         </tr>
                     }
                 </tbody>
@@ -247,6 +245,7 @@ else
     private string preApprovalTokenId = string.Empty;
     private string selectedStatus = string.Empty;
     private string searchedLabel = string.Empty;
+    private bool showNew;
 
     private bool locationsLoading = true;
     private bool loading;

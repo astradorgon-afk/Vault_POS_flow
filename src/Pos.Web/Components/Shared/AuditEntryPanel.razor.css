@@ -26,7 +26,7 @@
 
 .audit-facts { display:grid; gap:11px; margin:0; }
 .audit-facts > div { display:grid; grid-template-columns:86px minmax(0,1fr); gap:12px; align-items:baseline; }
-.audit-facts dt { color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
+.audit-facts dt { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
 .audit-facts dd { margin:0; display:grid; gap:3px; min-width:0; }
 .audit-facts dd strong { color:var(--text); font-size:.9rem; }
 .audit-facts dd span { color:var(--muted); font-size:.78rem; }
@@ -41,13 +41,13 @@
 .audit-transfer-facts dt { color:var(--muted); font-weight:800; }
 .audit-transfer-facts dd { margin:0; color:var(--text); }
 .audit-transfer-lines { width:100%; border-collapse:collapse; margin-top:12px; text-align:left; }
-.audit-transfer-lines th { padding:6px 8px; border-bottom:1px solid var(--line); color:var(--muted); font-size:.64rem; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; }
+.audit-transfer-lines th { padding:6px 8px; border-bottom:1px solid var(--line); color:var(--muted); font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; }
 .audit-transfer-lines td { padding:6px 8px; border-bottom:1px solid #eef2ee; color:var(--text); font-size:.76rem; font-variant-numeric:tabular-nums; }
-.audit-transfer-note { display:block; margin-top:8px; color:var(--muted); font-size:.68rem; }
+.audit-transfer-note { display:block; margin-top:8px; color:var(--muted); font-size:.72rem; }
 .audit-payload summary { color:var(--forest-bright); font-weight:800; font-size:.8rem; cursor:pointer; }
 .audit-payload[open] summary { margin-bottom:10px; }
 .audit-json { max-height:340px; overflow:auto; margin:0; padding:11px; border-radius:8px; background:#f5f8f5; color:var(--text); font:.72rem/1.5 ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
-.audit-trace small { display:block; margin-top:10px; color:var(--muted); font-size:.68rem; }
+.audit-trace small { display:block; margin-top:10px; color:var(--muted); font-size:.72rem; }
 
 @media(max-width:700px) {
     .audit-drawer { width:100%; }

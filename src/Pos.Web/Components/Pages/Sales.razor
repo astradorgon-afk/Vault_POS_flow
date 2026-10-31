@@ -10,16 +10,13 @@
 
 <section class="pos-head">
     <div>
-        <span class="eyebrow">Point of sale</span>
-        <h1>Sales</h1>
-        <p>Find completed transactions by store and business date, then review, reprint or act on them.</p>
+        <h1>Sales ledger</h1>
     </div>
     <div class="head-pickers">
         <label class="location-picker">
             <span>Store</span>
             <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
                     @onchange="OnLocationChangedAsync" disabled="@loadingLocations">
-                <option value="">Select a store</option>
                 @foreach (PosLocation location in locations)
                 {
                     <option value="@location.Id">@location.Code · @location.Name</option>
@@ -38,7 +35,7 @@
         {
             <button type="button" class="search-action" @onclick="SearchAsync"
                     disabled="@(searching || selectedLocationId is null)">
-                @(searching ? "Searching…" : "Find sales")
+                @(searching ? "Searching…" : "Apply dates")
             </button>
         }
     </div>
@@ -70,24 +67,24 @@ else
         }
         else if (results.Count == 0)
         {
-            <div class="results-empty"><strong>No sales yet.</strong><span>Choose a store and business-date window, then search.</span></div>
+            <div class="results-empty"><strong>No sales to show.</strong><span>Try another store or date range.</span></div>
         }
         else
         {
-            <table class="sales-table">
+            <table class="sales-table rt-stack">
                 <thead>
-                    <tr><th>SALE #</th><th>Status</th><th>Business date</th><th>Completed</th><th>Gross</th><th>Net</th></tr>
+                    <tr><th>SALE #</th><th>Status</th><th class="rt-hide-tablet">Business date</th><th>Completed</th><th>Gross</th><th>Net</th></tr>
                 </thead>
                 <tbody>
                     @foreach (PosSaleSummary sale in results)
                     {
                         <tr @key="sale.Id" @onclick="() => OpenSale(sale.Id)">
-                            <td class="sale-number"><a href="@($"/sales/{sale.Id:D}")" @onclick:stopPropagation="true">@sale.Number</a></td>
-                            <td><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></td>
-                            <td>@sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
-                            <td>@sale.CompletedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td>@Money(sale.GrossTotal)</td>
-                            <td><strong>@Money(sale.NetTotal)</strong></td>
+                            <td class="sale-number rt-primary"><a href="@($"/sales/{sale.Id:D}")" @onclick:stopPropagation="true">@sale.Number</a></td>
+                            <td data-label="Status"><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></td>
+                            <td class="rt-hide-tablet" data-label="Business date">@sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
+                            <td data-label="Completed">@sale.CompletedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td data-label="Gross">@Money(sale.GrossTotal)</td>
+                            <td data-label="Net"><strong>@Money(sale.NetTotal)</strong></td>
                         </tr>
                     }
                 </tbody>
@@ -156,7 +153,6 @@ else
         locations.AddRange(response.Value.Where(location =>
             location.Kind == 1 &&
             Session.CanUseInventoryLocation(location.Id)));
-        selectedLocationId = locations.Count == 1 ? locations[0].Id : null;
         if (locations.Count == 0)
         {
             message = "No active store is assigned to this account.";
@@ -170,16 +166,28 @@ else
             from = DateOnly.TryParseExact(QueryFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly f) ? f : null;
             to = DateOnly.TryParseExact(QueryTo, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly t) ? t : null;
             await SearchAsync();
+            return;
         }
+
+        // Open on the store this session works at, or the first one, so the
+        // ledger shows sales straight away rather than an empty panel.
+        selectedLocationId = Session.WorkLocationId is { } preferred && locations.Any(location => location.Id == preferred)
+            ? preferred
+            : locations[0].Id;
+        await SearchAsync();
     }
 
-    private void OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    private async Task OnLocationChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
         selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
         results.Clear();
         total = 0;
         searched = false;
         message = null;
+        if (selectedLocationId is not null)
+        {
+            await SearchAsync();
+        }
     }
 
     private async Task SearchAsync()

@@ -15,7 +15,6 @@
     <div>
         @if (order is not null)
         {
-            <span class="order-eyebrow">Purchase order</span>
             <h1>@PurchasingText.OrderName(order.Number) <span class="ov-pill tone-@PurchasingText.Tone(order.Status, Outstanding)">@PurchasingText.Label(order.Status, Outstanding)</span></h1>
             <p>@SupplierName <span aria-hidden="true">→</span> @LocationName(order.DestinationLocationId)</p>
         }
@@ -111,7 +110,7 @@ else if (order is { } o)
                 <div class="po-card-head">
                     <div>
                         <h2>Approve line by line</h2>
-                        <p>Tick each line once you have checked the product, quantity and cost. Approve unlocks when every line is ticked.</p>
+                        <p>Tick every line to unlock approval.</p>
                     </div>
                     <div class="po-meter" role="progressbar" aria-valuemin="0" aria-valuemax="@o.Lines.Count" aria-valuenow="@reviewed.Count">
                         <strong>@reviewed.Count of @o.Lines.Count</strong><span>lines checked</span>
@@ -123,19 +122,19 @@ else if (order is { } o)
                     <div class="po-alert">You raised this order. Unless it is within your self-approval limit, someone else has to approve it.</div>
                 }
                 <div class="qr-table-wrap">
-                    <table class="qr-table po-lines">
+                    <table class="qr-table po-lines rt-stack">
                         <thead><tr><th>Checked</th><th>#</th><th>Product</th><th class="num">Quantity</th><th class="num">Unit cost</th><th class="num">Line total</th></tr></thead>
                         <tbody>
                             @foreach (PosPurchaseOrderLine line in o.Lines)
                             {
                                 bool ok = reviewed.Contains(line.Id);
                                 <tr class="@(ok ? "po-ok" : null)" @onclick="() => ToggleReviewed(line.Id)">
-                                    <td><input type="checkbox" checked="@ok" aria-label="Checked line @line.LineNo" @onclick:stopPropagation="true" @onchange="() => ToggleReviewed(line.Id)" /></td>
-                                    <td>@line.LineNo</td>
-                                    <td><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
-                                    <td class="num">@PurchasingText.Quantity(line.OrderedQuantity) @UnitName(line.UnitOfMeasureId)</td>
-                                    <td class="num">@PurchasingText.Money(line.UnitCost)</td>
-                                    <td class="num"><strong>@PurchasingText.Money(line.LineTotal)</strong></td>
+                                    <td data-label="Checked"><input type="checkbox" checked="@ok" aria-label="Checked line @line.LineNo" @onclick:stopPropagation="true" @onchange="() => ToggleReviewed(line.Id)" /></td>
+                                    <td class="rt-hide-sm">@line.LineNo</td>
+                                    <td class="rt-primary"><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
+                                    <td class="num" data-label="Quantity">@PurchasingText.Quantity(line.OrderedQuantity) @UnitName(line.UnitOfMeasureId)</td>
+                                    <td class="num" data-label="Unit cost">@PurchasingText.Money(line.UnitCost)</td>
+                                    <td class="num" data-label="Line total"><strong>@PurchasingText.Money(line.LineTotal)</strong></td>
                                 </tr>
                             }
                         </tbody>
@@ -220,7 +219,7 @@ else if (order is { } o)
         <section class="qr-card qr-results">
             <header class="qr-results-head"><h2>Order items <small>@o.Lines.Count</small></h2></header>
             <div class="qr-table-wrap">
-                <table class="qr-table po-lines">
+                <table class="qr-table po-lines rt-stack">
                     <thead><tr><th>#</th><th>Product</th><th class="num">Ordered</th><th class="num">Received good</th><th class="num">Still due</th><th class="num">Unit cost</th><th class="num">Line total</th></tr></thead>
                     <tbody>
                         @foreach (PosPurchaseOrderLine line in o.Lines)
@@ -228,13 +227,13 @@ else if (order is { } o)
                             decimal got = ReceivedFor(line.Id);
                             bool isShort = Due(line) > 0 && o.Status is "PartiallyReceived" or "Closed";
                             <tr class="static @(isShort ? "po-short-row" : null)">
-                                <td>@line.LineNo</td>
-                                <td><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
-                                <td class="num">@PurchasingText.Quantity(line.OrderedQuantity)</td>
-                                <td class="num">@(receiptsLoaded ? PurchasingText.Quantity(got) : "—")</td>
-                                <td class="num">@(receiptsLoaded ? Due(line) > 0 ? PurchasingText.Quantity(Due(line)) : "Complete" : "—")@if (receiptsLoaded && isShort) { <small>short</small> }</td>
-                                <td class="num">@PurchasingText.Money(line.UnitCost)</td>
-                                <td class="num">@PurchasingText.Money(line.LineTotal)</td>
+                                <td class="rt-hide-sm">@line.LineNo</td>
+                                <td class="rt-primary"><strong>@(line.ProductName ?? "Product")</strong><small>@line.ProductSku</small></td>
+                                <td class="num" data-label="Ordered">@PurchasingText.Quantity(line.OrderedQuantity)</td>
+                                <td class="num" data-label="Received good">@(receiptsLoaded ? PurchasingText.Quantity(got) : "—")</td>
+                                <td class="num" data-label="Still due">@(receiptsLoaded ? Due(line) > 0 ? PurchasingText.Quantity(Due(line)) : "Complete" : "—")@if (receiptsLoaded && isShort) { <small>short</small> }</td>
+                                <td class="num" data-label="Unit cost">@PurchasingText.Money(line.UnitCost)</td>
+                                <td class="num" data-label="Line total">@PurchasingText.Money(line.LineTotal)</td>
                             </tr>
                         }
                     </tbody>

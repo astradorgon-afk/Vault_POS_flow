@@ -2,9 +2,10 @@
 .report-page-head h1 { margin:.3rem 0 .3rem; font:800 clamp(1.5rem,2.4vw,2rem)/1.1 'Manrope'; letter-spacing:-.03em; }
 .report-page-head p { max-width:42rem; margin:0; color:var(--muted); }
 .report-pickers { display:flex; align-items:flex-end; gap:.65rem; flex-wrap:wrap; justify-content:flex-end; }
-.report-pickers label { display:grid; gap:.4rem; color:var(--muted); font-size:.67rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.report-pickers label { display:grid; gap:.4rem; color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
 .report-pickers select,.report-pickers input { height:44px; min-width:170px; padding:0 .75rem; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--ink); font-weight:700; font-size:.86rem; }
-.report-pickers button { height:44px; padding:0 1rem; border:0; border-radius:9px; background:var(--forest); color:#fff; font-weight:800; cursor:pointer; }
+.report-pickers button { height:44px; padding:0 1rem; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--forest); font-weight:800; cursor:pointer; }
+.report-pickers button:hover:enabled { background:var(--mint-soft); }
 .report-pickers button:disabled { opacity:.5; cursor:default; }
 .report-message { margin:0 0 1rem; padding:.8rem 1rem; border-left:3px solid var(--amber); background:var(--amber-soft); color:#6e5011; }
 .report-empty { min-height:300px; display:flex; align-items:center; justify-content:center; gap:1.2rem; border:1px dashed var(--line-strong); border-radius:18px; background:#fff; color:var(--muted); }
@@ -29,7 +30,7 @@
 /* --- Stat cards --- */
 .stat-row { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-top:1rem; }
 .stat-card { display:flex; flex-direction:column; min-height:140px; padding:1.2rem 1.3rem; border:1px solid var(--line); border-radius:16px; background:#fff; }
-.stat-label { color:var(--muted); font-size:.67rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.stat-label { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
 .stat-figure { display:flex; align-items:center; gap:.8rem; margin:.5rem 0 .55rem; }
 .stat-figure strong { font:700 clamp(1.8rem,3vw,2.6rem)/1 'Manrope'; letter-spacing:-.04em; color:var(--forest); }
 .stat-figure strong.negative { color:var(--danger); }
@@ -55,7 +56,7 @@
 
 /* Tables */
 .activity-table,.items-table { width:100%; border-collapse:collapse; font-size:.8rem; }
-.activity-table th,.items-table th { padding:.6rem .7rem; color:var(--muted); font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; text-align:left; background:var(--paper); }
+.activity-table th,.items-table th { padding:.6rem .7rem; color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; text-align:left; background:var(--paper); }
 .activity-table th:first-child,.items-table th:first-child { border-radius:7px 0 0 7px; }
 .activity-table th:last-child,.items-table th:last-child { border-radius:0 7px 7px 0; }
 .activity-table td,.items-table td { padding:.65rem .7rem; border-bottom:1px solid var(--line); vertical-align:middle; }
@@ -65,11 +66,11 @@
 .units-in { color:var(--forest); font-weight:700; }
 .units-out { color:#8a6413; font-weight:700; }
 .activity-ref { font-weight:600; }
-.activity-dr { display:block; color:var(--muted); font-size:.68rem; }
+.activity-dr { display:block; color:var(--muted); font-size:.72rem; }
 .activity-kind { margin-right:.45rem; }
 .activity-route { color:var(--ink); }
 .items-table td:first-child { font-weight:600; }
-.direction { display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.6rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
+.direction { display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
 .direction.incoming { background:var(--mint-soft); color:var(--forest); }
 .direction.outgoing { background:var(--amber-soft); color:#765715; }
 
@@ -85,7 +86,7 @@
 .chart-bar { flex:1; display:flex; align-items:flex-end; justify-content:center; gap:3px; min-width:0; height:100%; }
 .chart-bar .bar-in { width:100%; max-width:9px; background:var(--forest); border-radius:3px 3px 0 0; }
 .chart-bar .bar-out { width:100%; max-width:9px; background:#d47a2a; border-radius:3px 3px 0 0; }
-.chart-axis { display:flex; margin-top:.5rem; color:var(--muted); font-size:.68rem; }
+.chart-axis { display:flex; margin-top:.5rem; color:var(--muted); font-size:.72rem; }
 .chart-axis span { flex:1; text-align:center; min-width:0; }
 .chart-legend { display:flex; gap:1.5rem; margin-top:.8rem; font-size:.75rem; color:var(--muted); }
 .chart-legend span { display:flex; align-items:center; gap:.45rem; }
@@ -102,11 +103,18 @@
     .report-pickers { justify-content:flex-start; }
 }
 @media(max-width:700px) {
-    .report-pickers { align-items:stretch; flex-direction:column; }
-    .report-pickers select,.report-pickers input { width:100%; }
-    .report-banner { align-items:flex-start; flex-wrap:wrap; gap:.9rem; }
-    .banner-stat { margin-left:0; padding-left:0; border-left:0; width:100%; justify-content:space-between; }
-    .stat-row { grid-template-columns:1fr; }
+    .report-pickers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; }
+    .report-pickers select,.report-pickers input { width:100%; min-width:0; }
+    .report-pickers button { grid-column:1 / -1; }
+    .report-banner { align-items:center; gap:.75rem; padding:.85rem 1rem; }
+    .banner-icon, .banner-stat small { display:none; }
+    .banner-identity strong { font-size:1.15rem; }
+    .banner-stat { padding-left:.75rem; }
+    .banner-stat strong { font-size:1.3rem; }
+    .stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); gap:.6rem; }
+    .stat-card { min-height:0; padding:.8rem .9rem; }
+    .stat-badge { display:none; }
+    .stat-figure strong { font-size:1.6rem; }
     .report-empty { align-items:flex-start; padding:2rem 1.5rem; flex-direction:column; }
     .activity-table,.items-table { font-size:.74rem; }
 }

@@ -11,12 +11,10 @@
 <PageTitle>Store inventory · VaultFlow</PageTitle>
 
 <header class="qr-head sk-head">
-    <span class="eyebrow">Monitoring</span>
-    <h1>Store inventory</h1>
-    <p>What each location holds, from the items running out to the ones piling up.</p>
+    <h1>Stock levels</h1>
     @if (Notifications.IsLive)
     {
-        <p class="sk-live"><span aria-hidden="true">●</span> Live: updates as registers sell and stock moves</p>
+        <p class="sk-live"><span aria-hidden="true">●</span> Live</p>
     }
 </header>
 
@@ -129,11 +127,11 @@ else if (report is not null)
                 <thead>
                     <tr>
                         @SortHeader("name", "Product", false)
-                        @SortHeader("category", "Category", false)
+                        @SortHeader("category", "Category", false, "rt-hide-md")
                         @SortHeader("available", "Available", true)
-                        <th class="num">Reorder at</th>
-                        <th class="num">Target</th>
-                        @SortHeader("sold", "Sold / day", true)
+                        <th class="num rt-hide-lg">Reorder at</th>
+                        <th class="num rt-hide-lg">Target</th>
+                        @SortHeader("sold", "Sold / day", true, "rt-hide-md")
                         @SortHeader("days", "Days left", true)
                         @SortHeader("value", "Value", true)
                         @SortHeader("status", "Status", false)
@@ -153,11 +151,11 @@ else if (report is not null)
                     {
                         <tr @key="row.ProductId" class="static">
                             <td><strong>@row.Name</strong><small>@row.Sku</small></td>
-                            <td>@row.Category</td>
+                            <td class="rt-hide-md">@row.Category</td>
                             <td class="num"><strong>@Qty(row.Available)</strong>@if (row.InTransit > 0m) {<small>+@Qty(row.InTransit) in transit</small>}</td>
-                            <td class="num">@Qty(row.ReorderPoint)</td>
-                            <td class="num">@Qty(row.TargetStock)</td>
-                            <td class="num">@row.DailySales.ToString("0.##", CultureInfo.InvariantCulture)</td>
+                            <td class="num rt-hide-lg">@Qty(row.ReorderPoint)</td>
+                            <td class="num rt-hide-lg">@Qty(row.TargetStock)</td>
+                            <td class="num rt-hide-md">@row.DailySales.ToString("0.##", CultureInfo.InvariantCulture)</td>
                             <td class="num">@(row.DaysOfCover is { } days ? days.ToString("0.#", CultureInfo.InvariantCulture) : "—")</td>
                             <td class="num">@Money(row.StockValue)</td>
                             <td><span class="ov-pill tone-@Tone(row.Status)">@StatusLabel(row.Status)</span></td>
@@ -325,10 +323,10 @@ else if (report is not null)
         _ => 3,
     };
 
-    private RenderFragment SortHeader(string key, string label, bool numeric) => __builder =>
+    private RenderFragment SortHeader(string key, string label, bool numeric, string? shed = null) => __builder =>
     {
         bool active = sortKey == key;
-        <th class="@(numeric ? "num" : null)" aria-sort="@(active ? (sortDescending ? "descending" : "ascending") : "none")">
+        <th class="@($"{(numeric ? "num" : null)} {shed}".Trim())" aria-sort="@(active ? (sortDescending ? "descending" : "ascending") : "none")">
             <button type="button" class="sk-sort @(active ? "on" : null)" @onclick="() => SortBy(key, numeric)" title="Sort by @label.ToLowerInvariant()">
                 @label <span aria-hidden="true">@(active ? (sortDescending ? "↓" : "↑") : "↕")</span>
             </button>

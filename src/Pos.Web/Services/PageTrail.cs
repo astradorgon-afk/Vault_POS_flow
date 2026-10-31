@@ -62,8 +62,8 @@ public sealed class PageTrail(NavigationManager navigation)
     private static PagePlace Place(string path) => path switch
     {
         "" => new("Your workspace", "Overview", null),
-        "notifications" => new("Activity", "Notifications", null),
-        "stores" => new("Stores", "Store performance", null),
+        "notifications" => new("Your workspace", "Notifications", null),
+        "stores" => new("Stores", "Store movement", null),
         "sales" => new("Stores", "Sales ledger", null),
         "analytics/products" => new("Stores", "Product analytics", null),
         _ when path.StartsWith("sales/", StringComparison.Ordinal) => new("Stores", "Sale", Sales),
@@ -78,9 +78,9 @@ public sealed class PageTrail(NavigationManager navigation)
         _ when path.StartsWith("transfers/", StringComparison.Ordinal) => new("Inventory", "Transfer", new NavCrumb("Transfers", "transfers")),
         _ when path.StartsWith("inventory/timeline/", StringComparison.Ordinal) => new("Inventory", "Movement chain", new NavCrumb("Stock levels", "inventory/stock")),
         "reports" => new("Stores", "Daily reports", null),
-        "catalog" => new("Your workspace", "Products & barcodes", new NavCrumb("Your workspace", string.Empty)),
-        "catalog/change-requests" => new("Your workspace", "Catalogue approvals", Catalogue),
-        _ when path.StartsWith("catalog/products/", StringComparison.Ordinal) => new("Your workspace", "Product", Catalogue),
+        "catalog" => new("Catalogue", "Products & barcodes", null),
+        "catalog/change-requests" => new("Catalogue", "Catalogue approvals", null),
+        _ when path.StartsWith("catalog/products/", StringComparison.Ordinal) => new("Catalogue", "Product", Catalogue),
         "inventory/exceptions" => new("Inventory", "Failed attempts", null),
         "purchasing" => new("Purchasing", "Purchase orders", null),
         "receiving" => new("Inventory", "Goods receiving", null),
@@ -90,7 +90,8 @@ public sealed class PageTrail(NavigationManager navigation)
         "admin/locations" => new("Administration", "Locations", null),
         "admin/users" => new("Administration", "People & roles", null),
         "admin/devices" => new("Administration", "Devices", null),
-        "sync/failures" => new("System operations", "Sync failures", null),
+        "sync/failures" => new("Administration", "Sync failures", null),
+        "admin/audit" => new("Your workspace", "Activity log", null),
         _ => new("Your workspace", "VaultFlow", new NavCrumb("Overview", string.Empty)),
     };
 }

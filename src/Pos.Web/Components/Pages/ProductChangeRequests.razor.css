@@ -19,7 +19,7 @@
 .approval-what span { color:var(--muted); font-size:.8rem; }
 .approval-what i { margin:0 5px; color:#b3c6cc; font-style:normal; }
 
-.approval-status { flex:none; padding:4px 11px; border-radius:99px; font-weight:800; font-size:.66rem; letter-spacing:.06em; text-transform:uppercase; }
+.approval-status { flex:none; padding:4px 11px; border-radius:99px; font-weight:800; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; }
 .status-pending { background:var(--amber); color:#4a3a10; }
 .status-approved { background:var(--mint); color:var(--forest); }
 .status-rejected { background:#f4ebeb; color:#a45e5e; }

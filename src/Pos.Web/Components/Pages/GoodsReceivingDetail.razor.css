@@ -22,7 +22,7 @@
 .route-field strong{font-size:.88rem;font-weight:600;overflow-wrap:anywhere}
 .icon-box{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:10px;background:#edf5ef;color:#1b634b}
 .icon-box ::deep svg{width:19px;height:19px}
-.label{display:block;margin-bottom:3px;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.label{display:block;margin-bottom:3px;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .route-arrow{display:grid;place-items:center;width:55px;color:#9bac9f}
 .route-arrow ::deep svg{width:22px;height:22px}
 .route-stats{display:flex;gap:32px;margin-left:auto;padding-left:30px;border-left:1px solid #e2e9e4}
@@ -43,9 +43,9 @@
 .card-head p{margin:6px 0 0;color:#73817b;font-size:.76rem}
 .card-head-icon{display:grid;place-items:center;color:#8a9f90}
 .card-head-icon ::deep svg{width:17px;height:17px}
-.eyebrow{margin-bottom:5px;color:#1b634b;font-size:.63rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
-.optional{padding:3px 7px;border-radius:4px;background:#f3f5f2;color:#73817b;font-size:.63rem;font-weight:500}
-.count{padding:4px 10px;border-radius:20px;background:#f0f4f0;color:#73817b;font-size:.7rem}
+.eyebrow{margin-bottom:5px;color:#1b634b;font-size:.72rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
+.optional{padding:3px 7px;border-radius:4px;background:#f3f5f2;color:#73817b;font-size:.72rem;font-weight:500}
+.count{padding:4px 10px;border-radius:20px;background:#f0f4f0;color:#73817b;font-size:.72rem}
 
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px 20px}
 .scan-hint{display:flex;align-items:center;gap:8px;color:#73817b;font-size:.72rem;line-height:1.5}
@@ -62,13 +62,13 @@
 /* Five columns on the desktop table; the header labels them once rather than
    repeating a label inside every row. */
 .table-head,.product-row{display:grid;grid-template-columns:minmax(160px,1fr) 46px 118px 104px 112px;gap:14px;align-items:start}
-.table-head{padding:11px 24px;border-block:1px solid #e2e9e4;background:#f8faf8;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.table-head{padding:11px 24px;border-block:1px solid #e2e9e4;background:#f8faf8;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .product-row{min-height:138px;padding:24px;border-bottom:1px solid #e2e9e4}
 .product-rows .product-row:last-child{border-bottom:0}
 .product{min-width:0;padding-top:3px}
 .product-name{font-size:.84rem;font-weight:600;line-height:1.55;color:#23392f;overflow-wrap:anywhere}
 .sku{margin-top:4px;color:#73817b;font-size:.72rem}
-.note-marker{margin-top:5px;color:#1b634b;font-size:.65rem}
+.note-marker{margin-top:5px;color:#1b634b;font-size:.72rem}
 .due-cell{padding-top:7px}
 .due{display:inline-block;padding:3px 10px;border-radius:5px;background:#edf5ef;font-size:.76rem;font-weight:600}
 
@@ -81,7 +81,7 @@
 .stepper input::-webkit-inner-spin-button,.stepper input::-webkit-outer-spin-button{appearance:none;margin:0}
 .stepper:focus-within{outline:2px solid #91bfa3;outline-offset:2px}
 .stepper input:focus-visible{outline:0}
-.text-btn{margin-top:5px;padding:4px 0 0;border:0;background:transparent;color:#1b634b;font-size:.66rem;font-weight:600;cursor:pointer}
+.text-btn{margin-top:5px;padding:4px 0 0;border:0;background:transparent;color:#1b634b;font-size:.72rem;font-weight:600;cursor:pointer}
 .text-btn:disabled{opacity:.45;cursor:not-allowed}
 
 .damage-field{display:block;margin:0;width:100%}
@@ -90,17 +90,17 @@
 .damage-input input{width:100%;min-width:0;height:42px;padding:8px 10px;border:1px solid #d6e0d9;border-radius:7px;background:#fff;color:#17382d;font-size:.88rem;font-weight:600;text-align:center;appearance:textfield;font-variant-numeric:tabular-nums}
 .damage-input input::-webkit-inner-spin-button,.damage-input input::-webkit-outer-spin-button{appearance:none;margin:0}
 /* The derived number the counter actually cares about. */
-.usable{display:flex;align-items:center;gap:5px;margin-top:9px;color:#1b634b;font-size:.66rem;white-space:nowrap}
+.usable{display:flex;align-items:center;gap:5px;margin-top:9px;color:#1b634b;font-size:.72rem;white-space:nowrap}
 .usable::before{content:"";width:4px;height:4px;flex:none;border-radius:50%;background:#75a487}
 
 .action-stack{display:grid;gap:7px;padding-top:4px;min-width:0}
-.action-stack button{display:flex;align-items:center;gap:6px;min-height:26px;padding:2px 0;border:0;background:none;color:#5d7364;font-size:.66rem;white-space:nowrap;text-align:left;cursor:pointer}
+.action-stack button{display:flex;align-items:center;gap:6px;min-height:26px;padding:2px 0;border:0;background:none;color:#5d7364;font-size:.72rem;white-space:nowrap;text-align:left;cursor:pointer}
 .action-stack button:hover{color:#17382d}
 .action-stack ::deep svg{width:14px;height:14px;flex:none}
 .action-stack .row-scan{justify-content:center;padding:6px 7px;min-height:34px;border:1px solid #d6e5da;border-radius:6px;background:#edf5ef;color:#1b634b;font-weight:600}
 .action-stack .row-scan:hover{background:#e0eee3}
 
-.helper{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid #e2e9e4;background:#fbfcfa;color:#73817b;font-size:.7rem;line-height:1.6}
+.helper{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid #e2e9e4;background:#fbfcfa;color:#73817b;font-size:.72rem;line-height:1.6}
 .helper ::deep svg{width:14px;height:14px;flex:none}
 
 .form-body{padding:0 24px 24px}
@@ -119,7 +119,7 @@
 .progress{height:5px;margin:17px 0 23px;border-radius:4px;background:#edf1eb;overflow:hidden}
 .progress>div{height:100%;background:#418b65;transition:width .2s}
 .submit{width:100%;min-height:43px;font-size:.78rem}
-.summary-foot{margin:9px 0 0;color:#73817b;font-size:.68rem;text-align:center}
+.summary-foot{margin:9px 0 0;color:#73817b;font-size:.72rem;text-align:center}
 
 .empty{padding:30px;text-align:center}
 .empty .icon-box{width:44px;height:44px;margin:0 auto 12px;background:#f5f7f4;color:#9aaa9e}
@@ -179,17 +179,17 @@
     .product-row>.product{grid-column:1/-1;padding-right:62px}
     .product-name{font-size:.9rem}
     .due-cell{position:absolute;top:22px;right:20px;padding:0}
-    .due-cell .due::after{content:" due";font-size:.66rem}
+    .due-cell .due::after{content:" due";font-size:.72rem}
     .quantity-cell{grid-column:1;grid-row:2}
-    .quantity-cell::before{content:"ARRIVED";display:block;margin-bottom:8px;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.08em}
+    .quantity-cell::before{content:"ARRIVED";display:block;margin-bottom:8px;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.08em}
     .stepper{width:100%;height:48px}
     .stepper button{flex-basis:34px;width:34px;font-size:1.15rem}
     .stepper input{font-size:1rem}
     .damage-cell{grid-column:2;grid-row:2}
-    .damage-label{position:static;width:auto;height:auto;clip:auto;display:block;margin:0 0 8px;overflow:visible;color:#73817b;font-size:.63rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+    .damage-label{position:static;width:auto;height:auto;clip:auto;display:block;margin:0 0 8px;overflow:visible;color:#73817b;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
     .damage-input input{height:48px;font-size:1rem}
-    .text-btn{min-height:36px;font-size:.7rem}
-    .usable{margin-top:10px;font-size:.7rem;white-space:normal}
+    .text-btn{min-height:36px;font-size:.72rem}
+    .usable{margin-top:10px;font-size:.72rem;white-space:normal}
     /* Row actions become real targets once they are the only way in. */
     .action-stack{grid-column:1/-1;grid-row:3;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-top:12px;border-top:1px solid #e2e9e4}
     .action-stack button{justify-content:center;min-height:44px;padding:7px 8px;border:1px solid #e2e9e4;border-radius:6px;background:#fafcf9;font-size:.72rem;white-space:normal}
@@ -219,7 +219,7 @@
 
 @media(prefers-reduced-motion:reduce){.progress>div,.btn{transition:none}}
 
-.dlg-status{margin-right:auto;color:#73817b;font-size:.7rem;text-align:left}
+.dlg-status{margin-right:auto;color:#73817b;font-size:.72rem;text-align:left}
 .dlg .field select{display:block;width:100%;min-width:0;height:41px;margin-top:7px;padding:0 10px;border:1px solid #d6e0d8;border-radius:6px;background:#fff;color:#17382d;font-size:.78rem;font-weight:500}
 .dlg-product code{padding:2px 7px;border-radius:5px;background:#f3f5f2;font-family:ui-monospace,Consolas,monospace;font-size:.78rem}
 @media(max-width:780px){.dlg .field select{height:46px;font-size:1rem}.dlg footer{flex-wrap:wrap}.dlg-status{flex:1 1 100%;margin:0 0 6px}}

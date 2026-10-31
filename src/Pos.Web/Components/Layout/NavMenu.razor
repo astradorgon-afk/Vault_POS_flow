@@ -8,7 +8,7 @@
 <div class="brand-block">
     <a class="brand" href="" @onclick="NotifyNavigation">
         <span class="brand-glyph" aria-hidden="true">V</span>
-        <span><strong>VaultFlow</strong><small>Operations ledger</small></span>
+        <span><strong>VaultFlow</strong></span>
     </a>
     <button class="sidebar-close" type="button" aria-label="Close navigation" @onclick="NotifyNavigation"><AppIcon Name="close" /></button>
 </div>
@@ -130,7 +130,7 @@
 <AuthorizeView>
     <Authorized>
         <div class="sidebar-footer">
-            <div><span>Signed in as</span><strong>@Session.Current?.User.DisplayName</strong></div>
+            <strong title="@Session.Current?.User.DisplayName">@Session.Current?.User.DisplayName</strong>
             <button class="sign-out" type="button" @onclick="SignOutAsync"><AppIcon Name="logout" /> Sign out</button>
         </div>
     </Authorized>

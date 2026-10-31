@@ -6,7 +6,7 @@
 .restock-tabs button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 15px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: 800 .85rem 'Manrope', sans-serif; cursor: pointer; white-space: nowrap; }
 .restock-tabs button:hover { color: var(--forest); }
 .restock-tabs button.active { background: #fff; color: var(--forest); box-shadow: var(--shadow-card); }
-.restock-tab-badge { padding: 1px 7px; border-radius: 99px; background: #fff6dc; color: #8a5a16; font-size: .7rem; font-weight: 800; }
+.restock-tab-badge { padding: 1px 7px; border-radius: 99px; background: #fff6dc; color: #8a5a16; font-size: .72rem; font-weight: 800; }
 .restock-card { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: #fff; box-shadow: var(--shadow-card); }
 .restock-card > header { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); background: #f7faf7; }
 .restock-card h2 { margin: 4px 0 0; font: 700 1.1rem 'Manrope', sans-serif; }
@@ -21,7 +21,7 @@
 .restock-step-head small { color: var(--muted); font-size: .78rem; }
 .restock-step-note { margin: 0; padding: 12px 14px; border: 1px dashed var(--line-strong); border-radius: 9px; color: var(--muted); font-size: .83rem; }
 .restock-step-note[role="alert"] { border: 1px solid #e5b3ae; background: #fdecea; color: #a63d35; }
-.restock-field { display: grid; min-width: 0; gap: 6px; color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.restock-field { display: grid; min-width: 0; gap: 6px; color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .restock-field > :is(input, select) { box-sizing: border-box; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-size: .87rem; font-weight: 600; letter-spacing: normal; text-transform: none; }
 .restock-field:has(select) { max-width: 380px; }
 .restock-product-search { max-width: 700px; }
@@ -96,5 +96,9 @@
   .restock-line { flex-wrap: wrap; }
   .restock-line-name { flex-basis: 100%; }
   .restock-line-remove { margin-left: auto; }
-  .restock-row { flex-wrap: wrap; }
+  .restock-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; min-height: 0; padding: 12px 14px; }
+  .restock-row > div { grid-column: 1 / -1; }
+  .restock-row .restock-status { justify-self: start; }
+  .restock-row-action { justify-self: end; }
+  .restock-page section > header:not(.restock-head) > p { display: none; }
 }
