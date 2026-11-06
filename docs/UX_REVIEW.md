@@ -89,6 +89,30 @@ At phone width (650px and below; desktop is unchanged):
 Checked on a Pixel 7 viewport for owner, warehouse and store manager across 22
 pages: no horizontal overflow, titles hidden only where the app bar names the page.
 
+### Every page on a phone (second pass)
+
+All 30 routes plus sign-in and the *More* sheet were captured at full length
+on a Pixel 7 viewport, then reworked where they were still desktop layouts:
+
+- **Activity log**: the six-column table becomes one stacked entry per row
+  (time, action, person, place, record) with no clipped columns.
+- **Products**: each row shows the name with its barcode underneath, the
+  state and chevron on the right, instead of a truncated name beside a chip.
+- **Product detail**: the barcodes table keeps code, scans-as and actions.
+- **Devices**: the three status counts sit side by side.
+- **Count sheet**: a category filter no longer leaves a 150px gap (a desktop
+  flex width became a height when the toolbar stacked); each line has one
+  compact tool row (Scan + counted time) instead of a full-width button and divider.
+- **Receive delivery**: Scan, Report issue and Batch/cost share one compact row.
+- **New purchase order**: the running total docks flush on the tab bar.
+- **Section tabs** stay pinned under the app bar while a list scrolls.
+- **Location history** is titled in the app bar and goes back to Locations.
+- **Sign in**: the brand becomes a compact header so the form is above the fold
+  (overridden in the web's own sheet; the device client's shared sign-in is unchanged).
+- Any remaining wide table scrolls inside its card instead of being cut.
+
+Result: no page scrolls sideways at phone width (29 signed-in routes checked).
+
 ## Verification
 
 Follow-up (flagged items):

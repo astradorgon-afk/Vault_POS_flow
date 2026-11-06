@@ -91,6 +91,8 @@ public sealed class PageTrail(NavigationManager navigation)
         "admin/users" => new("Administration", "People & roles", null),
         "admin/devices" => new("Administration", "Devices", null),
         "admin/audit" => new("Administration", "Activity log", null),
+        _ when path.StartsWith("locations/", StringComparison.Ordinal) && path.EndsWith("/history", StringComparison.Ordinal)
+            => new("Administration", "Location history", new NavCrumb("Locations", "admin/locations")),
         "sync/failures" => new("Administration", "Sync failures", null),
         _ => new("Workspace", "VaultFlow", new NavCrumb("Overview", string.Empty)),
     };

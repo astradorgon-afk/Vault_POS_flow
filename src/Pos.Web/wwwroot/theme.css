@@ -514,6 +514,128 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
     .app-main .content .nt-toolbar { margin-top: 0; }
 }
 
+/* ---- Phone: page by page -----------------------------------------------------
+   Desktop tables become stacked rows, per-line tools become one compact row,
+   and summary figures sit side by side instead of one card per screen. */
+@media (max-width: 650px) {
+    /* Activity log: one entry per card-like row, no clipped columns. */
+    .app-main .content .audit-table-scroll { max-height: none; overflow: visible; }
+    .app-main .content .audit-table-scroll table,
+    .app-main .content .audit-table-scroll tbody { display: block; }
+    .app-main .content .audit-table-scroll thead { display: none; }
+    .app-main .content .audit-table-scroll .audit-day,
+    .app-main .content .audit-table-scroll .audit-day th { display: flex; position: static; }
+    .app-main .content .audit-table-scroll .audit-day th { width: 100%; }
+    .app-main .content .audit-table-scroll .audit-row {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr) 14px;
+        grid-template-areas: "when action open" "when who open" "when place open" "when record open";
+        gap: 2px 12px;
+        padding: 12px 14px;
+        border-top: 1px solid var(--line);
+    }
+    .app-main .content .audit-table-scroll .audit-row > td { padding: 0; border: 0; font-size: .8rem; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(1) { grid-area: when; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(2) { grid-area: action; font-weight: 700; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(3) { grid-area: who; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(4) { grid-area: place; color: var(--muted); font-size: .74rem; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(5) { grid-area: record; max-width: none; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(6) { grid-area: open; align-self: center; }
+    .app-main .content .audit-table-scroll .audit-row :is(.audit-code, td:nth-child(3) small) { display: none; }
+    .app-main .content .audit-table-scroll .audit-row td:nth-child(3) :is(button, strong) { display: inline; }
+    .app-main .content .audit-open-button { padding: 0; font-size: 0; }
+    .app-main .content .audit-open-button span { font-size: 1.2rem; color: var(--muted); }
+
+    /* Products: name over its barcode, state and chevron on the right. */
+    .app-main .content .catalog-product {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-areas: "id state chev" "code state chev";
+        align-items: center;
+        gap: 4px 10px;
+        min-height: 0;
+        padding: 10px 0;
+    }
+    .app-main .content .catalog-product .product-identity { grid-area: id; }
+    .app-main .content .catalog-product .product-meta { display: contents; }
+    .app-main .content .catalog-product .product-meta :is(code, .catalog-nocode) { grid-area: code; justify-self: start; max-width: 100%; padding: 2px 7px; }
+    .app-main .content .catalog-product .catalog-more { display: none; }
+    .app-main .content .catalog-product .product-status { grid-area: state; }
+    .app-main .content .catalog-product .product-chevron { grid-area: chev; }
+
+    /* Product barcodes: the code, what it scans as, and its actions. */
+    .app-main .content .barcode-table :is(th, td):is(:nth-child(2), :nth-child(4), :nth-child(5)) { display: none; }
+    .app-main .content .barcode-table :is(th, td) { padding-inline: 10px; }
+
+    /* Any remaining wide table scrolls inside its card rather than being cut. */
+    .app-main .content :is(.results-panel, .qr-results) { overflow-x: auto; }
+
+    /* Devices: three counts side by side. */
+    .app-main .content .fleet-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .app-main .content .fleet-summary > article { min-width: 0; min-height: 0; padding: 10px 12px; }
+    .app-main .content .fleet-summary > article small { display: none; }
+    .app-main .content .fleet-summary > article span { font-size: .62rem; line-height: 1.25; }
+    .app-main .content .fleet-summary > article strong { margin: 4px 0 0; font-size: 1.35rem; }
+
+    /* The count toolbar stacks into a column on a phone, where the filters'
+       desktop flex widths (190px, 230px) turned into tall empty heights. */
+    .app-main .content .sheet-toolbar > :is(.sheet-search, .sheet-category) { flex: 0 0 auto; }
+
+    /* Section tabs stay pinned under the app bar while a long list scrolls. */
+    .app-main .content .section-tabs {
+        position: sticky;
+        top: calc(56px + env(safe-area-inset-top));
+        z-index: 15;
+        margin: -16px -16px 12px;
+        padding: 8px 16px 0;
+        background: var(--paper);
+    }
+
+    /* New purchase order: the running total docks on the tab bar, edge to
+       edge, so content no longer shows through a gap beneath it. */
+    .app-main .content .pn-bar {
+        bottom: calc(65px + env(safe-area-inset-bottom));
+        margin-inline: -16px;
+        padding: 10px 16px;
+        border-width: 1px 0 0;
+        border-radius: 0;
+        background: #fff;
+        box-shadow: 0 -8px 18px -14px rgba(16, 41, 30, .3);
+    }
+
+    /* Count sheets and transfer pick/receive sheets: one tool row per line. */
+    .app-main .content :is(.cs-row, .cs-table--lean .cs-row) { min-height: 0; gap: 10px 12px; padding: 14px 16px; }
+    .app-main .content .cs-due-cell { top: 14px; right: 16px; }
+    .app-main .content .cs-stepper { height: 44px; }
+    .app-main .content .cs-actions { grid-template-columns: auto minmax(0, 1fr); align-items: center; padding-top: 0; border-top: 0; }
+    .app-main .content .cs-actions .cs-row-scan { grid-column: auto; min-height: 38px; padding: 0 14px; font-size: .76rem; }
+    .app-main .content .cs-actions .cs-sku { justify-self: end; text-align: right; }
+
+    /* Receiving rows: scan, issue and batch as one compact tool row. */
+    .app-main .content .product-row { min-height: 0; gap: 10px 12px; padding: 14px 16px; }
+    .app-main .content .action-stack { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding-top: 0; border-top: 0; }
+    .app-main .content .action-stack button,
+    .app-main .content .action-stack .row-scan {
+        grid-column: auto;
+        min-height: 40px;
+        padding: 4px 6px;
+        flex-direction: column;
+        gap: 2px;
+        font-size: .64rem;
+        line-height: 1.15;
+        text-align: center;
+    }
+}
+
+/* Sign-in on a phone: the brand as a header, the form first. Only the web
+   loads this sheet, so the device client's shared sign-in is unchanged. */
+@media (max-width: 560px) {
+    .login-story { min-height: 0; padding: 20px 24px 22px; gap: 10px; justify-content: flex-start; }
+    .login-story h1 { margin: 10px 0 0; font-size: 1.9rem; letter-spacing: -.04em; }
+    .login-story .eyebrow, .login-story p, .login-story > small { display: none; }
+    .login-panel { padding: 26px 24px 32px; place-items: start center; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .start-task, .start-task:hover { transition: none; transform: none; }
 }
