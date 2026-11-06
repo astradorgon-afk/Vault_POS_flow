@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Pos.Application.Notifications;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 using Pos.Domain.Transfers;
@@ -124,6 +125,20 @@ public sealed class TransferChangeInterceptorTests : IAsyncLifetime
         }
 
         _published.Batches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task NewStockCount_AnnouncesItsLocation_SoCountListsFollowAlong()
+    {
+        InventoryCount count = InventoryCount.Open(
+            DocumentNumber.Create(DocumentType.InventoryCount, 2026, 1), _store, InventoryCountKind.FullPhysical,
+            hasCategories: false, hasProducts: false,
+            [new InventoryCountSheetItem(_coke, null, 10m, 25m)], null, Actor, Now).Value;
+
+        _context.InventoryCounts.Add(count);
+        await _context.SaveChangesAsync(CancellationToken.None);
+
+        _published.Batches.Should().ContainSingle().Which.Should().BeEquivalentTo([_store]);
     }
 
     private Transfer Draft() => Transfer.Create(

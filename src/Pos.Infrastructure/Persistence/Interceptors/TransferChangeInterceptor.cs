@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Pos.Application.Notifications;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
+using Pos.Domain.Purchasing;
 using Pos.Domain.Transfers;
 
 namespace Pos.Infrastructure.Persistence.Interceptors;
@@ -144,7 +146,33 @@ public sealed partial class TransferChangeInterceptor(
                 locations.Add(entry.Entity.DestinationLocationId);
             }
         }
+
+        // Stock counts and supplier orders are worked from the same kind of
+        // list (Stock counts, Goods receiving) by people at that location. A
+        // new document or a status step wakes those lists the same way, so a
+        // submitted count or a sent order appears without anyone refreshing.
+        foreach (var entry in context.ChangeTracker.Entries<InventoryCount>())
+        {
+            if (IsNewOrStatusStep(entry, nameof(InventoryCount.Status)))
+            {
+                _pending.GetOrCreateValue(context).Add(entry.Entity.LocationId);
+            }
+        }
+
+        foreach (var entry in context.ChangeTracker.Entries<PurchaseOrder>())
+        {
+            if (IsNewOrStatusStep(entry, nameof(PurchaseOrder.Status)))
+            {
+                _pending.GetOrCreateValue(context).Add(entry.Entity.DestinationLocationId);
+            }
+        }
     }
+
+    private static bool IsNewOrStatusStep<TEntity>(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<TEntity> entry, string statusProperty)
+        where TEntity : class
+        => entry.State == EntityState.Added ||
+           (entry.State == EntityState.Modified && entry.Property(statusProperty).IsModified);
 
     private async Task FlushAsync(DbContext context)
     {

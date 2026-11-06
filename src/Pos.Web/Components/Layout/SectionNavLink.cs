@@ -15,17 +15,20 @@ public sealed class SectionNavLink : NavLink
     [Parameter]
     public IReadOnlyList<string> Except { get; set; } = [];
 
+    /// <summary>
+    /// Further base-relative sections this link stands for. One menu entry can
+    /// open a module of several pages (Restock: approvals, fulfillment,
+    /// requests) and stay current on any of them.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<string> Also { get; set; } = [];
+
     [Inject]
     private NavigationManager Navigation { get; set; } = default!;
 
     /// <inheritdoc />
     protected override bool ShouldMatch(string uriAbsolute)
     {
-        if (!base.ShouldMatch(uriAbsolute))
-        {
-            return false;
-        }
-
         string relative = Navigation.ToBaseRelativePath(uriAbsolute);
         int query = relative.IndexOfAny(['?', '#']);
         if (query >= 0)
@@ -33,15 +36,15 @@ public sealed class SectionNavLink : NavLink
             relative = relative[..query];
         }
 
-        foreach (string excluded in Except)
+        if (!base.ShouldMatch(uriAbsolute) && !Also.Any(section => Within(relative, section)))
         {
-            if (relative.Equals(excluded, StringComparison.OrdinalIgnoreCase) ||
-                relative.StartsWith(excluded + "/", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
+            return false;
         }
 
-        return true;
+        return !Except.Any(section => Within(relative, section));
     }
+
+    private static bool Within(string relative, string section)
+        => relative.Equals(section, StringComparison.OrdinalIgnoreCase) ||
+           relative.StartsWith(section + "/", StringComparison.OrdinalIgnoreCase);
 }

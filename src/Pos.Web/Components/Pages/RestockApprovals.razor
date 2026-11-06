@@ -6,15 +6,16 @@
 @inject NotificationStore Notifications
 @using System.Globalization
 @inject VaultFlowApiClient Api
+@inject UserSession Session
 
 <PageTitle>Restock approvals · VaultFlow</PageTitle>
 
 <section class="restock-page">
+    <SectionTabs Items="@SectionTabSets.Movement(Session)" Label="Movement" />
     <header class="restock-head">
         <div><span class="eyebrow">Owner approvals · inventory</span><h1>Restock approvals</h1><p>Review supply requests from your stores and your warehouse. A store's request is filled from warehouse stock; the warehouse's own request is filled by buying from a supplier.</p></div>
         <button type="button" class="restock-refresh" @onclick="() => LoadAsync()" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
-
     @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
 
     <nav class="restock-filters" aria-label="Filter restock requests">

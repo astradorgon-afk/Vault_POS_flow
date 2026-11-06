@@ -223,3 +223,23 @@
 .dlg .field select{display:block;width:100%;min-width:0;height:41px;margin-top:7px;padding:0 10px;border:1px solid #d6e0d8;border-radius:6px;background:#fff;color:#17382d;font-size:.78rem;font-weight:500}
 .dlg-product code{padding:2px 7px;border-radius:5px;background:#f3f5f2;font-family:ui-monospace,Consolas,monospace;font-size:.78rem}
 @media(max-width:780px){.dlg .field select{height:46px;font-size:1rem}.dlg footer{flex-wrap:wrap}.dlg-status{flex:1 1 100%;margin:0 0 6px}}
+
+/* Goods the supplier sent that the order does not cover: held for quarantine. */
+.unexpected-goods{display:grid;gap:10px;margin:0;padding:16px 24px 20px;border-top:1px solid #f0d9a8;background:#fffaf0}
+.unexpected-goods h3{margin:0;color:#6f4f12;font:700 .9rem 'Manrope',sans-serif}
+.unexpected-goods > p{margin:0;color:#7a6633;font-size:.74rem}
+.unexpected-row{display:grid;grid-template-columns:minmax(0,1fr) 120px auto;align-items:end;gap:12px;padding:10px 12px;border:1px solid #f0dfb8;border-radius:9px;background:#fff}
+.unexpected-row > div{display:grid;gap:2px;min-width:0}
+.unexpected-row strong{overflow:hidden;font-size:.8rem;text-overflow:ellipsis;white-space:nowrap}
+.unexpected-row small{color:#73817b;font-size:.68rem}
+.unexpected-row label{display:grid;gap:4px;color:#73817b;font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.unexpected-row label{min-width:0}
+.unexpected-row input{box-sizing:border-box;width:100%;min-width:0;height:36px;padding:0 10px;border:1px solid #cbd5cd;border-radius:8px;font-size:.84rem}
+.unexpected-row .text-btn{margin:0;padding:0 4px;align-self:center;font-size:.74rem}
+.unexpected-goods > .btn{justify-self:start}
+
+/* The receiver vouches for what physically arrived before stock is recorded. */
+.arrival-confirmation{align-items:flex-start;margin:12px 0 2px;padding:10px 12px;border:1px solid #d5e4da;border-radius:9px;background:#f6faf7;color:#2c4d3c;line-height:1.45}
+.arrival-confirmation input{margin-top:2px}
+
+@media(max-width:620px){.unexpected-row{grid-template-columns:minmax(0,1fr) 100px}.unexpected-row .text-btn{grid-column:1/-1;justify-self:start}}

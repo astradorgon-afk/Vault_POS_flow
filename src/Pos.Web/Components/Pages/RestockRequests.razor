@@ -11,6 +11,7 @@
 <PageTitle>@PageHeading · VaultFlow</PageTitle>
 
 <section class="restock-page">
+    <SectionTabs Items="@SectionTabSets.Movement(Session)" Label="Movement" />
     <header class="restock-head">
         <div><span class="eyebrow">@(AtWarehouse ? "Main warehouse · supplier stock" : "Inventory · store supplies")</span><h1>@PageHeading</h1><p>@(AtWarehouse
             ? "Ask the owner to buy what the warehouse is running out of. The owner turns approved requests into purchase orders."
@@ -26,7 +27,6 @@
             </button>
         </div>
     </header>
-
     @if (!string.IsNullOrWhiteSpace(message))
     {
         <div class="restock-message" role="status">@message</div>

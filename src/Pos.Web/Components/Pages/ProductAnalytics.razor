@@ -8,11 +8,11 @@
 <PageTitle>Product analytics · VaultFlow</PageTitle>
 
 <div class="pa">
+    <SectionTabs Items="@SectionTabSets.StorePerformance(Session)" Label="Store performance" />
     <header class="pa-head">
         <h1>Best &amp; worst sellers</h1>
         <p>@PeriodLabel@(report is null ? "" : $" · {report.From:d MMM} – {report.To:d MMM}")</p>
     </header>
-
     <div class="pa-controls">
         <div class="pa-seg" role="radiogroup" aria-label="Period">
             @foreach (int days in Periods)

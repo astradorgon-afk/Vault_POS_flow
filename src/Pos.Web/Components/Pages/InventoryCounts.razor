@@ -1,9 +1,11 @@
 @page "/inventory/counts"
 @attribute [Authorize]
 @rendermode InteractiveServer
+@implements IDisposable
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
+@inject NotificationStore Notifications
 @inject NavigationManager Navigation
 
 <PageTitle>Stock counts · VaultFlow</PageTitle>
@@ -200,6 +202,8 @@ else
             ? selectedCategoryId is not null
             : true);
 
+    private RefreshThrottle? liveRefresh;
+
     protected override async Task OnInitializedAsync()
     {
         if (!CanViewInventory)
@@ -207,6 +211,14 @@ else
             loadingLocations = false;
             return;
         }
+
+        // Counts are opened, submitted and approved by other people. Each step is
+        // announced with the workflow-document signal, and an approval also
+        // moves stock. The list follows along without Refresh.
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadCountsQuietlyAsync));
+        Notifications.TransfersChanged += OnInventoryChanged;
+        Notifications.Changed += OnCountsMayHaveChanged;
+        Notifications.InventoryChanged += OnInventoryChanged;
 
         await LoadLocationsAsync();
         if (CanCount)
@@ -276,6 +288,45 @@ else
     private void OnCategoryChangedAsync(Microsoft.AspNetCore.Components.ChangeEventArgs e)
     {
         selectedCategoryId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
+    }
+
+    private void OnCountsMayHaveChanged() => liveRefresh?.Request();
+
+    private void OnInventoryChanged(IReadOnlyList<Guid> _) => liveRefresh?.Request();
+
+    /// <summary>Replaces the rows in place: no spinner, no cleared list, no message.</summary>
+    private async Task ReloadCountsQuietlyAsync()
+    {
+        if (loading || selectedLocationId is not { } locationId || !locations.Any(location => location.Id == locationId))
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<List<PosInventoryCountSummary>> response = await Api.GetInventoryCountsAsync(
+                locationId,
+                string.IsNullOrWhiteSpace(selectedStatus) ? null : selectedStatus,
+                CancellationToken.None);
+            if (response is { IsSuccess: true, Value: { } fresh })
+            {
+                counts.Clear();
+                counts.AddRange(fresh);
+                StateHasChanged();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the rows on screen; the next change tries again.
+        }
+    }
+
+    public void Dispose()
+    {
+        Notifications.TransfersChanged -= OnInventoryChanged;
+        Notifications.Changed -= OnCountsMayHaveChanged;
+        Notifications.InventoryChanged -= OnInventoryChanged;
+        liveRefresh?.Dispose();
     }
 
     private async Task LoadCountsAsync()

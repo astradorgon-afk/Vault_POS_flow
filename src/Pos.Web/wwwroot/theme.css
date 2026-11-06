@@ -269,6 +269,78 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 .app-main .content .decision-note .reason-input { width: 100%; max-width: none; }
 .app-main .content .action-panel .open-count-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
+/* ---- Module tabs --------------------------------------------------------------
+   Pages that are views of one job (restock approvals, fulfillment, requests
+   and all transfers; best sellers and store movement) switch like tabs. They
+   sit above the page title as underlined section tabs, so they never read as
+   another copy of a page's own segmented filters below the title. */
+
+.section-tabs {
+    max-width: 100%;
+    margin: -6px 0 16px;
+    display: flex;
+    gap: 22px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line);
+    scrollbar-width: none;
+}
+.section-tabs::-webkit-scrollbar { display: none; }
+.section-tabs a {
+    flex: none;
+    padding: 4px 1px 10px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    color: var(--muted);
+    font-size: .84rem;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.section-tabs a:hover { color: var(--forest); border-bottom-color: var(--line-strong); }
+.section-tabs a.active { color: var(--forest); border-bottom-color: var(--forest); }
+.restock-page > .section-tabs { margin-bottom: -2px; }
+
+/* A link that does a button's job looks like one. */
+.app-main .content a.search-action { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* The top bar already names who is signed in on desktop; the sidebar keeps
+   only Sign out there, so the daily pages fit without scrolling. Phones,
+   where the top bar hides the name, still show it in the menu. */
+@media (min-width: 901px) {
+    .sidebar-footer > div { display: none; }
+    .sidebar-footer { padding-top: 10px; }
+    .nav-link { min-height: 35px; }
+}
+
+/* ---- Collapsible menu groups ------------------------------------------------- */
+
+.nav-stack button.nav-heading {
+    width: calc(100% - 20px);
+    padding: 2px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-weight: 800;
+    text-align: left;
+    cursor: pointer;
+}
+.nav-stack button.nav-heading:hover:not(:disabled) { color: #d5e6dc; }
+.nav-stack button.nav-heading:disabled { cursor: default; }
+.nav-stack button.nav-heading i {
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform .15s;
+}
+.nav-stack button.nav-heading[aria-expanded="false"] i { transform: rotate(-45deg); }
+.nav-stack button.nav-heading:disabled i { opacity: .35; }
+
 /* ---- Transfers list ---------------------------------------------------------- */
 
 .app-main .content .head-pickers .head-primary { align-self: flex-end; }

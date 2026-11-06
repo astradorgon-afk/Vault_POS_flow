@@ -91,6 +91,13 @@
         // it, so receiving follows along without anyone pressing Refresh.
         liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadTransfersQuietlyAsync));
         Notifications.TransfersChanged += OnTransfersChanged;
+
+        // Supplier orders move too: one is sent, another delivery is recorded
+        // elsewhere. The document signal above covers both; a notice or a
+        // stock change is a second cue.
+        orderRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadOrdersQuietlyAsync));
+        Notifications.Changed += OnOrdersMayHaveChanged;
+        Notifications.InventoryChanged += OnInventoryChanged;
         return LoadAsync();
     }
 
@@ -111,12 +118,7 @@
 
             locations.Clear();
             locations.AddRange(locationResult.Value);
-            orders.Clear();
-            orders.AddRange(orderResult.Value
-                .Where(order => Session.CanUseInventoryLocation(order.DestinationLocationId) &&
-                    order.Status is "Ordered" or "PartiallyReceived" or "FullyReceived" or "Closed")
-                .OrderBy(order => order.Status is "Ordered" or "PartiallyReceived" ? 0 : 1)
-                .ThenByDescending(order => order.CreatedAtUtc));
+            ShowOrders(orderResult.Value);
 
             await ReloadTransfersAsync();
         }
@@ -159,7 +161,45 @@
 
     /// <summary>The live signal: reload the inbound list without touching the
     /// button, the message, or anything already on screen.</summary>
-    private void OnTransfersChanged(IReadOnlyList<Guid> _) => liveRefresh?.Request();
+    // The same signal now covers supplier orders sent or received at these locations.
+    private void OnTransfersChanged(IReadOnlyList<Guid> _)
+    {
+        liveRefresh?.Request();
+        orderRefresh?.Request();
+    }
+
+    private RefreshThrottle? orderRefresh;
+
+    private void OnOrdersMayHaveChanged() => orderRefresh?.Request();
+
+    private void OnInventoryChanged(IReadOnlyList<Guid> _) => orderRefresh?.Request();
+
+    private void ShowOrders(IEnumerable<PosPurchaseOrderSummary> loaded)
+    {
+        orders.Clear();
+        orders.AddRange(loaded
+            .Where(order => Session.CanUseInventoryLocation(order.DestinationLocationId) &&
+                order.Status is "Ordered" or "PartiallyReceived" or "FullyReceived" or "Closed")
+            .OrderBy(order => order.Status is "Ordered" or "PartiallyReceived" ? 0 : 1)
+            .ThenByDescending(order => order.CreatedAtUtc));
+    }
+
+    private async Task ReloadOrdersQuietlyAsync()
+    {
+        try
+        {
+            ApiResult<List<PosPurchaseOrderSummary>> orderResult = await Api.GetPurchaseOrdersAsync(CancellationToken.None);
+            if (orderResult is { IsSuccess: true, Value: { } loaded })
+            {
+                ShowOrders(loaded);
+                StateHasChanged();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the rows on screen; the next change tries again.
+        }
+    }
 
     private async Task ReloadTransfersQuietlyAsync()
     {
@@ -178,7 +218,10 @@
     public void Dispose()
     {
         Notifications.TransfersChanged -= OnTransfersChanged;
+        Notifications.Changed -= OnOrdersMayHaveChanged;
+        Notifications.InventoryChanged -= OnInventoryChanged;
         liveRefresh?.Dispose();
+        orderRefresh?.Dispose();
     }
 
     private string LocationName(Guid id) => locations.FirstOrDefault(location => location.Id == id)?.Name ?? "Location";

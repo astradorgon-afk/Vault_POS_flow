@@ -27,7 +27,7 @@ costs clicks or causes doubt; **Low** is polish.
 | 11 | Medium | **Restock approval and fulfillment queues needed manual Refresh**, while the requester's page already updated live. | Both queues reload quietly on the existing transfer-change signal. |
 | 12 | Low | **Transfers opened on a large creation form**, above the list, exposing an internal *Pre-approval token* field to everyone. | The form opens from a **New transfer** button; the token sits under *Advanced*. Store staff see a pointer to *Restock requests* for warehouse stock. |
 | 13 | Low | **Phone KPI cards ran off-screen**: two stylesheets disagreed (2-column grid vs. a swipe carousel whose negative margin missed the 16px gutter). | One 2×2 grid; long labels wrap. |
-| 14 | Low | **Names did not match**: nav *Stock levels* → page *Store inventory*; the line list on a submitted request was titled *Items in transit*; warehouse *Restock requests* actually ask the owner to buy; *Activity log* had a generic "VaultFlow" breadcrumb. | Headings, breadcrumbs and nav labels now agree (*Stock levels*, *Requested items* until dispatch, *Supply requests* at the warehouse, *Activity log*). |
+| 14 | Low | **Names did not match**: nav *Stock levels* → page *Store inventory*; the line list on a submitted request was titled *Items in transit*; warehouse *Restock requests* actually ask the owner to buy; *Activity log* had a generic "VaultFlow" breadcrumb. | Headings, breadcrumbs and nav labels now agree (*Stock levels*, *Requested items* until dispatch, *Supply requests* at the warehouse, *Activity log*; later *Stock exceptions* and *Sync failures*). |
 | 15 | Low | **Sidebar overgrown and loosely grouped**: 7 groups, a one-item *Purchasing* group, *Activity log* under Workspace, *Store movement* under "Stores". | Five task-based groups: **Stock**, **Movement**, **Sales & reports**, **Catalogue & buying**, **Administration**. Breadcrumb sections use the same names. |
 
 ## Visual design system
@@ -49,22 +49,44 @@ set of decisions instead of rewriting each:
 - The offline PWA (`/offline/`) loads the same layer, and the root service
   worker caches `/theme.css` with `/app.css`, so online and offline look alike.
 
-## Flagged, not changed
+## Flagged items, now fixed (follow-up)
 
-These need a product decision or a larger change than a UI pass should make.
+The eight items first flagged for a decision were then implemented.
 
-| # | Priority | Inconvenience | Recommendation |
+| # | Priority | Inconvenience | What changed |
 |---|---|---|---|
-| A | High | **Two receiving forms for one job** (old finding 3): `/purchasing/{id}` (owner-only) and `/receiving/{id}` (receiving staff) record deliveries with different fields and safeguards. | Build one receiving component used by both routes, carrying cost, batch, quarantine and physical-arrival confirmation; keep the role-specific entry points. |
-| B | Medium | **Store staff still have two ways to ask for stock**: *Restock requests* (warehouse → store, starts from low stock) and *All transfers → New transfer* (any route). This change points store users to Restock, but both remain. | Decide whether store users need free-form transfers at all; if not, hide *New transfer* for store roles and keep Transfers as the record. |
-| C | Medium | **Restock is split across three role pages plus Transfers** (requests, approvals, fulfillment). Each is fine alone; together they are four lists of the same documents. | Consider one *Restock* inbox with role-filtered tabs (*Needs my decision*, *To fulfil*, *Sent*), opening the same transfer detail. |
-| D | Medium | **Four overlapping analytics pages** for owners: *Sales ledger*, *Daily reports*, *Product analytics*, *Store movement*. | Merge Store movement and Product analytics into one *Store performance* page with tabs; keep the ledger and daily reconciliation separate. |
-| E | Low | **Stock counts and Goods receiving still rely on Refresh** buttons. | Subscribe them to the existing inventory/transfer change signals as done here for the restock queues. |
-| F | Low | **Owner sidebar still scrolls on a 900px-tall screen** (about 20 links). | Collapsible groups, or move Administration behind a settings entry. |
-| G | Low | **"Failed attempts"** is unclear as a menu name for blocked negative-stock sales and repeat count variances. | Rename to *Stock exceptions* together with its page heading. |
-| H | Low | **Sync failures page is titled "Failure review"** while the menu says *Sync failures*. | Use one name. |
+| A | High | **Two receiving forms for one job** (old finding 3): the owner's purchase order page and the staff receiving page recorded deliveries with different fields and safeguards. | `/receiving/{id}` is now the only receiving form. It gained the order page's safeguards: invoice unit cost per line (shown only with `product.cost.view`; a different cost goes to the owner's approval as before), goods not on the order listed and recorded in quarantine (scanned products not on the order, or uncatalogued codes the receiver chooses to hold), a physical-arrival confirmation (with the same-day wording), no receiving before the order is sent, and a warning when items are not in this delivery. The purchase order page's *Receive a delivery* and *Receive the delivery now* open that form with a breadcrumb back to the order; its separate form and about 280 lines of duplicate code were removed. Verified end to end against the real API. |
+| B | Medium | **Store staff seemed to have two ways to ask for stock.** In fact a transfer always *sends* stock out of a location the person works at, while a restock request asks for stock to *come in*; the labels did not say so. | The Transfers page names the direction: **Send stock** (when signed in at a location) next to **Request stock** for store staff, and the form reads *Send stock from {location}*. A single possible source is selected automatically. |
+| C | Medium | **Restock was split across three role pages plus Transfers.** | Restock is one module: the menu has one **Restock** entry that opens the person's own tab, and the pages share a tab row (*Approvals*, *Fulfillment*, *Restock/Supply requests*, *All transfers*), showing only what the person may open. |
+| D | Medium | **Overlapping analytics pages.** | *Best & worst sellers* and *Store movement* are tabs of one **Store performance** menu entry. *Sales ledger* and *Daily reports* stay separate (different jobs). |
+| E | Low | **Stock counts and Goods receiving relied on Refresh.** The server sent no live signal when a count or purchase order changed. | The server's workflow-document signal now also covers stock counts and purchase orders (new, or a status step), and both lists reload quietly on it. Verified: a count opened elsewhere and an order sent elsewhere appeared within seconds without Refresh. |
+| F | Low | **Owner sidebar scrolled on a 900px-tall screen.** | Menu groups fold; *Administration* starts folded and the group holding the current page always stays open. On desktop the sidebar no longer repeats the signed-in name (the top bar shows it). The owner's menu now fits at 900px. |
+| G | Low | **"Failed attempts"** was unclear. | Renamed **Stock exceptions** in the menu, page, breadcrumb and Overview. |
+| H | Low | **Sync failures page was titled "Failure review".** | Titled **Sync failures**. |
 
 ## Verification
+
+Follow-up (flagged items):
+
+- Purchase order → *Receive a delivery* opened `/receiving/{id}?from=order`
+  with a *Purchase order* breadcrumb; *Record delivery* stayed disabled until
+  arrival was confirmed and while a scanned product not on the order was
+  listed; *Record in quarantine* filed the incident; an edited invoice cost
+  (35.32) was saved on the receipt; leaving one line out showed *Not in this
+  delivery: 1 item* and left the order `PartiallyReceived`.
+- Owner, warehouse and store manager each see one *Restock* and one *Store
+  performance* entry with exactly one active item and the right tabs; the
+  store manager's Transfers shows *Request stock* and *Send stock*.
+- Stock counts and Goods receiving picked up a count opened and an order sent
+  by someone else within seconds, without Refresh.
+- New infrastructure test: a new stock count is announced at its location.
+  Web 51, architecture 31 and infrastructure 246 tests pass (21 skip without
+  Docker). API integration: 202 pass; 11 fail, all of them already failing
+  before this work: 9 fail identically at the previous commit (transfer
+  activity returns 500, product curation returns 400) and 2 need a Docker
+  daemon. Those pre-existing failures are worth a separate look.
+
+First pass:
 
 - `Pos.Web` builds with zero warnings and errors (warnings are errors here).
 - `Pos.Web.Tests` 51/51 and `Pos.Architecture.Tests` 31/31 pass.

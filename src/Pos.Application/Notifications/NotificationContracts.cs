@@ -72,10 +72,12 @@ public interface IInventoryChangePublisher
 }
 
 /// <summary>
-/// Tells connected clients that a transfer document changed state at some
-/// locations — submitted, approved, picked, dispatched, received — once the
-/// change is committed. It carries no details: clients reload the lists they
-/// show, which is how a store's request history stays current without polling.
+/// Tells connected clients that a workflow document changed state at some
+/// locations once the change is committed: a transfer (submitted, approved,
+/// picked, dispatched, received), a stock count, or a supplier purchase order.
+/// It carries no details: clients reload the lists they show, which is how a
+/// store's request history, count list and receiving list stay current
+/// without polling.
 /// </summary>
 public interface ITransferChangePublisher
 {

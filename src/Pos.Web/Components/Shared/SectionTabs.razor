@@ -1,0 +1,31 @@
+@inject NavigationManager Navigation
+
+@* Pages that are views of one job read as tabs of one page. A set with a
+   single page this person may open shows nothing. *@
+@if (Items.Count > 1)
+{
+    <nav class="section-tabs" aria-label="@Label">
+        @foreach (SectionTab tab in Items)
+        {
+            bool current = IsCurrent(tab);
+            <a href="@tab.Href" class="@(current ? "active" : null)" aria-current="@(current ? "page" : null)">@tab.Label</a>
+        }
+    </nav>
+}
+
+@code {
+    /// <summary>The pages in the set, already filtered to what this person may open.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SectionTab> Items { get; set; } = [];
+
+    /// <summary>What a screen reader announces for the tab row.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Section";
+
+    private bool IsCurrent(SectionTab tab)
+    {
+        string path = Navigation.ToBaseRelativePath(Navigation.Uri);
+        int end = path.IndexOfAny(['?', '#']);
+        return string.Equals(end >= 0 ? path[..end] : path, tab.Href, StringComparison.OrdinalIgnoreCase);
+    }
+}

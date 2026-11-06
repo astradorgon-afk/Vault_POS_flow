@@ -81,7 +81,7 @@ public sealed class PageTrail(NavigationManager navigation)
         "catalog" => new("Catalogue & buying", "Products & barcodes", null),
         "catalog/change-requests" => new("Catalogue & buying", "Catalogue approvals", null),
         _ when path.StartsWith("catalog/products/", StringComparison.Ordinal) => new("Catalogue & buying", "Product", Catalogue),
-        "inventory/exceptions" => new("Stock", "Failed attempts", null),
+        "inventory/exceptions" => new("Stock", "Stock exceptions", null),
         "purchasing" => new("Catalogue & buying", "Purchase orders", null),
         "receiving" => new("Stock", "Goods receiving", null),
         _ when path.StartsWith("receiving/", StringComparison.Ordinal) => new("Stock", "Receive delivery", new("Goods receiving", "receiving")),

@@ -5,6 +5,7 @@
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
+@inject PageTrail Trail
 
 <PageTitle>Receive delivery · VaultFlow</PageTitle>
 
@@ -46,6 +47,15 @@
         @if (!string.IsNullOrWhiteSpace(message))
         {
             <div class="receiving-message" role="status">@message</div>
+        }
+
+        @if (historyLoaded && order.Status is "Ordered" or "PartiallyReceived" && !ReceivingDateAllowed)
+        {
+            <div class="receiving-message" role="status">Receiving opens once the order has been sent to the supplier. Check the order date if it is in the future.</div>
+        }
+        else if (CanReceiveNow && IsSameDayDelivery)
+        {
+            <div class="receiving-message" role="status">Same-day delivery: this order was sent today. Continue only if the supplier has already delivered the goods.</div>
         }
 
         <div class="layout">
@@ -128,7 +138,7 @@
                                             <AppIcon Name="warning" /> Report issue
                                         </button>
                                         <button type="button" @onclick="() => OpenBatch(line)">
-                                            <AppIcon Name="box" /> Batch &amp; dates
+                                            <AppIcon Name="box" /> @(CanViewCost ? "Batch, dates & cost" : "Batch & dates")
                                         </button>
                                     </div>
                                 </article>
@@ -139,10 +149,41 @@
                             <AppIcon Name="info" />
                             Leave arrived at 0 for items not in this delivery. Damaged and reported issues cannot exceed arrived.
                         </div>
+
+                        @if (unexpected.Count > 0)
+                        {
+                            @* Goods the supplier sent that this order does not cover. They
+                               cannot go onto the receipt, so they are held in quarantine
+                               before the delivery is recorded. *@
+                            <section class="unexpected-goods" aria-label="Goods not on this order">
+                                <h3>Goods not on this order</h3>
+                                <p>Record these in quarantine before recording the delivery. They are not added to stock.</p>
+                                @foreach (UnexpectedItem item in unexpected)
+                                {
+                                    <div class="unexpected-row" @key="item.Barcode">
+                                        <div><strong>@(item.ProductName ?? "Unknown product")</strong><small>@item.Barcode</small></div>
+                                        <label><span>Quantity</span><input type="number" min="0" step="1" inputmode="numeric" value="@item.Quantity" @onchange="e => SetUnexpectedQuantity(item, e.Value)" /></label>
+                                        <button type="button" class="text-btn" @onclick="() => unexpected.Remove(item)">Remove</button>
+                                    </div>
+                                }
+                                @if (quarantineError is { } quarantineProblem)
+                                {
+                                    <p class="dlg-warn" role="alert">@quarantineProblem</p>
+                                }
+                                <button type="button" class="btn primary" disabled="@(raisingQuarantine || !CanQuarantine)" @onclick="RaiseQuarantineAsync">
+                                    @(raisingQuarantine ? "Recording\u2026" : "Record in quarantine")
+                                </button>
+                                @if (!CanQuarantine)
+                                {
+                                    <p class="summary-foot">Your account cannot record quarantine incidents. Ask a manager, or remove these lines to continue.</p>
+                                }
+                            </section>
+                        }
                     </section>
                 }
-                else if (historyLoaded)
+                else if (historyLoaded && order.Status is not ("Ordered" or "PartiallyReceived"))
                 {
+                    @* An open order that is not yet sent already says why above. *@
                     <div class="receiving-message">This order is not currently ready for another delivery.</div>
                 }
 
@@ -225,6 +266,18 @@
                                 <div style="width:@(ProgressPercent.ToString(CultureInfo.InvariantCulture))%"></div>
                             </div>
 
+                            @if (NotInDelivery > 0 && lines.Any(line => line.Received > 0))
+                            {
+                                <div class="summary-row"><span>Not in this delivery</span><strong>@NotInDelivery @(NotInDelivery == 1 ? "item" : "items")</strong></div>
+                            }
+
+                            <label class="check arrival-confirmation">
+                                <input type="checkbox" @bind="arrivalConfirmed" />
+                                <span>@(IsSameDayDelivery
+                                    ? "I confirm this is a genuine same-day delivery: the goods have physically arrived and I have checked the quantities."
+                                    : "I confirm these goods have physically arrived and the quantities have been checked.")</span>
+                            </label>
+
                             <button type="button" class="btn primary submit" disabled="@(saving || !CanRecord)" @onclick="RecordAsync">
                                 <AppIcon Name="check" /> @(saving ? "Recording…" : "Record delivery")
                             </button>
@@ -278,6 +331,7 @@
             <footer>
                 <span class="dlg-status">@(CaptureBlockedReason ?? "Ready to capture.")</span>
                 <button type="button" class="btn" @onclick="() => unknownCode = null">Cancel</button>
+                <button type="button" class="btn" @onclick="() => QuarantineUnknown(newCode)">Hold in quarantine</button>
                 <button type="button" class="btn primary"
                         disabled="@(CaptureBlockedReason is not null || capturing)"
                         @onclick="CaptureProductAsync">
@@ -333,7 +387,7 @@
     {
         <div class="dlg-scrim" @onclick="CloseDialogs"></div>
         <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="batch-title">
-            <h2 id="batch-title">Batch &amp; dates</h2>
+            <h2 id="batch-title">@(CanViewCost ? "Batch, dates & cost" : "Batch & dates")</h2>
             <p class="dlg-product">@batching.Name</p>
             <p class="dlg-lead">Taken from the carton. Expiry drives which stock is sold first.</p>
             <label class="field">Lot number
@@ -342,6 +396,12 @@
                 <label class="field">Made on<input type="date" @bind="batching.ManufacturedOn" /></label>
                 <label class="field">Expires on<input type="date" @bind="batching.ExpiresOn" /></label>
             </div>
+            @if (CanViewCost)
+            {
+                <label class="field">Unit cost on invoice
+                    <input type="number" min="0" step="0.01" inputmode="decimal" @bind="batching.InvoiceUnitCost" /></label>
+                <p class="dlg-lead">Ordered at @PurchasingText.Money(batching.OrderLine.UnitCost). A different invoice cost is recorded for the owner's approval.</p>
+            }
             <footer>
                 <button type="button" class="btn primary" @onclick="CloseDialogs">Done</button>
             </footer>
@@ -366,6 +426,25 @@
     private DateTime? supplierReleasedAt;
     private bool historyLoaded;
     private ScanLine? scanQueue;
+    private bool arrivalConfirmed;
+
+    // Goods that arrived but are not on this order: held in quarantine, never received.
+    private readonly List<UnexpectedItem> unexpected = [];
+    private bool raisingQuarantine;
+    private string? quarantineError;
+
+    // Opened from the purchase order: Back returns there rather than to the receiving list.
+    [SupplyParameterFromQuery(Name = "from")] public string? From { get; set; }
+
+    private bool CanViewCost => Session.HasPermission("product.cost.view");
+    private bool CanQuarantine => Session.HasPermission("quarantine.create");
+
+    private bool ReceivingDateAllowed => order?.OrderedAtUtc is { } sent && DateTimeOffset.UtcNow >= sent;
+
+    private bool IsSameDayDelivery => order?.OrderedAtUtc is { } sent &&
+        DateOnly.FromDateTime(sent.InStoreTime().DateTime) == StoreClock.Today;
+
+    private int NotInDelivery => lines.Count(line => line.Received <= 0);
 
     // Capturing a product the delivery brought but the catalogue does not know.
     private readonly List<PosCategory> captureCategories = [];
@@ -489,7 +568,7 @@
         return $"{stem}-{DateTime.UtcNow:HHmmss}";
     }
 
-    private bool CanReceiveNow => historyLoaded && order?.Status is "Ordered" or "PartiallyReceived";
+    private bool CanReceiveNow => historyLoaded && order?.Status is "Ordered" or "PartiallyReceived" && ReceivingDateAllowed;
     private int CountedLines => lines.Count(line => line.Received > 0);
     private decimal TotalDue => lines.Sum(line => line.Due);
     private decimal TotalArrived => lines.Sum(line => line.Received);
@@ -501,8 +580,14 @@
         : Math.Clamp(Math.Round(TotalArrived / TotalDue * 100m, 1), 0m, 100m);
 
     private string SubmitHelp => CanRecord
-        ? "Ready to record this delivery."
-        : TotalDue <= 0 ? "All ordered units have been received." : "Enter a quantity to continue.";
+        ? NotInDelivery > 0
+            ? "Ready. The order stays open for the items not in this delivery."
+            : "Ready to record this delivery."
+        : TotalDue <= 0 ? "All ordered units have been received."
+        : !lines.Any(line => line.Received > 0) ? "Enter a quantity to continue."
+        : unexpected.Count > 0 ? "Record or remove the goods not on this order first."
+        : !arrivalConfirmed ? "Confirm the goods have physically arrived."
+        : "Check that problem quantities do not exceed what arrived.";
 
     /// <summary>What is left to shelve once damage and issues come out.</summary>
     private static decimal Usable(ReceiptLineInput line)
@@ -611,11 +696,21 @@
     private Task OnScanCodeKeyAsync(KeyboardEventArgs e)
         => e.Key == "Enter" ? SubmitScanCodeAsync() : Task.CompletedTask;
 
-    private bool CanRecord => lines.Any(line => line.Received > 0) &&
+    private bool CanRecord => arrivalConfirmed && unexpected.Count == 0 &&
+        lines.Any(line => line.Received > 0) &&
         lines.All(line => line.Received >= 0 && line.Damaged >= 0 && line.WrongItem >= 0 &&
-            line.Expired >= 0 && line.Damaged + line.WrongItem + line.Expired <= line.Received);
+            line.Expired >= 0 && line.Damaged + line.WrongItem + line.Expired <= line.Received &&
+            line.InvoiceUnitCost >= 0);
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override Task OnInitializedAsync()
+    {
+        if (From == "order")
+        {
+            Trail.Name("Receive delivery", new NavCrumb("Purchase order", FormattableString.Invariant($"purchasing/{OrderId:D}")));
+        }
+
+        return LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -707,7 +802,8 @@
             PosCreateGoodsReceipt body = new(
                 [.. lines.Where(line => line.Received > 0).Select(line => new PosCreateGoodsReceiptLine(
                     line.OrderLine.Id, line.Received, line.Damaged, line.WrongItem, line.Expired,
-                    line.OrderLine.UnitCost, string.IsNullOrWhiteSpace(line.LotNumber) ? null : line.LotNumber.Trim(),
+                    CanViewCost ? line.InvoiceUnitCost : line.OrderLine.UnitCost,
+                    string.IsNullOrWhiteSpace(line.LotNumber) ? null : line.LotNumber.Trim(),
                     line.ManufacturedOn, line.ExpiresOn))],
                 documentsMissing,
                 NullIfBlank(supplierDrNumber),
@@ -724,6 +820,7 @@
             if (historyLoaded)
             {
                 message = "Delivery recorded. Accepted stock is ready for inventory inspection.";
+                arrivalConfirmed = false;
                 documentsMissing = false;
                 supplierDrNumber = string.Empty;
                 supplierOrNumber = string.Empty;
@@ -772,6 +869,13 @@
                     return;
                 }
 
+                if (found.ErrorCode is "catalog.barcode_unknown" or "catalog.barcode_retired")
+                {
+                    AddUnexpected(BarcodeText.Clean(scan.Code), null);
+                    message = $"{scan.Code} is not catalogued. It is listed under goods not on this order for quarantine.";
+                    return;
+                }
+
                 message = $"{scan.Code}: {found.Error ?? "Product not found."}";
                 return;
             }
@@ -782,9 +886,14 @@
                 item.OrderLine.ProductId == product.Id && item.Received + 1m <= item.Due);
             if (line is null)
             {
-                message = lines.Any(item => item.OrderLine.ProductId == product.Id)
-                    ? $"{product.Name} has reached the quantity due. Enter a fractional amount manually if needed."
-                    : $"{product.Name} is not on this purchase order.";
+                if (lines.Any(item => item.OrderLine.ProductId == product.Id))
+                {
+                    message = $"{product.Name} has reached the quantity due. Enter a fractional amount manually if needed.";
+                    return;
+                }
+
+                AddUnexpected(BarcodeText.Clean(scan.Code), product.Name);
+                message = $"{product.Name} is not on this purchase order. It is listed under goods not on this order for quarantine.";
                 return;
             }
 
@@ -812,8 +921,11 @@
         public string? LotNumber { get; set; }
         public DateOnly? ManufacturedOn { get; set; }
         public DateOnly? ExpiresOn { get; set; }
+        public decimal InvoiceUnitCost { get; set; } = orderLine.UnitCost;
 
         public string Name => OrderLine.ProductName ?? OrderLine.ProductSku ?? "Product";
+
+        public bool HasCostChange => InvoiceUnitCost != OrderLine.UnitCost;
 
         public bool HasProblem => WrongItem > 0 || Expired > 0;
 
@@ -821,7 +933,87 @@
             !string.IsNullOrWhiteSpace(LotNumber) || ManufacturedOn is not null || ExpiresOn is not null;
 
         /// <summary>Whether a dialog has been filled in, so the row can say so.</summary>
-        public bool HasNotes => HasProblem || HasBatchDetail;
+        public bool HasNotes => HasProblem || HasBatchDetail || HasCostChange;
+    }
+
+    private sealed record UnexpectedItem(string Barcode, string? ProductName, decimal Quantity);
+
+    private void AddUnexpected(string barcode, string? productName)
+    {
+        int index = unexpected.FindIndex(item => string.Equals(item.Barcode, barcode, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            unexpected[index] = unexpected[index] with { Quantity = unexpected[index].Quantity + 1m };
+        }
+        else
+        {
+            unexpected.Add(new UnexpectedItem(barcode, productName, 1m));
+        }
+    }
+
+    private void SetUnexpectedQuantity(UnexpectedItem item, object? value)
+    {
+        int index = unexpected.IndexOf(item);
+        if (index >= 0 && decimal.TryParse(value?.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal quantity) && quantity >= 0m)
+        {
+            unexpected[index] = item with { Quantity = quantity };
+        }
+    }
+
+    /// <summary>An uncatalogued code the receiver would rather hold than capture as a product.</summary>
+    private void QuarantineUnknown(string code)
+    {
+        AddUnexpected(code, null);
+        unknownCode = null;
+        message = $"{code} is listed under goods not on this order for quarantine.";
+    }
+
+    private async Task RaiseQuarantineAsync()
+    {
+        if (raisingQuarantine || order is null || unexpected.Count == 0)
+        {
+            return;
+        }
+
+        if (!CanQuarantine)
+        {
+            quarantineError = "Your account needs the quarantine.create permission to record these goods.";
+            return;
+        }
+
+        List<PosCreateQuarantineLine> held = [.. unexpected
+            .Where(item => item.Quantity > 0m)
+            .Select(item => new PosCreateQuarantineLine(item.Barcode, item.Quantity, ClaimedProductName: item.ProductName))];
+        if (held.Count == 0)
+        {
+            quarantineError = "Enter a quantity for at least one item, or remove the lines.";
+            return;
+        }
+
+        raisingQuarantine = true;
+        quarantineError = null;
+        try
+        {
+            ApiResult<PosReference> result = await Api.CreateQuarantineIncidentAsync(
+                order.DestinationLocationId, held,
+                $"Found while receiving {order.Number ?? "a purchase order"}.", CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                quarantineError = result.Error ?? "The quarantine incident could not be recorded.";
+                return;
+            }
+
+            unexpected.Clear();
+            message = "Quarantine incident recorded for the goods not on this order.";
+        }
+        catch (HttpRequestException)
+        {
+            quarantineError = "The quarantine service is unavailable. Try again shortly.";
+        }
+        finally
+        {
+            raisingQuarantine = false;
+        }
     }
 
     private static string Quantity(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);

@@ -7,13 +7,11 @@ using Pos.Web.Services;
 
 namespace Pos.Web.Components.Pages;
 
-/// <summary>One purchase order: approval line by line, sending, and receiving each delivery.</summary>
+/// <summary>One purchase order: approval line by line, sending, and its delivery record. Deliveries are counted on the receiving page.</summary>
 public partial class PurchaseOrderDetail
 {
     private readonly HashSet<Guid> reviewed = [];
     private readonly List<PosGoodsReceipt> receipts = [];
-    private readonly List<ReceiveLine> receiving = [];
-    private readonly List<QuarantineLine> quarantineLines = [];
     private readonly Dictionary<Guid, PosLocation> locations = [];
     private readonly Dictionary<Guid, PosUnitOfMeasure> units = [];
     private readonly Dictionary<Guid, string> people = [];
@@ -23,31 +21,14 @@ public partial class PurchaseOrderDetail
     private bool loading = true;
     private bool busy;
     private bool confirmDiscard;
-    private bool documentsMissing;
-    private string supplierDrNumber = string.Empty;
-    private string supplierOrNumber = string.Empty;
-    private DateTime? supplierReleasedAt;
-    private bool receivingOpen;
     private bool justSent;
     private ElementReference backToOrdersButton;
     private bool focusBackToOrders;
-    private bool arrivalConfirmed;
     private bool receiptsLoaded;
-    private bool raisingQuarantine;
-    private string? quarantineError;
-    private Pos.Web.Services.ScanLine? scanQueue;
     private string? notice;
     private bool noticeOk;
     private string decisionNotes = string.Empty;
     private string endReason = string.Empty;
-
-    private enum ReceiveMode
-    {
-        None,
-        All,
-        Counted,
-        Missing,
-    }
 
     /// <summary>Gets or sets the order shown.</summary>
     [Parameter]
@@ -145,9 +126,6 @@ public partial class PurchaseOrderDetail
 
     private bool ReceivingDateAllowed => order?.OrderedAtUtc is { } sent && DateTimeOffset.UtcNow >= sent;
 
-    private bool IsSameDayDelivery => order?.OrderedAtUtc is { } sent
-        && DateOnly.FromDateTime(ReceivingTime(sent).DateTime) == ReceivingToday;
-
     private bool IsDeliveryOverdue => order is { Status: "Ordered" or "PartiallyReceived", ExpectedAtUtc: { } expected }
         && DateOnly.FromDateTime(ReceivingTime(expected).DateTime) < ReceivingToday;
 
@@ -166,24 +144,6 @@ public partial class PurchaseOrderDetail
 
     private string ExpectedDate => order?.ExpectedAtUtc is { } expected
         ? ReceivingTime(expected).ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture) : "Not specified";
-
-    private int AccountedCount => receiving.Count(line => line.Mode != ReceiveMode.None);
-
-    private bool CanRecord => receiptsLoaded && ReceivingDateAllowed && arrivalConfirmed && quarantineLines.Count == 0 && receiving.Count > 0
-        && AccountedCount == receiving.Count
-        && receiving.All(line => line.Problem is null)
-        && receiving.Any(line => line.ArrivingQuantity > 0);
-
-    private string ReceiveSummary
-    {
-        get
-        {
-            decimal arriving = receiving.Sum(line => line.ArrivingQuantity);
-            int missing = receiving.Count(line => line.Mode == ReceiveMode.Missing);
-            string text = $"{PurchasingText.Quantity(arriving)} units arriving";
-            return missing > 0 ? $"{text} · {missing} line{(missing == 1 ? "" : "s")} not in this delivery" : text;
-        }
-    }
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
@@ -243,8 +203,6 @@ public partial class PurchaseOrderDetail
     private async Task LoadOrderAsync()
     {
         receiptsLoaded = false;
-        receivingOpen = false;
-        arrivalConfirmed = false;
         ApiResult<PosPurchaseOrder> loaded = await Api.GetPurchaseOrderAsync(OrderId, CancellationToken.None);
         if (loaded is not { IsSuccess: true, Value: { } fresh })
         {
@@ -286,19 +244,8 @@ public partial class PurchaseOrderDetail
 
         receiptsLoaded = true;
 
-        // Approval ticks and a half-entered delivery belong to the order as it
-        // was; a reload starts both again.
+        // Approval ticks belong to the order as it was; a reload starts them again.
         reviewed.RemoveWhere(id => fresh.Lines.All(line => line.Id != id));
-        receiving.Clear();
-        receiving.AddRange(fresh.Lines
-            .Where(line => Due(line) > 0)
-            .Select(line => new ReceiveLine(line, Due(line))));
-        documentsMissing = false;
-        supplierDrNumber = string.Empty;
-        supplierOrNumber = string.Empty;
-        supplierReleasedAt = null;
-        receivingOpen = false;
-        arrivalConfirmed = false;
     }
 
     private bool Can(string permission) => Session.HasPermission(permission);
@@ -325,136 +272,6 @@ public partial class PurchaseOrderDetail
     private decimal Outstanding => order?.Lines.Sum(Due) ?? 0m;
 
     private decimal Due(PosPurchaseOrderLine line) => Math.Max(0m, line.OrderedQuantity - ReceivedFor(line.Id));
-
-    private string? scanNote;
-
-    // A scan switches that line to counting and adds one received unit.
-    private Task OnScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
-    {
-        scanQueue ??= new Pos.Web.Services.ScanLine(ProcessScanAsync);
-        return scanQueue.EnqueueAsync(scan);
-    }
-
-    private async Task ProcessScanAsync(Pos.Shared.Scanning.BarcodeScan scan)
-    {
-        ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
-        if (found is not { IsSuccess: true, Value: { } product })
-        {
-            if (found.ErrorCode is "catalog.barcode_unknown" or "catalog.barcode_retired")
-            {
-                AddQuarantineLine(scan.Code, null);
-                scanNote = $"{scan.Code} is not catalogued. Record it as a quarantine incident.";
-            }
-            else
-            {
-                scanNote = $"{scan.Code}: {found.Error ?? "The product could not be found."}";
-            }
-            await InvokeAsync(StateHasChanged);
-            return;
-        }
-
-        ReceiveLine? line = receiving.FirstOrDefault(l => l.Line.ProductId == product.Id);
-        if (line is null)
-        {
-            AddQuarantineLine(scan.Code, product.Name);
-            scanNote = $"{product.Name} is not on this order. Record it as a quarantine incident.";
-            await InvokeAsync(StateHasChanged);
-            return;
-        }
-
-        if (line.Mode != ReceiveMode.Counted)
-        {
-            line.Mode = ReceiveMode.Counted;
-            line.Received = 0m;
-        }
-
-        line.Received += 1m;
-        scanNote = $"{product.Name}: {PurchasingText.Quantity(line.Received)} of {PurchasingText.Quantity(line.Due)} counted.";
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private sealed record QuarantineLine(string Barcode, string? ProductName, decimal Quantity);
-
-    private void AddQuarantineLine(string barcode, string? productName)
-    {
-        int index = quarantineLines.FindIndex(line => string.Equals(line.Barcode, barcode, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0)
-        {
-            quarantineLines[index] = quarantineLines[index] with { Quantity = quarantineLines[index].Quantity + 1m };
-        }
-        else
-        {
-            quarantineLines.Add(new QuarantineLine(barcode, productName, 1m));
-        }
-    }
-
-    private void SetQuarantineQuantity(QuarantineLine line, ChangeEventArgs change)
-    {
-        int index = quarantineLines.IndexOf(line);
-        if (index >= 0 && decimal.TryParse(change.Value?.ToString(), out decimal quantity) && quantity >= 0m)
-        {
-            quarantineLines[index] = line with { Quantity = quantity };
-        }
-    }
-
-    private void RemoveQuarantineLine(QuarantineLine line) => quarantineLines.Remove(line);
-
-    private async Task RaiseQuarantineAsync()
-    {
-        if (raisingQuarantine || order is null || quarantineLines.Count == 0)
-        {
-            return;
-        }
-
-        if (!Can("quarantine.create"))
-        {
-            quarantineError = "Your account needs the quarantine.create permission to record these goods.";
-            return;
-        }
-
-        List<PosCreateQuarantineLine> lines = [.. quarantineLines
-            .Where(line => line.Quantity > 0m)
-            .Select(line => new PosCreateQuarantineLine(line.Barcode, line.Quantity, ClaimedProductName: line.ProductName))];
-        if (lines.Count == 0)
-        {
-            quarantineError = "Enter a quantity for at least one item.";
-            return;
-        }
-
-        raisingQuarantine = true;
-        quarantineError = null;
-        try
-        {
-            ApiResult<PosReference> result = await Api.CreateQuarantineIncidentAsync(
-                order.DestinationLocationId, lines,
-                $"Found while receiving {PurchasingText.OrderName(order.Number)}.", CancellationToken.None);
-            if (!result.IsSuccess)
-            {
-                quarantineError = result.Error ?? "The quarantine incident could not be recorded.";
-                return;
-            }
-
-            quarantineLines.Clear();
-            Tell(true, "Quarantine incident recorded for the unordered goods.");
-        }
-        catch (HttpRequestException)
-        {
-            quarantineError = "The quarantine service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            raisingQuarantine = false;
-        }
-    }
-
-    private static void SetMode(ReceiveLine line, ReceiveMode mode)
-    {
-        line.Mode = line.Mode == mode ? ReceiveMode.None : mode;
-        if (line.Mode == ReceiveMode.Counted && line.Received == 0)
-        {
-            line.Received = line.Due;
-        }
-    }
 
     /// <summary>
     /// Sends a draft on. The owner approves their own orders, so for them this
@@ -496,7 +313,6 @@ public partial class PurchaseOrderDetail
         if (order is { Status: "Ordered" })
         {
             justSent = true;
-            receivingOpen = false;
             focusBackToOrders = true;
         }
     }
@@ -516,11 +332,17 @@ public partial class PurchaseOrderDetail
         }
     }
 
-    /// <summary>Closes the dialog and opens the receiving form behind it.</summary>
+    /// <summary>
+    /// The receiving page every role uses: one form, one set of checks. Opened
+    /// from here, its Back returns to this order.
+    /// </summary>
+    private string ReceiveHref => FormattableString.Invariant($"receiving/{OrderId:D}?from=order");
+
+    /// <summary>Closes the dialog and opens the receiving page.</summary>
     private void ReceiveNow()
     {
         justSent = false;
-        receivingOpen = true;
+        Navigation.NavigateTo(ReceiveHref);
     }
 
     /// <summary>
@@ -550,34 +372,6 @@ public partial class PurchaseOrderDetail
 
     private Task CancelAsync() => RunAsync(
         () => Api.CancelPurchaseOrderAsync(OrderId, endReason.Trim(), CancellationToken.None), "Order cancelled.");
-
-    private async Task RecordDeliveryAsync()
-    {
-        if (busy || !CanRecord)
-        {
-            return;
-        }
-
-        await RecordReceiptAsync();
-        if (noticeOk && order is { Status: "PartiallyReceived" } recorded)
-        {
-            int shortLines = recorded.Lines.Count(line => Due(line) > 0);
-            Tell(true, $"Delivery recorded. The order is marked incomplete: {shortLines} line{(shortLines == 1 ? "" : "s")} still short ({PurchasingText.Quantity(Outstanding)} units).");
-        }
-    }
-
-    private Task RecordReceiptAsync() => RunAsync(
-        () => Api.CreateGoodsReceiptAsync(
-            OrderId,
-            new PosCreateGoodsReceipt(
-                [.. receiving.Where(line => line.ArrivingQuantity > 0 || line.Mode == ReceiveMode.Counted && line.IssueQuantity > 0)
-                    .Select(line => line.ToRequest())],
-                documentsMissing,
-                NullIfBlank(supplierDrNumber),
-                NullIfBlank(supplierOrNumber),
-                ReleasedAtOrNull()),
-            CancellationToken.None),
-        "Delivery recorded. Accepted goods are awaiting inventory inspection.");
 
     private async Task RunAsync(Func<Task<ApiResult<PosReference>>> action, string success)
     {
@@ -657,66 +451,5 @@ public partial class PurchaseOrderDetail
 
     private static string? NullIfBlank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-    /// <summary>
-    /// Reads the supplier's release time as typed in the receiving store's own
-    /// clock. The picker gives a wall reading with no offset, so it is resolved
-    /// against Asia/Manila rather than against wherever this server runs.
-    /// </summary>
-    private DateTimeOffset? ReleasedAtOrNull()
-        => supplierReleasedAt is { } local ? StoreClock.FromStoreLocal(local) : null;
-
     private static string SplitWords(string value) => Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
-
-    /// <summary>What was found for one order line in the delivery being recorded.</summary>
-    private sealed class ReceiveLine(PosPurchaseOrderLine line, decimal due)
-    {
-        public PosPurchaseOrderLine Line { get; } = line;
-
-        public decimal Due { get; } = due;
-
-        public ReceiveMode Mode { get; set; }
-
-        public decimal Received { get; set; }
-
-        public decimal Damaged { get; set; }
-
-        public decimal WrongItem { get; set; }
-
-        public decimal Expired { get; set; }
-
-        public decimal UnitCost { get; set; } = line.UnitCost;
-
-        public string? Lot { get; set; }
-
-        public DateOnly? ExpiresOn { get; set; }
-
-        public decimal IssueQuantity => Damaged + WrongItem + Expired;
-
-        public decimal ArrivingQuantity => Mode switch
-        {
-            ReceiveMode.All => Due,
-            ReceiveMode.Counted => Math.Max(0m, Received),
-            _ => 0m,
-        };
-
-        public string? Problem => Mode != ReceiveMode.Counted
-            ? null
-            : Received < 0 || Damaged < 0 || WrongItem < 0 || Expired < 0 ? "Counts cannot be negative."
-            : IssueQuantity > Received ? "Damaged, wrong and expired are part of what was received, so together they cannot exceed it."
-            : UnitCost < 0 ? "The unit cost cannot be negative."
-            : Received == 0 ? "Enter how many arrived, or mark the line as not in this delivery."
-            : null;
-
-        public PosCreateGoodsReceiptLine ToRequest() => Mode == ReceiveMode.All
-            ? new PosCreateGoodsReceiptLine(Line.Id, Due, 0m, 0m, 0m, Line.UnitCost)
-            : new PosCreateGoodsReceiptLine(
-                Line.Id,
-                Received,
-                Damaged,
-                WrongItem,
-                Expired,
-                UnitCost,
-                string.IsNullOrWhiteSpace(Lot) ? null : Lot.Trim(),
-                ExpiresOn: ExpiresOn);
-    }
 }

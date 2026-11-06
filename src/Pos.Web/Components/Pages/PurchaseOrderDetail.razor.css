@@ -64,15 +64,6 @@
     .purchase-detail .po-delivery li { flex-direction: column; gap: 3px; }
     .purchase-detail .po-delivery li small { text-align: left; }
 }
-.po-quarantine { display:grid; gap:12px; margin:18px 0; padding:18px; border:1px solid #d5a673; border-radius:14px; background:#fff8ee; }
-.po-quarantine h3 { margin:0; font-size:1rem; }
-.po-quarantine p { margin:0; color:var(--muted); font-size:.86rem; }
-.po-quarantine-line { display:flex; align-items:end; flex-wrap:wrap; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
-.po-quarantine-line > div { display:grid; gap:2px; flex:1 1 180px; }
-.po-quarantine-line small { color:var(--muted); }
-.po-quarantine-line label { display:grid; gap:4px; font-size:.75rem; }
-.po-quarantine-line input { width:96px; min-height:38px; padding:6px 9px; border:1px solid var(--line-strong); border-radius:8px; }
-.po-quarantine > .po-btn { justify-self:start; }
 .sent-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(12, 29, 21, .58); backdrop-filter: blur(2px); }
 .sent-dialog { width: min(100%, 540px); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-top: 4px solid var(--forest-bright); border-radius: 16px; background: var(--panel); color: var(--ink); box-shadow: 0 24px 64px rgba(21, 60, 43, .22); }
 .sent-dialog h2 { margin: 7px 0 10px; color: var(--ink); font: 800 1.25rem/1.2 'Manrope', sans-serif; letter-spacing: -.02em; }

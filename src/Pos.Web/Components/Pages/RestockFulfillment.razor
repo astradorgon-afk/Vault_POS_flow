@@ -10,11 +10,11 @@
 <PageTitle>Restock fulfillment · VaultFlow</PageTitle>
 
 <section class="restock-page">
+    <SectionTabs Items="@SectionTabSets.Movement(Session)" Label="Movement" />
     <header class="restock-head">
         <div><span class="eyebrow">Main warehouse · store supplies</span><h1>Restock fulfillment</h1><p>Open an approved request to pick its products, mark it ready, and dispatch it to the store.</p></div>
         <button type="button" class="restock-refresh" @onclick="() => LoadAsync()" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
-
     @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
 
     <nav class="restock-filters" aria-label="Filter warehouse requests">

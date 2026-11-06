@@ -9,6 +9,7 @@
 <PageTitle>All transfers · VaultFlow</PageTitle>
 <div class="inventory-workflow web-workflow">
 
+<SectionTabs Items="@SectionTabSets.Movement(Session)" Label="Movement" />
 <div class="office-head">
     <div>
         <p class="office-kicker">Movement</p>
@@ -16,10 +17,16 @@
         <p class="office-lead">Move stock between your stores and the main warehouse, and record what arrives at the door.</p>
     </div>
     <div class="head-pickers">
+        @* Two directions, named as such: a transfer sends stock out of a
+           location you work at; a restock request asks for stock to come in. *@
+        @if (Session.CanRequestRestock() && Session.WorkLocationKind == 1)
+        {
+            <a class="search-action secondary head-primary" href="restock">Request stock</a>
+        }
         @if (CanRequestTransfers)
         {
             <button type="button" class="search-action head-primary" aria-expanded="@(showRequestForm ? "true" : "false")" aria-controls="transfer-request-form" @onclick="ToggleRequestForm">
-                @(showRequestForm ? "Close form" : "New transfer")
+                @(showRequestForm ? "Close form" : SendsFromOwnLocation ? "Send stock" : "New transfer")
             </button>
         }
         <label class="location-picker">
@@ -59,7 +66,7 @@ else
     {
         <section class="open-count" id="transfer-request-form">
             <div class="open-count-title">
-                <strong>Request a transfer</strong>
+                <strong>@(SendsFromOwnLocation ? $"Send stock from {Session.WorkLocationName}" : "Request a transfer")</strong>
                 <span>
                     @(SourceKnown
                         ? $"Shipping from {SourceLabel} — pick a destination, then search what's in stock here to add it."
@@ -199,7 +206,7 @@ else
         }
         else if (visibleTransfers.Count == 0)
         {
-            <div class="results-empty"><strong>No transfers yet.</strong><span>@(CanRequestTransfers ? "Select New transfer to request one, or wait for a dispatch to arrive at your store." : "Transfers to and from your locations will appear here.")</span></div>
+            <div class="results-empty"><strong>No transfers yet.</strong><span>@(CanRequestTransfers ? $"Select {(SendsFromOwnLocation ? "Send stock" : "New transfer")} to start one, or wait for a dispatch to arrive." : "Transfers to and from your locations will appear here.")</span></div>
         }
         else
         {
@@ -297,6 +304,14 @@ else
     // A web session may work at several assigned locations, so the source is selected.
     private bool SourceKnown => false;
 
+    // Signed in at one location, every transfer from here ships out of it.
+    private bool SendsFromOwnLocation => Session.WorkLocationId is not null && Session.WorkLocationName is { Length: > 0 };
+
+    // The work location, or the only location this person may send from.
+    private Guid? PreferredSource => Session.WorkLocationId is { } preferred && sourceChoices.Any(location => location.Id == preferred)
+        ? preferred
+        : sourceChoices.Count == 1 ? sourceChoices[0].Id : null;
+
     private string SourceLabel
     {
         get
@@ -340,8 +355,7 @@ else
         await LoadLocationsAsync();
         if (CanRequestTransfers)
         {
-            sourceLocationId = Session.WorkLocationId is { } preferred && sourceChoices.Any(location => location.Id == preferred)
-                ? preferred : null;
+            sourceLocationId = PreferredSource;
             await LoadProductsAsync();
             await LoadSourceStockAsync();
             AddLine();
@@ -610,8 +624,7 @@ else
             }
 
             preApprovalTokenId = string.Empty;
-            sourceLocationId = Session.WorkLocationId is { } preferred && sourceChoices.Any(location => location.Id == preferred)
-                ? preferred : null;
+            sourceLocationId = PreferredSource;
             destinationLocationId = null;
             sourceStock.Clear();
             draftLines.Clear();
