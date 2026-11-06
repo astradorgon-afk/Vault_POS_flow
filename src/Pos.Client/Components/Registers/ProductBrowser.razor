@@ -12,7 +12,7 @@
         <span class="catalogue-search-hint">F2 · by name</span>
     </div>
 
-    <div class="catalogue-families" role="tablist" aria-label="Product families">
+    <div class="catalogue-families" role="tablist" aria-label="Product categories">
         <button type="button" class="family-chip @(ActiveFamily is null ? "chip-active" : "")" @onclick="() => ChooseFamily(null)" role="tab">
             All
         </button>
@@ -27,7 +27,7 @@
     <div class="catalogue-grid">
         @if (VisibleProducts.Count == 0)
         {
-            <p class="catalogue-empty">No products match “@Search”.</p>
+            <p class="catalogue-empty">@(string.IsNullOrWhiteSpace(Search) ? "No products in this category." : $"No products match “{Search}”.")</p>
         }
         @foreach (var item in VisibleProducts)
         {
@@ -55,6 +55,10 @@
                     }
                 </span>
             </button>
+        }
+        @if (MatchingCount > VisibleProducts.Count)
+        {
+            <p class="catalogue-more">Showing @VisibleProducts.Count of @MatchingCount. Pick a category or type a name, SKU or barcode to narrow the list.</p>
         }
     </div>
 </div>
@@ -98,11 +102,22 @@
     [Parameter]
     public int SearchFocusTicket { get; set; }
 
-    /// <summary>The tile's family is the SKU's dash-prefix, exactly as a
-    /// till without a category feed groups its products.</summary>
+    /// <summary>How many tiles the grid shows at once; a grocery carries hundreds
+    /// of products, so the rest are reached by category or search.</summary>
+    private const int MaxTiles = 60;
+
+    /// <summary>The categories the products fall into, as head office files them.</summary>
     internal IReadOnlyList<string> Families { get; private set; } = Array.Empty<string>();
 
     internal List<CatalogueItem> VisibleProducts { get; private set; } = new();
+
+    /// <summary>How many products match before the grid is capped.</summary>
+    internal int MatchingCount { get; private set; }
+
+    /// <summary>A product's category; a product head office sent without one
+    /// falls back to its SKU's dash-prefix.</summary>
+    private static string FamilyOf(CatalogueItem item)
+        => string.IsNullOrWhiteSpace(item.Category) ? item.Sku.Split('-', 2)[0].Trim() : item.Category.Trim();
 
     // The filter a cashier sees is the one a paper list would respect:
     // whole-word-ish containment, prices only, families in handy order.
@@ -111,7 +126,7 @@
         var here = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in Items)
         {
-            var family = item.Sku.Split('-', 2)[0].Trim();
+            var family = FamilyOf(item);
             if (family.Length > 0)
             {
                 here.Add(family);
@@ -127,10 +142,13 @@
     private void RecalculateVisible()
     {
         IEnumerable<CatalogueItem> visible = Items;
-        if (ActiveFamily is { } family)
+
+        // A search looks through every product: a cashier typing "coffee" while
+        // the Rice tab is open still expects to find it.
+        if (ActiveFamily is { } family && string.IsNullOrWhiteSpace(Search))
         {
             visible = visible.Where(item =>
-                item.Sku.StartsWith(family, StringComparison.OrdinalIgnoreCase));
+                string.Equals(FamilyOf(item), family, StringComparison.OrdinalIgnoreCase));
         }
 
         if (!string.IsNullOrWhiteSpace(Search))
@@ -142,10 +160,12 @@
                 || (item.Barcode?.Contains(sought, StringComparison.OrdinalIgnoreCase) ?? false));
         }
 
-        VisibleProducts = visible
+        List<CatalogueItem> matching = [.. visible];
+        MatchingCount = matching.Count;
+        VisibleProducts = matching
             .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(item => item.Sku, StringComparer.OrdinalIgnoreCase)
-            .Take(60)
+            .Take(MaxTiles)
             .ToList();
     }
 

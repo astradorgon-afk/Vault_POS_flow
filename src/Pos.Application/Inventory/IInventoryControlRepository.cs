@@ -110,7 +110,8 @@ public interface IInventoryControlRepository
 /// <summary>A location's facts for posting.</summary>
 /// <param name="Kind">The location kind.</param>
 /// <param name="TimeZoneId">The IANA time zone, or null when not configured.</param>
-public sealed record InventoryControlLocation(LocationKind Kind, string? TimeZoneId);
+/// <param name="IsActive">Whether the location is still open for business.</param>
+public sealed record InventoryControlLocation(LocationKind Kind, string? TimeZoneId, bool IsActive);
 
 /// <summary>One balance bucket as it stands.</summary>
 /// <param name="ProductId">The product.</param>

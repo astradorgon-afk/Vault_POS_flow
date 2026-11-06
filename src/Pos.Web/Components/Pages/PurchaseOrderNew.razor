@@ -1,0 +1,396 @@
+@page "/purchasing/new"
+@attribute [Authorize(Policy = "purchase.create")]
+@attribute [Authorize(Roles = "Owner")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>New purchase order · VaultFlow</PageTitle>
+
+@if (loading)
+{
+    <section class="qr-card"><div class="qr-empty"><span class="qr-spinner"></span><p>Loading suppliers and products…</p></div></section>
+}
+else
+{
+<div class="pn">
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pn-alert" role="alert">@message</div>
+    }
+
+    <header class="pn-intro">
+        <div class="pn-intro-top">
+            <h1>New order</h1>
+            <span class="pn-status @(IsReady ? "ready" : null)" role="status">
+                <i aria-hidden="true"></i>@(IsReady ? "Ready to review" : "In progress")
+            </span>
+        </div>
+        <p>Set where it is going, add the products, then review it before sending.</p>
+        @* Three stops, so the buyer can see at a glance what is already
+           settled and what the page is still waiting for. *@
+        <ol class="pn-steps" aria-label="Order progress">
+            <li class="@StepState(1)"><span class="pn-step-num" aria-hidden="true">@(DetailsDone ? "✓" : "1")</span>Details</li>
+            <li class="@StepState(2)"><span class="pn-step-num" aria-hidden="true">@(ProductsDone ? "✓" : "2")</span>Products</li>
+            <li class="@StepState(3)"><span class="pn-step-num" aria-hidden="true">3</span>Review</li>
+        </ol>
+    </header>
+
+    @if (supplyRequest is { } seeded)
+    {
+        <section class="pn-seeded" role="note">
+            <strong>Buying for @seeded.Number</strong>
+            <span>
+                The warehouse asked for @seeded.Lines.Count product@(seeded.Lines.Count == 1 ? "" : "s") on
+                @seeded.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture).
+                Quantities are what is still to be bought. Choose the supplier and check the costs, then save the order.
+                Ordering only part of it leaves the rest on the request for a second supplier.
+            </span>
+            @if (!string.IsNullOrWhiteSpace(seeded.Note))
+            {
+                <span class="pn-seeded-note">“@seeded.Note”</span>
+            }
+        </section>
+    }
+
+    @* The order itself on the left; on a wide screen the running total,
+       what is still missing and the approval note move into a rail beside
+       it rather than floating over the cards. *@
+    <div class="pn-main">
+        <section class="pn-card">
+            <div class="pn-card-head">
+                <span class="pn-num" aria-hidden="true">01</span>
+                <div class="pn-card-head-main">
+                    <p class="pn-eyebrow">Order settings</p>
+                    <h2>Delivery details</h2>
+                </div>
+                <button type="button" class="pn-toggle" aria-expanded="@(detailsOpen ? "true" : "false")" @onclick="() => detailsOpen = !detailsOpen">
+                    @(detailsOpen ? "Done" : "Edit details")
+                </button>
+            </div>
+
+            @if (detailsOpen)
+            {
+                <div class="pn-fields">
+                    <div class="pn-field">
+                        <label for="pn-supplier">Supplier <span class="pn-required" aria-hidden="true">*</span></label>
+                        @if (useCustomSupplier)
+                        {
+                            <input id="pn-supplier" class="pn-control" type="text" maxlength="128" placeholder="Enter the supplier's name"
+                                   @bind="customSupplierName" @bind:event="oninput" />
+                        }
+                        else
+                        {
+                            <span class="pn-select">
+                                <select id="pn-supplier" class="pn-control" @bind="supplierId" @bind:after="OnSupplierChanged">
+                                    <option value="">Choose a supplier…</option>
+                                    @foreach (PosSupplier supplier in suppliers.Where(s => s.IsActive).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        <option value="@supplier.Id">@supplier.Name</option>
+                                    }
+                                </select>
+                            </span>
+                        }
+                        <button type="button" class="pn-link" @onclick="ToggleCustomSupplier">
+                            @(useCustomSupplier ? "Choose a listed supplier instead" : "Supplier not listed? Type the name")
+                        </button>
+                    </div>
+
+                    <div class="pn-field">
+                        <label for="pn-destination">Deliver to <span class="pn-required" aria-hidden="true">*</span></label>
+                        <span class="pn-select">
+                            <select id="pn-destination" class="pn-control" @bind="destinationId">
+                                @foreach (PosLocation location in destinations)
+                                {
+                                    <option value="@location.Id">@location.Code · @location.Name</option>
+                                }
+                            </select>
+                        </span>
+                    </div>
+
+                    <div class="pn-field">
+                        <label for="pn-expected">Expected delivery</label>
+                        <input id="pn-expected" class="pn-control" type="date" @bind="expectedOn" />
+                        <p class="pn-note">
+                            <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></svg>
+                            Estimated from the supplier's usual lead time. Change it if they confirm another date.
+                        </p>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="pn-glance">
+                    <div>
+                        <p class="pn-glance-main">
+                            <span>@SupplierLabel</span>
+                            <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                            <span>@DestinationLabel</span>
+                        </p>
+                        <p class="pn-glance-date">Expected · @ExpectedLabel</p>
+                    </div>
+                    @if (DetailsDone)
+                    {
+                        <span class="pn-glance-badge">✓ Set</span>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="pn-card">
+            <div class="pn-card-head">
+                <span class="pn-num" aria-hidden="true">02</span>
+                <div class="pn-card-head-main">
+                    <p class="pn-eyebrow">Order lines</p>
+                    <h2>Add products</h2>
+                    <p class="pn-card-sub">Search for an item or scan its barcode.</p>
+                </div>
+                <span class="pn-chip">@lines.Count @(lines.Count == 1 ? "item" : "items")</span>
+            </div>
+
+            <ScanTarget OnScan="OnScanned" Enabled="@(!saving)" />
+
+            <div class="pn-search-row">
+                <label class="pn-search">
+                    <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                    <input type="search" placeholder="Search product or SKU" aria-label="Search products"
+                           @bind="productSearch" @bind:event="oninput" @onkeydown="OnFinderKey" />
+                </label>
+                <CameraScanner Enabled="@(!saving)" />
+            </div>
+            <p class="pn-scan-hint">@(scanNote ?? "Each scan adds one more of that product.")</p>
+
+            @if (Supplier is { } forSupplier)
+            {
+                <div class="pn-filterline">
+                    <p class="pn-filtercopy">Only products from <strong>@forSupplier.Name</strong></p>
+                    <button type="button" class="pn-switch @(onlySupplierProducts ? "on" : null)" role="switch"
+                            aria-checked="@(onlySupplierProducts ? "true" : "false")"
+                            aria-label="Show only this supplier's products"
+                            @onclick="() => onlySupplierProducts = !onlySupplierProducts"></button>
+                </div>
+            }
+
+            @if (ShowResults)
+            {
+                <div class="pn-results-head">
+                    <span>@(productSearch.Trim().Length > 0 ? "Matching products" : "Available products")</span>
+                    <button type="button" @onclick="CloseResults">Close</button>
+                </div>
+                <div class="pn-results" aria-live="polite">
+                    @foreach (PosOrderableProduct product in Matches)
+                    {
+                        DraftLine? already = lines.FirstOrDefault(l => l.Product.Id == product.Id);
+                        <div class="pn-result">
+                            <span class="pn-result-icon" aria-hidden="true">
+                                <svg class="pn-ico" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4-9-4Zm0 0v10l9 4 9-4V7M12 11v10" /></svg>
+                            </span>
+                            <div class="pn-result-copy">
+                                <p class="pn-result-name">@product.Name</p>
+                                <p class="pn-result-meta">@product.Sku · @UnitName(product.BaseUnitOfMeasureId)@(product.DefaultPurchaseCost is { } cost ? " · " + PurchasingText.Money(cost) : "")</p>
+                            </div>
+                            @if (already is null)
+                            {
+                                <button type="button" class="pn-add-one" @onclick="() => AddLine(product)">+ Add</button>
+                            }
+                            else
+                            {
+                                <span class="pn-added">✓ @PurchasingText.Quantity(already.Quantity)</span>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (Matches.Count == 0)
+                {
+                    <p class="pn-none">No products match@(onlySupplierProducts && Supplier is { } s ? " among " + s.Name + "'s products — turn the filter off to search everything" : "").</p>
+                }
+                else if (MatchTotal > Matches.Count)
+                {
+                    <p class="pn-hint">Showing @Matches.Count of @MatchTotal. Type more of the name to narrow it down.</p>
+                }
+            }
+
+            @if (lines.Count == 0)
+            {
+                <div class="pn-empty">
+                    <span class="pn-empty-icon" aria-hidden="true">
+                        <svg class="pn-ico" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4-9-4Zm0 0v10l9 4 9-4V7M12 11v10" /></svg>
+                    </span>
+                    <strong>No products added yet</strong>
+                    <p>Find a product above or scan a barcode to start this order.</p>
+                </div>
+            }
+            else
+            {
+                <div class="pn-lines">
+                    @foreach (DraftLine line in lines)
+                    {
+                        <article class="pn-line @(line.IsValid ? null : "invalid")">
+                            <div class="pn-line-top">
+                                <div class="pn-line-info">
+                                    <p class="pn-line-title">@line.Product.Name</p>
+                                    <p class="pn-line-sku">@line.Product.Sku · per @UnitName(line.Product.BaseUnitOfMeasureId)</p>
+                                </div>
+                                <button type="button" class="pn-remove" aria-label="Remove @line.Product.Name" @onclick="() => lines.Remove(line)">
+                                    <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7" /></svg>
+                                </button>
+                            </div>
+                            <div class="pn-line-bottom">
+                                <div class="pn-stepper">
+                                    <button type="button" aria-label="One less" disabled="@(line.Quantity <= 1)" @onclick="() => Step(line, -1)">−</button>
+                                    <input type="number" min="1" step="1" aria-label="Quantity of @line.Product.Name" @bind="line.Quantity" @bind:event="oninput" />
+                                    <button type="button" aria-label="One more" @onclick="() => Step(line, 1)">+</button>
+                                </div>
+                                <div class="pn-line-money">
+                                    <label for="pn-cost-@line.Product.Id">Unit cost</label>
+                                    <input id="pn-cost-@line.Product.Id" class="pn-cost" type="number" min="0" step="0.01"
+                                           @bind="line.UnitCost" @bind:event="oninput" />
+                                    <strong class="pn-line-total">@PurchasingText.Money(line.Total)</strong>
+                                </div>
+                            </div>
+                        </article>
+                    }
+                </div>
+                <p class="pn-line-count">@lines.Count @(lines.Count == 1 ? "product" : "products") · @PurchasingText.Quantity(TotalUnits) units</p>
+            }
+
+            <button type="button" class="pn-add-product" @onclick="OpenCustomProduct">
+                <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                Product not listed? Add a new item
+            </button>
+        </section>
+    </div>
+
+    <div class="pn-side">
+        <div class="pn-tips">
+            <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></svg>
+            <p>@(SkipsApproval
+                ? "You approve your own purchase orders. Check the quantities before you continue to sending."
+                : "A different team member approves this order before it reaches the supplier.")</p>
+        </div>
+
+        @if (Missing.Count > 0)
+        {
+            <ul class="pn-missing">
+                @foreach (string item in Missing) { <li>@item</li> }
+            </ul>
+        }
+
+        @* The running total follows the buyer down the page: on a long order the
+           figure they are committing to should never be out of sight. On a
+           narrow screen it floats above the tab bar; in the rail it simply
+           stays put while the cards scroll past. *@
+        <div class="pn-bar">
+            <div class="pn-bar-meta">
+                <span>@lines.Count @(lines.Count == 1 ? "product" : "products") · @PurchasingText.Quantity(TotalUnits) units</span>
+                <strong>@PurchasingText.Money(OrderTotal)</strong>
+            </div>
+            <button type="button" class="pn-review" disabled="@(saving || Missing.Count > 0)" @onclick="OpenReview">
+                Review order
+                <svg class="pn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+        </div>
+    </div>
+
+    @if (customProductOpen)
+    {
+        <div class="pn-overlay" @onclick="CloseCustomProduct">
+            <section class="pn-sheet" role="dialog" aria-modal="true" aria-labelledby="pn-product-title" tabindex="-1"
+                     @ref="sheetElement" @onkeydown="OnSheetKey" @onclick:stopPropagation="true">
+                <div class="pn-handle" aria-hidden="true"></div>
+                <div class="pn-sheet-head">
+                    <h3 id="pn-product-title">Add a new product</h3>
+                    <button type="button" class="pn-sheet-close" aria-label="Close" @onclick="CloseCustomProduct">×</button>
+                </div>
+                <p class="pn-sheet-desc">It is saved to the catalogue and added straight to this order.</p>
+
+                <div class="pn-field"><label for="pn-np-name">Product name</label>
+                    <input id="pn-np-name" class="pn-control" maxlength="128" @bind="newProductName" @bind:event="oninput" /></div>
+                <div class="pn-field"><label for="pn-np-sku">SKU <em>optional — generated if blank</em></label>
+                    <input id="pn-np-sku" class="pn-control" maxlength="64" @bind="newProductSku" /></div>
+                <div class="pn-field"><label for="pn-np-barcode">Barcode <em>optional</em></label>
+                    <input id="pn-np-barcode" class="pn-control" maxlength="48" @bind="newProductBarcode" /></div>
+                <div class="pn-field"><label for="pn-np-category">Category</label>
+                    <span class="pn-select">
+                        <select id="pn-np-category" class="pn-control" @bind="newProductCategory">
+                            <option value="">Choose a category</option>
+                            @foreach (PosCategory category in categories)
+                            {
+                                <option value="@category.Id">@category.Name</option>
+                            }
+                            <option value="@OtherCategoryChoice">Other — none of these fit</option>
+                        </select>
+                    </span>
+                </div>
+                <div class="pn-field"><label for="pn-np-unit">Unit</label>
+                    <span class="pn-select">
+                        <select id="pn-np-unit" class="pn-control" @bind="newProductUnitId">
+                            <option value="">Choose a unit</option>
+                            @foreach (PosUnitOfMeasure unit in units.Values.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <option value="@unit.Id">@unit.Name (@unit.Code)</option>
+                            }
+                        </select>
+                    </span>
+                </div>
+                <div class="pn-field"><label for="pn-np-cost">Unit cost</label>
+                    <input id="pn-np-cost" class="pn-control" type="number" min="0" step="0.01" @bind="newProductCost" @bind:event="oninput" /></div>
+
+                @if (categories.Count == 0)
+                {
+                    <p class="pn-hint">The category list is unavailable. Choose “Other” to buy this product anyway and file it properly later.</p>
+                }
+
+                <button type="button" class="pn-full-primary" disabled="@(saving || !CanAddCustomProduct)" @onclick="AddCustomProductAsync">
+                    @(saving ? "Adding…" : "Create and add to order")
+                </button>
+                <button type="button" class="pn-full-secondary" @onclick="CloseCustomProduct">Cancel</button>
+            </section>
+        </div>
+    }
+
+    @if (reviewOpen)
+    {
+        <div class="pn-overlay" @onclick="CloseReview">
+            <section class="pn-sheet" role="dialog" aria-modal="true" aria-labelledby="pn-review-title" tabindex="-1"
+                     @ref="sheetElement" @onkeydown="OnSheetKey" @onclick:stopPropagation="true">
+                <div class="pn-handle" aria-hidden="true"></div>
+                <div class="pn-sheet-head">
+                    <h3 id="pn-review-title">Review purchase order</h3>
+                    <button type="button" class="pn-sheet-close" aria-label="Close" @onclick="CloseReview">×</button>
+                </div>
+                <p class="pn-sheet-desc">Check the details and the quantities before this becomes an order.</p>
+
+                <div class="pn-review-rows">
+                    <div class="pn-review-row"><span>Supplier</span><strong>@SupplierLabel</strong></div>
+                    <div class="pn-review-row"><span>Deliver to</span><strong>@DestinationLabel</strong></div>
+                    <div class="pn-review-row"><span>Expected delivery</span><strong>@ExpectedLabel</strong></div>
+                </div>
+
+                <p class="pn-review-sub">@lines.Count @(lines.Count == 1 ? "product" : "products") · @PurchasingText.Quantity(TotalUnits) units</p>
+                <div class="pn-review-rows">
+                    @foreach (DraftLine line in lines)
+                    {
+                        <div class="pn-review-row">
+                            <span>@PurchasingText.Quantity(line.Quantity) × @line.Product.Name</span>
+                            <strong>@PurchasingText.Money(line.Total)</strong>
+                        </div>
+                    }
+                </div>
+                <div class="pn-review-total"><span>Order total</span><strong>@PurchasingText.Money(OrderTotal)</strong></div>
+
+                <button type="button" class="pn-full-primary" disabled="@saving" @onclick="() => SaveAsync(submit: true)">
+                    @(saving ? "Saving…" : SkipsApproval ? "Continue to sending" : "Send for approval")
+                </button>
+                <button type="button" class="pn-full-secondary" disabled="@saving" @onclick="() => SaveAsync(submit: false)">Save as a draft instead</button>
+                <button type="button" class="pn-link pn-review-back" @onclick="CloseReview">Back to editing the order</button>
+                <small>@(SkipsApproval
+                    ? "The next screen prints the list and marks it sent to the supplier."
+                    : "A reviewer sees it next; nothing reaches the supplier until they approve it.")</small>
+            </section>
+        </div>
+    }
+</div>
+}

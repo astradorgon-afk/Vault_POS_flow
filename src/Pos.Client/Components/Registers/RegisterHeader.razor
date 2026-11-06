@@ -4,7 +4,7 @@
         <span class="vf-header-title">VaultFlow</span>
     </div>
 
-    <div class="vf-header-fact" title="Store">
+    <div class="vf-header-fact vf-header-store" title="Store">
         <small>Store</small>
         <strong>@StoreName</strong>
     </div>
@@ -19,7 +19,7 @@
         <strong>@CashierName</strong>
     </div>
     <span class="vf-header-sep" aria-hidden="true"></span>
-    <div class="vf-header-fact @(string.IsNullOrWhiteSpace(ShiftNumber) ? "vf-header-fact-warn" : string.Empty)" title="Shift">
+    <div class="vf-header-fact vf-header-shift @(string.IsNullOrWhiteSpace(ShiftNumber) ? "vf-header-fact-warn" : string.Empty)" title="Shift">
         <small>Shift</small>
         <strong>@ShiftLabel</strong>
     </div>

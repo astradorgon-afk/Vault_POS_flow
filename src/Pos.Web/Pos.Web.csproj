@@ -5,15 +5,24 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Pos.Web.Client\Pos.Web.Client.csproj" />
     <ProjectReference Include="..\Pos.SharedUI\Pos.SharedUI.csproj" />
     <ProjectReference Include="..\Pos.Infrastructure\Pos.Infrastructure.csproj" />
   </ItemGroup>
+
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!--
+      The SDK only restores the package that ships _framework/blazor.web.js when
+      .razor files are present at restore time. The Docker build restores from the
+      project files alone, so without this the published site has no blazor.web.js
+      and every interactive page (the sign-in form included) never starts.
+    -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
 </Project>

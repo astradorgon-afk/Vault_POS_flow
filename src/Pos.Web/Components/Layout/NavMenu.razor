@@ -2,6 +2,8 @@
 @inject NavigationManager Navigation
 @inject NotificationStore Notifications
 @inject UserSession Session
+@inject IJSRuntime JS
+@implements IDisposable
 
 <div class="brand-block">
     <a class="brand" href="" @onclick="NotifyNavigation">
@@ -13,7 +15,6 @@
 
 <nav class="nav-stack" aria-label="Primary navigation">
     <div class="nav-group">
-        <span class="nav-heading">Workspace</span>
         <NavLink class="nav-link" href="" Match="NavLinkMatch.All" @onclick="NotifyNavigation"><AppIcon Name="home" /> <span>Overview</span></NavLink>
         <NavLink class="nav-link" href="notifications" @onclick="NotifyNavigation">
             <AppIcon Name="bell" /> <span>Notifications</span>
@@ -24,84 +25,117 @@
         </NavLink>
     </div>
 
-    @if (CanViewSales || CanViewReceipts || CanViewInventory)
+    @* Each group folds away; the group holding the current page always stays open. *@
+    @if (CanViewInventory || CanReceivePurchasing || CanViewExceptions)
     {
         <div class="nav-group">
-            <span class="nav-heading">Stores</span>
-            @if (CanViewSales)
+            @GroupHeading("stock", "Stock")
+            @if (!IsCollapsed("stock"))
             {
-                <NavLink class="nav-link" href="stores" @onclick="NotifyNavigation"><AppIcon Name="coins" /> <span>Store performance</span></NavLink>
-            }
-            @if (CanViewInventory)
-            {
-                <NavLink class="nav-link" href="inventory/stock" @onclick="NotifyNavigation"><AppIcon Name="box" /> <span>Store inventory</span></NavLink>
-            }
-            @if (CanViewSales)
-            {
-                <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
-            }
-            @if (CanViewReceipts)
-            {
-                <NavLink class="nav-link" href="receipts" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Payment receipts</span></NavLink>
+                @if (CanViewInventory)
+                {
+                    <NavLink class="nav-link" href="inventory/stock" @onclick="NotifyNavigation"><AppIcon Name="box" /> <span>Stock levels</span></NavLink>
+                    <NavLink class="nav-link" href="inventory/counts" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock counts</span></NavLink>
+                }
+                @if (CanReceivePurchasing)
+                {
+                    <NavLink class="nav-link" href="receiving" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Goods receiving</span></NavLink>
+                }
+                @if (CanViewExceptions)
+                {
+                    <NavLink class="nav-link" href="inventory/exceptions" @onclick="NotifyNavigation"><AppIcon Name="alert" /> <span>Stock exceptions</span></NavLink>
+                }
             }
         </div>
     }
 
-    @if (CanUseStockCounts || CanAdjustStock || CanViewTransfers || CanViewQuarantine || CanViewCatalog || CanViewReports)
+    @if (RestockHref is not null || CanViewTransfers)
     {
+        @* Restock is one module: approvals, fulfillment and requests are tabs
+           of it, so the menu needs one entry that opens this person's own tab. *@
         <div class="nav-group">
-            <span class="nav-heading">Operations</span>
-            @if (CanUseStockCounts)
+            @GroupHeading("movement", "Movement")
+            @if (!IsCollapsed("movement"))
             {
-                <NavLink class="nav-link" href="inventory/counts" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock counts</span></NavLink>
-            }
-            @if (CanAdjustStock)
-            {
-                <NavLink class="nav-link" href="inventory/adjustments" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Stock adjustments</span></NavLink>
-            }
-            @if (CanViewTransfers)
-            {
-                <NavLink class="nav-link" href="transfers" Match="NavLinkMatch.All" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Transfers</span></NavLink>
-                <NavLink class="nav-link" href="transfers/replenishment" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>Replenishment</span></NavLink>
-            }
-            @if (CanViewQuarantine)
-            {
-                <NavLink class="nav-link" href="quarantine" @onclick="NotifyNavigation"><AppIcon Name="count" /> <span>Quarantine</span></NavLink>
-            }
-            @if (CanViewCatalog)
-            {
-                <NavLink class="nav-link" href="catalog/prices" @onclick="NotifyNavigation"><AppIcon Name="tag" /> <span>Price schedule</span></NavLink>
-            }
-            @if (CanViewReports)
-            {
-                <NavLink class="nav-link" href="reports" @onclick="NotifyNavigation"><AppIcon Name="report" /> <span>Daily reports</span></NavLink>
-            }
-            @if (CanViewExceptions)
-            {
-                <NavLink class="nav-link" href="inventory/exceptions" @onclick="NotifyNavigation"><AppIcon Name="report" /> <span>Inventory exceptions</span></NavLink>
+                @if (RestockHref is { } restockHref)
+                {
+                    <SectionNavLink class="nav-link" href="@restockHref" Also="RestockSections" @onclick="NotifyNavigation"><AppIcon Name="box-in" /> <span>Restock</span></SectionNavLink>
+                }
+                @if (CanViewTransfers)
+                {
+                    <NavLink class="nav-link" href="transfers" @onclick="NotifyNavigation"><AppIcon Name="transfer" /> <span>All transfers</span></NavLink>
+                }
             }
         </div>
     }
 
-    @if (CanViewLocations || CanViewAdministration || CanManageDevices || CanManageSync)
+    @if (CanViewSales || CanViewReports || PerformanceHref is not null)
     {
         <div class="nav-group">
-            <span class="nav-heading">Administration</span>
-            @if (CanViewLocations)
+            @GroupHeading("sales", "Sales & reports")
+            @if (!IsCollapsed("sales"))
             {
-                <NavLink class="nav-link" href="admin/locations" @onclick="NotifyNavigation"><AppIcon Name="location" /> <span>Locations</span></NavLink>
+                @if (CanViewSales)
+                {
+                    <NavLink class="nav-link" href="sales" @onclick="NotifyNavigation"><AppIcon Name="ledger" /> <span>Sales ledger</span></NavLink>
+                }
+                @if (CanViewReports)
+                {
+                    <NavLink class="nav-link" href="reports" @onclick="NotifyNavigation"><AppIcon Name="report" /> <span>Daily reports</span></NavLink>
+                }
+                @if (PerformanceHref is { } performanceHref)
+                {
+                    <SectionNavLink class="nav-link" href="@performanceHref" Also="PerformanceSections" @onclick="NotifyNavigation"><AppIcon Name="trend-up" /> <span>Store performance</span></SectionNavLink>
+                }
             }
-            @if (CanViewAdministration)
+        </div>
+    }
+
+    @if (CanViewCatalog || CanViewPurchasing)
+    {
+        <div class="nav-group">
+            @GroupHeading("catalog", "Catalogue & buying")
+            @if (!IsCollapsed("catalog"))
             {
-                <NavLink class="nav-link" href="admin/users" @onclick="NotifyNavigation"><AppIcon Name="people" /> <span>People &amp; roles</span></NavLink>
+                @if (CanViewCatalog)
+                {
+                    <SectionNavLink class="nav-link" href="catalog" Except="CatalogSiblings" @onclick="NotifyNavigation"><AppIcon Name="list" /> <span>Products &amp; barcodes</span></SectionNavLink>
+                    <NavLink class="nav-link" href="catalog/change-requests" @onclick="NotifyNavigation"><AppIcon Name="check" /> <span>Catalogue approvals</span></NavLink>
+                }
+                @if (CanViewPurchasing)
+                {
+                    <NavLink class="nav-link" href="purchasing" @onclick="NotifyNavigation"><AppIcon Name="receipt" /> <span>Purchase orders</span></NavLink>
+                }
             }
-            @if (CanManageDevices)
+        </div>
+    }
+
+    @if (CanViewLocations || CanViewAdministration || CanManageDevices || CanManageSync || CanViewAudit)
+    {
+        <div class="nav-group">
+            @GroupHeading("admin", "Administration")
+            @if (!IsCollapsed("admin"))
             {
-                <NavLink class="nav-link" href="admin/devices" @onclick="NotifyNavigation"><AppIcon Name="device" /> <span>Devices</span></NavLink>
-            }
-            @if (CanManageSync)
-            {
-                <NavLink class="nav-link" href="sync/failures" @onclick="NotifyNavigation"><AppIcon Name="sync" /> <span>Sync failures</span></NavLink>
+                @if (CanViewAdministration)
+                {
+                    <NavLink class="nav-link" href="admin/users" @onclick="NotifyNavigation"><AppIcon Name="people" /> <span>People &amp; roles</span></NavLink>
+                }
+                @if (CanViewLocations)
+                {
+                    <NavLink class="nav-link" href="admin/locations" @onclick="NotifyNavigation"><AppIcon Name="location" /> <span>Locations</span></NavLink>
+                }
+                @if (CanManageDevices)
+                {
+                    <NavLink class="nav-link" href="admin/devices" @onclick="NotifyNavigation"><AppIcon Name="device" /> <span>Devices</span></NavLink>
+                }
+                @if (CanManageSync)
+                {
+                    <NavLink class="nav-link" href="sync/failures" @onclick="NotifyNavigation"><AppIcon Name="sync" /> <span>Sync failures</span></NavLink>
+                }
+                @if (CanViewAudit)
+                {
+                    <NavLink class="nav-link" href="admin/audit" @onclick="NotifyNavigation"><AppIcon Name="clock" /> <span>Activity log</span></NavLink>
+                }
             }
         </div>
     }
@@ -121,20 +155,92 @@
     [Parameter]
     public EventCallback OnNavigate { get; set; }
 
+    /// <summary>
+    /// The unread pill reads the shared feed, so this menu has to repaint when
+    /// the feed refreshes. Without the subscription the pill renders once at
+    /// first paint — before the feed loads — and then either stays missing or
+    /// keeps a stale number until something else happens to re-render it.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        Notifications.Changed += OnNotificationsChanged;
+        // The group holding the current page opens itself, so the menu has to
+        // repaint when the address changes, not only when the feed does.
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+        => _ = InvokeAsync(StateHasChanged);
+
+    private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
+
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanViewCatalog => Session.HasPermission("product.view");
-    private bool CanViewReceipts => Session.HasPermission("receipt.view");
-    private bool CanViewReports => Session.HasPermission("report.view");
-    private bool CanUseStockCounts => Session.HasAnyPermission("inventory.count", "inventory.count.approve", "inventory.view.all");
-    private bool CanAdjustStock => Session.HasAnyPermission("inventory.adjust", "inventory.adjust.approve");
-    private bool CanViewQuarantine => Session.HasPermission("quarantine.view");
-    private bool CanViewExceptions => Session.HasPermission("inventory.view.all");
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
-    private bool CanViewLocations => Session.HasPermission("product.view");
+
+    private bool CanViewCatalog => Session.HasPermission("product.view");
+    private bool CanViewPurchasing => Session.HasPermission("purchase.view") &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool CanReceivePurchasing => Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive");
+    private bool CanViewReports => Session.HasPermission("report.view");
+    private bool CanViewExceptions => Session.HasPermission("inventory.view.all");
+    private bool CanViewLocations => Session.HasPermission("location.manage");
     private bool CanManageDevices => Session.HasPermission("device.manage");
     private bool CanManageSync => Session.HasPermission("sync.manage");
     private bool CanViewAdministration => Session.HasAnyPermission("user.manage", "role.manage");
+    // The permission alone, matching the page policy and the API. A role
+    // shortcut here would show a link that the audit endpoint then refuses.
+    private bool CanViewAudit => Session.HasPermission("audit.view");
+
+    private static readonly string[] CatalogSiblings = ["catalog/change-requests"];
+    private static readonly string[] RestockSections = ["restock"];
+    private static readonly string[] PerformanceSections = ["stores", "analytics/products"];
+
+    private string? RestockHref => SectionTabSets.RestockHome(Session);
+    private string? PerformanceHref => SectionTabSets.StorePerformance(Session).FirstOrDefault()?.Href;
+
+    // Which top-level sections belong to each group, to keep the current one open.
+    private static readonly Dictionary<string, string[]> GroupSections = new(StringComparer.Ordinal)
+    {
+        ["stock"] = ["inventory", "receiving"],
+        ["movement"] = ["restock", "transfers"],
+        ["sales"] = ["sales", "returns", "reports", "analytics", "stores"],
+        ["catalog"] = ["catalog", "purchasing"],
+        ["admin"] = ["admin", "sync", "locations"],
+    };
+
+    // Administration is visited least; folded by default so the daily pages fit.
+    private readonly HashSet<string> collapsed = new(StringComparer.Ordinal) { "admin" };
+
+    private bool IsCollapsed(string group) => collapsed.Contains(group) && !HoldsCurrentPage(group);
+
+    private bool HoldsCurrentPage(string group)
+    {
+        string path = Navigation.ToBaseRelativePath(Navigation.Uri);
+        int end = path.IndexOfAny(['/', '?', '#']);
+        string section = end >= 0 ? path[..end] : path;
+        return GroupSections.TryGetValue(group, out string[]? sections) &&
+               sections.Contains(section, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void Toggle(string group)
+    {
+        if (!collapsed.Remove(group))
+        {
+            collapsed.Add(group);
+        }
+    }
+
+    private RenderFragment GroupHeading(string group, string label) => __builder =>
+    {
+        bool open = !IsCollapsed(group);
+        bool locked = HoldsCurrentPage(group);
+        <button type="button" class="nav-heading" aria-expanded="@(open ? "true" : "false")" disabled="@locked"
+                title="@(locked ? "Contains the page you are on" : open ? $"Hide {label}" : $"Show {label}")"
+                @onclick="() => Toggle(group)">
+            <span>@label</span><i aria-hidden="true"></i>
+        </button>
+    };
 
     private Task NotifyNavigation() => OnNavigate.InvokeAsync();
 
@@ -142,7 +248,25 @@
     {
         await Notifications.StopAsync();
         Authentication.SignOut();
+        try
+        {
+            // Drops the cookie too; the server session is already gone.
+            await JS.InvokeVoidAsync("vaultflowSession.end");
+        }
+        catch (JSException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
         await OnNavigate.InvokeAsync();
         Navigation.NavigateTo("/login");
+    }
+
+    public void Dispose()
+    {
+        Notifications.Changed -= OnNotificationsChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
     }
 }

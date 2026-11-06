@@ -31,11 +31,126 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
     private static long _barcodeSequence = 7400000000000;
 
     [Fact]
+    public async Task StoreRestock_RequiresOwnerDecision_ThenWarehouseDispatchAndStoreReceipt()
+    {
+        Seed seed = await SeedAsync("restock");
+        await factory.CreateUserAsync("restock-store", Roles.InventoryStaff, locations: [seed.Store]);
+        await factory.CreateUserAsync("restock-warehouse", Roles.MainInventoryManager,
+            locations: [seed.Warehouse], tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("restock-owner", Roles.Owner, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string store = await SignInAsync(client, "restock-store");
+        string warehouse = await SignInAsync(client, "restock-warehouse");
+        string owner = await SignInAsync(client, "restock-owner");
+        await SeedAvailableAsync(seed.Warehouse, seed.Product, null, 10m, 95m);
+
+        LocationId otherStore = await factory.CreateLocationAsync(
+            "ST-restock-other", "Other restock store", LocationKind.Store);
+        using HttpResponseMessage outsideAssignment = await PostAsJsonAsync(client,
+            "/api/v1/transfers/restock-requests",
+            new
+            {
+                storeLocationId = otherStore.Value,
+                warehouseLocationId = seed.Warehouse.Value,
+                lines = new[] { new { productId = seed.Product.Value, quantity = 4m } },
+            }, store);
+        outsideAssignment.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage created = await PostAsJsonAsync(client,
+            "/api/v1/transfers/restock-requests",
+            new
+            {
+                storeLocationId = seed.Store.Value,
+                warehouseLocationId = seed.Warehouse.Value,
+                lines = new[] { new { productId = seed.Product.Value, quantity = 4m } },
+            }, store);
+        created.StatusCode.Should().Be(HttpStatusCode.OK, await created.Content.ReadAsStringAsync());
+        using JsonDocument createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        Guid id = createdBody.RootElement.GetProperty("id").GetGuid();
+        (await TransferDboAsync(id)).Mode.Should().Be(TransferMode.StoreRestock);
+
+        using HttpResponseMessage listed = await GetAsync(client, "/api/v1/transfers/", owner);
+        listed.StatusCode.Should().Be(HttpStatusCode.OK, await listed.Content.ReadAsStringAsync());
+        using JsonDocument listedBody = JsonDocument.Parse(await listed.Content.ReadAsStringAsync());
+        listedBody.RootElement.EnumerateArray()
+            .Single(item => item.GetProperty("id").GetGuid() == id)
+            .GetProperty("mode").GetString().Should().Be("StoreRestock");
+
+        using HttpResponseMessage submitted = await PostAsync(client, $"/api/v1/transfers/{id:D}/submit", store);
+        submitted.StatusCode.Should().Be(HttpStatusCode.OK, await submitted.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage managerReview = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/review", new { note = "Checking" }, warehouse);
+        managerReview.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage ownerReview = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/review", new { note = "Checking" }, owner);
+        ownerReview.StatusCode.Should().Be(HttpStatusCode.OK, await ownerReview.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage managerApproval = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/approve", new { note = "Approve" }, warehouse);
+        managerApproval.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage ownerApproval = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/approve",
+            new { note = "Approved three units", amendments = new[] { new { lineNo = 1, requestedQuantity = 3m } } }, owner);
+        ownerApproval.StatusCode.Should().Be(HttpStatusCode.OK, await ownerApproval.Content.ReadAsStringAsync());
+
+        object pick = new { allocations = new[] { new { lineNo = 1, batchId = (Guid?)null, quantity = 3m } } };
+        using HttpResponseMessage storePick = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/pick", pick, store);
+        storePick.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage warehousePick = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/pick", pick, warehouse);
+        warehousePick.StatusCode.Should().Be(HttpStatusCode.OK, await warehousePick.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage ready = await PostAsync(client, $"/api/v1/transfers/{id:D}/ready", warehouse);
+        ready.StatusCode.Should().Be(HttpStatusCode.OK, await ready.Content.ReadAsStringAsync());
+        using HttpResponseMessage dispatched = await PostAsync(client, $"/api/v1/transfers/{id:D}/dispatch", warehouse);
+        dispatched.StatusCode.Should().Be(HttpStatusCode.OK, await dispatched.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage received = await PostAsJsonAsync(client,
+            $"/api/v1/transfers/{id:D}/receive",
+            new { receives = new[] { new { lineNo = 1, batchId = (Guid?)null, receivedQuantity = 3m, damagedQuantity = 0m } } },
+            store);
+        received.StatusCode.Should().Be(HttpStatusCode.OK, await received.Content.ReadAsStringAsync());
+        (await BalanceAsync(seed.Store, seed.Product, null, InventoryState.Available)).Should().Be(3m);
+
+        using HttpResponseMessage activity = await GetAsync(
+            client,
+            "/api/v1/audit?category=transfers&search=Product%20restock",
+            owner);
+        activity.StatusCode.Should().Be(HttpStatusCode.OK, await activity.Content.ReadAsStringAsync());
+        using JsonDocument activityBody = JsonDocument.Parse(await activity.Content.ReadAsStringAsync());
+        JsonElement[] transferActivity = [.. activityBody.RootElement.GetProperty("items").EnumerateArray()
+            .Where(item => item.GetProperty("entityId").GetGuid() == id)];
+        transferActivity.Select(item => item.GetProperty("action").GetString())
+            .Should().Contain([
+                "transfer.created",
+                "transfer.requested",
+                "transfer.review.started",
+                "transfer.approved",
+                "transfer.picked",
+                "transfer.ready",
+                "transfer.dispatched",
+                "transfer.received",
+            ]);
+        JsonElement requestActivity = transferActivity.Single(item => item.GetProperty("action").GetString() == "transfer.requested");
+        requestActivity.GetProperty("recordSummary").GetString().Should().Contain("Product restock");
+        using JsonDocument requestDetailsDocument = JsonDocument.Parse(requestActivity.GetProperty("newValueJson").GetString()!);
+        JsonElement requestDetails = requestDetailsDocument.RootElement;
+        requestDetails.GetProperty("products")[0].GetProperty("productName").GetString().Should().Be("Product restock");
+        requestDetails.GetProperty("products")[0].GetProperty("requestedQuantity").GetDecimal().Should().Be(3m);
+        requestDetails.GetProperty("quantityBasis").GetString().Should().Be("Current transfer totals");
+    }
+
+    [Fact]
     public async Task Transfer_FullLifecycle_PostsBalancedLedger_AndCloses()
     {
         Seed seed = await SeedAsync("lcf");
         await factory.CreateUserAsync("lcf-requester", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
-        await factory.CreateUserAsync("lcf-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        UserId approverId = await factory.CreateUserAsync("lcf-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
         using HttpClient client = factory.CreateClient();
         string requester = await SignInAsync(client, "lcf-requester");
         string approver = await SignInAsync(client, "lcf-approver");
@@ -77,7 +192,20 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         afterDispatch.Status.Should().Be(TransferStatus.Dispatched);
         afterDispatch.Number.Should().MatchRegex(@"^TRF-\d{4}-\d{6}$");
         afterDispatch.ShipmentNumber.Should().MatchRegex(@"^SHP-\d{4}-\d{6}$");
+        afterDispatch.DeliveryReceiptNumber.Should().MatchRegex(@"^DR-\d{4}-\d{6}$");
         afterDispatch.ShipmentId.Should().NotBeNull();
+
+        using HttpResponseMessage detailResponse = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/transfers/{transferId}"), approver);
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.OK, await detailResponse.Content.ReadAsStringAsync());
+        using (JsonDocument detailDocument = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync()))
+        {
+            JsonElement transferDetail = detailDocument.RootElement;
+            transferDetail.GetProperty("approvedByUserId").GetGuid().Should().Be(approverId.Value);
+            transferDetail.GetProperty("approvedByDisplayName").GetString().Should().Be("lcf-approver");
+            transferDetail.GetProperty("approvedAtUtc").ValueKind.Should().Be(JsonValueKind.String);
+            transferDetail.GetProperty("lines")[0].GetProperty("pickedQuantity").GetDecimal().Should().Be(6m);
+        }
 
         // Dispatch pulls six from available into in-transit at the source,
         // stamped with the shipment number.
@@ -131,7 +259,75 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         TransferDbo closed = await TransferDboAsync(transferId);
         closed.Status.Should().Be(TransferStatus.Closed);
         closed.CustodyKinds.Should().Equal(
+            "Created", "Submitted", "Reviewed", "Approved", "Picked", "Ready", "Dispatched", "Received", "Verified");
+    }
+
+    [Fact]
+    public async Task Transfer_StoreToWarehouse_FullLifecycle_ReturnsStockToWarehouse()
+    {
+        Seed seed = await SeedAsync("return");
+        await factory.CreateUserAsync("return-requester", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("return-approver", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string requester = await SignInAsync(client, "return-requester");
+        string approver = await SignInAsync(client, "return-approver");
+
+        await SeedAvailableAsync(seed.Store, seed.Product, batchId: null, quantity: 8m, unitCost: 95m);
+
+        using HttpResponseMessage created = await PostAsJsonAsync(
+            client,
+            "/api/v1/transfers",
+            new
+            {
+                sourceLocationId = seed.Store.Value,
+                destinationLocationId = seed.Warehouse.Value,
+                lines = new object[] { new { productId = seed.Product.Value, quantity = 6m } },
+            },
+            requester);
+        created.StatusCode.Should().Be(HttpStatusCode.OK, await created.Content.ReadAsStringAsync());
+        using JsonDocument createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        Guid transferId = createdBody.RootElement.GetProperty("id").GetGuid();
+
+        using HttpResponseMessage details = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/transfers/{transferId}"), requester);
+        details.StatusCode.Should().Be(HttpStatusCode.OK, await details.Content.ReadAsStringAsync());
+        using (JsonDocument document = JsonDocument.Parse(await details.Content.ReadAsStringAsync()))
+        {
+            document.RootElement.GetProperty("kind").GetString().Should().Be(nameof(TransferKind.StoreToWarehouse));
+        }
+
+        await RequestThroughApprovalAsync(client, requester, approver, transferId);
+        await PickReadyDispatchAsync(client, approver, transferId, [(null, 6m)]);
+
+        (await BalanceAsync(seed.Store, seed.Product, null, InventoryState.Available)).Should().Be(2m);
+        (await BalanceAsync(seed.Store, seed.Product, null, InventoryState.InTransit)).Should().Be(6m);
+
+        using HttpResponseMessage received = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/transfers/{transferId}/receive"),
+            new
+            {
+                receives = new object[]
+                {
+                    new { lineNo = 1, batchId = (Guid?)null, receivedQuantity = 6m, damagedQuantity = 0m },
+                },
+            },
+            approver);
+        received.StatusCode.Should().Be(HttpStatusCode.OK, await received.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage verified = await PostAsync(
+            client, FormattableString.Invariant($"/api/v1/transfers/{transferId}/verify"), approver);
+        verified.StatusCode.Should().Be(HttpStatusCode.OK, await verified.Content.ReadAsStringAsync());
+
+        TransferDbo closed = await TransferDboAsync(transferId);
+        closed.Status.Should().Be(TransferStatus.Closed);
+        closed.CustodyKinds.Should().Equal(
             "Created", "Submitted", "Reviewed", "Approved", "Picked", "Dispatched", "Received", "Verified");
+        BalanceSnapshot warehouseAvailable = await BalanceSnapshotAsync(
+            seed.Warehouse, seed.Product, null, InventoryState.Available);
+        warehouseAvailable.Quantity.Should().Be(6m);
+        warehouseAvailable.AverageUnitCost.Should().Be(95m);
+        (await BalanceAsync(seed.Store, seed.Product, null, InventoryState.InTransit)).Should().Be(0m);
     }
 
     [Fact]
@@ -811,11 +1007,13 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
                 transfer.Number,
                 transfer.ShipmentId?.Value,
                 transfer.ShipmentNumber,
+                transfer.DeliveryReceiptNumber,
                 transfer.ReceiptId?.Value,
                 transfer.ReceiptNumber,
                 [.. transfer.Discrepancies.Select(d => d.Id.Value)],
                 [.. transfer.Discrepancies.Select(d => d.Quantity)],
-                [.. transfer.CustodyEvents.OrderBy(e => e.Sequence).Select(e => e.Kind.ToString())]);
+                [.. transfer.CustodyEvents.OrderBy(e => e.Sequence).Select(e => e.Kind.ToString())],
+                transfer.Mode);
         });
 
     private async Task<List<MovementSnapshot>> MovementsByReferenceAsync(Guid referenceDocumentId)
@@ -932,11 +1130,13 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
         string Number,
         Guid? ShipmentId,
         string? ShipmentNumber,
+        string? DeliveryReceiptNumber,
         Guid? ReceiptId,
         string? ReceiptNumber,
         IReadOnlyList<Guid> DiscrepancyIds,
         IReadOnlyList<decimal> DiscrepancyQuantities,
-        IReadOnlyList<string> CustodyKinds);
+        IReadOnlyList<string> CustodyKinds,
+        TransferMode Mode);
 
     private sealed record BalanceSnapshot(decimal Quantity, decimal AverageUnitCost);
 

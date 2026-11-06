@@ -36,6 +36,12 @@ public sealed record CreateTransferBody(
 /// <param name="Note">An optional picking note.</param>
 public sealed record CreateTransferLineBody(Guid ProductId, decimal Quantity, string? Note = null);
 
+/// <summary>Store supplies requested from the main warehouse.</summary>
+public sealed record CreateRestockRequestBody(
+    Guid StoreLocationId,
+    IReadOnlyList<CreateTransferLineBody> Lines,
+    Guid? WarehouseLocationId = null);
+
 /// <summary>An approval-time change to a requested quantity.</summary>
 /// <param name="LineNo">The line to change.</param>
 /// <param name="RequestedQuantity">The new requested quantity.</param>
@@ -178,7 +184,12 @@ public sealed record TransferSummary(
     DateTimeOffset? DispatchedAtUtc,
     DateTimeOffset? ReceivedAtUtc,
     decimal TotalValue,
-    int LineCount);
+    int LineCount,
+    string Mode = "Normal")
+{
+    /// <summary>The DR number issued when the goods were released.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>One step in a transfer's custody timeline.</summary>
 public sealed record TransferCustodyEventSummary(
@@ -194,6 +205,9 @@ public sealed record TransferDetailView(
     string Kind,
     string Mode,
     string? ReviewNote,
+    Guid? ApprovedByUserId,
+    string? ApprovedByDisplayName,
+    DateTimeOffset? ApprovedAtUtc,
     IReadOnlyList<TransferLineView> Lines);
 
 /// <summary>One line of a transfer detail.</summary>
@@ -243,6 +257,14 @@ public static class TransferEndpoints
             })
             .WithName("CreateTransfer")
             .WithSummary("Raises a draft transfer request.");
+
+        group.MapPost("/restock-requests", CreateRestockRequestAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Request)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("CreateRestockRequest")
+            .WithSummary("Raises a store request for supplies from the main warehouse.");
 
         group.MapPost("/{id:guid}/submit", SubmitTransferAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Request)
@@ -307,6 +329,14 @@ public static class TransferEndpoints
             })
             .WithName("CancelTransferDispatch")
             .WithSummary("Cancels a dispatched transfer and reverses the ledger.");
+
+        group.MapPost("/{id:guid}/cancel", CancelTransferBeforeDispatchAsync)
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Pick)
+            {
+                Scope = ScopeSource.None,
+            })
+            .WithName("CancelTransferBeforeDispatch")
+            .WithSummary("Abandons a transfer that has not been dispatched; no ledger movement is involved.");
 
         group.MapPost("/{id:guid}/receive", ReceiveTransferAsync)
             .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.Receive)
@@ -423,7 +453,11 @@ public static class TransferEndpoints
         t.DispatchedAtUtc,
         t.ReceivedAtUtc,
         t.TotalValue,
-        t.Lines.Count);
+        t.Lines.Count,
+        t.Mode.ToString())
+    {
+        DeliveryReceiptNumber = t.DeliveryReceiptNumber,
+    };
 
     private static async Task<IResult> ListTransfersAsync(
         PosDbContext context,
@@ -482,6 +516,57 @@ public static class TransferEndpoints
                         : new PreApprovalTokenId(body.PreApprovalTokenId.Value)),
                 cancellationToken)
             .ConfigureAwait(false);
+
+        return Complete(result, currentUser);
+    }
+
+    private static async Task<IResult> CreateRestockRequestAsync(
+        [FromBody] CreateRestockRequestBody body,
+        PosDbContext context,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+    {
+        if (body.Lines is not { Count: > 0 })
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.Validation("restock.lines_required", "Add at least one product to the request.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        bool activeStore = await context.Locations.AsNoTracking()
+            .AnyAsync(location => location.Id == new LocationId(body.StoreLocationId) &&
+                location.Kind == LocationKind.Store && location.IsActive, cancellationToken)
+            .ConfigureAwait(false);
+        if (!activeStore)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.Validation("restock.store_unavailable", "Choose an active store.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        Location? warehouse = await context.Locations.AsNoTracking()
+            .Where(location => location.Kind == LocationKind.MainWarehouse && location.IsActive &&
+                (body.WarehouseLocationId == null || location.Id == new LocationId(body.WarehouseLocationId.Value)))
+            .OrderBy(location => location.Code)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (warehouse is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.NotFound("restock.warehouse_unavailable", "No active main warehouse is available.")),
+                currentUser.CorrelationId.Value);
+        }
+
+        Result<TransferOrderId> result = await dispatcher.SendAsync(
+            new CreateTransferCommand(
+                warehouse.Id,
+                new LocationId(body.StoreLocationId),
+                [.. body.Lines.Select(line => new TransferLineSpec(
+                    new ProductId(line.ProductId), line.Quantity, line.Note))],
+                Mode: TransferMode.StoreRestock),
+            cancellationToken).ConfigureAwait(false);
 
         return Complete(result, currentUser);
     }
@@ -585,6 +670,18 @@ public static class TransferEndpoints
         CancellationToken cancellationToken)
         => await DispatchAsync(
             new CancelTransferDispatchCommand(new TransferOrderId(id), body.Reason),
+            dispatcher,
+            currentUser,
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<IResult> CancelTransferBeforeDispatchAsync(
+        Guid id,
+        [FromBody] CancelTransferDispatchBody body,
+        IDispatcher dispatcher,
+        ICurrentUser currentUser,
+        CancellationToken cancellationToken)
+        => await DispatchAsync(
+            new CancelTransferBeforeDispatchCommand(new TransferOrderId(id), body.Reason),
             dispatcher,
             currentUser,
             cancellationToken).ConfigureAwait(false);
@@ -723,6 +820,15 @@ public static class TransferEndpoints
 
         ProductId[] productIds = [.. transfer.Lines.Select(l => l.ProductId).Distinct()];
 
+        string? approvedByDisplayName = transfer.ApprovedByUserId is { } approvedByUserId
+            ? await context.Users
+                .AsNoTracking()
+                .Where(user => user.Id == approvedByUserId.Value)
+                .Select(user => user.DisplayName)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
         Dictionary<Guid, string> names = await context.Products
             .AsNoTracking()
             .Where(p => productIds.Contains(p.Id))
@@ -773,10 +879,17 @@ public static class TransferEndpoints
                 transfer.DispatchedAtUtc,
                 transfer.ReceivedAtUtc,
                 transfer.TotalValue,
-                transfer.Lines.Count),
+                transfer.Lines.Count,
+                transfer.Mode.ToString())
+            {
+                DeliveryReceiptNumber = transfer.DeliveryReceiptNumber,
+            },
             transfer.Kind.ToString(),
             transfer.Mode.ToString(),
             transfer.ReviewNote,
+            transfer.ApprovedByUserId?.Value,
+            approvedByDisplayName,
+            transfer.ApprovedAtUtc,
             lines);
 
         return TypedResults.Ok(detail);
@@ -928,7 +1041,8 @@ public static class TransferEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind == LocationKind.Store && (everyStore || assignedLocations.Contains(l.Id)))
+            .Where(l => l.Kind == LocationKind.Store && l.IsActive
+                && (everyStore || assignedLocations.Contains(l.Id)))
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -940,7 +1054,7 @@ public static class TransferEndpoints
 
         List<Location> sources = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Kind != LocationKind.External)
+            .Where(l => l.Kind != LocationKind.External && l.IsActive)
             .OrderBy(l => l.Kind == LocationKind.MainWarehouse ? 0 : 1)
             .ThenBy(l => l.Code)
             .ToListAsync(cancellationToken)

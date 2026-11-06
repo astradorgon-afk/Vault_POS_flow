@@ -1,0 +1,274 @@
+@page "/purchasing"
+@attribute [Authorize(Policy = "purchase.view")]
+@attribute [Authorize(Roles = "Owner")]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Purchase orders · VaultFlow</PageTitle>
+
+<div class="po-page">
+    <header class="po-heading">
+        <div>
+            <span class="eyebrow">▣ &nbsp; Purchasing</span>
+            <h1>Purchase orders</h1>
+            <p>Manage orders, approvals and deliveries.</p>
+        </div>
+        @if (Session.HasPermission("purchase.create"))
+        {
+            <a class="po-primary" href="purchasing/new">＋ &nbsp; New purchase order</a>
+        }
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="po-notice" role="status">@message</div>
+    }
+
+    @if (NeedsMyApproval.Count > 0)
+    {
+        <button type="button" class="po-banner" @onclick='() => SetStage("PendingApproval")'>
+            <span class="banner-symbol" aria-hidden="true">◷</span>
+            <span class="banner-body">
+                <strong>@NeedsMyApproval.Count order@(NeedsMyApproval.Count == 1 ? "" : "s") need@(NeedsMyApproval.Count == 1 ? "s" : "") your approval</strong>
+                <small>@PurchasingText.Money(NeedsMyApproval.Sum(o => o.GrandTotal)) awaiting review</small>
+            </span>
+            <b class="banner-chevron" aria-hidden="true">›</b>
+        </button>
+    }
+
+    <section>
+        <div class="po-section-head">
+            <h2>Orders</h2>
+            <span>@orders.Count total</span>
+        </div>
+
+        <nav class="po-chips" aria-label="Filter by order status">
+            @foreach ((string key, string label) in StageFilters)
+            {
+                int count = CountFor(key);
+                <button type="button" class="@(stage == key ? "on" : null)" aria-pressed="@((stage == key) ? "true" : "false")" @onclick="() => SetStage(key)">
+                    <span>@label</span><span class="chip-count">@count</span>
+                </button>
+            }
+        </nav>
+
+        <div class="po-toolbar" role="search">
+            <label class="po-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                <input type="search" placeholder="Search orders..." aria-label="Search orders"
+                       @bind="search" @bind:event="oninput" @bind:after="FirstPage" />
+            </label>
+            <button type="button" class="po-filter-toggle" aria-expanded="@filtersOpen" aria-controls="po-filters"
+                    aria-label="Show advanced filters" @onclick="() => filtersOpen = !filtersOpen">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></svg>
+            </button>
+        </div>
+
+        <div id="po-filters" class="po-filter-panel @(filtersOpen ? null : "po-collapsed")">
+            <label>
+                Supplier
+                <select aria-label="Supplier" @bind="supplierFilter" @bind:after="FirstPage">
+                    <option value="">All suppliers</option>
+                    @foreach (PosSupplier supplier in suppliers.Values.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <option value="@supplier.Id">@supplier.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Destination
+                <select aria-label="Deliver to" @bind="destinationFilter" @bind:after="FirstPage">
+                    <option value="">All destinations</option>
+                    @foreach (PosLocation location in locations.Values.Where(l => l.Kind is 0 or 1).OrderBy(l => l.Kind).ThenBy(l => l.Code))
+                    {
+                        <option value="@location.Id">@location.Code · @location.Name</option>
+                    }
+                </select>
+            </label>
+        </div>
+
+        @if (loading)
+        {
+            <div class="po-empty" role="status"><span class="po-spinner"></span><p>Loading purchase orders…</p></div>
+        }
+        else
+        {
+            List<PosPurchaseOrderSummary> visible = Visible;
+            int pageCount = Math.Max(1, (visible.Count + PageSize - 1) / PageSize);
+            int currentPage = Math.Clamp(page, 1, pageCount);
+
+            @if (visible.Count == 0)
+            {
+                <div class="po-empty">
+                    <strong>No purchase orders here</strong>
+                    <p>@(orders.Count == 0 ? "Start with a new purchase order." : "Try another stage, supplier or search.")</p>
+                </div>
+            }
+            else
+            {
+                <div class="po-cards">
+                    @foreach (PosPurchaseOrderSummary order in visible.Skip((currentPage - 1) * PageSize).Take(PageSize))
+                    {
+                        <a class="po-card @(IsMineToApprove(order) ? "attention" : null)"
+                           href="@($"purchasing/{order.Id:D}")"
+                           aria-label="View purchase order @PurchasingText.OrderName(order.Number)">
+                            <div class="po-card-top">
+                                <div>
+                                    <span class="small-label">Purchase order</span>
+                                    <strong>@PurchasingText.OrderName(order.Number)</strong>
+                                </div>
+                                <span class="status-badge">@PurchasingText.Label(order.Status, order.OutstandingQuantity)</span>
+                            </div>
+                            <span class="supplier-name">@SupplierName(order.SupplierId)</span>
+                            <span class="destination">⌖ &nbsp; @LocationName(order.DestinationLocationId)</span>
+                            @if (order.CreatedByUserId == MyId)
+                            {
+                                <span class="short-note">Raised by you</span>
+                            }
+                            @if (PurchasingText.IsIncomplete(order.Status, order.OutstandingQuantity))
+                            {
+                                <span class="short-note">@PurchasingText.Quantity(order.OutstandingQuantity) unit@(order.OutstandingQuantity == 1 ? "" : "s") not delivered</span>
+                            }
+                            <hr />
+                            <div class="po-card-foot">
+                                <div>
+                                    <span class="amount">@PurchasingText.Money(order.GrandTotal)</span>
+                                    <span class="date">@order.CreatedAtUtc.InStoreTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                </div>
+                                <span class="next-icon" aria-hidden="true">↗</span>
+                            </div>
+                        </a>
+                    }
+                </div>
+
+                <nav class="po-pager" aria-label="Order pages">
+                    <span>Showing @((currentPage - 1) * PageSize + 1)–@Math.Min(currentPage * PageSize, visible.Count) of @visible.Count</span>
+                    <span class="po-page-buttons">
+                        <button type="button" aria-label="Previous page" disabled="@(currentPage == 1)" @onclick="() => page = currentPage - 1">‹</button>
+                        <span>Page @currentPage of @pageCount</span>
+                        <button type="button" aria-label="Next page" disabled="@(currentPage == pageCount)" @onclick="() => page = currentPage + 1">›</button>
+                    </span>
+                </nav>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    private const int PageSize = 20;
+
+    private static readonly (string Key, string Label)[] StageFilters =
+    [
+        ("", "All"),
+        ("Draft", "Drafts"),
+        ("PendingApproval", "Awaiting approval"),
+        ("Approved", "Approved"),
+        ("Ordered", "Ordered"),
+        ("Incomplete", "Incomplete"),
+        ("Done", "Received & closed"),
+        ("Stopped", "Rejected & cancelled"),
+    ];
+
+    private readonly List<PosPurchaseOrderSummary> orders = [];
+    private readonly Dictionary<Guid, PosSupplier> suppliers = [];
+    private readonly Dictionary<Guid, PosLocation> locations = [];
+    private bool loading = true;
+    private bool filtersOpen;
+    private string? message;
+    private string stage = string.Empty;
+    private string search = string.Empty;
+    private Guid? supplierFilter;
+    private Guid? destinationFilter;
+    private int page = 1;
+
+    private Guid MyId => Session.Current?.User.Id ?? Guid.Empty;
+
+    private bool CanApprove => Session.HasPermission("purchase.approve");
+
+    // Someone else's order: the one who raised it may not approve it.
+    private bool IsMineToApprove(PosPurchaseOrderSummary order)
+        => CanApprove && order.Status == "PendingApproval" && order.CreatedByUserId != MyId;
+
+    private List<PosPurchaseOrderSummary> NeedsMyApproval => [.. orders.Where(IsMineToApprove)];
+
+    private List<PosPurchaseOrderSummary> Visible
+    {
+        get
+        {
+            string term = search.Trim();
+            return [.. orders
+                .Where(o => Session.CanUseInventoryLocation(o.DestinationLocationId))
+                .Where(o => InStage(o, stage))
+                .Where(o => supplierFilter is null || o.SupplierId == supplierFilter)
+                .Where(o => destinationFilter is null || o.DestinationLocationId == destinationFilter)
+                .Where(o => term.Length == 0
+                    || (o.Number?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || SupplierName(o.SupplierId).Contains(term, StringComparison.OrdinalIgnoreCase))];
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Task<ApiResult<List<PosPurchaseOrderSummary>>> ordersTask = Api.GetPurchaseOrdersAsync(CancellationToken.None);
+            Task<ApiResult<List<PosSupplier>>> suppliersTask = Api.GetSuppliersAsync(CancellationToken.None);
+            Task<ApiResult<List<PosLocation>>> locationsTask = Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+            await Task.WhenAll(ordersTask, suppliersTask, locationsTask);
+
+            if (ordersTask.Result is { IsSuccess: true, Value: { } list })
+            {
+                orders.AddRange(list.OrderByDescending(o => o.CreatedAtUtc));
+            }
+            else
+            {
+                message = ordersTask.Result.Error;
+            }
+
+            foreach (PosSupplier supplier in suppliersTask.Result.Value ?? []) suppliers[supplier.Id] = supplier;
+            foreach (PosLocation location in locationsTask.Result.Value ?? [])
+            {
+                if (Session.CanUseInventoryLocation(location.Id)) locations[location.Id] = location;
+            }
+
+            // Arriving with work to do: open on what needs a decision.
+            if (NeedsMyApproval.Count > 0)
+            {
+                stage = "PendingApproval";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            message = "Purchase orders are unavailable. Try again shortly.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private static bool InStage(PosPurchaseOrderSummary order, string key) => key switch
+    {
+        "" => true,
+        "Incomplete" => PurchasingText.IsIncomplete(order.Status, order.OutstandingQuantity),
+        "Done" => order.Status == "FullyReceived" || (order.Status == "Closed" && order.OutstandingQuantity <= 0),
+        "Stopped" => order.Status is "Rejected" or "Cancelled",
+        _ => order.Status == key,
+    };
+
+    private int CountFor(string key) => orders.Count(o => InStage(o, key));
+
+    private void SetStage(string key)
+    {
+        stage = key;
+        page = 1;
+    }
+
+    private void FirstPage() => page = 1;
+
+    private string SupplierName(Guid id) => suppliers.TryGetValue(id, out PosSupplier? supplier) ? supplier.Name : "Unknown supplier";
+
+    private string LocationName(Guid id) => locations.TryGetValue(id, out PosLocation? location) ? $"{location.Code} · {location.Name}" : "—";
+}

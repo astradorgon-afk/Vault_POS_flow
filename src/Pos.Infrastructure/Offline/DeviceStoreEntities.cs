@@ -1,5 +1,6 @@
 using Pos.Domain.Common;
 using Pos.Domain.Locations;
+using System.Text.Json;
 
 namespace Pos.Infrastructure.Offline;
 
@@ -13,19 +14,62 @@ public sealed class DeviceStoreProfile
         DeviceId deviceId,
         LocationId locationId,
         string shortCode,
-        DateTimeOffset enrolledAtUtc)
+        DateTimeOffset enrolledAtUtc,
+        IEnumerable<LocationId>? allowedLocationIds = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shortCode);
         DeviceId = deviceId;
         LocationId = locationId;
         ShortCode = shortCode.Trim().ToUpperInvariant();
         EnrolledAtUtc = enrolledAtUtc;
+        AllowedLocationIdsJson = JsonSerializer.Serialize((allowedLocationIds ?? [locationId])
+            .Append(locationId).Select(x => x.Value).Distinct().ToArray());
     }
 
     public DeviceId DeviceId { get; private init; }
     public LocationId LocationId { get; private set; }
     public string ShortCode { get; private init; }
     public DateTimeOffset EnrolledAtUtc { get; private init; }
+    public string AllowedLocationIdsJson { get; private set; } = "[]";
+    public IReadOnlyList<LocationId> AllowedLocationIds
+    {
+        get
+        {
+            Guid[] ids = JsonSerializer.Deserialize<Guid[]>(AllowedLocationIdsJson) ?? [];
+            List<LocationId> locations = [.. ids.Where(x => x != Guid.Empty).Distinct().Select(x => new LocationId(x))];
+            if (!locations.Contains(LocationId))
+            {
+                locations.Insert(0, LocationId);
+            }
+
+            return locations;
+        }
+    }
+
+    public bool SelectLocation(LocationId locationId)
+    {
+        if (!AllowedLocationIds.Contains(locationId))
+        {
+            return false;
+        }
+        LocationId = locationId;
+        return true;
+    }
+
+    public void UpdateAllowedLocations(IEnumerable<LocationId> locationIds)
+    {
+        ArgumentNullException.ThrowIfNull(locationIds);
+        LocationId[] locations = [.. locationIds.Append(LocationId).Distinct()];
+        AllowedLocationIdsJson = JsonSerializer.Serialize(locations.Select(x => x.Value).ToArray());
+    }
+
+    public void RefreshAllowedLocations(LocationId defaultLocationId, IEnumerable<LocationId> locationIds)
+    {
+        ArgumentNullException.ThrowIfNull(locationIds);
+        LocationId[] locations = [.. locationIds.Append(defaultLocationId).Distinct()];
+        LocationId = defaultLocationId;
+        AllowedLocationIdsJson = JsonSerializer.Serialize(locations.Select(x => x.Value).ToArray());
+    }
 }
 
 /// <summary>
@@ -100,7 +144,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        string? category = null)
     {
         Id = id;
         Sku = sku;
@@ -110,11 +155,15 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        Category = category;
     }
 
     public ProductId Id { get; private init; }
     public string Sku { get; private set; }
     public string Name { get; private set; }
+
+    /// <summary>The product's category name, which the till groups products by.</summary>
+    public string? Category { get; private set; }
     public bool IsActive { get; private set; }
     public bool TracksBatches { get; private set; }
     public bool TracksExpiry { get; private set; }
@@ -128,7 +177,8 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         bool tracksBatches,
         bool tracksExpiry,
         long sourceVersion,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        string? category = null)
     {
         Sku = sku;
         Name = name;
@@ -137,6 +187,7 @@ public sealed class DeviceCachedProduct : IChangeFeedOwned
         TracksExpiry = tracksExpiry;
         SourceVersion = sourceVersion;
         UpdatedAtUtc = updatedAtUtc;
+        Category = category;
     }
 }
 

@@ -128,6 +128,7 @@ public static class CatalogEndpoints
         PosDbContext context,
         IPermissionEvaluator evaluator,
         ICurrentUser currentUser,
+        HttpContext httpContext,
         [FromQuery] string? q,
         [FromQuery] bool includeInactive = false,
         [FromQuery] int offset = 0,
@@ -165,6 +166,13 @@ public static class CatalogEndpoints
                     b.ProductId == p.Id && b.RetiredAtUtc == null && b.Value.Contains(term)));
 #pragma warning restore CA1304, CA1311
         }
+
+        // How many match in total, so a caller can show "page 3 of 12" rather
+        // than guessing. Sent as a header: the body stays a plain array, which
+        // several clients and the offline snapshot already read as one.
+        int matching = await query.CountAsync(cancellationToken).ConfigureAwait(false);
+        httpContext.Response.Headers["X-Total-Count"] =
+            matching.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         List<ProductSummary> products = await query
             .OrderBy(p => p.Name)

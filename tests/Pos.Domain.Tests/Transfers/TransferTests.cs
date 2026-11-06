@@ -27,6 +27,7 @@ public sealed class TransferTests
 
     private static readonly DocumentNumber TrfNumber = DocumentNumber.Create(DocumentType.TransferOrder, 2026, 7);
     private static readonly DocumentNumber ShpNumber = DocumentNumber.Create(DocumentType.TransferShipment, 2026, 3);
+    private static readonly DocumentNumber DrNumber = DocumentNumber.Create(DocumentType.DeliveryReceipt, 2026, 5);
     private static readonly DocumentNumber TrcNumber = DocumentNumber.Create(DocumentType.TransferReceipt, 2026, 11);
 
     [Fact]
@@ -270,15 +271,16 @@ public sealed class TransferTests
         Result<Transfer> result = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now);
         Transfer transfer = result.Value;
 
-        transfer.Ready(Now).Error.Code.Should().Be("transfer.invalid_state");
+        transfer.Ready(Picker, Now).Error.Code.Should().Be("transfer.invalid_state");
 
         transfer.Submit(Requester, Now);
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
 
-        transfer.Ready(Now).IsSuccess.Should().BeTrue();
+        transfer.Ready(Picker, Now).IsSuccess.Should().BeTrue();
         transfer.Status.Should().Be(TransferStatus.Ready);
+        transfer.CustodyEvents[^1].Kind.Should().Be(TransferCustodyEventKind.Ready);
     }
 
     [Fact]
@@ -290,19 +292,21 @@ public sealed class TransferTests
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
-        transfer.Ready(Now);
+        transfer.Ready(Picker, Now);
 
         Result dispatch = transfer.Dispatch(
             Now,
             TrfNumber,
             TransferShipmentId.New(),
             ShpNumber.Value,
+            DrNumber.Value,
             Picker);
 
         dispatch.IsSuccess.Should().BeTrue(because: string.Join("; ", dispatch.Errors.Select(e => e.Code)));
         transfer.Status.Should().Be(TransferStatus.Dispatched);
         transfer.Number.Should().Be(TrfNumber.Value);
         transfer.ShipmentNumber.Should().Be(ShpNumber.Value);
+        transfer.DeliveryReceiptNumber.Should().Be(DrNumber.Value);
         transfer.DispatchedByUserId.Should().Be(Picker);
         transfer.CustodyEvents.Select(e => e.Kind).Should().Contain(TransferCustodyEventKind.Dispatched);
     }
@@ -313,18 +317,56 @@ public sealed class TransferTests
         Result<Transfer> result = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now);
         Transfer transfer = result.Value;
 
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker)
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker)
             .Error.Code.Should().Be("transfer.invalid_state");
 
         transfer.Submit(Requester, Now);
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
-        transfer.Ready(Now);
+        transfer.Ready(Picker, Now);
 
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker).IsSuccess.Should().BeTrue();
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker)
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker).IsSuccess.Should().BeTrue();
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker)
             .Error.Code.Should().Be("transfer.already_numbered");
+    }
+
+    [Fact]
+    public void CancelBeforeDispatch_AtReady_AbandonsTheTransfer()
+    {
+        // The case this exists for: picked, ready, and then the stock it was
+        // picked against is gone. Dispatch will refuse, so without this the
+        // transfer is stranded with no action left on it at all.
+        Transfer transfer = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now).Value;
+        transfer.Submit(Requester, Now);
+        transfer.Review(Approver, Now, null);
+        transfer.Approve(Approver, Now);
+        transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
+        transfer.Ready(Picker, Now);
+        transfer.Status.Should().Be(TransferStatus.Ready);
+
+        transfer.CancelBeforeDispatch(Now, "  ", Picker).Error.Code.Should().Be("transfer.cancel_reason_required");
+
+        Result cancelled = transfer.CancelBeforeDispatch(Now, "Stock sold before the truck came", Picker);
+
+        cancelled.IsSuccess.Should().BeTrue(because: string.Join("; ", cancelled.Errors.Select(e => e.Code)));
+        transfer.Status.Should().Be(TransferStatus.Cancelled);
+        transfer.CancelReason.Should().Be("Stock sold before the truck came");
+        transfer.CancelledByUserId.Should().Be(Picker);
+    }
+
+    [Fact]
+    public void CancelBeforeDispatch_AfterDispatch_IsRefused()
+    {
+        // Once stock is on the ledger it has to come back through the reversing
+        // cancel, not this one.
+        Transfer transfer = Transfer.Create(Warehouse, Store, [Spec(Coke, 10m)], Requester, Now).Value;
+        Dispatched(transfer);
+
+        Result cancelled = transfer.CancelBeforeDispatch(Now, "Too late now", Picker);
+
+        cancelled.IsFailure.Should().BeTrue();
+        transfer.Status.Should().Be(TransferStatus.Dispatched);
     }
 
     [Fact]
@@ -501,8 +543,8 @@ public sealed class TransferTests
         transfer.Review(Approver, Now, null);
         transfer.Approve(Approver, Now);
         transfer.Pick(Picker, Now, [new TransferPickAllocationSpec(1, BatchA, 10m, 90m)]);
-        transfer.Ready(Now);
-        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, Picker);
+        transfer.Ready(Picker, Now);
+        transfer.Dispatch(Now, TrfNumber, TransferShipmentId.New(), ShpNumber.Value, DrNumber.Value, Picker);
     }
 
     private static TransferLineSpec Spec(ProductId productId, decimal quantity, string? note = null)

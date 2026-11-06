@@ -40,6 +40,13 @@
                 }
                 @if (Api.HasPermission(PermissionsInventoryView))
                 {
+                    <button type="button" class="office-nav-link @InventoryNavClass" aria-current="@(InventoryNavClass.Length > 0 ? "page" : null)" @onclick="GoInventory">
+                        <span class="office-nav-glyph" aria-hidden="true">▦</span>
+                        Inventory
+                    </button>
+                }
+                @if (Api.HasPermission(PermissionsInventoryView))
+                {
                     <button type="button" class="office-nav-link @NavClass("/inventory/counts")" aria-current="@Current("/inventory/counts")" @onclick="GoCounts">
                         <span class="office-nav-glyph" aria-hidden="true">≡</span>
                         Stock counts
@@ -59,6 +66,12 @@
                         Goods receiving
                     </button>
                 }
+                <span class="office-nav-label">Devices</span>
+                <button type="button" class="office-nav-link @NavClass("/scanner")" aria-current="@Current("/scanner")" @onclick="GoScanner">
+                    <span class="office-nav-glyph" aria-hidden="true">▥</span>
+                    Scanner test
+                </button>
+
                 @if (Api.HasPermission(PermissionsReportsView))
                 {
                     <span class="office-nav-label">Sales</span>
@@ -70,9 +83,89 @@
             </nav>
 
             <main class="office-main">
-                @Body
+                @if (Register.IsOffline)
+                {
+                    <div class="office-error" role="status">
+                        This account is signed in with saved offline access. Office data needs a live sign-in. Sign out, then sign in again while connected.
+                        <button type="button" class="button-secondary" @onclick="SignOutAsync">Sign out and sign in again</button>
+                    </div>
+                }
+                @if (Place is { } place)
+                {
+                    <nav class="office-trail" aria-label="Breadcrumb">
+                        <a class="office-trail-back" href="@place.ParentHref" aria-label="Back to @place.ParentLabel">
+                            <span aria-hidden="true">←</span> Back
+                        </a>
+                        <ol>
+                            <li><a href="/office">Office</a></li>
+                            @if (place.ParentHref != "/office")
+                            {
+                                <li><a href="@place.ParentHref">@place.ParentLabel</a></li>
+                            }
+                            <li aria-current="page">@place.Title</li>
+                        </ol>
+                    </nav>
+                }
+                @if (!Register.IsOffline)
+                {
+                    @Body
+                }
             </main>
         </div>
+
+        <nav class="office-mobile-nav" aria-label="Mobile office">
+            <button type="button" class="office-mobile-nav-link @NavClass("/office")" aria-current="@Current("/office")" @onclick="GoOffice">
+                <span aria-hidden="true">⌂</span>
+                <small>Overview</small>
+            </button>
+            @if (Api.HasPermission(PermissionsInventoryView))
+            {
+                <button type="button" class="office-mobile-nav-link @InventoryNavClass" aria-current="@(InventoryNavClass.Length > 0 ? "page" : null)" @onclick="GoInventory">
+                    <span aria-hidden="true">▦</span>
+                    <small>Inventory</small>
+                </button>
+                <button type="button" class="office-mobile-nav-link @NavClass("/inventory/counts")" aria-current="@Current("/inventory/counts")" @onclick="GoCounts">
+                    <span aria-hidden="true">≡</span>
+                    <small>Counts</small>
+                </button>
+            }
+            @if (Api.HasPermission(PermissionsTransferView))
+            {
+                <button type="button" class="office-mobile-nav-link @NavClass("/transfers")" aria-current="@Current("/transfers")" @onclick="GoTransfers">
+                    <span aria-hidden="true">⇄</span>
+                    <small>Transfers</small>
+                </button>
+            }
+            <button type="button" class="office-mobile-nav-link @(mobileMoreOpen ? "active" : string.Empty)" aria-expanded="@mobileMoreOpen" @onclick="ToggleMobileMore">
+                <span aria-hidden="true">•••</span>
+                <small>More</small>
+            </button>
+        </nav>
+
+        @if (mobileMoreOpen)
+        {
+            <div class="office-mobile-more-backdrop" @onclick="CloseMobileMore"></div>
+            <section class="office-mobile-more" role="dialog" aria-modal="true" aria-label="More office tools">
+                <header>
+                    <strong>More tools</strong>
+                    <button type="button" aria-label="Close more tools" @onclick="CloseMobileMore">×</button>
+                </header>
+                @if (Api.HasPermission(PermissionsSaleCreate))
+                {
+                    <button type="button" @onclick="GoTill"><span>▣</span>Open till</button>
+                }
+                @if (Api.HasPermission(PermissionsPurchasingView))
+                {
+                    <button type="button" @onclick="GoReceiving"><span>□</span>Goods receiving</button>
+                }
+                @if (Api.HasPermission(PermissionsReportsView))
+                {
+                    <button type="button" @onclick="GoReports"><span>▤</span>Daily reports</button>
+                }
+                <button type="button" @onclick="GoScanner"><span>▥</span>Scanner test</button>
+                <button type="button" class="office-mobile-more-danger" @onclick="SignOutAsync"><span>↪</span>Sign out</button>
+            </section>
+        }
     </div>
 }
 else if (!_booted)
@@ -93,6 +186,7 @@ else if (!_booted)
 
     private (string Name, string TillCode)? _store;
     private bool _booted;
+    private bool mobileMoreOpen;
 
     protected override async Task OnInitializedAsync()
     {
@@ -120,7 +214,31 @@ else if (!_booted)
 
     private string? Current(string path) => NavClass(path).Length > 0 ? "page" : null;
 
+    // Every page below a sidebar entry gets Back to that entry, in one place.
+    // Sidebar pages themselves need none: the sidebar is how you reach them.
+    private OfficePlace? Place
+    {
+        get
+        {
+            string path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+            return path switch
+            {
+                "purchasing/orders/new" => new("Goods receiving", "/purchasing/orders", "New purchase order"),
+                _ when path.StartsWith("purchasing/orders/", StringComparison.Ordinal) => new("Goods receiving", "/purchasing/orders", "Purchase order"),
+                _ when path.StartsWith("inventory/counts/", StringComparison.Ordinal) => new("Stock counts", "/inventory/counts", "Count"),
+                _ when path.StartsWith("transfers/", StringComparison.Ordinal) => new("Transfers", "/transfers", "Transfer"),
+                _ when path.StartsWith("inventory/timeline/", StringComparison.Ordinal) => new("Overview", "/office", "Movement chain"),
+                _ => null,
+            };
+        }
+    }
+
+    private sealed record OfficePlace(string ParentLabel, string ParentHref, string Title);
+
     private void Go(string path) => Navigation.NavigateTo(path);
+
+    private void ToggleMobileMore() => mobileMoreOpen = !mobileMoreOpen;
+    private void CloseMobileMore() => mobileMoreOpen = false;
 
     private async Task GoOffice() => Go("/office");
     private async Task GoTill() => Go("/register");
@@ -128,6 +246,12 @@ else if (!_booted)
     private async Task GoTransfers() => Go("/transfers");
     private async Task GoReceiving() => Go("/purchasing/orders");
     private async Task GoReports() => Go("/reports");
+    private void GoScanner() => Go("/scanner");
+    private void GoInventory() => Go("/inventory");
+
+    // "/inventory" is a prefix of "/inventory/counts", so match it exactly.
+    private string InventoryNavClass
+        => ("/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0]).TrimEnd('/') == "/inventory" ? "active" : string.Empty;
 
     private async Task SignOutAsync()
     {

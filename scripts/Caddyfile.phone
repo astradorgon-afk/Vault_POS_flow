@@ -1,0 +1,22 @@
+{
+    admin off
+    auto_https disable_redirects
+    skip_install_trust
+}
+
+https://{$VAULTFLOW_PHONE_IP}:8444 {
+    tls internal
+    reverse_proxy host.docker.internal:5215
+}
+
+# Serve only the public CA certificate so an Android phone can download it.
+http://{$VAULTFLOW_PHONE_IP}:8445 {
+    handle /phone-ca.crt {
+        root * /data/caddy/pki/authorities/local
+        rewrite * /root.crt
+        file_server
+    }
+    handle {
+        respond 404
+    }
+}

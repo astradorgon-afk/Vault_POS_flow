@@ -1,0 +1,45 @@
+.scan-feedback {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 140;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 12px 10px 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-radius: 12px;
+    background: #1b2a24;
+    color: #f1f5f2;
+    font-size: 0.86rem;
+    box-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.55);
+    animation: scan-feedback-in 0.18s ease-out;
+}
+
+.scan-feedback strong {
+    font-family: ui-monospace, Consolas, monospace;
+    letter-spacing: 0.02em;
+}
+
+.scan-feedback-mark {
+    font-size: 1.1rem;
+    opacity: 0.8;
+}
+
+.scan-feedback button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.15rem;
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+@keyframes scan-feedback-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scan-feedback { animation: none; }
+}

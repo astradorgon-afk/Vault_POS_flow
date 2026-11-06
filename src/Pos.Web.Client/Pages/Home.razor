@@ -1,0 +1,1294 @@
+@page "/"
+@page "/login"
+@page "/offline"
+@page "/purchasing"
+@page "/receiving"
+@page "/inventory/stock"
+@page "/restock"
+@page "/stores"
+@page "/sync"
+@page "/team"
+@implements IAsyncDisposable
+@using System.Globalization
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>@PageTitleText · VaultFlow</PageTitle>
+@if (!unlocked)
+{
+    <LoginSurface>
+        <form @onsubmit="UnifiedOfflineSignInAsync" @onsubmit:preventDefault="true">
+            <header><span class="eyebrow">Secure workspace</span><h2>Welcome back</h2><p>Use your VaultFlow account to open the operations console.</p></header>
+            <p class="login-mode">Offline mode · saved work on this device</p>
+            @if (!ready) { <p class="login-help" role="status">Opening saved data…</p> }
+            @if (busy) { <p class="login-help" role="status">@activity</p> }
+            @if (message is not null) { <p class="login-help" role="status">@message</p> }
+            @if (error is not null) { <div class="form-error" role="alert">@error</div> }
+            <label for="offline-username">Username or email</label>
+            <input id="offline-username" name="username" autocomplete="username" required autofocus @bind="userName" @bind:event="oninput" disabled="@busy" />
+            <label for="offline-password">Password</label>
+            <div class="password-field">
+                <input id="offline-password" name="password" type="@(showPassword ? "text" : "password")" autocomplete="current-password" required @bind="password" @bind:event="oninput" disabled="@busy" />
+                <button type="button" class="password-toggle" aria-label="@(showPassword ? "Hide password" : "Show password")" aria-pressed="@showPassword" @onclick="() => showPassword = !showPassword">@(showPassword ? "Hide" : "Show")</button>
+            </div>
+            @if (device is null)
+            {
+                <label for="offline-enrol">Enroll installation <span>one-time setup</span></label>
+                <input id="offline-enrol" @bind="enrolmentCode" @bind:event="oninput" disabled="@(!ready || !connected || busy)" />
+                <p class="login-help">Connect to enroll this installation. An administrator provides the one-time code. If browser data was cleared, work that was only saved on this device may be gone.</p>
+            }
+            <div class="login-location">
+                <div class="login-location-trigger"><span class="login-location-arrow" aria-hidden="true">▸</span> Work location <small>@(device?.LocationName ?? (device is null ? "Assigned during enrollment" : "Enrolled on this device"))</small></div>
+            </div>
+            <button type="submit" disabled="@(!ready || busy)">@((device is null) ? "Enroll installation" : "Open workspace")</button>
+            @if (!connected) { <p class="login-help">A saved employee profile is required to sign in without a connection.</p> }
+        </form>
+    </LoginSurface>
+}
+else
+{
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="app-shell">
+<aside id="primary-navigation" class="sidebar @(navigationOpen ? "is-open" : string.Empty)">
+    <div class="brand-block"><a class="brand" href="" @onclick="CloseNavigation"><span class="brand-glyph">V</span><span><strong>VaultFlow</strong><small>Operations ledger</small></span></a><button class="sidebar-close" type="button" aria-label="Close navigation" @onclick="CloseNavigation"><AppIcon Name="close" /></button></div>
+    <nav class="nav-stack" aria-label="Primary navigation">
+        <div class="nav-group"><span class="nav-heading">Workspace</span>
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All" @onclick="CloseNavigation"><AppIcon Name="home" /> <span>Overview</span></NavLink>
+            <OnlineFeatureLink Href="/notifications" Icon="bell" Label="Notifications" Connected="@connected" />
+            @if (CanViewAudit) { <OnlineFeatureLink Href="/admin/audit" Icon="ledger" Label="Activity log" Connected="@connected" /> }
+        </div>
+        @if (unlocked)
+        {
+            <div class="nav-group"><span class="nav-heading">Inventory</span>
+                @if (CanInventory) { <NavLink class="nav-link" href="inventory/stock" @onclick="CloseNavigation"><AppIcon Name="box" /> <span>Stock levels</span></NavLink><OnlineFeatureLink Href="/inventory/counts" Icon="ledger" Label="Stock counts" Connected="@connected" /> }
+                @if (CanViewStores) { <OnlineFeatureLink Href="/transfers" Icon="location" Label="Transfers" Connected="@connected" /> }
+                @if (CanApproveRestock) { <OnlineFeatureLink Href="/restock/approvals" Icon="ledger" Label="Restock approvals" Connected="@connected" /> }
+                @if (CanFulfillRestock) { <OnlineFeatureLink Href="/restock/fulfillment" Icon="box" Label="Restock fulfillment" Connected="@connected" /> }
+                @if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock) { <NavLink class="nav-link" href="restock" @onclick="CloseNavigation"><AppIcon Name="ledger" /> <span>Restock requests</span></NavLink> }
+                @if (CanReceive) { <NavLink class="nav-link" href="receiving" @onclick="CloseNavigation"><AppIcon Name="receipt" /> <span>Goods receiving</span></NavLink> }
+                @if (HasPermission("inventory.view.all")) { <OnlineFeatureLink Href="/inventory/exceptions" Icon="alert" Label="Exceptions" Connected="@connected" /> }
+            </div>
+            @if (CanViewStores || HasPermission("sale.view") || HasPermission("report.view")) { <div class="nav-group"><span class="nav-heading">Stores</span>
+                @if (CanViewStores) { <OnlineFeatureLink Href="/stores" Icon="location" Label="Store movement" Connected="@connected" /> }
+                @if (HasPermission("sale.view")) { <OnlineFeatureLink Href="/sales" Icon="ledger" Label="Sales ledger" Connected="@connected" /><OnlineFeatureLink Href="/analytics/products" Icon="trend-up" Label="Product analytics" Connected="@connected" /> }
+                @if (HasPermission("report.view")) { <OnlineFeatureLink Href="/reports" Icon="report" Label="Daily reports" Connected="@connected" /> }
+            </div> }
+            @if (CanViewPurchasing) { <div class="nav-group"><span class="nav-heading">Purchasing</span>
+                <NavLink class="nav-link" href="purchasing" @onclick="CloseNavigation"><AppIcon Name="receipt" /> <span>Purchase orders</span></NavLink>
+            </div> }
+            @if (HasPermission("location.manage") || HasPermission("user.manage") || HasPermission("role.manage") || HasPermission("device.manage") || HasPermission("sync.manage")) { <div class="nav-group"><span class="nav-heading">Administration</span>
+                @if (HasPermission("location.manage")) { <OnlineFeatureLink Href="/admin/locations" Icon="location" Label="Locations" Connected="@connected" /> }
+                @if (HasPermission("user.manage") || HasPermission("role.manage")) { <OnlineFeatureLink Href="/admin/users" Icon="people" Label="People &amp; roles" Connected="@connected" /> }
+                @if (HasPermission("device.manage")) { <OnlineFeatureLink Href="/admin/devices" Icon="device" Label="Devices" Connected="@connected" /> }
+                @if (HasPermission("sync.manage")) { <OnlineFeatureLink Href="/sync/failures" Icon="sync" Label="Sync failures" Connected="@connected" /> }
+            </div> }
+            <div class="nav-group"><span class="nav-heading">On this device</span><NavLink class="nav-link" href="sync" @onclick="CloseNavigation"><AppIcon Name="sync" /> <span>Pending work</span><small>@PendingCount</small></NavLink>
+                @if (canProvision) { <NavLink class="nav-link" href="team" @onclick="CloseNavigation"><AppIcon Name="people" /> <span>Offline access</span></NavLink> }
+            </div>
+        }
+    </nav>
+    <div class="sidebar-footer"><div><span>Signed in as</span><strong>@displayName</strong></div><button class="sign-out" type="button" @onclick="LockAsync"><AppIcon Name="logout" /> Lock workspace</button></div>
+</aside>
+@if (navigationOpen) { <button class="nav-scrim" type="button" aria-label="Close navigation" @onclick="CloseNavigation"></button> }
+<div class="app-main">
+<header class="top-row"><button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@navigationOpen" @onclick="ToggleNavigation"><AppIcon Name="menu" /></button><div class="workspace-context"><nav class="page-trail" aria-label="Breadcrumb"><ol><li>@PageSection</li><li><strong aria-current="page">@PageTitleText</strong></li></ol></nav></div><div class="top-actions"><span class="connection-pill @(connected ? "is-online" : "is-offline")" role="status">@(connected ? "Connected" : "Offline")</span>@if (connected) { <button type="button" class="notification-bell" aria-label="Notifications" @onclick="OpenNotificationsOnline"><AppIcon Name="bell" /></button> } else { <span class="notification-bell offline-unavailable" title="Notifications need Wi-Fi" aria-label="Notifications need Wi-Fi"><AppIcon Name="bell" /></span> }<div class="operator"><span class="operator-mark" aria-hidden="true">@Initials</span><span><strong>@displayName</strong><small>@(device?.LocationName ?? "Saved workspace")</small></span></div></div></header>
+<main id="main-content" class="workspace content" tabindex="-1">
+    @if (!cacheReady) { <p class="notice" role="status">Downloading offline files. Keep this page open until it is ready.</p> }
+    @if (unlocked && !connected) { <p class="notice" role="status">You are working from downloaded data. Edits stay <strong>Saved on device</strong> until the server confirms them.</p> }
+    @if (busy) { <p class="notice" role="status">@activity</p> }
+    @if (message is not null) { <p class="notice" role="status">@message</p> }
+    @if (error is not null) { <p class="error" role="alert">@error</p> }
+    @if (unlocked)
+    {
+        @if (section == "overview")
+        {
+            <section class="ov-hero" aria-labelledby="overview-title"><div class="ov-hero-copy"><span class="eyebrow">@DayGreeting,</span><h1 id="overview-title">Welcome back, @FirstName.</h1><p>Here's your saved work for @(device?.LocationName ?? "this location"). Shared records update after server confirmation.</p></div><svg class="ov-hero-art" viewBox="0 0 340 170" aria-hidden="true" focusable="false">
+        <ellipse cx="96" cy="128" rx="58" ry="30" fill="#d6ebdd" transform="rotate(-24 96 128)" />
+        <ellipse cx="292" cy="112" rx="48" ry="24" fill="#d6ebdd" transform="rotate(-52 292 112)" />
+        <ellipse cx="190" cy="160" rx="130" ry="10" fill="#cfe4d6" />
+        <path d="M58 36l3 8 8 3-8 3-3 8-3-8-8-3 8-3z M300 22l2.4 6 6 2.4-6 2.4-2.4 6-2.4-6-6-2.4 6-2.4z M84 12l1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6 4-1.6z" fill="#9fcbb0" />
+        <rect x="128" y="76" width="140" height="80" rx="3" fill="#f3faf5" stroke="#9cc6ab" stroke-width="1.5" />
+        <path d="M118 44l18-30h124l18 30z" fill="#2f7a55" />
+        <g>
+            <rect x="118" y="44" width="20" height="24" fill="#2f7a55" />
+            <rect x="138" y="44" width="20" height="24" fill="#f3faf5" />
+            <rect x="158" y="44" width="20" height="24" fill="#2f7a55" />
+            <rect x="178" y="44" width="20" height="24" fill="#f3faf5" />
+            <rect x="198" y="44" width="20" height="24" fill="#2f7a55" />
+            <rect x="218" y="44" width="20" height="24" fill="#f3faf5" />
+            <rect x="238" y="44" width="20" height="24" fill="#2f7a55" />
+            <rect x="258" y="44" width="20" height="24" fill="#f3faf5" />
+            <path d="M118 68a10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0 10 8 0 0 0 20 0z" fill="#2f7a55" />
+        </g>
+        <rect x="154" y="98" width="40" height="58" rx="2" fill="#2f7a55" />
+        <rect x="160" y="104" width="28" height="22" rx="1" fill="#8fc4a3" />
+        <circle cx="184" cy="132" r="2" fill="#d6ebdd" />
+        <rect x="210" y="98" width="42" height="32" rx="2" fill="#bfe0cb" stroke="#2f7a55" stroke-width="3" />
+        <path d="M231 98v32" stroke="#2f7a55" stroke-width="2" />
+        <path d="M112 156h14l-2-18h-10z" fill="#2f7a55" />
+        <path d="M119 138c-6-8-10-16-6-24 4 6 6 14 6 24z M119 138c2-10 6-18 13-22-1 9-5 17-13 22z M119 138c-1-12 0-22 4-30 3 10 1 20-4 30z" fill="#4f9a70" />
+    </svg></section>
+            <section class="ov-kpis" aria-label="Saved workspace status">
+                <article class="ov-kpi"><span class="ov-kpi-icon"><AppIcon Name="box" /></span><div class="ov-kpi-body"><span class="ov-kpi-label">Products downloaded</span><strong>@products.Count</strong><div class="ov-kpi-foot"><small>At your last download</small></div></div></article>
+                <article class="ov-kpi"><span class="ov-kpi-icon"><AppIcon Name="receipt" /></span><div class="ov-kpi-body"><span class="ov-kpi-label">Open orders</span><strong>@orders.Count</strong><div class="ov-kpi-foot"><small>Available to count on this device</small></div></div></article>
+                <article class="ov-kpi"><span class="ov-kpi-icon"><AppIcon Name="sync" /></span><div class="ov-kpi-body"><span class="ov-kpi-label">Pending work</span><strong>@PendingCount</strong><div class="ov-kpi-foot"><small>Saved on device until confirmed</small></div></div></article>
+                <article class="ov-kpi"><span class="ov-kpi-icon"><AppIcon Name="calendar" /></span><div class="ov-kpi-body"><span class="ov-kpi-label">Last downloaded</span><strong class="offline-date">@(snapshot is null ? "No data" : snapshot.DownloadedAtUtc.ToLocalTime().ToString("MMM d"))</strong><div class="ov-kpi-foot"><small>@(snapshot is null ? "Connect to prepare this device" : snapshot.DownloadedAtUtc.ToLocalTime().ToString("g"))</small></div></div></article>
+            </section>
+            <div class="ov-grid ov-grid-compact">
+                <div class="ov-main">
+                    @if (CanInventory && snapshot?.StockLevels is { } stock) { <section class="ov-card ov-stock"><span class="ov-stock-icon"><AppIcon Name="box" /></span><div class="ov-stock-copy"><h2>Inventory status</h2><p>Downloaded quantities for @stock.Name.</p></div><div class="ov-stock-stats"><div><span class="ov-dot is-ok"><AppIcon Name="box" /></span><small>Available</small><strong>@stock.Products.Sum(row => row.Available)</strong><em>units</em></div><div><span class="ov-dot is-warn"><AppIcon Name="alert" /></span><small>Low stock</small><strong>@stock.Products.Count(row => row.Status.Contains("Low", StringComparison.OrdinalIgnoreCase))</strong><em>items</em></div><div><span class="ov-dot is-bad"><AppIcon Name="alert" /></span><small>Out of stock</small><strong>@stock.Products.Count(row => row.Available <= 0)</strong><em>items</em></div></div><a class="ov-button" href="inventory/stock">View inventory <AppIcon Name="arrow" /></a></section> }
+                </div>
+                <section class="ov-card ov-activity"><header class="ov-activity-head"><span class="ov-card-icon ov-round"><AppIcon Name="clock" /></span><h2>Recent activity</h2><a class="text-link" href="sync">View all <AppIcon Name="arrow" /></a></header>
+                    @if (operations.Count == 0) { <p class="ov-empty">No work saved on this device yet.</p> }
+                    else { <ul>@foreach (OfflineOperation operation in operations.OrderByDescending(item => item.UpdatedAtUtc).Take(4)) { <li><a href="sync"><span class="ov-activity-icon"><AppIcon Name="sync" /></span><span class="ov-activity-copy"><strong>@operation.Label</strong><b>Saved on device</b><small>@operation.UpdatedAtUtc.ToLocalTime().ToString("g")</small></span><span class="ov-pill tone-warn">@operation.Status</span></a></li> }</ul> }
+                </section>
+            </div>
+            <section class="workbench" aria-labelledby="workbench-title"><div class="section-heading"><div><span class="eyebrow">Your tools</span><h2 id="workbench-title">Quick actions</h2></div><span class="permission-note">Actions that need Wi-Fi are marked unavailable</span></div>
+                <div class="task-grid">
+                    @foreach (OfflineAction action in Actions) { @if (action.OfflineAvailable) { <a class="task-card @(action == Actions[0] ? "task-primary" : string.Empty)" href="@action.Href"><span class="task-icon"><AppIcon Name="@action.Icon" /></span><span class="task-copy"><strong>@action.Title</strong><small>@action.Description</small></span><AppIcon Name="arrow" CssClass="task-arrow" /></a> } else if (connected) { <button type="button" class="task-card" @onclick="() => OpenOnline(action.Href)"><span class="task-icon"><AppIcon Name="@action.Icon" /></span><span class="task-copy"><strong>@action.Title</strong><small>@action.Description</small></span><AppIcon Name="arrow" CssClass="task-arrow" /></button> } else { <div class="task-card offline-unavailable" aria-disabled="true"><span class="task-icon"><AppIcon Name="@action.Icon" /></span><span class="task-copy"><strong>@action.Title</strong><small>@action.Description <span class="offline-wifi">Needs Wi-Fi</span></small></span><AppIcon Name="wifi" CssClass="task-arrow" /></div> } }
+                </div>
+            </section>
+            <section class="dashboard-section readiness-panel"><div><h2>Ready for work away from the connection</h2><p>@(cacheReady ? "App files are saved in this browser." : "App files are still downloading.") @StorageText()</p>
+                @if (HasDeviceOnlyWork) { <p class="notice" role="status">@DeviceWorkWarning</p> }
+                @if (!storagePersisted) { <p class="notice" role="status">This browser may remove offline data when storage is low. @((HasDeviceOnlyWork) ? "Unsynced work could be lost." : "")</p><button type="button" @onclick="RequestPersistentStorageAsync">Request persistent storage</button> }
+            </div><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button></section>
+        }
+        @if (section == "purchase" && CanPurchase)
+        {
+            <div class="po-page">
+                <header class="po-heading">
+                    <div>
+                        <span class="eyebrow">▣ &nbsp; Purchasing</span>
+                        <h1>Purchase orders</h1>
+                        <p>Order from suppliers and check deliveries against downloaded orders. Drafts await server confirmation.</p>
+                    </div>
+                    <button type="button" class="po-primary" @onclick="() => showPurchaseForm = !showPurchaseForm">@(showPurchaseForm ? "Close form" : "＋ &nbsp; New purchase order")</button>
+                </header>
+                <section>
+                    <div class="po-section-head">
+                        <h2>Downloaded orders</h2>
+                        <span>@FilteredOrders.Count of @orders.Count</span>
+                    </div>
+                    <nav class="po-chips" aria-label="Filter by stage">
+                        <button type="button" class="@(purchaseStage == "all" ? "on" : null)" aria-pressed="@(purchaseStage == "all")" @onclick='() => purchaseStage = "all"'><span>All</span><span class="chip-count">@orders.Count</span></button>
+                        <button type="button" class="@(purchaseStage == "Ordered" ? "on" : null)" aria-pressed="@(purchaseStage == "Ordered")" @onclick='() => purchaseStage = "Ordered"'><span>Ordered</span><span class="chip-count">@orders.Count(order => order.Status == "Ordered")</span></button>
+                        <button type="button" class="@(purchaseStage == "PartiallyReceived" ? "on" : null)" aria-pressed="@(purchaseStage == "PartiallyReceived")" @onclick='() => purchaseStage = "PartiallyReceived"'><span>Partially received</span><span class="chip-count">@orders.Count(order => order.Status == "PartiallyReceived")</span></button>
+                        <span class="po-stage-unavailable" aria-disabled="true">Approvals <small>Needs Wi-Fi</small></span>
+                    </nav>
+                    @if (FilteredOrders.Count == 0)
+                    {
+                        <div class="po-empty">
+                            <strong>No downloaded orders here</strong>
+                            <p>@(orders.Count == 0 ? "Download your orders, then return here to work offline." : "Try another stage for the orders saved on this device.")</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="po-cards">
+                            @foreach (OfflineOrder order in FilteredOrders)
+                            {
+                                <div class="po-card" @key="order.Id">
+                                    <div class="po-card-top">
+                                        <div>
+                                            <span class="small-label">Downloaded order</span>
+                                            <strong>@(order.Number ?? order.Id.ToString("D"))</strong>
+                                        </div>
+                                        <span class="status-badge">@StageLabel(order.Status)</span>
+                                    </div>
+                                    <span class="supplier-name">@(device?.LocationName ?? "Assigned location")</span>
+                                    <span class="destination">@order.Lines.Count line@(order.Lines.Count == 1 ? "" : "s") ready to count</span>
+                                    <hr />
+                                    <div class="po-card-foot">
+                                        <span class="date">Status at the last download</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (operations.Any(o => o.EventType == "PwaPurchaseDraft"))
+                    {
+                        <div class="po-section-head"><h2>Drafts from this device</h2><span>@operations.Count(o => o.EventType == "PwaPurchaseDraft") total</span></div>
+                        @foreach (OfflineOperation operation in operations.Where(o => o.EventType == "PwaPurchaseDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
+                    }
+                </section>
+            @if (showPurchaseForm)
+            {
+            <section class="qr-card"><h2>New purchase order</h2><p>Your draft is saved on this device until the server confirms it.</p>
+                <div class="form-grid"><label>Supplier<select @bind="purchase.SupplierId"><option value="">New supplier by name</option>@foreach (OfflineSupplier supplier in snapshot?.Suppliers ?? []) { <option value="@supplier.Id">@supplier.Name</option> }</select></label>
+                @if (purchase.SupplierId is null) { <label>Supplier name<input @bind="purchase.CustomSupplierName" /></label> }
+                <label>Search catalog<input @bind="productSearch" @bind:event="oninput" /></label></div>
+                @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button @onclick="() => AddProductAsync(product)">Add</button></li> }</ul> }
+                <div class="scanner-row"><BarcodeCamera OnScan="OnPurchaseScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnPurchaseScanAsync(manualCode)">Find on device</button></div>
+                @if (scanMessage is not null) { <p role="status">@scanMessage</p> }
+                @if (showProposal)
+                {
+                    <div class="subpanel"><h3>Unknown product details</h3><div class="form-grid">
+                        <label>Barcode<input @bind="proposal.Barcode" /></label><label>SKU<input @bind="proposal.Sku" /></label><label>Name<input @bind="proposal.Name" /></label>
+                        <label>Category<select @bind="proposal.CategoryId"><option value="@Guid.Empty">Choose</option>@foreach (OfflineCategory category in snapshot?.Categories ?? []) { <option value="@category.Id">@category.Name</option> }</select></label>
+                        <label>Unit<select @bind="proposal.BaseUnitOfMeasureId"><option value="@Guid.Empty">Choose</option>@foreach (OfflineUnit unit in snapshot?.Units ?? []) { <option value="@unit.Id">@unit.Name</option> }</select></label>
+                        <label>Purchase cost<input type="number" min="0" step="0.01" @bind="proposal.DefaultPurchaseCost" /></label>
+                    </div><button @onclick="AddProposalAsync">Add proposal</button></div>
+                }
+                <h3>Order lines</h3>@if (purchase.Lines.Count == 0) { <p>Scan or search to begin.</p> }
+                @foreach (ProposedProduct item in purchase.Proposals)
+                {
+                    <div class="subpanel" @key="item"><h3>Proposed: @item.Name</h3><div class="form-grid"><label>Barcode<input @bind="item.Barcode" /></label><label>SKU<input @bind="item.Sku" /></label><label>Name<input @bind="item.Name" /></label><label>Link existing product<select value="" @onchange="args => LinkProposalAsync(item, args)"><option value="">Choose product</option>@foreach (OfflineProduct known in products) { <option value="@known.Id">@known.Name · @known.Sku</option> }</select></label></div></div>
+                }
+                @foreach (PurchaseWorkingLine line in purchase.Lines) { <div class="line-row" @key="line"><strong>@line.Name</strong><label>Quantity<input type="number" min="0.001" step="0.001" @bind="line.OrderedQuantity" /></label><label>Unit cost<input type="number" min="0" step="0.01" @bind="line.UnitCost" /></label><button @onclick="() => RemoveLineAsync(line)">Remove</button></div> }
+                <div class="actions"><button @onclick="SavePurchaseAsync">Save form on device</button><button class="primary" disabled="@busy" @onclick="QueuePurchaseAsync">Queue purchase draft</button></div>
+            </section>
+            }
+            </div>
+        }
+        else if (section == "receiving" && CanReceive)
+        {
+            <header class="receiving-head"><div><span class="eyebrow">Inventory · inbound stock</span><h1>Goods receiving</h1><p>Record deliveries for downloaded orders headed to your assigned location.</p></div><button type="button" class="receiving-secondary" disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh</button></header>
+            @if (orders.Count == 0) { <div class="receiving-empty"><strong>No downloaded deliveries to show.</strong><span>Connect and refresh to prepare new orders for offline counting.</span></div> }
+            else { <div class="receiving-list">@foreach (OfflineOrder order in orders) { <button type="button" class="receiving-row @(receiving.PurchaseOrderId == order.Id ? "selected" : string.Empty)" @onclick="() => SelectOrderAsync(new ChangeEventArgs { Value = order.Id.ToString() })"><span class="receiving-row-mark" aria-hidden="true">↘</span><span class="receiving-row-main"><strong>@(order.Number ?? "Draft order")</strong><small>@(device?.LocationName ?? "Assigned location") · @order.Lines.Count lines</small></span><span class="receiving-state ready">Ready to receive</span><span class="receiving-row-arrow" aria-hidden="true">→</span></button> }</div> }
+
+            @* The same count sheet the desktop receiving screen uses, so staff
+               who learn one know the other: the lines with a stepper and a
+               per-row scan, then paperwork and the running total. *@
+            <div class="cs-sheet">
+                @if (receiving.PurchaseOrderId == Guid.Empty)
+                {
+                    <div class="cs-card">
+                        <div class="cs-card-head">
+                            <div><div class="cs-eyebrow">New delivery</div><h2>Choose a delivery</h2><p>Pick one of the downloaded orders above, or choose it here.</p></div>
+                        </div>
+                        <div class="cs-form">
+                            <label class="cs-field">Order
+                                <select value="@receiving.PurchaseOrderId" @onchange="SelectOrderAsync">
+                                    <option value="@Guid.Empty">Choose downloaded order</option>
+                                    @foreach (OfflineOrder order in orders) { <option value="@order.Id">@(order.Number ?? order.Id.ToString("D")) · @order.Status</option> }
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                <div class="cs-layout">
+                    <div class="cs-main">
+                        <div class="cs-card">
+                            <div class="cs-card-head">
+                                <div>
+                                    <div class="cs-eyebrow">New delivery</div>
+                                    <h2>Count what arrived</h2>
+                                    <p>Enter the quantities received in this delivery. Stock changes only after the server confirms it.</p>
+                                </div>
+                                <span class="cs-count">@ReceivingCountedLines of @receiving.Lines.Count</span>
+                            </div>
+
+                            <div class="cs-toolbar">
+                                <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                                <button type="button" class="cs-btn" disabled="@busy" @onclick="MarkAllArrivedAsync">
+                                    <AppIcon Name="check" /> Mark all arrived
+                                </button>
+                            </div>
+                            <p class="cs-help">@(scanMessage ?? "Open a row's scanner, or use the camera below. A scan is matched to the product it belongs to, whichever row it came from.")</p>
+                            <p class="cs-note">Count all arrived units, then enter how many are damaged. Usable = arrived − damaged and anything reported as an issue.</p>
+
+                            <div class="cs-scanbar">
+                                <BarcodeCamera OnScan="OnReceivingScanAsync" />
+                                <label class="cs-field">Barcode<input inputmode="numeric" autocomplete="off" placeholder="Enter barcode value" @bind="manualCode" @bind:event="oninput" /></label>
+                                <button type="button" class="cs-btn" disabled="@string.IsNullOrWhiteSpace(manualCode)" @onclick="CountManualCodeAsync">Count one</button>
+                            </div>
+
+                            <div class="cs-table-head" aria-hidden="true">
+                                <span>Product</span><span>Due</span><span>Arrived</span><span>Damaged</span><span>Actions</span>
+                            </div>
+
+                            <div class="cs-rows">
+                                @foreach (ReceivingWorkingLine line in receiving.Lines)
+                                {
+                                    <article class="cs-row" @key="line" aria-label="@line.Name">
+                                        <div class="cs-product">
+                                            <div class="cs-name">@line.Name</div>
+                                            <div class="cs-sku">@(SkuFor(line) ?? "No SKU")</div>
+                                            @if (HasIssueDetail(line)) { <div class="cs-flag">Details added</div> }
+                                        </div>
+
+                                        <div class="cs-due-cell"><span class="cs-due">@Units(DueFor(line))</span></div>
+
+                                        <div class="cs-qty-cell" data-label="ARRIVED">
+                                            <div class="cs-stepper">
+                                                <button type="button" aria-label="One fewer @line.Name"
+                                                        disabled="@(line.QuantityReceived <= 0m)" @onclick="() => StepArrivedAsync(line, -1m)">−</button>
+                                                <input type="number" min="0" step="0.001" inputmode="decimal"
+                                                       aria-label="Arrived quantity for @line.Name"
+                                                       value="@line.QuantityReceived" @onchange="e => SetArrivedAsync(line, e.Value)" />
+                                                <button type="button" aria-label="One more @line.Name"
+                                                        @onclick="() => StepArrivedAsync(line, 1m)">+</button>
+                                            </div>
+                                            <button type="button" class="cs-text-btn" disabled="@(line.QuantityReceived == DueFor(line))"
+                                                    @onclick="() => SetArrivedAsync(line, DueFor(line))">Receive all @Units(DueFor(line))</button>
+                                        </div>
+
+                                        <div class="cs-second-cell">
+                                            <label class="cs-second-field">
+                                                <span class="cs-second-label">Damaged</span>
+                                                <span class="cs-second-input">
+                                                    <input type="number" min="0" step="0.001" inputmode="decimal"
+                                                           aria-label="Damaged quantity for @line.Name"
+                                                           value="@line.QuantityDamaged" @onchange="e => SetDamagedAsync(line, e.Value)" />
+                                                </span>
+                                            </label>
+                                            <div class="cs-derived">@Units(UsableFor(line)) usable units</div>
+                                        </div>
+
+                                        <div class="cs-actions">
+                                            <button type="button" class="cs-row-scan" @onclick="() => OpenReceivingScan(line)"
+                                                    aria-label="Scan barcode for @line.Name">
+                                                <AppIcon Name="camera" /> Scan barcode
+                                            </button>
+                                            <button type="button" @onclick="() => OpenReceivingDetail(line)">
+                                                <AppIcon Name="warning" /> Issue, lot &amp; cost
+                                            </button>
+                                        </div>
+                                    </article>
+                                }
+                            </div>
+
+                            <div class="cs-helper">
+                                <AppIcon Name="info" />
+                                Leave arrived at 0 for items not in this delivery. Damaged and reported issues cannot exceed arrived.
+                            </div>
+                        </div>
+
+                        @if (receiving.UnexpectedGoods.Count > 0)
+                        {
+                            <div class="cs-card">
+                                <div class="cs-card-head">
+                                    <div><div class="cs-eyebrow">Quarantine review</div><h2>Unexpected goods</h2><p>Codes that are not on this order. They are held for review instead of counted into stock.</p></div>
+                                    <span class="cs-count">@receiving.UnexpectedGoods.Count</span>
+                                </div>
+                                <div class="cs-form">
+                                    @foreach (UnexpectedGood good in receiving.UnexpectedGoods)
+                                    {
+                                        <div class="cs-unexpected" @key="good">
+                                            <strong>@good.Barcode</strong>
+                                            <label class="cs-field">Description<input @bind="good.Description" placeholder="As printed on the carton" /></label>
+                                            <label class="cs-field">Quantity<input type="number" min="0" step="0.001" @bind="good.Quantity" /></label>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <aside class="cs-side">
+                        <div class="cs-card">
+                            <div class="cs-card-head">
+                                <h2>Supplier paperwork</h2>
+                                <span class="cs-optional">Optional</span>
+                            </div>
+                            <div class="cs-form">
+                                <label class="cs-field">DR number<input maxlength="40" autocomplete="off" disabled="@receiving.DocumentsMissing" placeholder="Delivery receipt number" @bind="receiving.SupplierDeliveryReceiptNumber" /></label>
+                                <label class="cs-field">OR number<input maxlength="40" autocomplete="off" disabled="@receiving.DocumentsMissing" placeholder="Official receipt number" @bind="receiving.SupplierOfficialReceiptNumber" /></label>
+                                <label class="cs-field">Released by supplier<input type="datetime-local" @bind="receiving.SupplierReleasedAt" /></label>
+                                <label class="cs-check"><input type="checkbox" @bind="receiving.DocumentsMissing" /> Driver brought no paperwork</label>
+                            </div>
+                        </div>
+
+                        <div class="cs-card">
+                            <div class="cs-card-head">
+                                <h2>Delivery summary</h2>
+                                <span class="cs-card-icon" aria-hidden="true"><AppIcon Name="box" /></span>
+                            </div>
+                            <div class="cs-summary">
+                                <div class="cs-summary-row"><span>Items counted</span><strong>@ReceivingCountedLines of @receiving.Lines.Count</strong></div>
+                                <div class="cs-summary-row"><span>Units arrived</span><strong>@Units(ReceivingArrivedUnits) of @Units(ReceivingDueUnits)</strong></div>
+                                <div class="cs-summary-row"><span>Damaged or rejected</span><strong>@Units(ReceivingProblemUnits)</strong></div>
+                                <div class="cs-summary-row cs-summary-key"><span>Usable units</span><strong>@Units(ReceivingUsableUnits)</strong></div>
+
+                                <div class="cs-progress" role="progressbar" aria-label="Units counted"
+                                     aria-valuemin="0" aria-valuemax="@Units(ReceivingDueUnits)" aria-valuenow="@Units(ReceivingArrivedUnits)">
+                                    <div style="width:@ReceivingPercent%"></div>
+                                </div>
+
+                                <button type="button" class="cs-btn cs-primary cs-submit" disabled="@busy" @onclick="QueueReceivingAsync">
+                                    <AppIcon Name="check" /> @(busy ? "Queueing…" : "Queue receiving count")
+                                </button>
+                                <button type="button" class="cs-btn cs-submit" disabled="@busy" @onclick="SaveReceivingAsync">Save count on device</button>
+                                <p class="cs-summary-foot">Queued counts stay on this device until the server confirms them.</p>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+                }
+            </div>
+
+            @if (scanLine is { } scanning)
+            {
+                <div class="cs-dlg-scrim" @onclick="CloseReceivingDialogs"></div>
+                <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="pwa-scan-title">
+                    <h2 id="pwa-scan-title">Scan product barcode</h2>
+                    <p class="cs-dlg-product">@scanning.Name</p>
+                    <p class="cs-dlg-lead">Point the camera at this product's barcode. Each scan adds one arrived unit to the product it belongs to, whichever row it was opened from.</p>
+                    <BarcodeCamera OnScan="OnReceivingScanAsync" />
+                    <label class="cs-field">Barcode value<input inputmode="numeric" autocomplete="off" placeholder="Enter barcode value" @bind="manualCode" @bind:event="oninput" /></label>
+                    <footer>
+                        <span class="cs-dlg-status">@(scanMessage ?? "Ready to scan.")</span>
+                        <button type="button" class="cs-btn" @onclick="CloseReceivingDialogs">Done</button>
+                        <button type="button" class="cs-btn cs-primary" disabled="@string.IsNullOrWhiteSpace(manualCode)" @onclick="CountManualCodeAsync">Add one unit</button>
+                    </footer>
+                </div>
+            }
+            else if (detailLine is { } detailing)
+            {
+                <div class="cs-dlg-scrim" @onclick="CloseReceivingDialogs"></div>
+                <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="pwa-detail-title">
+                    <h2 id="pwa-detail-title">Issue, lot &amp; cost</h2>
+                    <p class="cs-dlg-product">@detailing.Name</p>
+                    <p class="cs-dlg-lead">Anything recorded here comes off the usable count and is reviewed when the delivery reaches the server.</p>
+                    <label class="cs-field">Wrong item<input type="number" min="0" step="0.001" @bind="detailing.QuantityWrongItem" /></label>
+                    <label class="cs-field">Expired<input type="number" min="0" step="0.001" @bind="detailing.QuantityExpired" /></label>
+                    <label class="cs-field">Unit cost<input type="number" min="0" step="0.01" @bind="detailing.UnitCost" /></label>
+                    <label class="cs-field">Lot number<input maxlength="40" @bind="detailing.LotNumber" placeholder="As printed" /></label>
+                    <footer>
+                        <span class="cs-dlg-status">@Units(UsableFor(detailing)) usable units</span>
+                        <button type="button" class="cs-btn cs-primary" @onclick="SaveReceivingDetailAsync">Done</button>
+                    </footer>
+                </div>
+            }
+        }
+        else if (section == "inventory" && CanInventory)
+        {
+            <header class="qr-head sk-head"><span class="eyebrow">Monitoring</span><h1>Store inventory</h1><p>What your location held at the last download. Later sales, receiving, and movements need Wi-Fi to appear.</p><p class="sk-snapshot">Saved snapshot · @(snapshot?.DownloadedAtUtc.ToLocalTime().ToString("g") ?? "Not downloaded")</p></header>
+            @if (snapshot?.StockLevels is { } stockLevels)
+            {
+                <nav class="sk-tabs" aria-label="Location"><button type="button" class="active" aria-current="page">@stockLevels.Name</button></nav>
+                <section class="sk-summary" aria-label="Downloaded stock status"><button type="button" class="out @(stockFilter == "Out" ? "active" : null)" @onclick='() => ToggleStockFilter("Out")'><strong>@StockCount("Out")</strong><span>Out of stock</span></button><button type="button" class="low @(stockFilter == "Low" ? "active" : null)" @onclick='() => ToggleStockFilter("Low")'><strong>@StockCount("Low")</strong><span>Low</span></button><button type="button" class="ok @(stockFilter == "Healthy" ? "active" : null)" @onclick='() => ToggleStockFilter("Healthy")'><strong>@StockCount("Healthy")</strong><span>Healthy</span></button><button type="button" class="over @(stockFilter == "Over" ? "active" : null)" @onclick='() => ToggleStockFilter("Over")'><strong>@StockCount("Over")</strong><span>Overstocked</span></button><article class="sk-value"><strong>@stockLevels.Products.Count</strong><span>Products downloaded</span></article></section>
+                <div class="sk-extremes"><section class="qr-card sk-panel"><header><h2>Running lowest</h2><span>Fewest available units</span></header><ol>@foreach (OfflineStockRow row in stockLevels.Products.OrderBy(item => item.Available).Take(4)) { <li><div><strong>@row.Name</strong><small>@row.Sku</small></div><span class="sk-qty">@row.Available</span><span class="ov-pill tone-warn">@row.Status</span></li> }</ol></section><section class="qr-card sk-panel"><header><h2>Most abundant</h2><span>Most available units</span></header><ol>@foreach (OfflineStockRow row in stockLevels.Products.OrderByDescending(item => item.Available).Take(4)) { <li><div><strong>@row.Name</strong><small>@row.Sku</small></div><span class="sk-qty">@row.Available</span><span class="ov-pill tone-ok">@row.Status</span></li> }</ol></section></div>
+                <section class="qr-card qr-results" id="all-products"><header class="qr-results-head sk-table-head"><h2>All products <small>@StockMatches.Count() of @stockLevels.Products.Count</small></h2></header><div class="sk-toolbar" role="search" aria-label="Find products"><input class="sk-search" type="search" placeholder="Search name or SKU" aria-label="Search products" @bind="stockSearch" @bind:event="oninput" /><select aria-label="Status" @bind="stockFilter"><option value="">Any status</option><option value="Out">Out of stock</option><option value="Low">Low</option><option value="Healthy">Healthy</option><option value="Over">Overstocked</option></select></div><div class="qr-table-wrap"><table class="qr-table sk-table"><thead><tr><th>Product</th><th class="num">Available</th><th class="num">In transit</th><th class="num">On hold</th><th>Status</th></tr></thead><tbody>@foreach (OfflineStockRow row in StockMatches) { <tr class="static" @key="row.ProductId"><td><strong>@row.Name</strong><small>@row.Sku</small></td><td class="num"><strong>@row.Available</strong></td><td class="num">@row.InTransit</td><td class="num">@row.OnHold</td><td><span class="ov-pill tone-@(StockBand(row) == "Out" ? "bad" : StockBand(row) == "Low" ? "warn" : "ok")">@row.Status</span></td></tr> }</tbody></table></div></section>
+            }
+            else { <section class="qr-card"><p>Inventory data was not available for this employee or location at the last download.</p></section> }
+        }
+        else if (section == "restock" && CanRestock)
+        {
+            <div class="restock-page">
+                <header class="restock-head">
+                    <div>
+                        <span class="eyebrow">Inventory · store supplies</span>
+                        <h1>Restock requests</h1>
+                        <p>Ask the main warehouse for the products your store needs. The draft is held on this device and sent for approval when Wi-Fi returns.</p>
+                    </div>
+                </header>
+                <section class="restock-card">
+                    <header>
+                        <div>
+                            <span class="eyebrow">New request</span>
+                            <h2>Deliver to @(device?.LocationName ?? "this store")</h2>
+                        </div>
+                        <p>Your request is saved on this device until the server confirms it.</p>
+                    </header>
+                    <div class="restock-form">
+                        @if (RestockLowStock.Count > 0)
+                        {
+                            <div class="restock-low">
+                                <header>
+                                    <div><strong>Low stock on this device</strong><small>@RestockLowStock.Count product@(RestockLowStock.Count == 1 ? "" : "s") at or below the reorder point</small></div>
+                                    <label class="restock-low-all"><input type="checkbox" checked="@(restockLowSelected.Count == RestockLowStock.Count)" @onchange="ToggleAllRestockLow" /> Select all</label>
+                                </header>
+                                <div class="restock-low-list">
+                                    @foreach (OfflineStockRow row in RestockLowStock)
+                                    {
+                                        <div class="restock-low-row" @key="row.ProductId">
+                                            <input type="checkbox" aria-label="Request @row.Name" checked="@restockLowSelected.Contains(row.ProductId)" @onchange="() => ToggleRestockLow(row.ProductId)" />
+                                            <div class="restock-low-product"><strong>@row.Name</strong><small>@row.Sku</small></div>
+                                            <span class="restock-low-status @(StockBand(row) == "Out" ? "is-out" : "is-low")">@(StockBand(row) == "Out" ? "Out of stock" : "Low")</span>
+                                            <span class="restock-low-avail"><strong>@row.Available</strong><small>available</small></span>
+                                            <span class="restock-low-suggest"><strong>@SuggestRestockQuantity(row)</strong><small>suggested</small></span>
+                                        </div>
+                                    }
+                                </div>
+                                <footer><button type="button" class="restock-primary" disabled="@(restockLowSelected.Count == 0)" @onclick="AddSelectedRestockLow">@(restockLowSelected.Count == 0 ? "Select products to add" : $"Add {restockLowSelected.Count} to request")</button></footer>
+                            </div>
+                        }
+                        else { <p class="restock-low-none">Nothing on this device is below its reorder point.</p> }
+                        <div class="restock-product-search">
+                            <label class="restock-field">Search catalog<input @bind="productSearch" @bind:event="oninput" /></label>
+                            @if (!string.IsNullOrWhiteSpace(productSearch)) { <ul class="results">@foreach (OfflineProduct product in ProductMatches.Take(12)) { <li>@product.Name <small>@product.Sku</small><button disabled="@(restock.Lines.Any(line => line.ProductId == product.Id))" @onclick="() => AddRestockLine(product)">Add</button></li> }</ul> }
+                        </div>
+                        <div class="scanner-row"><BarcodeCamera OnScan="OnRestockScanAsync" /><label>Barcode or SKU<input @bind="manualCode" /></label><button @onclick="() => OnRestockScanAsync(manualCode)">Find on device</button></div>
+                        @if (scanMessage is not null) { <p role="status">@scanMessage</p> }
+                    </div>
+                    <div class="restock-lines">
+                        <h3>Request lines</h3>
+                        @if (restock.Lines.Count == 0) { <p>Search or scan to begin.</p> }
+                        @foreach (RestockWorkingLine line in restock.Lines)
+                        {
+                            <div class="restock-line" @key="line">
+                                <div><strong>@line.Name</strong><small>Quantity to request</small></div>
+                                <label>Quantity<input type="number" min="0.001" step="0.001" @bind="line.Quantity" /></label>
+                                <button @onclick="() => RemoveRestockLine(line)">Remove</button>
+                            </div>
+                        }
+                    </div>
+                    <footer>
+                        <span>@restock.Lines.Count line@(restock.Lines.Count == 1 ? "" : "s") in this request</span>
+                        <div class="restock-actions">
+                            <button type="button" class="restock-refresh" @onclick="SaveRestockAsync">Save form on device</button>
+                            <button type="button" class="restock-primary" disabled="@busy" @onclick="QueueRestockAsync">Queue restock draft</button>
+                        </div>
+                    </footer>
+                </section>
+                <section class="restock-card">
+                    <header>
+                        <div>
+                            <span class="eyebrow">From this device</span>
+                            <h2>Drafts</h2>
+                        </div>
+                        <p>Sent for approval the next time this device has Wi-Fi.</p>
+                    </header>
+                    @if (operations.Any(item => item.EventType == "PwaRestockDraft"))
+                    {
+                        @foreach (OfflineOperation operation in operations.Where(item => item.EventType == "PwaRestockDraft")) { <div class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span></div> }
+                    }
+                    else
+                    {
+                        <div class="restock-empty">
+                            <strong>No restock drafts on this device</strong>
+                            <p>Queued requests appear here until the server confirms them.</p>
+                        </div>
+                    }
+                </section>
+            </div>
+        }
+        else if (section == "stores" && CanViewStores)
+        {
+            <header class="qr-head"><div><span class="eyebrow">Stores</span><h1>Store movement</h1><p>Track stock and movement across your stores.</p></div></header>
+            <section class="dashboard-section online-required"><span class="online-required-icon"><AppIcon Name="wifi" /></span><div><h2>Wi-Fi required</h2><p>Store movement uses live records and is unavailable without a connection.</p>@if (connected) { <button class="primary" @onclick="OpenStoresOnline">Open online workspace</button> }</div></section>
+        }
+        else if (section == "prepare")
+        {
+            <header class="qr-head"><div><span class="eyebrow">Administration</span><h1>Offline access</h1><p>Each employee prepares their own account on this device.</p></div></header>
+            <section class="panel"><h2>Prepare an employee</h2><p>Connect this device, then ask the employee to sign in at <strong>/login</strong> with their usual username and password. VaultFlow will download and encrypt their permitted work automatically.</p><p>Employees with older PIN-protected data will be prompted to move it safely after online sign-in.</p></section>
+        }
+        else if (section == "queue")
+        {
+            <header class="qr-head"><div><span class="eyebrow">Workspace</span><h1>Pending work</h1><p>Review device edits and send them for server confirmation.</p></div></header>
+            @if (HasDeviceOnlyWork) { <p class="notice" role="status">@DeviceWorkWarning</p> }
+            <section class="panel"><h2>Synchronization</h2><p>Retries keep the same event ID. Failed work stays on this device for review.</p><div class="actions"><button disabled="@(busy || !connected)" @onclick="DownloadAsync">Refresh downloaded data</button><button class="primary" disabled="@(busy || !connected)" @onclick="SyncAsync">Sync pending work</button></div>
+                @foreach (OfflineOperation operation in operations) { <article class="operation"><strong>@operation.Label</strong><span class="state">@operation.Status</span><small>@operation.UpdatedAtUtc.ToLocalTime().ToString("g") · #@operation.Sequence</small>@if (operation.EntityId is { } id) { <p>Official record: @id</p> }@if (operation.Message is not null) { <p>@operation.Message</p> }@if (operation.EventType == "PwaPurchaseDraft" && (operation.Status is "Needs review" or "Conflict")) { <button @onclick="() => RevisePurchaseAsync(operation)">Revise purchase draft</button> }</article> }
+                @if (operations.Count == 0) { <p>No local operations yet.</p> }
+            </section>
+        }
+        else if (section != "overview")
+        {
+            <section class="panel"><h1>Workflow unavailable</h1><p>This employee does not have access to this workflow on the device.</p><a href="./">Back to overview</a></section>
+        }
+    }
+</main>
+<nav class="tabbar" aria-label="Main">
+    @foreach (OfflineTab tab in Tabs) { @if (tab.OfflineAvailable) { <NavLink class="tab-item" href="@tab.Href" Match="@(tab.Href.Length == 0 ? NavLinkMatch.All : NavLinkMatch.Prefix)"><AppIcon Name="@tab.Icon" /><span>@tab.Label</span></NavLink> } else { <OnlineFeatureLink Href="@tab.Href" Icon="@tab.Icon" Label="@tab.Label" CssClass="tab-item" Connected="@connected" /> } }
+    <button type="button" class="tab-item @(navigationOpen ? "active" : string.Empty)" aria-expanded="@navigationOpen" aria-controls="primary-navigation" @onclick="ToggleNavigation"><AppIcon Name="menu" /><span>More</span></button>
+</nav>
+</div>
+</div>
+}
+
+@code {
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
+    private IJSObjectReference? store;
+    private DotNetObjectReference<Home>? lifecycle;
+    private bool ready, busy, unlocked, unlockMode, cacheReady, storagePersisted, showProposal, showPurchaseForm, navigationOpen, showPassword;
+    private bool appInstalled, showInstallSteps;
+    private bool connected = true;
+    private string? installMessage;
+    private long storageUsed, storageQuota;
+    private string activity = string.Empty;
+    private string? message, error, scanMessage;
+    private string enrolmentCode = string.Empty, userName = string.Empty, password = string.Empty, offlinePin = string.Empty;
+    private string twoFactorCode = string.Empty, selectedScope = string.Empty;
+    private string section = "overview", productSearch = string.Empty, stockSearch = string.Empty, stockFilter = string.Empty, purchaseStage = "all", manualCode = string.Empty, displayName = string.Empty;
+    private int PendingCount => operations.Count(o => o.Status != "Confirmed");
+    private int SavedFormCount => (purchase.Lines.Count > 0 || purchase.Proposals.Count > 0 || purchase.SupplierId is not null || !string.IsNullOrWhiteSpace(purchase.CustomSupplierName) ? 1 : 0)
+        + (receiving.PurchaseOrderId != Guid.Empty || receiving.UnexpectedGoods.Count > 0 ? 1 : 0)
+        + (restock.Lines.Count > 0 ? 1 : 0);
+    private bool HasDeviceOnlyWork => PendingCount > 0 || SavedFormCount > 0;
+    private string DeviceWorkWarning => $"Saved only on this device: {PendingCount} unconfirmed {(PendingCount == 1 ? "edit" : "edits")} and {SavedFormCount} saved {(SavedFormCount == 1 ? "form" : "forms")}. Queue saved forms, then sync and confirm edits before clearing browser or VaultFlow site data.";
+    private string Initials => string.Concat((displayName.Length > 0 ? displayName : "VaultFlow").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => char.ToUpperInvariant(part[0])));
+    private string FirstName => displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "there";
+    private static string DayGreeting => DateTime.Now.Hour switch { < 12 => "Good morning", < 18 => "Good afternoon", _ => "Good evening" };
+    private bool HasPermission(string permission) => currentPermissions.Contains(permission);
+    private void OpenOnline(string href) => Navigation.NavigateTo(href, forceLoad: true);
+    private void OpenNotificationsOnline() => OpenOnline("/notifications");
+    private void OpenStoresOnline() => OpenOnline("/stores");
+    private sealed record OfflineTab(string Href, string Icon, string Label, bool OfflineAvailable);
+    private IEnumerable<OfflineTab> Tabs
+    {
+        get
+        {
+            List<OfflineTab> tabs = [new(string.Empty, "home", "Home", true)];
+            if (CanViewStores) tabs.Add(new("/stores", "location", "Movement", false));
+            if (HasPermission("sale.view")) tabs.Add(new("/analytics/products", "trend-up", "Analytics", false));
+            if (CanInventory) tabs.Add(new("inventory/stock", "box", "Stock", true));
+            if (CanApproveRestock) tabs.Add(new("/restock/approvals", "ledger", "Approvals", false));
+            else if (CanFulfillRestock) tabs.Add(new("/restock/fulfillment", "box", "Fulfill", false));
+            else if (CanRequestRestock) tabs.Add(new("restock", "ledger", "Restock", true));
+            if (CanReceive) tabs.Add(new("receiving", "receipt", "Receiving", true));
+            if (CanViewPurchasing) tabs.Add(new("purchasing", "receipt", "Orders", true));
+            if (HasPermission("user.manage") || HasPermission("role.manage")) tabs.Add(new("/admin/users", "people", "People", false));
+            tabs.Add(new("/notifications", "bell", "Alerts", false));
+            return tabs.Take(4);
+        }
+    }
+    private sealed record OfflineAction(string Icon, string Title, string Description, string Href, bool OfflineAvailable);
+    private List<OfflineAction> Actions
+    {
+        get
+        {
+            List<OfflineAction> actions = [];
+            if (CanInventory) { actions.Add(new("box", "Stock levels", "View downloaded quantities for your location.", "/inventory/stock", true)); actions.Add(new("ledger", "Stock counts", "Count and submit physical stock.", "/inventory/counts", false)); }
+            if (CanViewStores) { actions.Add(new("location", "Transfers", "Request and track stock moving between locations.", "/transfers", false)); }
+            if (CanApproveRestock) actions.Add(new("ledger", "Restock approvals", "Decide store supply requests.", "/restock/approvals", false));
+            if (CanFulfillRestock) actions.Add(new("box", "Restock fulfillment", "Pick and dispatch approved requests.", "/restock/fulfillment", false));
+            if (CanRequestRestock) actions.Add(new("ledger", "Restock requests", "Ask the main warehouse to supply your store. Drafts wait for Wi-Fi.", "/restock", true));
+            if (CanReceive) actions.Add(new("receipt", "Goods receiving", "Count a downloaded supplier delivery.", "/receiving", true));
+            if (CanViewPurchasing) actions.Add(new("receipt", "Purchase orders", "Create a draft saved on this device.", "/purchasing", true));
+            if (HasPermission("sale.view")) { actions.Add(new("coins", "Store performance", "See sales and best sellers.", "/stores", false)); actions.Add(new("trend-up", "Best & worst sellers", "Review product performance.", "/analytics/products", false)); actions.Add(new("ledger", "Review sales", "Browse transactions and returns.", "/sales", false)); }
+            if (HasPermission("report.view")) actions.Add(new("report", "Open daily reports", "Reconcile trade and payments.", "/reports", false));
+            if (HasPermission("user.manage") || HasPermission("role.manage")) actions.Add(new("people", "Manage people & roles", "Control accounts and access.", "/admin/users", false));
+            if (HasPermission("device.manage")) actions.Add(new("device", "Manage devices", "Inspect and manage terminals.", "/admin/devices", false));
+            if (HasPermission("sync.manage")) actions.Add(new("sync", "Resolve sync failures", "Review server synchronization conflicts.", "/sync/failures", false));
+            if (actions.Count == 0) actions.Add(new("sync", "Pending work", "Review edits saved on this device.", "/sync", true));
+            return actions;
+        }
+    }
+    private string PageTitleText => section switch { "purchase" => "Purchase orders", "receiving" => "Goods receiving", "inventory" => "Store inventory", "restock" => "Restock requests", "stores" => "Store movement", "queue" => "Pending work", "prepare" => "Offline access", _ => "Overview" };
+    private string PageSection => section switch { "purchase" => "Purchasing", "receiving" or "inventory" or "restock" => "Inventory", "stores" => "Stores", "prepare" => "Administration", _ => "Workspace" };
+    protected override void OnInitialized()
+    {
+        SetSectionFromUri();
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+    private void ToggleNavigation() => navigationOpen = !navigationOpen;
+    private void CloseNavigation() => navigationOpen = false;
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        SetSectionFromUri();
+        navigationOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+    private void SetSectionFromUri()
+    {
+        string path = Navigation.ToBaseRelativePath(Navigation.Uri).TrimEnd('/');
+        section = path switch { "purchasing" => "purchase", "receiving" => "receiving", "inventory/stock" => "inventory", "restock" => "restock", "stores" => "stores", "sync" => "queue", "team" => "prepare", _ => "overview" };
+    }
+    private DeviceView? device;
+    private List<ProfileView> profiles = [];
+    private List<StaffView> staff = [];
+    private bool canProvision;
+    private List<string> currentPermissions = [];
+    private List<string> currentRoles = [];
+    private bool CanPurchase => HasPermission("purchase.create");
+    private bool CanReceive => currentPermissions.Contains("purchase.view") && currentPermissions.Contains("purchase.receive");
+    private bool CanInventory => currentPermissions.Contains("inventory.view");
+    private bool CanViewStores => currentPermissions.Contains("transfer.view");
+
+    // The drawer mirrors NavMenu.razor, which decides these by the employee's
+    // roles and by the kind of the work location (0 warehouse, 1 store).
+    private bool HasRole(string role) => currentRoles.Contains(role, StringComparer.Ordinal);
+
+    /// <summary>Mirrors NavMenu.CanViewAudit: permission, or Owner/Administrator by role.</summary>
+    private bool CanViewAudit => HasPermission("audit.view") || HasRole("Owner") || HasRole("Administrator");
+    private short? DeviceLocationKind => device?.LocationKind;
+    private bool IsWarehouse => DeviceLocationKind == 0;
+    private bool IsStore => DeviceLocationKind == 1;
+    private bool CanApproveRestock => HasPermission("transfer.approve") && HasRole("Owner");
+    private bool CanFulfillRestock => IsWarehouse && HasPermission("transfer.pick") &&
+        HasPermission("transfer.dispatch") && (HasRole("MainInventoryManager") || HasRole("InventoryStaff"));
+    private bool CanRequestRestock => IsStore && HasPermission("transfer.request") && CanViewStores;
+    private bool CanRestock => CanRequestRestock;
+    private bool CanViewPurchasing => HasPermission("purchase.view") && HasRole("Owner");
+    private ProfileView? SelectedPinProfile => profiles.FirstOrDefault(profile =>
+        profile.Scope == selectedScope && profile.UnlockMethod == "pin");
+    private ProfileView? MatchedPinProfile => profiles.FirstOrDefault(profile =>
+        profile.UnlockMethod == "pin" && profile.UserName.Equals(userName.Trim(), StringComparison.OrdinalIgnoreCase));
+    private OfflineSnapshot? snapshot;
+    private List<OfflineProduct> products = [];
+    private List<OfflineOrder> orders = [];
+    private List<OfflineOperation> operations = [];
+    private PurchaseWorking purchase = new();
+    private ReceivingWorking receiving = new();
+    private RestockWorking restock = new();
+    private readonly HashSet<Guid> restockLowSelected = [];
+    private ProposedProduct proposal = new();
+    private IEnumerable<OfflineProduct> ProductMatches => products.Where(p => p.IsActive && (p.Name.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Sku.Contains(productSearch, StringComparison.OrdinalIgnoreCase) || p.Barcodes.Any(b => b.Contains(productSearch, StringComparison.OrdinalIgnoreCase))));
+    private List<OfflineOrder> FilteredOrders => purchaseStage == "all" ? orders : orders.Where(order => order.Status == purchaseStage).ToList();
+    private List<OfflineStockRow> StockRows => snapshot?.StockLevels?.Products ?? [];
+    private IEnumerable<OfflineStockRow> StockMatches => StockRows.Where(row =>
+        (string.IsNullOrWhiteSpace(stockSearch) || row.Name.Contains(stockSearch, StringComparison.OrdinalIgnoreCase) || row.Sku.Contains(stockSearch, StringComparison.OrdinalIgnoreCase)) &&
+        (stockFilter.Length == 0 || StockBand(row) == stockFilter));
+    private static string StockBand(OfflineStockRow row) => row.Available <= 0 ? "Out" :
+        row.Status.Contains("Low", StringComparison.OrdinalIgnoreCase) ? "Low" :
+        row.Status.Contains("Over", StringComparison.OrdinalIgnoreCase) ? "Over" : "Healthy";
+    private static string StageLabel(string status) => status switch
+    {
+        "PartiallyReceived" => "Partially received",
+        "Ordered" => "Ordered",
+        _ => status,
+    };
+
+    /// <summary>Resolves the supplier's release reading as Asia/Manila, the zone
+    /// every other timestamp in this system is written in. A device sits in
+    /// whatever zone the browser reports, so the wall clock typed on screen is
+    /// pinned to where the store trades instead of to that reading.</summary>
+    private DateTimeOffset? SupplierReleasedAtUtc()
+        => receiving.SupplierReleasedAt is { } local
+            ? new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(local, DateTimeKind.Unspecified),
+                TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila")))
+            : null;
+    private int StockCount(string band) => StockRows.Count(row => StockBand(row) == band);
+    private void ToggleStockFilter(string band) => stockFilter = stockFilter == band ? string.Empty : band;
+
+    /// <summary>Everything on this device that is out of stock or at its reorder
+    /// point and not already on the request. The emptiest products lead.</summary>
+    private List<OfflineStockRow> RestockLowStock => [.. StockRows
+        .Where(row => StockBand(row) is "Out" or "Low" && restock.Lines.All(line => line.ProductId != row.ProductId))
+        .OrderBy(row => StockBand(row) == "Out" ? 0 : 1)
+        .ThenBy(row => row.Available)];
+
+    /// <summary>Same goal the inventory page uses: reach the target level, or
+    /// the reorder point, minus anything already on the way.</summary>
+    private static decimal SuggestRestockQuantity(OfflineStockRow row)
+        => ReplenishmentQuantity.Suggest(row.Available, row.InTransit, row.TargetStock, row.ReorderPoint);
+
+    private void ToggleRestockLow(Guid productId)
+    {
+        if (!restockLowSelected.Remove(productId)) { restockLowSelected.Add(productId); }
+    }
+
+    private void ToggleAllRestockLow(ChangeEventArgs _)
+    {
+        List<OfflineStockRow> rows = RestockLowStock;
+        bool allSelected = rows.Count > 0 && rows.All(row => restockLowSelected.Contains(row.ProductId));
+        restockLowSelected.Clear();
+        if (!allSelected)
+        {
+            foreach (OfflineStockRow row in rows) { restockLowSelected.Add(row.ProductId); }
+        }
+    }
+
+    private async Task AddSelectedRestockLow()
+    {
+        int added = 0;
+        foreach (OfflineStockRow row in RestockLowStock.Where(row => restockLowSelected.Contains(row.ProductId)))
+        {
+            if (restock.Lines.All(line => line.ProductId != row.ProductId))
+            {
+                restock.Lines.Add(new RestockWorkingLine
+                {
+                    ProductId = row.ProductId,
+                    Name = row.Name,
+                    Quantity = SuggestRestockQuantity(row)
+                });
+                added++;
+            }
+        }
+
+        restockLowSelected.Clear();
+        await SaveRestockCoreAsync();
+        scanMessage = added == 0
+            ? "Those products are already on this request."
+            : $"{added} product{(added == 1 ? "" : "s")} added with the suggested quantity.";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { appInstalled = await JS.InvokeAsync<bool>("vaultFlowInstall.isInstalled"); }
+        catch (JSException) { showInstallSteps = true; }
+        try { store = await JS.InvokeAsync<IJSObjectReference>("import", "/offline/js/offline-store.js"); lifecycle = DotNetObjectReference.Create(this); await store.InvokeVoidAsync("watchLifecycle", lifecycle); await RefreshStateAsync(); ready = true; if (!unlocked && Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/') != "login") Navigation.NavigateTo("/login"); StateHasChanged(); }
+        catch (Exception ex) { error = UiError.Message(ex); ready = true; StateHasChanged(); }
+    }
+    private async Task InstallAppAsync()
+    {
+        try
+        {
+            string outcome = await JS.InvokeAsync<string>("vaultFlowInstall.prompt");
+            appInstalled = outcome == "installed";
+            showInstallSteps = outcome is "instructions" or "dismissed";
+            installMessage = outcome switch
+            {
+                "accepted" => "Install accepted. Open VaultFlow from your device's app list when it appears.",
+                "installed" => "VaultFlow is already open as an installed app.",
+                "dismissed" => "Install canceled. You can try again from your browser's install menu.",
+                _ => "Use the browser steps below to add VaultFlow to your device."
+            };
+        }
+        catch (JSException)
+        {
+            showInstallSteps = true;
+            installMessage = "Use the browser steps below to add VaultFlow to your device.";
+        }
+    }
+    private async Task RefreshStateAsync()
+    {
+        InitialView state = await store!.InvokeAsync<InitialView>("initialize");
+        device = state.Device; profiles = state.Profiles ?? []; cacheReady = state.CacheReady; connected = state.Online;
+        storageUsed = state.StorageUsed; storageQuota = state.StorageQuota; storagePersisted = state.Persisted;
+        unlockMode = profiles.Count > 0;
+        selectedScope = profiles.Count == 1 ? profiles[0].Scope
+            : profiles.Any(profile => profile.Scope == selectedScope) ? selectedScope : string.Empty;
+    }
+    private async Task RunAsync(string description, Func<Task> action)
+    {
+        error = null; message = null; activity = description; busy = true;
+        try { await action(); } catch (Exception ex) { error = UiError.Message(ex); }
+        finally { busy = false; StateHasChanged(); }
+    }
+    private Task EnrolAsync() => RunAsync("Enrolling browser…", async () => { device = await store!.InvokeAsync<DeviceView>("enrol", enrolmentCode.Trim()); message = "Installation enrolled. Sign in to download data."; });
+    private async Task UnifiedOfflineSignInAsync()
+    {
+        if (!ready || busy) return;
+        if (device is null)
+        {
+            if (!connected) { error = "Connect to enroll this installation first."; return; }
+            if (string.IsNullOrWhiteSpace(enrolmentCode)) { error = "Enter the one-time enrollment code."; return; }
+            await EnrolAsync();
+            return;
+        }
+        ProfileView? profile = profiles.FirstOrDefault(item =>
+            item.UserName.Equals(userName.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (profile?.UnlockMethod == "pin")
+        {
+            error = "This saved profile uses an older offline PIN. Connect and sign in online to move its saved work to your account password.";
+            return;
+        }
+        if (profile is null && !connected)
+        {
+            error = "No saved data for this account on this device. Connect and sign in once to prepare it.";
+            return;
+        }
+        selectedScope = profile?.Scope ?? string.Empty;
+
+        // Signing in online is what gives this device the server session it
+        // syncs through. Unlocking alone left every sync refused until someone
+        // thought to open the online sign-in page, so the online attempt comes
+        // first whenever there is a connection and the saved copy is the
+        // fallback rather than the default.
+        await RunAsync(connected ? "Signing in and downloading…" : "Unlocking saved data…", async () =>
+        {
+            if (!connected) { await UnlockCoreAsync(); return; }
+            OnlineSignInView attempt = await store!.InvokeAsync<OnlineSignInView>(
+                "signInOnline", userName.Trim(), password, twoFactorCode.Trim(), offlinePin);
+            if (attempt.Status == "signed-in" && attempt.Login is not null)
+            {
+                await AdoptSignInAsync(attempt.Login);
+                return;
+            }
+            if (profile is null)
+            {
+                error = attempt.Message ?? "Signing in online was refused, and nothing is saved for this account on this device.";
+                return;
+            }
+            await UnlockCoreAsync();
+            message = $"{attempt.Message} Opened the copy saved on this device — work stays here until signing in online confirms it.";
+        });
+        if (unlocked) Navigation.NavigateTo("/");
+    }
+    private Task OpenWorkspaceAsync() => unlockMode ? UnlockAsync() : LoginAsync();
+    private Task LoginAsync() => RunAsync("Signing in and downloading…", async () =>
+    {
+        LoginView login = await store!.InvokeAsync<LoginView>("login", userName.Trim(), password, twoFactorCode.Trim(), offlinePin);
+        await AdoptSignInAsync(login);
+    });
+
+    /// <summary>Opens the workspace on the account an online sign-in just confirmed.</summary>
+    private async Task AdoptSignInAsync(LoginView login)
+    {
+        displayName = login.User.DisplayName; unlocked = true; password = offlinePin = string.Empty;
+        currentPermissions = login.User.Permissions;
+        currentRoles = login.User.Roles;
+        canProvision = CanProvision(login.User.Permissions);
+        ChooseFirstWorkflow();
+        await LoadWorkingAsync();
+        try { snapshot = await store!.InvokeAsync<OfflineSnapshot>("download"); PrepareSnapshot(); }
+        catch (Exception ex) { message = $"Signed in. Download needs attention: {UiError.Message(ex)}"; }
+        await RefreshStateAsync(); await RefreshOperationsAsync(); await SyncCoreAsync(); message ??= "Workspace ready on this device.";
+    }
+    private Task UnlockAsync() => RunAsync("Unlocking saved data…", UnlockCoreAsync);
+    private async Task UnlockCoreAsync()
+    {
+        UnlockView result = await store!.InvokeAsync<UnlockView>("unlock", selectedScope, password);
+        displayName = result.DisplayName; snapshot = result.Snapshot; unlocked = true; password = string.Empty;
+        currentPermissions = result.Permissions;
+        currentRoles = result.Roles;
+        canProvision = CanProvision(result.Permissions);
+        ChooseFirstWorkflow();
+        PrepareSnapshot(); await LoadWorkingAsync(); await RefreshOperationsAsync();
+        try { await SyncCoreAsync(); } catch (JSException) { }
+        message = "Local workspace unlocked. Shared records still need server confirmation.";
+    }
+    private async Task LoadWorkingAsync()
+    {
+        purchase = await store!.InvokeAsync<PurchaseWorking?>("loadWorking", "purchase") ?? new();
+        receiving = await store!.InvokeAsync<ReceivingWorking?>("loadWorking", "receiving") ?? new();
+        restock = await store!.InvokeAsync<RestockWorking?>("loadWorking", "restock") ?? new();
+        showPurchaseForm = purchase.Lines.Count > 0 || purchase.SupplierId is not null || !string.IsNullOrWhiteSpace(purchase.CustomSupplierName);
+    }
+    private void PrepareSnapshot()
+    {
+        products = snapshot?.Products.Where(p => p.IsActive).ToList() ?? [];
+        orders = snapshot?.Orders.Where(o => o.DestinationLocationId == device?.LocationId && (o.Status is "Ordered" or "PartiallyReceived")).ToList() ?? [];
+    }
+    private Task LockAsync() => RunAsync("Locking…", async () =>
+    {
+        int pendingAtLock = PendingCount;
+        int formsAtLock = SavedFormCount;
+        await store!.InvokeVoidAsync("lock");
+        unlocked = false; snapshot = null; displayName = string.Empty;
+        products.Clear(); orders.Clear(); operations.Clear();
+        purchase = new(); receiving = new(); restock = new(); restockLowSelected.Clear(); proposal = new(); showProposal = showPurchaseForm = false;
+        section = "overview"; productSearch = stockSearch = stockFilter = manualCode = offlinePin = string.Empty; purchaseStage = "all";
+        canProvision = false; currentPermissions.Clear(); currentRoles.Clear(); staff.Clear();
+        scanMessage = null; selectedScope = userName = password = twoFactorCode = string.Empty;
+        await RefreshStateAsync();
+        if (pendingAtLock > 0 || formsAtLock > 0) message = $"Still saved only on this device: {pendingAtLock} unconfirmed {(pendingAtLock == 1 ? "edit" : "edits")} and {formsAtLock} saved {(formsAtLock == 1 ? "form" : "forms")}. Sign in, queue saved forms, and sync before clearing browser data.";
+        Navigation.NavigateTo("/login");
+    });
+    private void ShowPurchase() => Navigation.NavigateTo("purchasing");
+    private void ShowReceiving() => Navigation.NavigateTo("receiving");
+    private void ShowInventory() => Navigation.NavigateTo("inventory/stock");
+    private void ShowQueue() => Navigation.NavigateTo("sync");
+    private void ChooseFirstWorkflow() => SetSectionFromUri();
+    private static bool CanProvision(IReadOnlyList<string>? permissions)
+        => permissions?.Contains("user.manage") == true && permissions.Contains("device.manage");
+    private bool IsPrepared(Guid userId)
+        => profiles.Any(profile => profile.Scope.Equals($"{userId:D}:{device?.LocationId:D}", StringComparison.OrdinalIgnoreCase));
+    private async Task ShowPrepareAsync()
+    {
+        Navigation.NavigateTo("team");
+        await LoadEmployeesAsync();
+    }
+    private Task LoadEmployeesAsync() => RunAsync("Loading assigned employees…", async () =>
+    {
+        Dictionary<Guid, StaffView> previous = staff.ToDictionary(employee => employee.UserId);
+        staff = await store!.InvokeAsync<List<StaffView>>("employees") ?? [];
+        foreach (StaffView employee in staff)
+        {
+            if (!previous.TryGetValue(employee.UserId, out StaffView? saved)) continue;
+            employee.Pin = saved.Pin;
+            employee.Error = saved.Error;
+        }
+    });
+    private async Task PrepareCoreAsync(StaffView employee)
+    {
+        employee.Error = null;
+        try
+        {
+            string pin = await store!.InvokeAsync<string>("newPin");
+            await store!.InvokeVoidAsync("provision", employee.UserId, pin);
+            employee.Pin = pin;
+            await RefreshStateAsync();
+        }
+        catch (Exception ex) { employee.Error = UiError.Message(ex); }
+    }
+    private Task PrepareEmployeeAsync(StaffView employee) => RunAsync("Preparing employee…", async () =>
+    {
+        await PrepareCoreAsync(employee);
+        message = employee.Error is null ? $"{employee.DisplayName} can now unlock offline." : null;
+    });
+    private Task PrepareAllAsync() => RunAsync("Preparing employees…", async () =>
+    {
+        foreach (StaffView employee in staff.Where(employee => !IsPrepared(employee.UserId)))
+        {
+            activity = $"Preparing {employee.DisplayName}…";
+            StateHasChanged();
+            await Task.Yield();
+            await PrepareCoreAsync(employee);
+        }
+        message = "Preparation finished. Record each new PIN before leaving this page.";
+    });
+    private string StorageText() => storageQuota == 0 ? "Storage estimate unavailable" : $"{storageUsed / 1024 / 1024} MB used of {storageQuota / 1024 / 1024} MB · {(storagePersisted ? "persistent" : "browser may evict")}";
+    private Task RequestPersistentStorageAsync() => RunAsync("Requesting persistent storage…", async () =>
+    {
+        storagePersisted = await store!.InvokeAsync<bool>("requestPersistentStorage");
+        message = storagePersisted ? "Persistent storage is enabled for this browser." : "The browser did not grant persistent storage. Keep pending work synced and avoid clearing VaultFlow site data.";
+    });
+    private OfflineProduct? FindProduct(string raw)
+    {
+        string code = raw.Trim().ToUpperInvariant();
+        string alternate = code.Length == 12 ? "0" + code : code.Length == 13 && code[0] == '0' ? code[1..] : code;
+        return products.FirstOrDefault(p => p.Sku.Equals(code, StringComparison.OrdinalIgnoreCase) || p.Barcodes.Any(b => b.Equals(code, StringComparison.OrdinalIgnoreCase) || b.Equals(alternate, StringComparison.OrdinalIgnoreCase)));
+    }
+    private async Task AddProductAsync(OfflineProduct product)
+    {
+        PurchaseWorkingLine? line = purchase.Lines.FirstOrDefault(l => l.ProductId == product.Id);
+        if (line is null) purchase.Lines.Add(new PurchaseWorkingLine { ProductId = product.Id, UnitOfMeasureId = product.BaseUnitOfMeasureId, UnitCost = product.DefaultPurchaseCost ?? 0, Name = product.Name });
+        else line.OrderedQuantity++;
+        productSearch = string.Empty; await SavePurchaseCoreAsync();
+    }
+    private async Task OnPurchaseScanAsync(string code)
+    {
+        OfflineProduct? product = FindProduct(code);
+        if (product is not null) { await AddProductAsync(product); scanMessage = $"{product.Name} added."; }
+        else { proposal = new ProposedProduct { Barcode = code, CategoryId = snapshot?.Categories.FirstOrDefault()?.Id ?? Guid.Empty, BaseUnitOfMeasureId = snapshot?.Units.FirstOrDefault()?.Id ?? Guid.Empty }; showProposal = true; scanMessage = $"{code} is unknown. Enter product details."; }
+    }
+    private Task AddProposalAsync() => RunAsync("Saving proposed product…", async () =>
+    {
+        if (string.IsNullOrWhiteSpace(proposal.Name) || proposal.CategoryId == Guid.Empty || proposal.BaseUnitOfMeasureId == Guid.Empty) throw new InvalidOperationException("Name, category and unit are required.");
+        proposal.Sku = string.IsNullOrWhiteSpace(proposal.Sku) ? $"PWA-{proposal.ClientId:N}"[..15] : proposal.Sku.Trim();
+        purchase.Proposals.Add(proposal); purchase.Lines.Add(new PurchaseWorkingLine { ProposedProductClientId = proposal.ClientId, UnitOfMeasureId = proposal.BaseUnitOfMeasureId, UnitCost = proposal.DefaultPurchaseCost, Name = proposal.Name });
+        proposal = new(); showProposal = false; await SavePurchaseCoreAsync();
+    });
+    private async Task RemoveLineAsync(PurchaseWorkingLine line) { purchase.Lines.Remove(line); if (line.ProposedProductClientId is { } id) purchase.Proposals.RemoveAll(p => p.ClientId == id); await SavePurchaseCoreAsync(); }
+    private Task LinkProposalAsync(ProposedProduct item, ChangeEventArgs args) => RunAsync("Linking product…", async () =>
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out Guid productId)) return;
+        OfflineProduct? known = products.FirstOrDefault(p => p.Id == productId);
+        if (known is null) return;
+        foreach (PurchaseWorkingLine line in purchase.Lines.Where(l => l.ProposedProductClientId == item.ClientId))
+        {
+            line.ProposedProductClientId = null; line.ProductId = productId;
+            line.UnitOfMeasureId = known.BaseUnitOfMeasureId; line.Name = known.Name;
+        }
+        purchase.Proposals.Remove(item); await SavePurchaseCoreAsync();
+        message = $"Linked {known.Name} to this draft. Queue the corrected operation.";
+    });
+    private Task RevisePurchaseAsync(OfflineOperation operation) => RunAsync("Opening saved draft…", async () =>
+    {
+        System.Text.Json.JsonElement payload = await store!.InvokeAsync<System.Text.Json.JsonElement>("operationPayload", operation.EventId.ToString("D"));
+        purchase = new PurchaseWorking
+        {
+            SupplierId = payload.GetProperty("supplierId").ValueKind == System.Text.Json.JsonValueKind.Null ? null : payload.GetProperty("supplierId").GetGuid(),
+            CustomSupplierName = payload.GetProperty("customSupplierName").GetString() ?? string.Empty,
+            Proposals = System.Text.Json.JsonSerializer.Deserialize<List<ProposedProduct>>(payload.GetProperty("proposedProducts"), JsonOptions) ?? [],
+            Lines = System.Text.Json.JsonSerializer.Deserialize<List<PurchaseWorkingLine>>(payload.GetProperty("lines"), JsonOptions) ?? [],
+        };
+        foreach (PurchaseWorkingLine line in purchase.Lines)
+            line.Name = line.ProductId is { } id ? products.FirstOrDefault(p => p.Id == id)?.Name ?? id.ToString("D") :
+                purchase.Proposals.FirstOrDefault(p => p.ClientId == line.ProposedProductClientId)?.Name ?? "Proposed product";
+        await SavePurchaseCoreAsync(); showPurchaseForm = true; ShowPurchase();
+        message = "Correct the proposal or link a known product, then queue a new draft. The original remains visible for review.";
+    });
+    private Task SavePurchaseCoreAsync() => store!.InvokeVoidAsync("saveWorking", "purchase", purchase).AsTask();
+    private Task SavePurchaseAsync() => RunAsync("Saving purchase form…", async () => { await SavePurchaseCoreAsync(); message = "Form saved on device."; });
+    private string CurrencyCode()
+    {
+        if (device is null || snapshot is null) throw new InvalidOperationException("Download location details before queuing a purchase.");
+        foreach (BaselineItem item in snapshot.Baseline.Items.Where(item => item.Type == "LocationChanged"))
+        {
+            if (item.Payload.TryGetProperty("locationId", out System.Text.Json.JsonElement id) && id.GetGuid() == device.LocationId &&
+                item.Payload.TryGetProperty("currencyCode", out System.Text.Json.JsonElement code) &&
+                code.GetString() is { Length: > 0 } currency)
+                return currency;
+        }
+        throw new InvalidOperationException("This location has no downloaded currency. Refresh the snapshot before queuing.");
+    }
+    private Task QueuePurchaseAsync() => RunAsync("Queueing purchase draft…", async () =>
+    {
+        if (!CanPurchase) throw new InvalidOperationException("This employee cannot create purchase drafts.");
+        if (device is null || purchase.Lines.Count == 0 || (purchase.SupplierId is null && string.IsNullOrWhiteSpace(purchase.CustomSupplierName)) || purchase.Lines.Any(l => l.OrderedQuantity <= 0 || l.UnitCost < 0)) throw new InvalidOperationException("Choose a supplier and add valid order lines.");
+        var payload = new { purchase.SupplierId, purchase.CustomSupplierName, DestinationLocationId = device.LocationId, CurrencyCode = CurrencyCode(), ExpectedAtUtc = (DateTimeOffset?)null, ProposedProducts = purchase.Proposals, Lines = purchase.Lines.Select(l => new { l.ProductId, l.ProposedProductClientId, l.UnitOfMeasureId, l.OrderedQuantity, l.UnitCost }).ToArray() };
+        await store!.InvokeAsync<string>("queue", "PwaPurchaseDraft", payload, $"Purchase draft · {purchase.Lines.Count} lines");
+        purchase = new(); showPurchaseForm = false; await SavePurchaseCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Purchase draft saved on device and queued for confirmation.";
+    });
+    private Task SelectOrderAsync(ChangeEventArgs args) => RunAsync("Opening cached order…", async () =>
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out Guid orderId)) return;
+        OfflineOrder? order = orders.FirstOrDefault(o => o.Id == orderId);
+        receiving = new ReceivingWorking { PurchaseOrderId = orderId, Lines = order?.Lines.Select(l => new ReceivingWorkingLine { PurchaseOrderLineId = l.Id, Name = l.ProductName ?? l.ProductSku ?? l.ProductId.ToString("D"), UnitCost = l.UnitCost }).ToList() ?? [] };
+        await SaveReceivingCoreAsync();
+    });
+    // The order behind the open count, so a line can show what was ordered: the
+    // working line holds only what was counted.
+    private OfflineOrder? ReceivingOrder => orders.FirstOrDefault(o => o.Id == receiving.PurchaseOrderId);
+    private OfflineOrderLine? OrderedFor(ReceivingWorkingLine line)
+        => ReceivingOrder?.Lines.FirstOrDefault(l => l.Id == line.PurchaseOrderLineId);
+    private decimal DueFor(ReceivingWorkingLine line) => OrderedFor(line)?.OrderedQuantity ?? 0m;
+    private string? SkuFor(ReceivingWorkingLine line) => OrderedFor(line)?.ProductSku;
+
+    /// <summary>What can go on the shelf: everything arrived, less every problem.</summary>
+    private static decimal UsableFor(ReceivingWorkingLine line)
+        => Math.Max(0m, line.QuantityReceived - line.QuantityDamaged - line.QuantityWrongItem - line.QuantityExpired);
+    private static bool HasIssueDetail(ReceivingWorkingLine line)
+        => line.QuantityWrongItem > 0m || line.QuantityExpired > 0m || !string.IsNullOrWhiteSpace(line.LotNumber);
+
+    private int ReceivingCountedLines => receiving.Lines.Count(l => l.QuantityReceived > 0m);
+    private decimal ReceivingArrivedUnits => receiving.Lines.Sum(l => l.QuantityReceived);
+    private decimal ReceivingDueUnits => receiving.Lines.Sum(DueFor);
+    private decimal ReceivingProblemUnits => receiving.Lines.Sum(l => l.QuantityDamaged + l.QuantityWrongItem + l.QuantityExpired);
+    private decimal ReceivingUsableUnits => receiving.Lines.Sum(UsableFor);
+    private string ReceivingPercent => ReceivingDueUnits <= 0m
+        ? "0"
+        : Math.Clamp(ReceivingArrivedUnits * 100m / ReceivingDueUnits, 0m, 100m).ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string Units(decimal value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+
+    private ReceivingWorkingLine? scanLine;
+    private ReceivingWorkingLine? detailLine;
+
+    private void OpenReceivingScan(ReceivingWorkingLine line)
+    {
+        scanLine = line;
+        detailLine = null;
+        manualCode = string.Empty;
+        scanMessage = null;
+    }
+
+    private void OpenReceivingDetail(ReceivingWorkingLine line)
+    {
+        detailLine = line;
+        scanLine = null;
+    }
+
+    private void CloseReceivingDialogs()
+    {
+        scanLine = null;
+        detailLine = null;
+        manualCode = string.Empty;
+    }
+
+    private Task SaveReceivingDetailAsync()
+    {
+        detailLine = null;
+        return SaveReceivingCoreAsync();
+    }
+
+    /// <summary>Counts the code typed beside the camera, for a camera that will not open.</summary>
+    private async Task CountManualCodeAsync()
+    {
+        string code = manualCode.Trim();
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        manualCode = string.Empty;
+        await OnReceivingScanAsync(code);
+    }
+
+    private Task SetArrivedAsync(ReceivingWorkingLine line, object? raw)
+    {
+        line.QuantityReceived = decimal.TryParse(
+            raw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, value)
+            : 0m;
+        return SaveReceivingCoreAsync();
+    }
+
+    private Task SetArrivedAsync(ReceivingWorkingLine line, decimal quantity)
+    {
+        line.QuantityReceived = Math.Max(0m, quantity);
+        return SaveReceivingCoreAsync();
+    }
+
+    private Task StepArrivedAsync(ReceivingWorkingLine line, decimal delta)
+        => SetArrivedAsync(line, line.QuantityReceived + delta);
+
+    private Task SetDamagedAsync(ReceivingWorkingLine line, object? raw)
+    {
+        line.QuantityDamaged = decimal.TryParse(
+            raw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Max(0m, value)
+            : 0m;
+        return SaveReceivingCoreAsync();
+    }
+
+    /// <summary>Counts every line at what the order says is due.</summary>
+    private Task MarkAllArrivedAsync()
+    {
+        foreach (ReceivingWorkingLine line in receiving.Lines)
+        {
+            line.QuantityReceived = DueFor(line);
+        }
+
+        return SaveReceivingCoreAsync();
+    }
+
+    private async Task OnReceivingScanAsync(string code)
+    {
+        OfflineProduct? product = FindProduct(code); OfflineOrder? order = orders.FirstOrDefault(o => o.Id == receiving.PurchaseOrderId);
+        OfflineOrderLine? ordered = order?.Lines.FirstOrDefault(l => l.ProductId == product?.Id);
+        ReceivingWorkingLine? line = receiving.Lines.FirstOrDefault(l => l.PurchaseOrderLineId == ordered?.Id);
+        if (line is not null) { line.QuantityReceived++; scanMessage = $"Counted one {line.Name}."; }
+        else { UnexpectedGood? unexpected = receiving.UnexpectedGoods.FirstOrDefault(g => g.Barcode.Equals(code, StringComparison.OrdinalIgnoreCase)); if (unexpected is null) receiving.UnexpectedGoods.Add(new UnexpectedGood { Barcode = code, Description = product?.Name ?? string.Empty }); else unexpected.Quantity++; scanMessage = $"{code} needs quarantine review."; }
+        await SaveReceivingCoreAsync(); StateHasChanged();
+    }
+    private Task SaveReceivingCoreAsync() => store!.InvokeVoidAsync("saveWorking", "receiving", receiving).AsTask();
+    private Task SaveReceivingAsync() => RunAsync("Saving count…", async () => { await SaveReceivingCoreAsync(); message = "Physical count saved on device."; });
+    private Task QueueReceivingAsync() => RunAsync("Queueing count…", async () =>
+    {
+        if (!CanReceive) throw new InvalidOperationException("This employee cannot record receiving.");
+        if (receiving.PurchaseOrderId == Guid.Empty || (receiving.Lines.All(l => l.QuantityReceived <= 0) && receiving.UnexpectedGoods.Count == 0)) throw new InvalidOperationException("Count at least one item.");
+        if (receiving.Lines.Any(l => l.QuantityReceived < 0 || l.QuantityDamaged < 0 || l.QuantityWrongItem < 0 || l.QuantityExpired < 0 || l.UnitCost < 0)) throw new InvalidOperationException("Quantities and costs cannot be negative.");
+        await store!.InvokeAsync<string>("queue", "PwaReceivingCount", new { receiving.PurchaseOrderId, receiving.Lines, receiving.UnexpectedGoods, receiving.DocumentsMissing, receiving.SupplierDeliveryReceiptNumber, receiving.SupplierOfficialReceiptNumber, SupplierReleasedAtUtc = SupplierReleasedAtUtc(), }, $"Receiving count · {receiving.PurchaseOrderId:D}");
+        receiving = new(); await SaveReceivingCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Count saved on device. Stock remains pending server confirmation.";
+    });
+    private async Task AddRestockLine(OfflineProduct product)
+    {
+        if (restock.Lines.All(line => line.ProductId != product.Id))
+        {
+            restock.Lines.Add(new RestockWorkingLine { ProductId = product.Id, Name = product.Name });
+        }
+        restockLowSelected.Remove(product.Id);
+        productSearch = string.Empty; await SaveRestockCoreAsync();
+    }
+    private async Task RemoveRestockLine(RestockWorkingLine line) { restock.Lines.Remove(line); await SaveRestockCoreAsync(); }
+    private async Task OnRestockScanAsync(string code)
+    {
+        OfflineProduct? product = FindProduct(code);
+        if (product is not null) { await AddRestockLine(product); scanMessage = $"{product.Name} added."; }
+        else { scanMessage = $"{code} is not a downloaded product. Search for it by name instead."; }
+        StateHasChanged();
+    }
+    private Task SaveRestockCoreAsync() => store!.InvokeVoidAsync("saveWorking", "restock", restock).AsTask();
+    private Task SaveRestockAsync() => RunAsync("Saving restock form…", async () => { await SaveRestockCoreAsync(); message = "Form saved on device."; });
+    private Task QueueRestockAsync() => RunAsync("Queueing restock draft…", async () =>
+    {
+        if (!CanRestock) throw new InvalidOperationException("This employee cannot raise restock requests.");
+        if (device is null || restock.Lines.Count == 0 || restock.Lines.Any(line => line.Quantity <= 0)) throw new InvalidOperationException("Add at least one product with a positive quantity.");
+        var payload = new { DestinationLocationId = device.LocationId, Lines = restock.Lines.Select(line => new { line.ProductId, line.Quantity }).ToArray() };
+        await store!.InvokeAsync<string>("queue", "PwaRestockDraft", payload, $"Restock request · {restock.Lines.Count} lines");
+        restock = new(); await SaveRestockCoreAsync(); await RefreshOperationsAsync(); ShowQueue(); message = "Restock draft saved on device. It is sent for approval when Wi-Fi returns.";
+    });
+    private async Task RefreshOperationsAsync() => operations = await store!.InvokeAsync<List<OfflineOperation>>("operations") ?? [];    private Task SyncAsync() => RunAsync("Synchronizing…", async () => { await SyncCoreAsync(); message = "Sync attempt finished. Review each operation status."; });
+    private async Task SyncCoreAsync() { await store!.InvokeVoidAsync("synchronize"); await RefreshOperationsAsync(); }
+    private Task DownloadAsync() => RunAsync("Refreshing data…", async () => { snapshot = await store!.InvokeAsync<OfflineSnapshot>("download"); PrepareSnapshot(); message = "Downloaded data refreshed."; });
+    [JSInvokable]
+    public async Task OnBrowserResume()
+    {
+        if (busy || store is null) return;
+        try
+        {
+            await RefreshStateAsync();
+            if (unlocked) await SyncCoreAsync();
+        }
+        catch (JSException) { }
+        StateHasChanged();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        if (store is not null) { await store.InvokeVoidAsync("unwatchLifecycle"); await store.DisposeAsync(); }
+        lifecycle?.Dispose();
+    }
+    private sealed class InitialView { public DeviceView? Device { get; set; } public List<ProfileView>? Profiles { get; set; } public bool CacheReady { get; set; } public bool Online { get; set; } public bool Persisted { get; set; } public long StorageUsed { get; set; } public long StorageQuota { get; set; } }
+    private sealed class DeviceView { public Guid DeviceId { get; set; } public Guid LocationId { get; set; }
+        public string? LocationName { get; set; }
+
+        /// <summary>0 main warehouse, 1 store. Null until enrolment or sign-in supplies it.</summary>
+        public short? LocationKind { get; set; } }
+    private sealed class ProfileView { public string Scope { get; set; } = string.Empty; public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string UnlockMethod { get; set; } = "password"; public DateTimeOffset LastOnlineUtc { get; set; } }
+    private sealed class LoginView { public LoginUser User { get; set; } = new(); }
+
+    /// <summary>What an online sign-in attempt came back with: the account, or why the server did not take it.</summary>
+    private sealed class OnlineSignInView { public string Status { get; set; } = string.Empty; public LoginView? Login { get; set; } public string? Message { get; set; } }
+    private sealed class LoginUser { public string DisplayName { get; set; } = string.Empty;
+        public List<string> Permissions { get; set; } = [];
+
+        /// <summary>Roles drive the same restock and purchasing gates the online nav uses.</summary>
+        public List<string> Roles { get; set; } = []; }
+    private sealed class UnlockView { public string DisplayName { get; set; } = string.Empty;
+        public List<string> Permissions { get; set; } = [];
+
+        /// <summary>Roles recorded when this profile was prepared online.</summary>
+        public List<string> Roles { get; set; } = [];
+        public OfflineSnapshot? Snapshot { get; set; } }
+    private sealed class StaffView { public Guid UserId { get; set; } public string UserName { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; public string? Pin { get; set; } public string? Error { get; set; } }
+}

@@ -61,7 +61,7 @@ public static class ChangeFeedWire
                 "ProductChanged" => Parse<ProductWire>(payload) is { } p
                     ? new ProductChanged(
                         sequence, new ProductId(p.ProductId), p.Sku, p.Name, p.IsActive,
-                        p.TracksBatches, p.TracksExpiry, p.SourceVersion, p.UpdatedAtUtc)
+                        p.TracksBatches, p.TracksExpiry, p.SourceVersion, p.UpdatedAtUtc, p.Category)
                     : null,
                 "ProductBarcodeChanged" => Parse<BarcodeWire>(payload) is { } b
                     ? new ProductBarcodeChanged(sequence, b.Barcode, new ProductId(b.ProductId), b.IsPrimary, b.IsActive)
@@ -113,7 +113,7 @@ public static class ChangeFeedWire
 
     private sealed record ProductWire(
         Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry,
-        long SourceVersion, DateTimeOffset UpdatedAtUtc);
+        long SourceVersion, DateTimeOffset UpdatedAtUtc, string? Category = null);
 
     private sealed record BarcodeWire(string Barcode, Guid ProductId, bool IsPrimary, bool IsActive);
 

@@ -74,6 +74,9 @@ public enum TransferMode
 
     /// <summary>The transfer was raised as an emergency and awaits central review.</summary>
     EmergencyOffline = 3,
+
+    /// <summary>A store's request for stock from the main warehouse, approved by the owner.</summary>
+    StoreRestock = 4,
 }
 
 /// <summary>The decision a central reviewer reaches on a pending emergency transfer.</summary>
@@ -153,6 +156,9 @@ public enum TransferCustodyEventKind
 
     /// <summary>Central review rejected the emergency transfer; its stock was reversed.</summary>
     CentralReviewRejected = 16,
+
+    /// <summary>The picked stock was marked ready to dispatch.</summary>
+    Ready = 17,
 }
 
 /// <summary>One requested line of a transfer.</summary>
@@ -979,9 +985,10 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
     }
 
     /// <summary>Marks picking complete; the transfer may now be dispatched.</summary>
+    /// <param name="readiedBy">The user who marked the picked stock ready.</param>
     /// <param name="now">The current instant.</param>
     /// <returns>Success, or a state or validation error.</returns>
-    public Result Ready(DateTimeOffset now)
+    public Result Ready(UserId readiedBy, DateTimeOffset now)
     {
         if (Status != TransferStatus.Picking)
         {
@@ -994,18 +1001,21 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         }
 
         Status = TransferStatus.Ready;
+        _custodyEvents.Add(Event(TransferCustodyEventKind.Ready, readiedBy, now, null));
         return Result.Success();
     }
 
     /// <summary>
-    /// Dispatches the transfer: records the TRF number, the SHP shipment number
-    /// and opens the ledger's in-transit buckets. The handler posts the ledger
-    /// group after this succeeds; a failed post rolls the whole transaction back.
+    /// Dispatches the transfer: records the TRF number, the SHP shipment number,
+    /// the DR delivery receipt number and opens the ledger's in-transit buckets.
+    /// The handler posts the ledger group after this succeeds; a failed post
+    /// rolls the whole transaction back.
     /// </summary>
     /// <param name="now">The current instant.</param>
     /// <param name="number">The allocated TRF number.</param>
     /// <param name="shipmentId">The shipment identifier used as the ledger reference.</param>
     /// <param name="shipmentNumber">The human-readable SHP number.</param>
+    /// <param name="deliveryReceiptNumber">The DR number issued with the dispatch.</param>
     /// <param name="dispatcher">The user dispatching the stock.</param>
     /// <returns>Success, or a state or conflict error.</returns>
     public Result Dispatch(
@@ -1013,6 +1023,7 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         DocumentNumber number,
         TransferShipmentId shipmentId,
         string shipmentNumber,
+        string deliveryReceiptNumber,
         UserId dispatcher)
     {
         // The number guard precedes the state guard: a transfer that already
@@ -1030,10 +1041,56 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
         Number = number.Value;
         ShipmentId = shipmentId;
         ShipmentNumber = shipmentNumber;
+        DeliveryReceiptNumber = deliveryReceiptNumber;
         DispatchedByUserId = dispatcher;
         DispatchedAtUtc = now;
         Status = TransferStatus.Dispatched;
         _custodyEvents.Add(Event(TransferCustodyEventKind.Dispatched, dispatcher, now, null));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Abandons a transfer that has not left the source yet.
+    /// </summary>
+    /// <remarks>
+    /// Picking records intent; dispatch is what posts the ledger. So a transfer
+    /// still sitting at Draft, Approved, Picking or Ready has moved no stock and
+    /// can simply be dropped — no reversal, nothing to put back. Without this a
+    /// transfer whose stock was consumed elsewhere between picking and dispatch
+    /// is stranded: it cannot dispatch, and the only cancel there was required
+    /// it to have dispatched first.
+    /// </remarks>
+    /// <param name="now">The current instant.</param>
+    /// <param name="reason">Why it is being abandoned.</param>
+    /// <param name="canceller">Who is abandoning it.</param>
+    /// <returns>Success, or a state or validation error.</returns>
+    public Result CancelBeforeDispatch(DateTimeOffset now, string reason, UserId canceller)
+    {
+        TransferStatus[] allowed =
+        [
+            TransferStatus.Draft,
+            TransferStatus.Submitted,
+            TransferStatus.InReview,
+            TransferStatus.Approved,
+            TransferStatus.Picking,
+            TransferStatus.Ready,
+        ];
+
+        if (!allowed.Contains(Status))
+        {
+            return Result.Failure(TransferErrors.InvalidTransferState(TransferStatus.Ready, Status));
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TransferErrors.CancelReasonRequired);
+        }
+
+        Status = TransferStatus.Cancelled;
+        CancelReason = reason.Trim();
+        CancelledByUserId = canceller;
+        CancelledAtUtc = now;
+        _custodyEvents.Add(Event(TransferCustodyEventKind.DispatchCancelled, canceller, now, reason.Trim()));
         return Result.Success();
     }
 
@@ -1291,6 +1348,12 @@ public sealed class Transfer : AggregateRoot<TransferOrderId>
 
     /// <summary>Gets the human-readable SHP shipment number.</summary>
     public string? ShipmentNumber { get; private set; }
+
+    /// <summary>
+    /// Gets the DR delivery receipt number issued when the goods were released,
+    /// allocated alongside the shipment at dispatch.
+    /// </summary>
+    public string? DeliveryReceiptNumber { get; private set; }
 
     /// <summary>Gets who cancelled the dispatch, when cancelled.</summary>
     public UserId? CancelledByUserId { get; private set; }

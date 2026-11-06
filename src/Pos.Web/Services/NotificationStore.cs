@@ -17,6 +17,21 @@ public sealed class NotificationStore(
     /// <summary>Raised when items, unread count, or connection state changes.</summary>
     public event Action? Changed;
 
+    /// <summary>
+    /// Raised with the locations whose stock just changed at head office. An
+    /// empty list means "anywhere": the live connection was lost and came back,
+    /// so changes may have been missed.
+    /// </summary>
+    public event Action<IReadOnlyList<Guid>>? InventoryChanged;
+
+    /// <summary>
+    /// Raised with the locations whose transfer documents just changed state
+    /// (submitted, approved, picked, dispatched, received). An empty list means
+    /// "anywhere": the live connection was lost and came back, so changes may
+    /// have been missed.
+    /// </summary>
+    public event Action<IReadOnlyList<Guid>>? TransfersChanged;
+
     /// <summary>Gets the newest notifications currently loaded.</summary>
     public IReadOnlyList<PosNotification> Items => _items;
 
@@ -56,6 +71,8 @@ public sealed class NotificationStore(
                 .Build();
 
             _connection.On<PosNotification>("notificationReceived", Receive);
+            _connection.On<Guid[]>("inventoryChanged", locations => InventoryChanged?.Invoke(locations));
+            _connection.On<Guid[]>("transfersChanged", locations => TransfersChanged?.Invoke(locations));
             _connection.Reconnecting += _ =>
             {
                 IsLive = false;
@@ -65,6 +82,8 @@ public sealed class NotificationStore(
             _connection.Reconnected += async _ =>
             {
                 IsLive = true;
+                InventoryChanged?.Invoke([]);
+                TransfersChanged?.Invoke([]);
                 await RefreshCoreAsync(CancellationToken.None).ConfigureAwait(false);
             };
             _connection.Closed += _ =>

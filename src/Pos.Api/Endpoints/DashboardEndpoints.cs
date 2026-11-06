@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Pos.Api.Authorization;
+using Pos.Api.Common;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Domain.Catalog;
@@ -28,6 +29,7 @@ public static class DashboardEndpoints
     }
 
     private static async Task<IResult> GetInventoryOverviewAsync(
+        Guid? locationId,
         PosDbContext context,
         DatabasePermissionEvaluator evaluator,
         ICurrentUser currentUser,
@@ -43,6 +45,23 @@ public static class DashboardEndpoints
         LocationId[]? assigned = authorization.HasAllLocations
             ? null
             : [.. authorization.Locations];
+
+        // A register asks for its own store, so the figures match the store it
+        // names rather than wherever the signed-in person happens to be assigned.
+        if (locationId is { } requested)
+        {
+            LocationId scope = new(requested);
+            if (assigned is not null && !assigned.Contains(scope))
+            {
+                return ProblemDetailsMapping.ToProblem(
+                    Result.Failure(Error.Forbidden(
+                        "inventory_overview.location_not_assigned",
+                        "This account is not assigned to this register's store, so its stock figures are not shown here.")),
+                    currentUser.CorrelationId.Value);
+            }
+
+            assigned = [scope];
+        }
 
         IQueryable<InventoryBalance> balances = context.InventoryBalances.AsNoTracking();
         IQueryable<ProductLocationSetting> settings = context.ProductLocationSettings

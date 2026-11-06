@@ -43,7 +43,20 @@
     </svg>
 </section>
 
-@if (loadingDashboard)
+@* The sidebar already lists every page. This row offers only the few jobs
+   this role starts most often, as verbs, where they are seen first. *@
+<nav class="start-tasks" aria-label="Start a task">
+    @foreach (DashboardAction action in Actions)
+    {
+        <a class="start-task @(action == Actions[0] ? "is-primary" : string.Empty)" href="@action.Href">
+            <span class="start-task-icon"><AppIcon Name="@action.Icon" /></span>
+            <span class="start-task-copy"><strong>@action.Title</strong><small>@action.Description</small></span>
+            <AppIcon Name="arrow" CssClass="start-task-arrow" />
+        </a>
+    }
+</nav>
+
+@if (loadingDashboard || loadingStores)
 {
     <section class="dashboard-loading" aria-live="polite">
         <span></span><div><strong>Reading your operational scope</strong><small>Sales, stock and system signals are being reconciled.</small></div>
@@ -61,9 +74,9 @@ else
         </div>
     }
 
-    @if (HasSales)
+    @if (HasKpis)
     {
-        <section class="ov-kpis" aria-label="Sales for the last 7 days">
+        <section class="ov-kpis" aria-label="@(OwnerInventoryChart ? "Inventory activity" : "Sales") for the last 7 days">
             @foreach (KpiTile tile in KpiTiles)
             {
                 <article class="ov-kpi">
@@ -75,13 +88,20 @@ else
                             <span>
                                 @if (tile.Change is decimal change)
                                 {
-                                    <b class="ov-trend @(change < 0 ? "is-down" : "is-up")"><AppIcon Name="@(change < 0 ? "trend-down" : "trend-up")" /> @Percent(change)</b>
+                                    @if (OwnerInventoryChart && change == 0m)
+                                    {
+                                        <b class="ov-trend is-flat">No change</b>
+                                    }
+                                    else
+                                    {
+                                        <b class="ov-trend @(change < 0 ? "is-down" : "is-up")"><AppIcon Name="@(change < 0 ? "trend-down" : "trend-up")" /> @Percent(change)</b>
+                                    }
                                 }
                                 else
                                 {
-                                    <b class="ov-trend">New</b>
+                                    <b class="ov-trend">@(OwnerInventoryChart && previousStoreReport is null ? "No prior data" : "New")</b>
                                 }
-                                <small>vs. previous 7 days</small>
+                                <small>@(OwnerInventoryChart && previousStoreReport is null ? "previous 7 days unavailable" : "vs. previous 7 days")</small>
                             </span>
                             <svg class="ov-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true" focusable="false">
                                 <path class="ov-spark-area" d="@SparkArea(tile.Series)" />
@@ -94,25 +114,25 @@ else
         </section>
     }
 
-    <div class="ov-grid @(HasSales ? string.Empty : "ov-grid-compact")">
+    <div class="ov-grid @(HasChart ? string.Empty : "ov-grid-compact")">
         <div class="ov-main">
-            @if (HasSales)
+            @if (HasChart)
             {
-                <section class="ov-card ov-chart-card" aria-labelledby="sales-overview-title">
+                <section class="ov-card ov-chart-card" aria-labelledby="chart-overview-title">
                     <header class="ov-card-head">
                         <span class="ov-card-icon"><AppIcon Name="report" /></span>
                         <div>
-                            <h2 id="sales-overview-title">Sales overview</h2>
-                            <p>Your sales performance for the last 7 days.</p>
+                            <h2 id="chart-overview-title">@(OwnerInventoryChart ? "Inventory movement" : "Sales overview")</h2>
+                            <p>@(OwnerInventoryChart ? "Product units received and sent across your stores in the last 7 days." : "Your sales performance for the last 7 days.")</p>
                         </div>
                         <span class="ov-range"><AppIcon Name="calendar" /> @DateRangeLabel</span>
                     </header>
 
-                    <div class="ov-chart" role="img" aria-label="Daily net sales and transaction counts for @DateRangeLabel">
+                    <div class="ov-chart" role="img" aria-label="@(OwnerInventoryChart ? "Daily product units received and sent" : "Daily net sales and transaction counts") for @DateRangeLabel">
                         <div class="ov-chart-axis">
                             @foreach (decimal tick in AxisTicks)
                             {
-                                <span>@AxisMoney(tick)</span>
+                                <span>@(OwnerInventoryChart ? Quantity(tick) : AxisMoney(tick))</span>
                             }
                         </div>
                         <div class="ov-chart-plot">
@@ -123,24 +143,24 @@ else
                                 }
                             </div>
                             <div class="ov-chart-bars">
-                                @foreach (DayPoint day in days)
+                                @foreach (ChartPoint day in ChartDays)
                                 {
-                                    <div class="ov-chart-col" title="@day.Date.ToString("MMM d", CultureInfo.InvariantCulture): @Money(day.Net) · @day.Count sale@(day.Count == 1 ? "" : "s")">
+                                    <div class="ov-chart-col" title="@ChartPointTitle(day)">
                                         <span style="height:@Css(BarHeight(day))%"></span>
                                     </div>
                                 }
                             </div>
                             <svg class="ov-chart-trend" viewBox="0 0 700 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                                <path d="@TransactionPath" />
+                                <path d="@ChartLinePath" />
                             </svg>
-                            @for (int index = 0; index < days.Count; index++)
+                            @for (int index = 0; index < ChartDays.Count; index++)
                             {
-                                <i class="ov-chart-dot" style="left:@Css((index + .5m) / days.Count * 100m)%;bottom:@Css(LineHeight(days[index]))%"></i>
+                                <i class="ov-chart-dot" style="left:@Css((index + .5m) / ChartDays.Count * 100m)%;bottom:@Css(LineHeight(ChartDays[index]))%"></i>
                             }
                         </div>
                         <div></div>
                         <div class="ov-chart-dates">
-                            @foreach (DayPoint day in days)
+                            @foreach (ChartPoint day in ChartDays)
                             {
                                 <span>@day.Date.ToString("MMM d", CultureInfo.InvariantCulture)</span>
                             }
@@ -148,8 +168,8 @@ else
                     </div>
 
                     <footer class="ov-legend">
-                        <span><i class="ov-legend-bar"></i>Net sales</span>
-                        <span><i class="ov-legend-line"></i>Transactions</span>
+                        <span><i class="ov-legend-bar"></i>@(OwnerInventoryChart ? "Units received" : "Net sales")</span>
+                        <span><i class="ov-legend-line"></i>@(OwnerInventoryChart ? "Units sent" : "Transactions")</span>
                     </footer>
                 </section>
             }
@@ -234,10 +254,10 @@ else
         <section class="dashboard-section" aria-labelledby="exceptions-title">
             <div class="section-heading">
                 <div><span class="eyebrow">Last 30 days</span><h2 id="exceptions-title">Stock exceptions</h2></div>
-                <a class="text-link" href="inventory/exceptions">Review exceptions <AppIcon Name="arrow" /></a>
+                <a class="text-link" href="inventory/exceptions">Review stock exceptions <AppIcon Name="arrow" /></a>
             </div>
             <div class="attention-list">
-                <div class="ledger-head"><span>Exception</span><span>Location</span><span>Signal</span></div>
+                <div class="ledger-head"><span>Attempt</span><span>Location</span><span>Signal</span></div>
                 @foreach (PosNegativeStockSummary row in negativeStockRows.Take(3))
                 {
                     <div class="attention-row"><div><strong>@(row.ProductName ?? row.Sku ?? "Unknown product")</strong><small>@row.Sku</small></div><span>@(row.LocationCode ?? "Assigned scope")</span><strong>@row.Attempts attempts</strong></div>
@@ -265,24 +285,6 @@ else
     }
 }
 
-<section class="workbench" aria-labelledby="workbench-title">
-    <div class="section-heading">
-        <div><span class="eyebrow">Your tools</span><h2 id="workbench-title">Quick actions</h2></div>
-        <span class="permission-note">Only actions assigned to you are shown</span>
-    </div>
-
-    <div class="task-grid">
-        @foreach (DashboardAction action in Actions)
-        {
-            <a class="task-card @(action == Actions[0] ? "task-primary" : string.Empty)" href="@action.Href">
-                <span class="task-icon"><AppIcon Name="@action.Icon" /></span>
-                <span class="task-copy"><strong>@action.Title</strong><small>@action.Description</small></span>
-                <AppIcon Name="arrow" CssClass="task-arrow" />
-            </a>
-        }
-    </div>
-</section>
-
 @code {
     private const int PeriodDays = 7;
 
@@ -293,8 +295,8 @@ else
     private readonly List<PosRepeatVariance> repeatVarianceRows = [];
     private readonly List<PosSyncFailure> syncFailures = [];
     private readonly List<string> dashboardMessages = [];
-    private readonly DateOnly dashboardFrom = DateOnly.FromDateTime(DateTime.Today).AddDays(-(PeriodDays - 1));
-    private readonly DateOnly dashboardTo = DateOnly.FromDateTime(DateTime.Today);
+    private readonly DateOnly dashboardFrom = StoreClock.Today.AddDays(-(PeriodDays - 1));
+    private readonly DateOnly dashboardTo = StoreClock.Today;
     private bool loadingDashboard = true;
     private decimal totalNet;
     private decimal totalGross;
@@ -306,36 +308,52 @@ else
 
     private bool CanViewSales => Session.HasPermission("sale.view");
     private bool CanCreateSale => Session.HasPermission("sale.create");
-    private bool CanViewCatalog => Session.HasPermission("product.view");
-    private bool CanViewReceipts => Session.HasPermission("receipt.view");
     private bool CanViewReports => Session.HasPermission("report.view");
     private bool CanViewInventory => Session.HasPermission("inventory.view");
-    private bool CanUseStockCounts => Session.HasAnyPermission("inventory.count", "inventory.count.approve", "inventory.view.all");
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
+    private bool CanApproveRestock => Session.HasPermission("transfer.approve") &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool CanRequestRestock => Session.WorkLocationKind == 1 &&
+        Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view");
+    private bool CanFulfillRestock => Session.WorkLocationKind == 0 &&
+        Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch") &&
+        Session.Current?.User.Roles.Any(role => role is "MainInventoryManager" or "InventoryStaff") == true;
+    private bool CanViewPurchasing => Session.HasPermission("purchase.view") &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool CanReceivePurchasing => Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive");
     private bool CanViewInventoryExceptions => Session.HasPermission("inventory.view.all");
     private bool CanManageUsers => Session.HasAnyPermission("user.manage", "role.manage");
     private bool CanManageDevices => Session.HasPermission("device.manage");
     private bool CanManageSync => Session.HasPermission("sync.manage");
 
     private bool HasSales => CanViewSales && storeKpis.Count > 0;
+    private bool HasKpis => OwnerInventoryChart
+        ? storeReport is { Stores.Count: > 0 }
+        : HasSales;
+    private bool OwnerInventoryChart => CanViewInventory &&
+        Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+    private bool HasChart => OwnerInventoryChart
+        ? storeReport is { Stores.Count: > 0 }
+        : HasSales;
 
-    private static string DayGreeting => DateTime.Now.Hour switch
+    private static string DayGreeting => StoreClock.Now.Hour switch
     {
-        < 12 => "Good morning",
-        < 18 => "Good afternoon",
+        var hour when hour < 12 => "Good morning",
+        var hour when hour < 18 => "Good afternoon",
         _ => "Good evening",
     };
 
     private string Greeting => $"Welcome back, {FirstName}.";
     private string FirstName => Session.Current?.User.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "there";
-    private string ScopeLabel => Session.Current?.User.HasAllLocations == true
+    private string ScopeLabel => Session.WorkLocationName is { Length: > 0 } chosen ? chosen
+        : Session.Current?.User.HasAllLocations == true && Session.HasPermission("location.manage")
         ? "All locations"
         : Session.Current?.User.Locations.Count switch { 1 => "1 location", int count => $"{count} locations", _ => "No locations" };
 
     private string WorkspaceName => (CanManageUsers, CanViewInventory, CanCreateSale, CanViewReports) switch
     {
+        (_, true, _, _) => "Inventory control",
         (true, _, _, _) => "Business control",
-        (_, true, false, _) => "Inventory control",
         (_, _, true, _) => "Store operations",
         (_, _, _, true) => "Review workspace",
         _ => "Operations overview",
@@ -343,30 +361,34 @@ else
 
     private string WorkspaceDescription => (CanManageUsers, CanViewInventory, CanCreateSale) switch
     {
-        (true, _, _) => "Here's what's happening across your business today.",
+        (true, _, _) => "Here's your stock position and the work across your locations.",
         (_, true, false) => "Here's your stock position and the movement inside your assigned scope.",
         (_, _, true) => "Here's what's happening with your store today.",
         _ => "Here's the activity included in your current access.",
     };
+
+    private PosStoreMovementReport? storeReport;
+    private PosStoreMovementReport? previousStoreReport;
+    private bool loadingStores;
 
     private List<DashboardAction> Actions
     {
         get
         {
             List<DashboardAction> actions = [];
-            if (CanViewSales) actions.Add(new("coins", "Store performance", "See what each store sold and took in, and its best sellers.", "/stores"));
-            if (CanViewInventory) actions.Add(new("box", "Store inventory", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
-            if (CanViewSales) actions.Add(new("ledger", "Review sales", "Browse each store's transactions, returns and receipts.", "/sales"));
-            if (CanUseStockCounts) actions.Add(new("count", "Stock counts", "See the counts each store ran and the variances they posted.", "/inventory/counts"));
-            if (CanViewTransfers) actions.Add(new("transfer", "Track transfers", "Follow stock moving between the warehouse and the stores.", "/transfers"));
-            if (CanViewReports) actions.Add(new("report", "Open daily reports", "Reconcile trade, payment methods and drawer shifts.", "/reports"));
-            if (CanManageUsers) actions.Add(new("people", "Manage people & roles", "Control accounts, access and location assignments.", "/admin/users"));
-            if (CanManageDevices) actions.Add(new("device", "Manage devices", "Enrol, suspend and inspect the terminal fleet.", "/admin/devices"));
-            if (CanViewReceipts) actions.Add(new("receipt", "Payment receipts", "See cash each store paid out or took in outside a sale.", "/receipts"));
-            if (CanViewCatalog) actions.Add(new("tag", "Review prices", "Search products and inspect effective price schedules.", "/catalog/prices"));
-            if (CanManageSync) actions.Add(new("sync", "Resolve sync failures", "Retry or dismiss device synchronization conflicts.", "/sync/failures"));
-            if (actions.Count == 0) actions.Add(new("bell", "Review notifications", "See activity and exceptions addressed to you.", "/notifications"));
-            return actions;
+            if (CanApproveRestock) actions.Add(new("check", "Review restock requests", "Approve or adjust what stores asked for.", "/restock/approvals"));
+            if (CanFulfillRestock) actions.Add(new("box-out", "Fulfill store requests", "Pick and dispatch approved requests.", "/restock/fulfillment"));
+            if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock) actions.Add(new("box-in", "Request stock", "Start from what is running low here.", "/restock"));
+            if (CanReceivePurchasing && !CanViewPurchasing) actions.Add(new("receipt", "Receive a delivery", "Check a supplier delivery into stock.", "/receiving"));
+            if (CanViewPurchasing) actions.Add(new("receipt", "New purchase order", "Order stock from a supplier.", "/purchasing/new"));
+            if (CanViewInventory) actions.Add(new("count", "Count stock", "Open or continue a physical count.", "/inventory/counts"));
+            if (CanViewInventory) actions.Add(new("box", "Check stock levels", "See what is running out or piling up.", "/inventory/stock"));
+            if (CanViewSales) actions.Add(new("ledger", "Review sales", "Transactions, returns and receipts.", "/sales"));
+            if (CanViewReports) actions.Add(new("report", "Daily reports", "Reconcile trade and payment methods.", "/reports"));
+            if (CanManageUsers) actions.Add(new("people", "Manage people", "Accounts, roles and locations.", "/admin/users"));
+            if (CanManageSync) actions.Add(new("sync", "Resolve sync failures", "Retry or dismiss device conflicts.", "/sync/failures"));
+            if (actions.Count == 0) actions.Add(new("bell", "Review notifications", "Activity and exceptions addressed to you.", "/notifications"));
+            return [.. actions.Take(4)];
         }
     }
 
@@ -374,13 +396,40 @@ else
     private decimal PreviousAverageTicket => previousTransactions == 0 ? 0m : previousNet / previousTransactions;
     private string DateRangeLabel => $"{dashboardFrom:MMM d} – {dashboardTo:MMM d, yyyy}";
 
-    private IEnumerable<KpiTile> KpiTiles =>
+    private IEnumerable<KpiTile> KpiTiles => OwnerInventoryChart ? InventoryKpiTiles : SalesKpiTiles;
+
+    private IEnumerable<KpiTile> SalesKpiTiles =>
     [
         new("ledger", "Total sales", "Net sales after discounts, excluding voided sales.", Money(totalNet), Change(totalNet, previousNet), [.. days.Select(day => day.Net)]),
         new("coins", "Transactions", "Completed sales, excluding voided sales.", totalTransactions.ToString("N0", CultureInfo.InvariantCulture), Change(totalTransactions, previousTransactions), [.. days.Select(day => (decimal)day.Count)]),
         new("ticket", "Average ticket", "Net sales divided by transactions.", Money(AverageTicket), Change(AverageTicket, PreviousAverageTicket), [.. days.Select(day => day.Count == 0 ? 0m : day.Net / day.Count)]),
         new("receipt", "Gross sales", "Sales value before discounts are applied.", Money(totalGross), Change(totalGross, previousGross), [.. days.Select(day => day.Gross)]),
     ];
+
+    private IEnumerable<KpiTile> InventoryKpiTiles =>
+    [
+        new("box-in", "Units received", "Product units dispatched into your stores.", Quantity(StoreTotalIncoming),
+            InventoryChange(StoreTotalIncoming, previousStoreReport?.Stores.Sum(store => store.IncomingUnits)), MovementSeries(point => point.IncomingUnits)),
+        new("transfer", "Completed movements", "Dispatched transfers involving stores.", storeReport!.DispatchedTransferCount.ToString("N0", CultureInfo.InvariantCulture),
+            InventoryChange(storeReport.DispatchedTransferCount, previousStoreReport?.DispatchedTransferCount),
+            ComparisonSeries(previousStoreReport?.DispatchedTransferCount, storeReport.DispatchedTransferCount)),
+        new("ledger", "Supply requests", "Store requests created in this period; pending approval: " + StorePendingRequests + ".", StoreTotalRequests.ToString("N0", CultureInfo.InvariantCulture),
+            InventoryChange(StoreTotalRequests, previousStoreReport?.Stores.Sum(store => store.RestockRequests)),
+            ComparisonSeries(previousStoreReport?.Stores.Sum(store => store.RestockRequests), StoreTotalRequests)),
+        new("box-out", "Units sent out", "Product units dispatched from your stores.", Quantity(StoreTotalOutgoing),
+            InventoryChange(StoreTotalOutgoing, previousStoreReport?.Stores.Sum(store => store.OutgoingUnits)), MovementSeries(point => point.OutgoingUnits)),
+    ];
+
+    private IReadOnlyList<decimal> MovementSeries(Func<PosStoreMovementChartPoint, decimal> value) =>
+        [.. Enumerable.Range(0, PeriodDays).Select(index => storeReport!.Stores.Sum(store =>
+            store.DailyMovement.Where(point => point.Bucket == index).Sum(value)))];
+
+    private static IReadOnlyList<decimal> ComparisonSeries(decimal? previous, decimal current) =>
+        previous is decimal prior ? [prior, current] : [current];
+
+    private static decimal? InventoryChange(decimal current, decimal? previous) => previous is null
+        ? null
+        : previous == 0m && current == 0m ? 0m : Change(current, previous.Value);
 
     private string? InventoryHref => CanViewInventory ? "inventory/stock" : null;
     private string ActivityHref => CanViewSales ? "sales" : "notifications";
@@ -415,15 +464,25 @@ else
         }
     }
 
+    private RefreshThrottle? liveRefresh;
+
     protected override async Task OnInitializedAsync()
     {
         Notifications.Changed += OnNotificationsChanged;
+        if (CanViewInventory)
+        {
+            liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadInventoryOverviewAsync));
+            Notifications.InventoryChanged += OnInventoryChanged;
+        }
+
         try
         {
             List<Task> tasks = [];
             if (CanViewSales) tasks.Add(LoadSalesAsync());
             if (CanViewInventory) tasks.Add(LoadInventoryAsync());
             if (CanManageSync) tasks.Add(LoadSyncAsync());
+            tasks.Add(LoadStoreMovementAsync());
+            loadingStores = true;
             await Task.WhenAll(tasks);
         }
         catch (HttpRequestException)
@@ -433,75 +492,123 @@ else
         finally
         {
             loadingDashboard = false;
+            loadingStores = false;
+        }
+    }
+
+    private async Task LoadStoreMovementAsync()
+    {
+        try
+        {
+            Task<ApiResult<PosStoreMovementReport>> currentTask = Api.GetStoreMovementsAsync(dashboardFrom, dashboardTo, CancellationToken.None);
+            Task<ApiResult<PosStoreMovementReport>>? previousTask = OwnerInventoryChart
+                ? Api.GetStoreMovementsAsync(dashboardFrom.AddDays(-PeriodDays), dashboardFrom.AddDays(-1), CancellationToken.None)
+                : null;
+            ApiResult<PosStoreMovementReport> response = await currentTask;
+            if (response.IsSuccess && response.Value is not null)
+            {
+                storeReport = response.Value with
+                {
+                    Stores = [.. response.Value.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId))],
+                };
+                try
+                {
+                    if (previousTask is not null && await previousTask is { IsSuccess: true, Value: { } previous })
+                    {
+                        previousStoreReport = previous with
+                        {
+                            Stores = [.. previous.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId))],
+                        };
+                    }
+                }
+                catch (HttpRequestException)
+                {
+                    // Current period cards remain useful without a comparison.
+                }
+            }
+            else
+            {
+                storeReport = null;
+                if (!string.IsNullOrWhiteSpace(response.Error))
+                    dashboardMessages.Add($"Store movement summary unavailable: {response.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            storeReport = null;
+            dashboardMessages.Add($"Store movement summary unavailable: {ex.Message}");
         }
     }
 
     private async Task LoadSalesAsync()
     {
-        ApiResult<List<PosLocation>> locationsResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
-        if (!locationsResponse.IsSuccess || locationsResponse.Value is null)
+        // The same report the Stores page reads, for this week and the week
+        // before, so the overview and the store figures always agree.
+        Task<ApiResult<PosStorePerformanceReport>> currentTask = Api.GetStorePerformanceAsync(
+            dashboardFrom, dashboardTo, CancellationToken.None);
+        Task<ApiResult<PosStorePerformanceReport>> previousTask = Api.GetStorePerformanceAsync(
+            dashboardFrom.AddDays(-PeriodDays), dashboardFrom.AddDays(-1), CancellationToken.None);
+        await Task.WhenAll(currentTask, previousTask);
+
+        if (currentTask.Result is not { IsSuccess: true, Value: { } report })
         {
-            dashboardMessages.Add(locationsResponse.Error ?? "Sales totals could not load.");
+            dashboardMessages.Add(currentTask.Result.Error ?? "Sales totals could not load.");
             return;
         }
 
-        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
-        List<PosLocation> stores = [.. locationsResponse.Value.Where(location =>
-            location.Kind == 1 && (Session.Current?.User.HasAllLocations == true || assigned.Contains(location.Id)))];
-        if (stores.Count == 0)
+        List<PosStorePerformance> scopedStores = [.. report.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId))];
+        if (scopedStores.Count == 0)
         {
             dashboardMessages.Add("No active store is assigned to this account.");
             return;
         }
 
-        // One request per store covers the current and the previous period so trends compare like for like.
-        DateOnly previousFrom = dashboardFrom.AddDays(-PeriodDays);
-        ApiResult<List<PosSaleSummary>>[] results = await Task.WhenAll(stores.Select(store =>
-            Api.SearchSalesAsync(store.Id, previousFrom, dashboardTo, CancellationToken.None)));
-
         Dictionary<DateOnly, DayPoint> byDay = Enumerable.Range(0, PeriodDays)
             .Select(offset => new DayPoint(dashboardFrom.AddDays(offset)))
             .ToDictionary(day => day.Date);
 
-        decimal largestNet = 0m;
-        for (int index = 0; index < stores.Count; index++)
+        foreach (PosStorePerformance store in scopedStores)
         {
-            if (!results[index].IsSuccess || results[index].Value is not { } sales) continue;
+            storeKpis.Add(new(store.Code, store.Name, store.NetSales, store.Transactions));
+            totalNet += store.NetSales;
+            totalGross += store.GrossSales;
+            totalTransactions += store.Transactions;
 
-            List<PosSaleSummary> current = [.. sales.Where(sale => sale.BusinessDate >= dashboardFrom)];
-            List<PosSaleSummary> counted = [.. current.Where(sale => !IsVoided(sale))];
-            decimal net = counted.Sum(sale => sale.NetTotal);
-            storeKpis.Add(new(stores[index].Code, stores[index].Name, net, counted.Count));
-            totalNet += net;
-            totalGross += counted.Sum(sale => sale.GrossTotal);
-            totalTransactions += counted.Count;
-            largestNet = Math.Max(largestNet, net);
-
-            foreach (PosSaleSummary sale in counted)
+            foreach (PosStoreDailySales daily in store.Daily)
             {
-                if (!byDay.TryGetValue(sale.BusinessDate, out DayPoint? day)) continue;
-                day.Net += sale.NetTotal;
-                day.Gross += sale.GrossTotal;
-                day.Count++;
+                if (!byDay.TryGetValue(daily.Date, out DayPoint? day)) continue;
+                day.Net += daily.NetSales;
+                day.Gross += daily.GrossSales;
+                day.Count += daily.Transactions;
             }
+        }
 
-            List<PosSaleSummary> previous = [.. sales.Where(sale => sale.BusinessDate < dashboardFrom && !IsVoided(sale))];
-            previousNet += previous.Sum(sale => sale.NetTotal);
-            previousGross += previous.Sum(sale => sale.GrossTotal);
-            previousTransactions += previous.Count;
-
-            recentSales.AddRange(current.Select(sale => new RecentSale(sale, stores[index].Name)));
+        if (previousTask.Result is { IsSuccess: true, Value: { } previous })
+        {
+            previousNet = previous.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId)).Sum(store => store.NetSales);
+            previousGross = previous.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId)).Sum(store => store.GrossSales);
+            previousTransactions = previous.Stores.Where(store => Session.CanUseInventoryLocation(store.LocationId)).Sum(store => store.Transactions);
         }
 
         days.AddRange(byDay.Values.OrderBy(day => day.Date));
-        List<RecentSale> latest = [.. recentSales.OrderByDescending(entry => entry.Sale.CompletedAtUtc).Take(5)];
-        recentSales.Clear();
-        recentSales.AddRange(latest);
-
+        decimal largestNet = storeKpis.Max(store => store.NetSales);
         foreach (StoreKpi store in storeKpis)
         {
             store.BarWidth = largestNet == 0 ? 0 : (int)Math.Round(store.NetSales / largestNet * 100m);
         }
+
+        // The activity feed needs only the newest few sales from each store.
+        ApiResult<PosSalePage>[] latest = await Task.WhenAll(scopedStores.Select(store =>
+            Api.SearchSalesAsync(store.LocationId, dashboardFrom, dashboardTo, 0, 5, CancellationToken.None)));
+        for (int index = 0; index < latest.Length; index++)
+        {
+            if (latest[index] is not { IsSuccess: true, Value: { } page }) continue;
+            recentSales.AddRange(page.Sales.Select(sale => new RecentSale(sale, scopedStores[index].Name)));
+        }
+
+        List<RecentSale> newest = [.. recentSales.OrderByDescending(entry => entry.Sale.CompletedAtUtc).Take(5)];
+        recentSales.Clear();
+        recentSales.AddRange(newest);
     }
 
     private async Task LoadInventoryAsync()
@@ -515,8 +622,8 @@ else
         Task<ApiResult<List<PosNegativeStockSummary>>> negativeTask = Api.GetNegativeStockSummaryAsync(from, to, CancellationToken.None);
         Task<ApiResult<List<PosRepeatVariance>>> varianceTask = Api.GetRepeatVariancesAsync(from, to, CancellationToken.None);
         await Task.WhenAll(negativeTask, varianceTask);
-        if (negativeTask.Result is { IsSuccess: true, Value: not null }) negativeStockRows.AddRange(negativeTask.Result.Value);
-        if (varianceTask.Result is { IsSuccess: true, Value: not null }) repeatVarianceRows.AddRange(varianceTask.Result.Value);
+        if (negativeTask.Result is { IsSuccess: true, Value: not null }) negativeStockRows.AddRange(negativeTask.Result.Value.Where(row => Session.CanUseInventoryLocation(row.LocationId)));
+        if (varianceTask.Result is { IsSuccess: true, Value: not null }) repeatVarianceRows.AddRange(varianceTask.Result.Value.Where(row => Session.CanUseInventoryLocation(row.LocationId)));
     }
 
     private async Task LoadSyncAsync()
@@ -527,34 +634,69 @@ else
 
     private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Notifications.Changed -= OnNotificationsChanged;
+    // The stock tiles follow the registers live; the scope check is the API's.
+    private void OnInventoryChanged(IReadOnlyList<Guid> changed) => liveRefresh?.Request();
+
+    private async Task ReloadInventoryOverviewAsync()
+    {
+        try
+        {
+            ApiResult<PosInventoryOverview> result = await Api.GetInventoryOverviewAsync(CancellationToken.None);
+            if (result is { IsSuccess: true, Value: { } fresh })
+            {
+                inventoryOverview = fresh;
+                StateHasChanged();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the tiles on screen; the next change tries again.
+        }
+    }
+
+    public void Dispose()
+    {
+        Notifications.Changed -= OnNotificationsChanged;
+        Notifications.InventoryChanged -= OnInventoryChanged;
+        liveRefresh?.Dispose();
+    }
 
     // Chart geometry ---------------------------------------------------------
 
-    private decimal AxisStep => NiceStep(days.Count == 0 ? 0m : days.Max(day => day.Net) / 3m);
+    private IReadOnlyList<ChartPoint> ChartDays => OwnerInventoryChart
+        ? [.. Enumerable.Range(0, PeriodDays).Select(index => new ChartPoint(
+            dashboardFrom.AddDays(index),
+            storeReport!.Stores.Sum(store => store.DailyMovement.FirstOrDefault(point => point.Bucket == index)?.IncomingUnits ?? 0m),
+            storeReport!.Stores.Sum(store => store.DailyMovement.FirstOrDefault(point => point.Bucket == index)?.OutgoingUnits ?? 0m)))]
+        : [.. days.Select(day => new ChartPoint(day.Date, day.Net, day.Count))];
+
+    private decimal AxisStep => NiceStep(ChartDays.Count == 0 ? 0m : ChartDays.Max(day => day.Bar) / 3m, OwnerInventoryChart ? 1m : 1000m);
     private decimal AxisMax => AxisStep * 3m;
     private IEnumerable<decimal> AxisTicks => [AxisStep * 3m, AxisStep * 2m, AxisStep, 0m];
-    private int MaxCount => days.Count == 0 ? 0 : days.Max(day => day.Count);
+    private decimal MaxLine => ChartDays.Count == 0 ? 0m : ChartDays.Max(day => day.Line);
 
-    private decimal BarHeight(DayPoint day) => AxisMax == 0 ? 0m : day.Net / AxisMax * 100m;
+    private decimal BarHeight(ChartPoint day) => AxisMax == 0 ? 0m : day.Bar / AxisMax * 100m;
 
-    // The transaction line uses its own scale and tops out below the chart edge.
-    private decimal LineHeight(DayPoint day) => MaxCount == 0 ? 0m : (decimal)day.Count / MaxCount * 88m;
+    // The line uses its own scale and tops out below the chart edge.
+    private decimal LineHeight(ChartPoint day) => MaxLine == 0 ? 0m : day.Line / MaxLine * 88m;
 
-    private string TransactionPath => string.Join(' ', days.Select((day, index) =>
-        $"{(index == 0 ? 'M' : 'L')}{Css((index + .5m) * 100m)} {Css(100m - LineHeight(day))}"));
+    private string ChartLinePath => SmoothPath([.. ChartDays.Select((day, index) =>
+        ((index + .5m) * 100m, 100m - LineHeight(day)))]);
 
-    private static decimal NiceStep(decimal rough)
+    private string ChartPointTitle(ChartPoint day) => OwnerInventoryChart
+        ? $"{day.Date:MMM d}: {Quantity(day.Bar)} units received · {Quantity(day.Line)} units sent"
+        : $"{day.Date:MMM d}: {Money(day.Bar)} · {day.Line} sale{(day.Line == 1m ? "" : "s")}";
+
+    private static decimal NiceStep(decimal rough, decimal emptyStep)
     {
-        if (rough <= 0) return 1000m;
+        if (rough <= 0) return emptyStep;
         double magnitude = Math.Pow(10, Math.Floor(Math.Log10((double)rough)));
         double normalized = (double)rough / magnitude;
         double nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
         return (decimal)(nice * magnitude);
     }
 
-    private static string SparkLine(IReadOnlyList<decimal> series) => string.Join(' ', SparkPoints(series)
-        .Select((point, index) => $"{(index == 0 ? 'M' : 'L')}{Css(point.X)} {Css(point.Y)}"));
+    private static string SparkLine(IReadOnlyList<decimal> series) => SmoothPath(SparkPoints(series));
 
     private static string SparkArea(IReadOnlyList<decimal> series)
     {
@@ -571,13 +713,85 @@ else
         return [.. series.Select((value, index) => (index * step, max == min ? 20m : 32m - (value - min) / (max - min) * 26m))];
     }
 
+    // Use monotone cubic Bézier segments: the trend is fluid but never draws a
+    // fake high or low between two recorded days. The dots remain on the raw data.
+    private static string SmoothPath(IReadOnlyList<(decimal X, decimal Y)> points)
+    {
+        if (points.Count == 0) return string.Empty;
+        if (points.Count == 1) return $"M{Css(points[0].X)} {Css(points[0].Y)}";
+
+        decimal[] slopes = new decimal[points.Count - 1];
+        decimal[] tangents = new decimal[points.Count];
+        for (int index = 0; index < slopes.Length; index++)
+        {
+            decimal width = points[index + 1].X - points[index].X;
+            slopes[index] = width == 0m ? 0m : (points[index + 1].Y - points[index].Y) / width;
+        }
+
+        tangents[0] = slopes[0];
+        tangents[^1] = slopes[^1];
+        for (int index = 1; index < tangents.Length - 1; index++)
+        {
+            tangents[index] = Math.Sign(slopes[index - 1]) == Math.Sign(slopes[index])
+                ? (slopes[index - 1] + slopes[index]) / 2m
+                : 0m;
+        }
+
+        // Fritsch-Carlson limiting keeps the smooth curve inside each segment's
+        // data range, including when a quiet day sits beside a busy one.
+        for (int index = 0; index < slopes.Length; index++)
+        {
+            decimal slope = slopes[index];
+            if (slope == 0m)
+            {
+                tangents[index] = 0m;
+                tangents[index + 1] = 0m;
+                continue;
+            }
+
+            double left = (double)(tangents[index] / slope);
+            double right = (double)(tangents[index + 1] / slope);
+            if (left < 0d) tangents[index] = 0m;
+            if (right < 0d) tangents[index + 1] = 0m;
+
+            left = (double)(tangents[index] / slope);
+            right = (double)(tangents[index + 1] / slope);
+            double magnitude = left * left + right * right;
+            if (magnitude > 9d)
+            {
+                decimal scale = (decimal)(3d / Math.Sqrt(magnitude));
+                tangents[index] = scale * (decimal)left * slope;
+                tangents[index + 1] = scale * (decimal)right * slope;
+            }
+        }
+
+        List<string> commands = [$"M{Css(points[0].X)} {Css(points[0].Y)}"];
+        for (int index = 0; index < points.Count - 1; index++)
+        {
+            decimal width = points[index + 1].X - points[index].X;
+            decimal firstControlX = points[index].X + width / 3m;
+            decimal firstControlY = points[index].Y + tangents[index] * width / 3m;
+            decimal secondControlX = points[index + 1].X - width / 3m;
+            decimal secondControlY = points[index + 1].Y - tangents[index + 1] * width / 3m;
+            commands.Add($"C{Css(firstControlX)} {Css(firstControlY)} {Css(secondControlX)} {Css(secondControlY)} {Css(points[index + 1].X)} {Css(points[index + 1].Y)}");
+        }
+
+        return string.Join(' ', commands);
+    }
+
     // Formatting -------------------------------------------------------------
 
     private static bool IsVoided(PosSaleSummary sale) => string.Equals(sale.Status, "Voided", StringComparison.OrdinalIgnoreCase);
+    private decimal StoreTotalIncoming => storeReport?.Stores.Sum(s => s.IncomingUnits) ?? 0m;
+    private decimal StoreTotalOutgoing => storeReport?.Stores.Sum(s => s.OutgoingUnits) ?? 0m;
+
+    private int StoreTotalRequests => storeReport?.Stores.Sum(s => s.RestockRequests) ?? 0;
+    private int StorePendingRequests => storeReport?.Stores.Sum(s => s.PendingApprovalRequests) ?? 0;
+
     private static decimal? Change(decimal current, decimal previous) => previous == 0 ? null : (current - previous) / previous;
     private static string Percent(decimal change) => (change > 0 ? "+" : string.Empty) + change.ToString("0%", CultureInfo.InvariantCulture);
     private static string Css(decimal value) => Math.Round(value, 2).ToString(CultureInfo.InvariantCulture);
-    private static string When(DateTimeOffset at) => at.ToLocalTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
+    private static string When(DateTimeOffset at) => at.InStoreTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
     private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
     private static string AxisMoney(decimal amount) => amount.ToString("₱#,##0", CultureInfo.InvariantCulture);
     private static string Quantity(decimal amount) => amount.ToString("#,##0.##", CultureInfo.InvariantCulture);
@@ -586,6 +800,7 @@ else
     private sealed record KpiTile(string Icon, string Label, string Hint, string Value, decimal? Change, IReadOnlyList<decimal> Series);
     private sealed record ActivityItem(string Icon, string Title, string Detail, DateTimeOffset At, string Status, string Tone, string Href);
     private sealed record RecentSale(PosSaleSummary Sale, string StoreName);
+    private sealed record ChartPoint(DateOnly Date, decimal Bar, decimal Line);
 
     private sealed class DayPoint(DateOnly date)
     {

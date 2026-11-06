@@ -72,6 +72,46 @@ public sealed class SaleLifecycleEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task Search_PagesNewestFirst_ReportsTheTotal_AndFindsByReceiptNumber()
+    {
+        Seed seed = await SeedAsync("c16p");
+        using HttpClient client = factory.CreateClient();
+
+        string manager = await PinSignInAsync(client, seed.ManagerEmployeeCode, seed.Device01.Value);
+        Guid shiftId = await OpenShiftAsync(client, manager, seed);
+        for (int seq = 1; seq <= 3; seq++)
+        {
+            await CompleteAsync(client, manager, seed, shiftId, quantity: 1m, seq);
+        }
+
+        string store = FormattableString.Invariant($"/api/v1/sales?locationId={seed.Store.Value}");
+
+        // A page shorter than the result says how many there are in all.
+        using (HttpResponseMessage first = await GetAsync(client, store + "&offset=0&limit=2", manager))
+        {
+            first.StatusCode.Should().Be(HttpStatusCode.OK, await first.Content.ReadAsStringAsync());
+            first.Headers.GetValues("X-Total-Count").Should().Equal("3");
+            using JsonDocument page = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+            page.RootElement.GetArrayLength().Should().Be(2);
+        }
+
+        using (HttpResponseMessage rest = await GetAsync(client, store + "&offset=2&limit=2", manager))
+        {
+            using JsonDocument page = JsonDocument.Parse(await rest.Content.ReadAsStringAsync());
+            page.RootElement.GetArrayLength().Should().Be(1);
+        }
+
+        // Part of a receipt number, in any case, finds that sale alone.
+        string tail = seed.SaleNumber(2)[^6..].ToLowerInvariant();
+        using (HttpResponseMessage byNumber = await GetAsync(client, store + "&number=" + tail, manager))
+        {
+            byNumber.Headers.GetValues("X-Total-Count").Should().Equal("1");
+            using JsonDocument page = JsonDocument.Parse(await byNumber.Content.ReadAsStringAsync());
+            page.RootElement[0].GetProperty("number").GetString().Should().Be(seed.SaleNumber(2));
+        }
+    }
+
+    [Fact]
     public async Task Search_ByAStoreManagerOfAnotherStore_IsForbidden()
     {
         Seed seed = await SeedAsync("c16b");

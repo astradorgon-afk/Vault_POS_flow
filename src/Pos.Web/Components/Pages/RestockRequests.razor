@@ -1,0 +1,741 @@
+@page "/restock"
+@attribute [Authorize(Policy = "transfer.request")]
+@rendermode InteractiveServer
+@implements IDisposable
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+@inject NotificationStore Notifications
+@inject PageTrail Trail
+
+<PageTitle>@PageHeading · VaultFlow</PageTitle>
+
+<section class="restock-page">
+    <SectionTabs Items="@SectionTabSets.Movement(Session)" Label="Movement" />
+    <header class="restock-head">
+        <div><span class="eyebrow">@(AtWarehouse ? "Main warehouse · supplier stock" : "Inventory · store supplies")</span><h1>@PageHeading</h1><p>@(AtWarehouse
+            ? "Ask the owner to buy what the warehouse is running out of. The owner turns approved requests into purchase orders."
+            : "Ask the main warehouse for the products your store needs. The owner reviews the request before stock is picked.")</p></div>
+        <div class="restock-tabs" role="tablist" aria-label="Restock request views">
+            <button type="button" role="tab" id="restock-tab-new" aria-controls="restock-panel-new" aria-selected="@(activeTab == "new" ? "true" : "false")" class="@(activeTab == "new" ? "active" : null)" @onclick='() => activeTab = "new"'>New request</button>
+            <button type="button" role="tab" id="restock-tab-history" aria-controls="restock-panel-history" aria-selected="@(activeTab == "history" ? "true" : "false")" class="@(activeTab == "history" ? "active" : null)" @onclick='() => activeTab = "history"'>
+                History
+                @if (WaitingCount > 0)
+                {
+                    <span class="restock-tab-badge">@WaitingCount<span class="visually-hidden"> waiting for the owner</span></span>
+                }
+            </button>
+        </div>
+    </header>
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="restock-message" role="status">@message</div>
+    }
+
+    @if (savedDraftId is { } draftId)
+    {
+        <a class="restock-draft-link" href="@($"/transfers/{draftId:D}")">Open the saved draft to submit it →</a>
+    }
+
+    @if (activeTab == "new")
+    {
+        <section class="restock-card" role="tabpanel" id="restock-panel-new" aria-labelledby="restock-tab-new">
+            <header>
+                <div><span class="eyebrow">New request</span><h2>Request supplies</h2></div>
+                <p>Choose a store, add the products it needs, then send the request for the owner's approval.</p>
+            </header>
+            @if (loading)
+            {
+                <p class="restock-empty">Loading stores and products…</p>
+            }
+            else if (stores.Count == 0 && warehouses.Count == 0)
+            {
+                <p class="restock-empty">No active store or warehouse is assigned to this account.</p>
+            }
+            else
+            {
+                <ol class="restock-steps">
+                    <li class="restock-step @(selectedStoreId is not null ? "is-done" : null)">
+                        <span class="restock-step-num" aria-hidden="true">@(selectedStoreId is not null ? "✓" : "1")</span>
+                        <div class="restock-step-body">
+                            <div class="restock-step-head"><strong>Choose where it goes</strong><small>@(IsWarehouseRequest ? "The owner buys these from a supplier." : "The request is delivered to this store.")</small></div>
+                            <label class="restock-field">
+                                <select aria-label="Deliver to" value="@selectedStoreId" @onchange="OnStoreChanged">
+                                    <option value="">Select a location</option>
+                                    @foreach (PosLocation store in stores)
+                                    {
+                                        <option value="@store.Id">@store.Code · @store.Name</option>
+                                    }
+                                    @foreach (PosLocation warehouse in warehouses)
+                                    {
+                                        <option value="@warehouse.Id">@warehouse.Code · @warehouse.Name (buy from supplier)</option>
+                                    }
+                                </select>
+                            </label>
+                            @if (IsWarehouseRequest)
+                            {
+                                <p class="restock-step-note">The warehouse has nobody to transfer from, so this goes to the owner as a shopping list. Approving it raises a purchase order against a supplier.</p>
+                            }
+                        </div>
+                    </li>
+
+                    <li class="restock-step @(draft.Count > 0 ? "is-done" : null)">
+                        <span class="restock-step-num" aria-hidden="true">@(draft.Count > 0 ? "✓" : "2")</span>
+                        <div class="restock-step-body">
+                            <div class="restock-step-head"><strong>Add products</strong><small>Start from what is running low, or search by name or SKU.</small></div>
+                            @if (loadingLowStock)
+                            {
+                                <p class="restock-step-note">Checking this store's stock…</p>
+                            }
+                            else if (lowStockError is not null)
+                            {
+                                <p class="restock-step-note" role="alert">@lowStockError</p>
+                            }
+                            else if (selectedStoreId is not { } lowStoreId)
+                            {
+                                <p class="restock-step-note">Choose a store to see which products are running low.</p>
+                            }
+                            else if (LowStock.Count > 0)
+                            {
+                                <div class="restock-low">
+                                    <header>
+                                        <div><strong>Low stock at @StoreName(lowStoreId)</strong><small>@LowStock.Count product@(LowStock.Count == 1 ? "" : "s") at or below the reorder point</small></div>
+                                        <label class="restock-low-all"><input type="checkbox" checked="@(selectedLow.Count == LowStock.Count && LowStock.Count > 0)" @onchange="ToggleAllLow" /> Select all</label>
+                                    </header>
+                                    <div class="restock-low-list">
+                                        @foreach (PosStockLevel row in LowStock)
+                                        {
+                                            <div class="restock-low-row" @key="row.ProductId">
+                                                <input type="checkbox" aria-label="Request @row.Name" checked="@selectedLow.Contains(row.ProductId)" @onchange="() => ToggleLow(row.ProductId)" />
+                                                <div class="restock-low-product"><strong>@row.Name</strong><small>@row.Sku</small></div>
+                                                <span class="restock-low-status @(row.Status == "Out" ? "is-out" : "is-low")">@(row.Status == "Out" ? "Out of stock" : "Low")</span>
+                                                <span class="restock-low-avail"><strong>@row.Available</strong><small>available</small></span>
+                                                <span class="restock-low-suggest"><strong>@SuggestQuantity(row).ToString(CultureInfo.InvariantCulture)</strong><small>suggested</small></span>
+                                            </div>
+                                        }
+                                    </div>
+                                    <footer><button type="button" class="restock-primary" disabled="@(selectedLow.Count == 0)" @onclick="AddSelectedLow">@(selectedLow.Count == 0 ? "Select at least one product" : $"Add {selectedLow.Count} to request")</button></footer>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="restock-low-none">Nothing is below its reorder point at @StoreName(lowStoreId).</p>
+                            }
+
+                            <div class="restock-product-search">
+                                <label class="restock-field"><input type="search" placeholder="Search another product by name or SKU" aria-label="Search products" @bind="search" @bind:event="oninput" /></label>
+                                @if (!string.IsNullOrWhiteSpace(search))
+                                {
+                                    <div class="restock-results">
+                                        @foreach (PosProductSummary product in Matches)
+                                        {
+                                            <button type="button" @onclick="() => AddProduct(product)" disabled="@draft.Any(line => line.Product.Id == product.Id)"><strong>@product.Name</strong><small>@product.Sku</small><span>+ Add</span></button>
+                                        }
+                                        @if (Matches.Count == 0)
+                                        {
+                                            <p>No products match “@search.Trim()”. Try part of the name or the SKU.</p>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </li>
+
+                    <li class="restock-step">
+                        <span class="restock-step-num" aria-hidden="true">3</span>
+                        <div class="restock-step-body">
+                            <div class="restock-step-head"><strong>Review and send</strong><small>Set the quantities you need, then send the request.</small></div>
+                            @if (draft.Count == 0)
+                            {
+                                <p class="restock-step-note">Nothing added yet — use step 2 to add products.</p>
+                            }
+                            else
+                            {
+                                <div class="restock-lines">
+                                    @foreach (DraftLine line in draft)
+                                    {
+                                        <div class="restock-line" @key="line.Product.Id">
+                                            <div class="restock-line-name"><strong>@line.Product.Name</strong><small>@line.Product.Sku</small></div>
+                                            <div class="restock-qty">
+                                                <button type="button" aria-label="One less @line.Product.Name" @onclick="() => Adjust(line, -1m)">−</button>
+                                                <input type="number" min="0.001" step="0.001" aria-label="Quantity of @line.Product.Name" @bind="line.Quantity" />
+                                                <button type="button" aria-label="One more @line.Product.Name" @onclick="() => Adjust(line, 1m)">+</button>
+                                            </div>
+                                            <button type="button" class="restock-line-remove" aria-label="Remove @line.Product.Name" @onclick="() => draft.Remove(line)">Remove</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </li>
+                </ol>
+
+                <footer>
+                    <span>
+                        @if (CanSend && selectedStoreId is { } readyStore)
+                        {
+                            <span>@draft.Count product@(draft.Count == 1 ? "" : "s") for @StoreName(readyStore)</span>
+                        }
+                        else if (!sending && SendBlockReason is { } reason)
+                        {
+                            <span class="restock-send-reason">@reason</span>
+                        }
+                    </span>
+                    <button type="button" class="restock-primary" disabled="@(!CanSend)" @onclick="SendAsync">@(sending ? "Sending…" : IsWarehouseRequest ? "Send to the owner to buy" : "Send for approval")</button>
+                </footer>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="restock-card" role="tabpanel" id="restock-panel-history" aria-labelledby="restock-tab-history">
+            <header>
+                <div><span class="eyebrow">Track deliveries</span><h2>Request history</h2></div>
+                <button type="button" class="restock-refresh" @onclick="LoadRequestsAsync" disabled="@loadingRequests">@(loadingRequests ? "Refreshing…" : "Refresh")</button>
+            </header>
+            @if (supplyRequests.Count > 0)
+            {
+                <div class="restock-supply-block">
+                    <h3>Sent to the owner to buy</h3>
+                    <div class="restock-list">
+                        @foreach (PosSupplyRequest supply in supplyRequests)
+                        {
+                            <div class="restock-row restock-row-static" @key="supply.Id">
+                                <div>
+                                    <strong>@supply.Number</strong>
+                                    <small>
+                                        @StoreName(supply.DestinationLocationId) ·
+                                        @supply.Lines.Count line@(supply.Lines.Count == 1 ? "" : "s") ·
+                                        @supply.RequestedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
+                                    </small>
+                                    @if (supply.Orders.Count > 0)
+                                    {
+                                        <small class="restock-row-hint">
+                                            On @string.Join(", ", supply.Orders.Select(o => o.Number ?? "a draft order"))
+                                        </small>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(supply.DecisionReason))
+                                    {
+                                        <small>“@supply.DecisionReason”</small>
+                                    }
+                                </div>
+                                <span class="restock-status @SupplyStatusClass(supply.Status)">@SplitWords(supply.Status)</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (loading)
+            {
+                <p class="restock-empty">Loading your requests…</p>
+            }
+            else if (requests.Count == 0 && supplyRequests.Count == 0)
+            {
+                <p class="restock-empty">No restock requests yet. <button type="button" class="restock-link-button" @onclick='() => activeTab = "new"'>Send your first request →</button></p>
+            }
+            else if (requests.Count == 0)
+            {
+                <p class="restock-empty">No transfer requests from this account yet.</p>
+            }
+            else
+            {
+                <nav class="restock-filters restock-history-filters" aria-label="Filter request history">
+                    <button type="button" class="@(historyFilter == "all" ? "active" : null)" @onclick='() => historyFilter = "all"'>All <span>@requests.Count</span></button>
+                    <button type="button" class="@(historyFilter == "waiting" ? "active" : null)" title="Waiting for the owner" @onclick='() => historyFilter = "waiting"'>Waiting <span>@CountGroup("waiting")</span></button>
+                    <button type="button" class="@(historyFilter == "progress" ? "active" : null)" title="Approved or moving through the warehouse" @onclick='() => historyFilter = "progress"'>In progress <span>@CountGroup("progress")</span></button>
+                    <button type="button" class="@(historyFilter == "done" ? "active" : null)" @onclick='() => historyFilter = "done"'>Done <span>@CountGroup("done")</span></button>
+                </nav>
+                @if (VisibleRequests.Count == 0)
+                {
+                    <p class="restock-empty">No requests in this group right now.</p>
+                }
+                else
+                {
+                    <div class="restock-list">
+                        @foreach (PosTransferSummary request in VisibleRequests)
+                        {
+                            <a class="restock-row @(request.Id == justSentId ? "is-just-sent" : null)" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
+                                <div>
+                                    <strong>@RequestLabel(request)</strong>
+                                    <small>@StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</small>
+                                    <small class="restock-row-hint">@(request.Id == justSentId ? "Sent just now. " : null)@StatusHint(request)</small>
+                                </div>
+                                <span class="restock-status @StatusClass(request.Status)">@StatusLabel(request.Status)</span>
+                                <span aria-hidden="true">→</span>
+                            </a>
+                        }
+                    </div>
+                }
+            }
+        </section>
+    }
+</section>
+
+@code {
+    private sealed class DraftLine(PosProductSummary product)
+    {
+        public PosProductSummary Product { get; } = product;
+        public decimal Quantity { get; set; } = 1m;
+    }
+
+    private readonly List<PosLocation> stores = [];
+    private readonly List<PosProductSummary> products = [];
+    private readonly List<PosTransferSummary> requests = [];
+    private readonly List<DraftLine> draft = [];
+    private readonly HashSet<Guid> selectedLow = [];
+    private PosStockLevelReport? stockLevels;
+    private Guid? selectedStoreId;
+    private Guid? warehouseLocationId;
+    private readonly List<PosLocation> warehouses = [];
+    private readonly List<PosSupplyRequest> supplyRequests = [];
+
+    /// <summary>Whether the chosen destination is the warehouse, which is bought for rather than transferred to.</summary>
+    // Signed in at the warehouse, this page asks the owner to buy; at a store it asks the warehouse.
+    private bool AtWarehouse => Session.WorkLocationKind == 0;
+    private string PageHeading => AtWarehouse ? "Supply requests" : "Restock requests";
+
+    private bool IsWarehouseRequest => selectedStoreId is { } chosen && warehouses.Any(w => w.Id == chosen);
+    private Guid? savedDraftId;
+    private Guid? justSentId;
+    private string search = string.Empty;
+    private string? message;
+    private string? lowStockError;
+    private string activeTab = "new";
+    private string historyFilter = "all";
+    private bool loading = true;
+    private bool loadingRequests;
+    private bool loadingLowStock;
+    private bool sending;
+
+    [SupplyParameterFromQuery(Name = "store")]
+    private Guid? PrefillStoreId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "product")]
+    private Guid? PrefillProductId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "quantity")]
+    private decimal? PrefillQuantity { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sku")]
+    private string? PrefillSku { get; set; }
+
+    private List<PosProductSummary> Matches => [.. products
+        .Where(product => product.IsActive && !draft.Any(line => line.Product.Id == product.Id) &&
+            (product.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             product.Sku.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)))
+        .Take(8)];
+
+    /// <summary>Why the send button is unavailable, named in the order the
+    /// staff member fixes them; null when the request can go out.</summary>
+    private string? SendBlockReason
+    {
+        get
+        {
+            if (selectedStoreId is not { } storeId
+                || (stores.All(store => store.Id != storeId) && warehouses.All(warehouse => warehouse.Id != storeId)))
+            {
+                return "Choose where the goods should go.";
+            }
+
+            if (draft.Count == 0)
+            {
+                return "Add at least one product.";
+            }
+
+            if (draft.Any(line => line.Quantity <= 0m))
+            {
+                return "Every product needs a quantity above zero.";
+            }
+
+            // A store request is filled from the warehouse, so there has to be
+            // one. The warehouse's own request is filled by a supplier, so it
+            // does not.
+            return !IsWarehouseRequest && warehouseLocationId is null
+                ? "The main warehouse is not configured. Ask the owner to set it up."
+                : null;
+        }
+    }
+
+    private bool CanSend => !sending && SendBlockReason is null;
+
+    /// <summary>Everything at the chosen store that is out of stock or at its
+    /// reorder point and not already on this request. Ordered so the emptiest
+    /// products lead.</summary>
+    private List<PosStockLevel> LowStock => [.. (stockLevels?.Products ?? [])
+        .Where(row => row.Status is "Out" or "Low" && draft.All(line => line.Product.Id != row.ProductId))
+        .OrderBy(row => row.Status == "Out" ? 0 : 1)
+        .ThenBy(row => row.Available)];
+
+    /// <summary>Requests grouped the way the store experiences them: waiting on
+    /// the owner, moving through the warehouse, or finished.</summary>
+    private int WaitingCount => CountGroup("waiting");
+
+    private int CountGroup(string group) => requests.Count(request => FilterGroup(request.Status) == group);
+
+    private List<PosTransferSummary> VisibleRequests => historyFilter == "all"
+        ? [.. requests]
+        : [.. requests.Where(request => FilterGroup(request.Status) == historyFilter)];
+
+    private static string FilterGroup(string status) => status switch
+    {
+        "Submitted" or "InReview" or "PendingCentralReview" => "waiting",
+        "Received" or "Closed" or "Cancelled" => "done",
+        _ => "progress",
+    };
+
+    /// <summary>Folds live transfer events into one quiet reload a moment later.</summary>
+    private RefreshThrottle? liveRefresh;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AtWarehouse)
+        {
+            Trail.Name(PageHeading);
+        }
+
+        // A request's status moves when the owner decides and when the
+        // warehouse acts; both ends announce the change, so the history
+        // follows along without anyone pressing Refresh.
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(ReloadRequestsQuietlyAsync));
+        Notifications.TransfersChanged += OnTransfersChanged;
+
+        try
+        {
+            ApiResult<List<PosLocation>> locations = await Api.GetLocationsAsync(CancellationToken.None);
+            if (locations.IsSuccess && locations.Value is not null)
+            {
+                warehouseLocationId = locations.Value.FirstOrDefault(location => location.Kind == 0 && location.IsActive)?.Id;
+                stores.AddRange(locations.Value.Where(location => location.Kind == 1 && location.IsActive && Session.CanUseInventoryLocation(location.Id)).OrderBy(location => location.Code));
+
+                // The warehouse can ask for stock too, but nobody upstream holds
+                // it: its request goes to the owner to buy. It is offered as a
+                // destination alongside the stores so there is one place to ask.
+                warehouses.AddRange(locations.Value
+                    .Where(location => location.Kind == 0 && location.IsActive && Session.CanUseInventoryLocation(location.Id))
+                    .OrderBy(location => location.Code));
+                selectedStoreId = Session.WorkLocationId is { } preferred && stores.Any(store => store.Id == preferred)
+                    ? preferred : stores.Count == 1 ? stores[0].Id : null;
+            }
+            else { message = locations.Error ?? "Stores could not be loaded."; }
+
+            for (int offset = 0; offset < 2000; offset += 200)
+            {
+                ApiResult<List<PosProductSummary>> page = await Api.GetProductsAsync(null, offset, 200, CancellationToken.None);
+                if (!page.IsSuccess || page.Value is null) { message ??= page.Error ?? "Products could not be loaded."; break; }
+                products.AddRange(page.Value);
+                if (page.Value.Count < 200) { break; }
+            }
+            if (PrefillStoreId is { } storeId && stores.Any(store => store.Id == storeId))
+            {
+                selectedStoreId = storeId;
+            }
+            await LoadLowStockAsync();
+            if (PrefillProductId is { } productId && !products.Any(product => product.Id == productId) && !string.IsNullOrWhiteSpace(PrefillSku))
+            {
+                ApiResult<List<PosProductSummary>> match = await Api.GetProductsAsync(PrefillSku, 0, 20, CancellationToken.None);
+                if (match.IsSuccess && match.Value is not null)
+                {
+                    products.AddRange(match.Value.Where(product => products.All(existing => existing.Id != product.Id)));
+                }
+            }
+            if (PrefillProductId is { } selectedProductId && products.FirstOrDefault(product => product.Id == selectedProductId && product.IsActive) is { } product)
+            {
+                AddProduct(product);
+                draft[^1].Quantity = PrefillQuantity is > 0m and { } quantity ? quantity : 1m;
+            }
+            else if (PrefillProductId is not null)
+            {
+                message ??= "The suggested product could not be loaded. Search for it before sending this request.";
+            }
+            await LoadRequestsAsync();
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { loading = false; }
+    }
+
+    private void AddProduct(PosProductSummary product)
+    {
+        if (draft.All(line => line.Product.Id != product.Id)) { draft.Add(new DraftLine(product)); }
+        selectedLow.Remove(product.Id);
+        search = string.Empty;
+    }
+
+    private static void Adjust(DraftLine line, decimal delta)
+    {
+        decimal next = line.Quantity + delta;
+        line.Quantity = next < 0.001m ? 0.001m : next;
+    }
+
+    private async Task OnStoreChanged(ChangeEventArgs args)
+    {
+        selectedStoreId = Guid.TryParse(args.Value?.ToString(), out Guid parsed) ? parsed : null;
+        await LoadLowStockAsync();
+    }
+
+    private async Task LoadLowStockAsync()
+    {
+        selectedLow.Clear();
+        if (selectedStoreId is not { } storeId)
+        {
+            stockLevels = null;
+            lowStockError = null;
+            return;
+        }
+
+        loadingLowStock = true;
+        lowStockError = null;
+        StateHasChanged();
+        try
+        {
+            ApiResult<PosStockLevelReport> report = await Api.GetStockLevelsAsync(storeId, CancellationToken.None);
+            if (report.IsSuccess && report.Value is not null) { stockLevels = report.Value; }
+            else { stockLevels = null; lowStockError = report.Error ?? "This store's stock levels could not be loaded."; }
+        }
+        catch (HttpRequestException) { stockLevels = null; lowStockError = "The inventory service is unavailable. Try again shortly."; }
+        finally { loadingLowStock = false; }
+    }
+
+    private void ToggleLow(Guid productId)
+    {
+        if (!selectedLow.Remove(productId)) { selectedLow.Add(productId); }
+    }
+
+    private void ToggleAllLow(ChangeEventArgs _)
+    {
+        List<PosStockLevel> rows = LowStock;
+        bool allSelected = rows.Count > 0 && rows.All(row => selectedLow.Contains(row.ProductId));
+        selectedLow.Clear();
+        if (!allSelected)
+        {
+            foreach (PosStockLevel row in rows) { selectedLow.Add(row.ProductId); }
+        }
+    }
+
+    /// <summary>Same goal the inventory page uses: reach the target level, or
+    /// the reorder point, minus anything already on the way.</summary>
+    private static decimal SuggestQuantity(PosStockLevel row)
+        => ReplenishmentQuantity.Suggest(row.Available, row.InTransit, row.TargetStock, row.ReorderPoint);
+
+    private void AddSelectedLow()
+    {
+        if (selectedStoreId is not { } storeId || stockLevels is null) { return; }
+        int added = 0;
+        foreach (PosStockLevel row in LowStock.Where(row => selectedLow.Contains(row.ProductId)))
+        {
+            PosProductSummary? product = products.FirstOrDefault(p => p.Id == row.ProductId)
+                ?? products.FirstOrDefault(p => p.Sku.Equals(row.Sku, StringComparison.OrdinalIgnoreCase));
+            if (product is null || !product.IsActive) { continue; }
+
+            if (draft.All(line => line.Product.Id != product.Id))
+            {
+                draft.Add(new DraftLine(product) { Quantity = SuggestQuantity(row) });
+                added++;
+            }
+        }
+
+        selectedLow.Clear();
+        message = added == 0
+            ? "None of those products are available to add."
+            : $"{added} product{(added == 1 ? "" : "s")} added to this request for {StoreName(storeId)}.";
+    }
+
+    private async Task SendAsync()
+    {
+        if (!CanSend || selectedStoreId is not { } storeId) { return; }
+        sending = true;
+        savedDraftId = null;
+        message = null;
+        try
+        {
+            if (IsWarehouseRequest)
+            {
+                await SendSupplyRequestAsync(storeId);
+                return;
+            }
+
+            PosCreateRestockRequest body = new(storeId,
+                [.. draft.Select(line => new PosTransferLineRequest(line.Product.Id, line.Quantity))],
+                warehouseLocationId);
+            ApiResult<PosReference> created = await Api.CreateRestockRequestAsync(body, CancellationToken.None);
+            if (!created.IsSuccess || created.Value is null) { message = created.Error ?? "The request could not be saved."; return; }
+
+            ApiResult<PosReference> submitted = await Api.SubmitTransferAsync(created.Value.Id, CancellationToken.None);
+            if (!submitted.IsSuccess)
+            {
+                savedDraftId = created.Value.Id;
+                message = submitted.Error ?? "The request was saved as a draft but could not be sent.";
+            }
+            else
+            {
+                // Land on the history with the fresh request highlighted, so
+                // the confirmation points at the thing it is about.
+                draft.Clear();
+                search = string.Empty;
+                justSentId = created.Value.Id;
+                historyFilter = "all";
+                activeTab = "history";
+                message = "Restock request sent to the owner for approval.";
+            }
+            await LoadRequestsAsync();
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { sending = false; }
+    }
+
+    /// <summary>
+    /// Sends the warehouse's own request. There is no draft stage and nothing to
+    /// submit afterwards: a supply request is raised already waiting on the owner,
+    /// because there is no picking to prepare for.
+    /// </summary>
+    /// <param name="warehouseId">The warehouse asking.</param>
+    private async Task SendSupplyRequestAsync(Guid warehouseId)
+    {
+        PosCreateSupplyRequest body = new(
+            warehouseId,
+            [.. draft.Select(line => new PosSupplyRequestLine(line.Product.Id, line.Quantity))]);
+
+        ApiResult<PosReference> created = await Api.CreateSupplyRequestAsync(body, CancellationToken.None);
+
+        if (!created.IsSuccess || created.Value is null)
+        {
+            message = created.Error ?? "The request could not be sent.";
+            return;
+        }
+
+        draft.Clear();
+        search = string.Empty;
+        historyFilter = "all";
+        activeTab = "history";
+        message = "Supply request sent to the owner, who will order these from a supplier.";
+    }
+
+    /// <summary>Colours a supply request by where it has got to.</summary>
+    /// <param name="status">The request status.</param>
+    /// <returns>The status chip class.</returns>
+    private static string SupplyStatusClass(string status) => status switch
+    {
+        "Submitted" => "pending",
+        "PartiallyOrdered" => "transit",
+        "Ordered" => "approved",
+        _ => string.Empty,
+    };
+
+    private async Task LoadRequestsAsync()
+    {
+        loadingRequests = true;
+        try
+        {
+            if (warehouses.Count > 0)
+            {
+                // The warehouse's own requests are a different document and do
+                // not come back with the transfers.
+                ApiResult<List<PosSupplyRequest>> supply =
+                    await Api.GetSupplyRequestsAsync(false, CancellationToken.None);
+                supplyRequests.Clear();
+                if (supply.IsSuccess && supply.Value is not null)
+                {
+                    supplyRequests.AddRange(supply.Value
+                        .Where(request => warehouses.Any(w => w.Id == request.DestinationLocationId))
+                        .OrderByDescending(request => request.RequestedAtUtc));
+                }
+            }
+
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { message ??= result.Error ?? "Requests could not be loaded."; return; }
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock" &&
+                stores.Any(store => store.Id == request.DestinationLocationId))
+                .OrderByDescending(request => request.CreatedAtUtc));
+        }
+        catch (HttpRequestException) { message ??= "Requests could not be refreshed."; }
+        finally { loadingRequests = false; }
+    }
+
+    /// <summary>The live signal: reload the history without touching the
+    /// button, the message, or anything the staff member is typing.</summary>
+    private void OnTransfersChanged(IReadOnlyList<Guid> changed) => liveRefresh?.Request();
+
+    private async Task ReloadRequestsQuietlyAsync()
+    {
+        try
+        {
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                // Keep the rows on screen; the next change tries again.
+                return;
+            }
+
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock" &&
+                stores.Any(store => store.Id == request.DestinationLocationId))
+                .OrderByDescending(request => request.CreatedAtUtc));
+            StateHasChanged();
+        }
+        catch (HttpRequestException)
+        {
+            // Keep the rows on screen; the next change tries again.
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Notifications.TransfersChanged -= OnTransfersChanged;
+        liveRefresh?.Dispose();
+    }
+
+    private string StoreName(Guid id)
+        => stores.FirstOrDefault(store => store.Id == id)?.Name
+            ?? warehouses.FirstOrDefault(warehouse => warehouse.Id == id)?.Name
+            ?? "Store";
+    private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
+        ? $"Restock request {TransferLabels.ShortId(request.Id)}"
+        : request.Number;
+
+    /// <summary>The stage of a request told the way the store experiences it:
+    /// the owner decides (pending), then the warehouse picks and delivers.</summary>
+    private static string StatusLabel(string status) => status switch
+    {
+        "Submitted" or "InReview" => "Pending approval",
+        "Approved" => "Approved",
+        "Picking" => "Being picked",
+        "Ready" => "Ready to deliver",
+        "Dispatched" => "On the way",
+        "PartiallyReceived" => "Partly received",
+        "Received" => "Received",
+        "Closed" => "Delivered",
+        "Cancelled" => "Cancelled",
+        "PendingCentralReview" => "Pending review",
+        _ => SplitWords(status),
+    };
+
+    /// <summary>Badge colour that matches the stage: amber while waiting, green
+    /// once approved or delivered, blue while the warehouse holds or moves it.</summary>
+    private static string StatusClass(string status) => status switch
+    {
+        "Submitted" or "InReview" or "PartiallyReceived" or "PendingCentralReview" => "pending",
+        "Approved" or "Picking" or "Received" or "Closed" => "approved",
+        "Ready" or "Dispatched" => "transit",
+        "Cancelled" => "cancelled",
+        _ => string.Empty,
+    };
+
+    /// <summary>What happens next, said from the store's side of the request.</summary>
+    private static string StatusHint(PosTransferSummary request) => request.Status switch
+    {
+        "Submitted" => "Waiting for the owner to approve.",
+        "InReview" => "The owner is reviewing this request.",
+        "Approved" => "Approved — the warehouse will start picking.",
+        "Picking" => "The warehouse is picking your items.",
+        "Ready" => "Packed and ready to deliver.",
+        "Dispatched" => "On the way to your store.",
+        "PartiallyReceived" => "Partly received — open the request to confirm the rest.",
+        "Received" or "Closed" => "Delivered to your store.",
+        "Cancelled" => "Cancelled — open the request for details.",
+        _ => "Open the request to see its details.",
+    };
+
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

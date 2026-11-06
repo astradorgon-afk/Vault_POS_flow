@@ -40,6 +40,9 @@ public sealed class GoodsReceiptTests
         receipt.BusinessDate.Should().Be(BusinessDate);
         receipt.Status.Should().Be(GoodsReceiptStatus.Posted);
         receipt.DocumentsMissing.Should().BeFalse();
+        receipt.SupplierDeliveryReceiptNumber.Should().BeNull();
+        receipt.SupplierOfficialReceiptNumber.Should().BeNull();
+        receipt.SupplierReleasedAtUtc.Should().BeNull();
         receipt.CostVariancePendingApproval.Should().BeFalse();
         receipt.CostVarianceValueAtStake.Should().Be(0m);
         receipt.Lines.Should().ContainSingle();
@@ -58,6 +61,68 @@ public sealed class GoodsReceiptTests
         line.AcceptedState.Should().Be(InventoryState.PendingInspection);
         line.UnitCost.Should().Be(100m);
         line.CostVariancePercent.Should().Be(0m);
+    }
+
+    [Fact]
+    public void Create_WithSupplierPaperwork_KeepsTheirNumbersAndTheirReleaseTime()
+    {
+        DateTimeOffset released = Now.AddDays(-1).AddHours(-3);
+
+        Result<GoodsReceipt> result = Plan(
+            Coke,
+            Line(received: 10m),
+            ordered: 10m,
+            poUnitCost: 100m,
+            supplierDeliveryReceiptNumber: "DR-8841",
+            supplierOfficialReceiptNumber: "OR-2026-0777",
+            supplierReleasedAtUtc: released);
+
+        result.IsSuccess.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.Code)));
+        GoodsReceipt receipt = result.Value;
+
+        // The supplier's own paperwork and the clock they released on are kept
+        // apart from our arrival: goods can leave them days before we count them.
+        receipt.SupplierDeliveryReceiptNumber.Should().Be("DR-8841");
+        receipt.SupplierOfficialReceiptNumber.Should().Be("OR-2026-0777");
+        receipt.SupplierReleasedAtUtc.Should().Be(released);
+        receipt.ReceivedAtUtc.Should().Be(Now);
+    }
+
+    [Fact]
+    public void Create_BlankSupplierPaperwork_RecordsNothingRatherThanBlanks()
+    {
+        Result<GoodsReceipt> result = Plan(
+            Coke,
+            Line(received: 10m),
+            ordered: 10m,
+            poUnitCost: 100m,
+            supplierDeliveryReceiptNumber: "   ",
+            supplierOfficialReceiptNumber: null);
+
+        result.IsSuccess.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.Code)));
+        GoodsReceipt receipt = result.Value;
+
+        // An untouched field must read as "not presented", never as "".
+        receipt.SupplierDeliveryReceiptNumber.Should().BeNull();
+        receipt.SupplierOfficialReceiptNumber.Should().BeNull();
+    }
+
+    [Fact]
+    public void Create_OverlongSupplierNumber_IsTrimmedAndCutRatherThanRefused()
+    {
+        Result<GoodsReceipt> result = Plan(
+            Coke,
+            Line(received: 10m),
+            ordered: 10m,
+            poUnitCost: 100m,
+            supplierDeliveryReceiptNumber: $"   {new string('X', GoodsReceipt.SupplierDocumentNumberMaxLength + 20)}   ");
+
+        result.IsSuccess.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.Code)));
+
+        // A delivery is never turned away because the supplier printed a long
+        // reference: it is cleaned and cut the way a lot number is.
+        result.Value.SupplierDeliveryReceiptNumber.Should().Be(
+            new string('X', GoodsReceipt.SupplierDocumentNumberMaxLength));
     }
 
     [Fact]
@@ -445,8 +510,23 @@ public sealed class GoodsReceiptTests
         bool tracksBatches = false,
         bool tracksExpiry = false,
         bool documentsMissing = false,
-        PurchaseOrderId? orderId = null)
-        => Plan(product, [line], ordered, poUnitCost, receivedByLine, tracksBatches, tracksExpiry, documentsMissing, orderId);
+        PurchaseOrderId? orderId = null,
+        string? supplierDeliveryReceiptNumber = null,
+        string? supplierOfficialReceiptNumber = null,
+        DateTimeOffset? supplierReleasedAtUtc = null)
+        => Plan(
+            product,
+            [line],
+            ordered,
+            poUnitCost,
+            receivedByLine,
+            tracksBatches,
+            tracksExpiry,
+            documentsMissing,
+            orderId,
+            supplierDeliveryReceiptNumber,
+            supplierOfficialReceiptNumber,
+            supplierReleasedAtUtc);
 
     private static Result<GoodsReceipt> Plan(
         ProductId product,
@@ -457,7 +537,10 @@ public sealed class GoodsReceiptTests
         bool tracksBatches = false,
         bool tracksExpiry = false,
         bool documentsMissing = false,
-        PurchaseOrderId? orderId = null)
+        PurchaseOrderId? orderId = null,
+        string? supplierDeliveryReceiptNumber = null,
+        string? supplierOfficialReceiptNumber = null,
+        DateTimeOffset? supplierReleasedAtUtc = null)
     {
         Dictionary<PurchaseOrderLineId, PurchaseOrderLineReceivingInfo> orderLines = new()
         {
@@ -480,6 +563,9 @@ public sealed class GoodsReceiptTests
             documentsMissing,
             BusinessDate,
             Shelf,
-            Now);
+            Now,
+            supplierDeliveryReceiptNumber,
+            supplierOfficialReceiptNumber,
+            supplierReleasedAtUtc);
     }
 }

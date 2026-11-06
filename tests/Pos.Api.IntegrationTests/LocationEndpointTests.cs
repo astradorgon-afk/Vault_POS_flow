@@ -31,6 +31,23 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task SignInLocations_WithoutAuthentication_ListsOnlyActivePhysicalLocationNames()
+    {
+        await factory.CreateLocationAsync("SIGNSTORE", "Sign-in Store", LocationKind.Store);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/locations/sign-in");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement[] locations = document.RootElement.EnumerateArray().ToArray();
+        locations.Should().Contain(location => location.GetProperty("code").GetString() == "SIGNSTORE");
+        locations.Should().NotContain(location => location.GetProperty("code").GetString() == SystemLocationCodes.ExternalSupplier);
+        locations.Should().OnlyContain(location => location.EnumerateObject().Select(property => property.Name)
+            .OrderBy(name => name).SequenceEqual(new[] { "code", "id", "kind", "name" }));
+    }
+
+    [Fact]
     public async Task Cashier_CanListLocations()
     {
         await factory.CreateLocationAsync("MAIN", "Main Warehouse", LocationKind.MainWarehouse);
@@ -53,6 +70,26 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
         // counterparty exists in the database but must never appear here.
         codes.Should().Contain(["MAIN", "STORE01"]);
         codes.Should().NotContain(SystemLocationCodes.ExternalSupplier);
+        document.RootElement.EnumerateArray().All(location =>
+            !location.TryGetProperty("settings", out _)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MainInventoryManager_CannotOpenLocationOrDeviceAdministration()
+    {
+        await factory.CreateUserAsync("loc-inventory-manager", Roles.MainInventoryManager);
+        using HttpClient client = factory.CreateClient();
+        string token = await SignInAsync(client, "loc-inventory-manager");
+
+        using HttpResponseMessage directory = await GetAsync(client, "/api/v1/locations", token);
+        using HttpResponseMessage administration = await GetAsync(client, "/api/v1/locations/administration", token);
+        using HttpResponseMessage deviceChoices = await GetAsync(client, "/api/v1/locations/device-choices", token);
+        using HttpResponseMessage devices = await GetAsync(client, "/api/v1/devices", token);
+
+        directory.StatusCode.Should().Be(HttpStatusCode.OK);
+        administration.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        deviceChoices.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        devices.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -85,6 +122,11 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
         using HttpClient client = factory.CreateClient();
 
         string token = await SignInAsync(client, "loc-admin");
+
+        using HttpResponseMessage administration = await GetAsync(client, "/api/v1/locations/administration", token);
+        using HttpResponseMessage deviceChoices = await GetAsync(client, "/api/v1/locations/device-choices", token);
+        administration.StatusCode.Should().Be(HttpStatusCode.OK);
+        deviceChoices.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using HttpResponseMessage created = await PostAsJsonAsync(
             client,
@@ -179,6 +221,256 @@ public sealed class LocationEndpointTests(PosApiFactory factory)
             token);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Administrator_CanReadOneLocation()
+    {
+        LocationId location = await factory.CreateLocationAsync("STORE04", "Store Four");
+        await factory.CreateUserAsync("loc-admin-read", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-read");
+
+        using HttpResponseMessage found = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/locations/{location.Value}"), token);
+        using HttpResponseMessage missing = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/locations/{Guid.CreateVersion7()}"), token);
+
+        found.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument document = JsonDocument.Parse(await found.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("code").GetString().Should().Be("STORE04");
+        document.RootElement.GetProperty("isActive").GetBoolean().Should().BeTrue();
+        missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Administrator_CanUpdateLocationDetails()
+    {
+        LocationId location = await factory.CreateLocationAsync("STORE05", "Store Five");
+        await factory.CreateUserAsync("loc-admin-update", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-update");
+
+        using HttpResponseMessage response = await PutAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}"),
+            new
+            {
+                code = "store05b",
+                name = "Store Five North",
+                kind = (int)LocationKind.Store,
+                timeZoneId = "Asia/Tokyo",
+            },
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var stored = await factory.WithServiceAsync(context =>
+            context.Locations.AsNoTracking()
+                .Where(l => l.Id == location)
+                .Select(l => new { l.Code, l.Name, l.Kind, l.TimeZoneId })
+                .SingleAsync());
+
+        // The code is normalised the same way creation normalises it, so a
+        // lower-case entry cannot split the directory into two spellings.
+        stored.Code.Should().Be("STORE05B");
+        stored.Name.Should().Be("Store Five North");
+        stored.Kind.Should().Be(LocationKind.Store);
+        stored.TimeZoneId.Should().Be("Asia/Tokyo");
+    }
+
+    [Fact]
+    public async Task UpdateDetails_WithACodeAnotherLocationHolds_ReturnsConflict()
+    {
+        await factory.CreateLocationAsync("STORE06", "Store Six");
+        LocationId other = await factory.CreateLocationAsync("STORE07", "Store Seven");
+        await factory.CreateUserAsync("loc-admin-code-clash", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-code-clash");
+
+        using HttpResponseMessage response = await PutAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{other.Value}"),
+            new
+            {
+                code = "STORE06",
+                name = "Store Seven",
+                kind = (int)LocationKind.Store,
+                timeZoneId = "Asia/Manila",
+            },
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task UpdateDetails_OnUnknownLocation_ReturnsNotFound()
+    {
+        await factory.CreateUserAsync("loc-admin-update-missing", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-update-missing");
+
+        using HttpResponseMessage response = await PutAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{Guid.CreateVersion7()}"),
+            new { code = "STORE99", name = "Store Ninety Nine", kind = (int)LocationKind.Store, timeZoneId = "Asia/Manila" },
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Cashier_CannotUpdateOrCloseLocations()
+    {
+        LocationId location = await factory.CreateLocationAsync("STORE08", "Store Eight");
+        await factory.CreateUserAsync("loc-cashier-crud", Roles.Cashier);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-cashier-crud");
+
+        using HttpResponseMessage updated = await PutAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}"),
+            new { code = "STORE08", name = "Tampered", kind = (int)LocationKind.Store, timeZoneId = "Asia/Manila" },
+            token);
+        using HttpResponseMessage closed = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}/close"),
+            new { closingDate = "2026-10-13" },
+            token);
+
+        updated.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        closed.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Administrator_CanCloseALocation_ItStaysVisibleButLeavesThePickers()
+    {
+        LocationId location = await factory.CreateLocationAsync("STORE09", "Store Nine");
+        await factory.CreateUserAsync("loc-admin-close", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-close");
+
+        using HttpResponseMessage closed = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}/close"),
+            new { closingDate = "2026-10-13" },
+            token);
+
+        closed.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // A closed location keeps its row, its history and its place in the
+        // administration list: an owner has to be able to find what it did, and
+        // the row itself says it is closed.
+        using HttpResponseMessage read = await GetAsync(
+            client, FormattableString.Invariant($"/api/v1/locations/{location.Value}"), token);
+        using JsonDocument document = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("isActive").GetBoolean().Should().BeFalse();
+        document.RootElement.GetProperty("closedOn").GetString().Should().Be("2026-10-13");
+
+        using HttpResponseMessage administration = await GetAsync(
+            client, "/api/v1/locations/administration", token);
+        using JsonDocument directory = JsonDocument.Parse(await administration.Content.ReadAsStringAsync());
+        JsonElement retired = directory.RootElement.EnumerateArray()
+            .Single(l => l.GetProperty("code").GetString() == "STORE09");
+        retired.GetProperty("isActive").GetBoolean().Should().BeFalse();
+
+        // It drops out of the pickers, though: no till may be assigned to it.
+        using HttpResponseMessage deviceChoices = await GetAsync(
+            client, "/api/v1/locations/device-choices", token);
+        using JsonDocument choices = JsonDocument.Parse(await deviceChoices.Content.ReadAsStringAsync());
+        choices.RootElement.EnumerateArray()
+            .Select(l => l.GetProperty("code").GetString())
+            .Should().NotContain("STORE09");
+
+        // Closing twice is refused rather than silently repeating.
+        using HttpResponseMessage again = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}/close"),
+            new { closingDate = "2026-10-13" },
+            token);
+        again.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Close_WhileStockRemains_Succeeds()
+    {
+        LocationId location = await factory.CreateLocationAsync("STORE10", "Store Ten");
+        ProductId product = await factory.CreateProductAsync("SKU-CLOSE-10", "Close Blocker", "4800000100016");
+        await factory.CreateUserAsync("loc-admin-close-stock", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-close-stock");
+
+        await InventoryControlTestSupport.SetBucketAsync(factory, location, product, quantity: 5m, unitCost: 10m);
+
+        // Outstanding stock does not block a close: the ledger keeps the rows
+        // either way, so the location retires with its history intact.
+        using HttpResponseMessage closed = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}/close"),
+            new { closingDate = "2026-10-13" },
+            token);
+
+        closed.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await InventoryControlTestSupport.QuantityAsync(factory, location, product)).Should().Be(5m);
+
+        Location stored = await factory.WithServiceAsync(context =>
+            context.Locations.AsNoTracking().FirstAsync(l => l.Id == location));
+        stored.IsActive.Should().BeFalse();
+        stored.ClosedOn.Should().Be(new DateOnly(2026, 10, 13));
+    }
+
+    [Fact]
+    public async Task Close_OnSystemCounterpartyOrUnknownLocation_IsRefused()
+    {
+        LocationId counterparty = await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalWriteOff);
+        await factory.CreateUserAsync("loc-admin-close-system", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-close-system");
+
+        using HttpResponseMessage system = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{counterparty.Value}/close"),
+            new { closingDate = "2026-10-13" },
+            token);
+        using HttpResponseMessage unknown = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{Guid.CreateVersion7()}/close"),
+            new { closingDate = "2026-10-13" },
+            token);
+
+        system.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Close_WithoutAClosingDate_ReturnsBadRequest()
+    {
+        LocationId location = await factory.CreateLocationAsync("STORE11", "Store Eleven");
+        await factory.CreateUserAsync("loc-admin-close-validation", Roles.Administrator, tier: ApprovalTier.Tier3);
+        using HttpClient client = factory.CreateClient();
+
+        string token = await SignInAsync(client, "loc-admin-close-validation");
+
+        using HttpResponseMessage response = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/locations/{location.Value}/close"),
+            new { },
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // A refused validation never half-closes the location.
+        Location stored = await factory.WithServiceAsync(context =>
+            context.Locations.AsNoTracking().FirstAsync(l => l.Id == location));
+        stored.IsActive.Should().BeTrue();
     }
 
     private static async Task<HttpResponseMessage> GetAsync(HttpClient client, string path, string accessToken)

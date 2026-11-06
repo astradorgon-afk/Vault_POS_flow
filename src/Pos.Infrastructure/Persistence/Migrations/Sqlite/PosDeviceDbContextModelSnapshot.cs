@@ -160,6 +160,11 @@ namespace Pos.Infrastructure.Persistence.Migrations.Sqlite
                         .HasColumnType("TEXT")
                         .HasColumnName("id");
 
+                    b.Property<string>("Category")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("category");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER")
                         .HasColumnName("is_active");
@@ -497,6 +502,12 @@ namespace Pos.Infrastructure.Persistence.Migrations.Sqlite
                     b.Property<Guid>("DeviceId")
                         .HasColumnType("TEXT")
                         .HasColumnName("device_id");
+
+                    b.Property<string>("AllowedLocationIdsJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("allowed_location_ids_json");
 
                     b.Property<string>("EnrolledAtUtc")
                         .IsRequired()

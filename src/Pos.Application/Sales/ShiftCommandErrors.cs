@@ -50,6 +50,16 @@ internal static class ShiftCommandErrors
         "shift.location_mismatch",
         "The stated location does not match the shift's location.");
 
+    /// <summary>A register reported a shift time ahead of head office's clock.</summary>
+    public static Error TimeInFuture => Error.Validation(
+        "shift.time_in_future",
+        "The shift time is in the future. Check the register's clock.");
+
+    /// <summary>A register reported closing a shift before it opened.</summary>
+    public static Error ClosedBeforeOpened => Error.Validation(
+        "shift.closed_before_opened",
+        "A shift cannot close before it opened.");
+
     /// <summary>The actor does not hold <c>shift.close.other</c>.</summary>
     public static Error CloseOtherShiftDenied => Error.Forbidden(
         "shift.close_other_denied",

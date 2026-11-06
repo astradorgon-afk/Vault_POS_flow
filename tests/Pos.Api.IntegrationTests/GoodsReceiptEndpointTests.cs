@@ -28,6 +28,123 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
     // in parallel.
     private static long _barcodeSequence = 7200000000000;
 
+    [Theory]
+    [InlineData(-2, true)]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public async Task Receiving_UsesActualArrivalTime_AndCannotPrecedeOrdering(int orderedDaysFromToday, bool allowed)
+    {
+        string prefix = $"grn-date-{orderedDaysFromToday}";
+        Seed seed = await SeedAsync(prefix);
+        await factory.CreateUserAsync(prefix + "-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync(prefix + "-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, prefix + "-rec");
+        string approver = await SignInAsync(client, prefix + "-app");
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        // Simulate separately dated orders only in the isolated integration database.
+        DateTimeOffset orderedAt = DateTimeOffset.UtcNow.AddDays(orderedDaysFromToday);
+        await factory.WithServiceAsync(async context =>
+        {
+            PurchaseOrder entity = await context.PurchaseOrders.AsTracking()
+                .SingleAsync(o => o.Id == new PurchaseOrderId(orderId));
+            context.Entry(entity).Property(o => o.OrderedAtUtc).CurrentValue = orderedAt;
+            await context.SaveChangesAsync();
+            return 0;
+        });
+
+        (HttpStatusCode _, JsonElement before) = await GetOrderAsync(client, receiver, orderId);
+        before.GetProperty("status").GetString().Should().Be("Ordered");
+        before.GetProperty("orderedAtUtc").GetDateTimeOffset().Should().Be(orderedAt);
+        before.GetProperty("receivingTimeZoneId").GetString().Should().NotBeNullOrWhiteSpace();
+        using HttpResponseMessage emptyHistory = await GetAsync(client,
+            $"/api/v1/purchasing/orders/{orderId}/receipts", receiver);
+        using JsonDocument history = JsonDocument.Parse(await emptyHistory.Content.ReadAsStringAsync());
+        history.RootElement.GetArrayLength().Should().Be(0, "sending an order must not create a delivery");
+
+        DateTimeOffset arrivalStartedAt = DateTimeOffset.UtcNow;
+        using HttpResponseMessage response = await PostAsJsonAsync(client,
+            $"/api/v1/purchasing/orders/{orderId}/receipts", ReceiptBody(lineId, received: 10m, unitCost: 100m), receiver);
+
+        if (!allowed)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await ReadErrorCodeAsync(response)).Should().Be("purchasing.receiving_before_order");
+            (HttpStatusCode _, JsonElement unchanged) = await GetOrderAsync(client, receiver, orderId);
+            unchanged.GetProperty("status").GetString().Should().Be("Ordered");
+            (await ReceiptCountAsync(orderId)).Should().Be(0);
+            return;
+        }
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using JsonDocument created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Guid receiptId = created.RootElement.GetProperty("id").GetGuid();
+        (HttpStatusCode _, JsonElement receipt) = await GetReceiptAsync(client, receiver, orderId, receiptId);
+        receipt.GetProperty("receivedAtUtc").GetDateTimeOffset().Should().BeOnOrAfter(arrivalStartedAt);
+        (HttpStatusCode _, JsonElement after) = await GetOrderAsync(client, receiver, orderId);
+        after.GetProperty("orderedAtUtc").GetDateTimeOffset().Should().Be(orderedAt, "receiving must preserve the order date");
+        after.GetProperty("status").GetString().Should().Be("FullyReceived");
+    }
+
+    [Fact]
+    public async Task Receipt_CarriesTheSuppliersPaperwork_AndReturnsItOnRead()
+    {
+        string prefix = "grn-supdocs";
+        Seed seed = await SeedAsync(prefix);
+        await factory.CreateUserAsync(prefix + "-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync(prefix + "-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, prefix + "-rec");
+        string approver = await SignInAsync(client, prefix + "-app");
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        // The supplier's paperwork is transcribed, not issued: we keep whatever
+        // they printed, including the moment they released the goods, which can
+        // be well before we counted them at the door.
+        DateTimeOffset released = DateTimeOffset.UtcNow.AddDays(-1).AddHours(-2);
+        object body = new
+        {
+            lines = new object[]
+            {
+                new
+                {
+                    purchaseOrderLineId = lineId,
+                    quantityReceived = 10m,
+                    quantityDamaged = 0m,
+                    quantityWrongItem = 0m,
+                    quantityExpired = 0m,
+                    unitCost = 100m,
+                },
+            },
+            supplierDeliveryReceiptNumber = "  DR-8841  ",
+            supplierOfficialReceiptNumber = "OR-2026-0777",
+            supplierReleasedAtUtc = released,
+        };
+
+        using HttpResponseMessage response = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            body,
+            receiver);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using JsonDocument created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Guid receiptId = created.RootElement.GetProperty("id").GetGuid();
+
+        (HttpStatusCode status, JsonElement receipt) = await GetReceiptAsync(client, receiver, orderId, receiptId);
+        status.Should().Be(HttpStatusCode.OK);
+        receipt.GetProperty("supplierDeliveryReceiptNumber").GetString().Should().Be("DR-8841");
+        receipt.GetProperty("supplierOfficialReceiptNumber").GetString().Should().Be("OR-2026-0777");
+        receipt.GetProperty("supplierReleasedAtUtc").GetDateTimeOffset()
+            .Should().BeCloseTo(released, TimeSpan.FromSeconds(1));
+    }
+
     [Fact]
     public async Task FullReceipt_PostsTheGrn_AndCompletesTheOrder()
     {
@@ -454,6 +571,57 @@ public sealed class GoodsReceiptEndpointTests(PosApiFactory factory)
         line.GetProperty("quantityAccepted").GetDecimal().Should().Be(4m);
         line.GetProperty("acceptedState").GetString().Should().Be("PendingInspection");
         detail.GetProperty("discrepancies").GetArrayLength().Should().Be(0);
+
+        (HttpStatusCode _, JsonElement completed) = await GetOrderAsync(client, receiver, orderId);
+        completed.GetProperty("status").GetString().Should().Be("FullyReceived");
+    }
+
+    [Fact]
+    public async Task DamagedUnits_LeaveTheOrderIncomplete_UntilReplacementsArrive()
+    {
+        Seed seed = await SeedAsync("grndmg");
+        await factory.CreateUserAsync("grndmg-rec", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateUserAsync("grndmg-app", Roles.MainInventoryManager, tier: ApprovalTier.Unlimited);
+        await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        using HttpClient client = factory.CreateClient();
+        string receiver = await SignInAsync(client, "grndmg-rec");
+        string approver = await SignInAsync(client, "grndmg-app");
+
+        Guid orderId = await CreateOrderAsync(client, receiver, seed, quantity: 10m, unitCost: 100m);
+        await SendOrderAsync(client, receiver, approver, orderId);
+        Guid lineId = await LineIdAsync(client, receiver, orderId);
+
+        // All ten counted, three of them refused as damaged.
+        using HttpResponseMessage delivered = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            new
+            {
+                lines = new object[]
+                {
+                    new { purchaseOrderLineId = lineId, quantityReceived = 10m, quantityDamaged = 3m, quantityWrongItem = 0m, quantityExpired = 0m, unitCost = 100m },
+                },
+            },
+            receiver);
+        delivered.StatusCode.Should().Be(HttpStatusCode.OK, await delivered.Content.ReadAsStringAsync());
+
+        (HttpStatusCode _, JsonElement afterDamage) = await GetOrderAsync(client, receiver, orderId);
+        afterDamage.GetProperty("status").GetString().Should().Be("PartiallyReceived", "refused units do not fill the order");
+        afterDamage.GetProperty("lines")[0].GetProperty("productName").GetString().Should().NotBeNullOrWhiteSpace();
+
+        using HttpResponseMessage listed = await GetAsync(client, "/api/v1/purchasing/orders?limit=200", receiver);
+        using JsonDocument list = JsonDocument.Parse(await listed.Content.ReadAsStringAsync());
+        list.RootElement.EnumerateArray()
+            .Single(o => o.GetProperty("id").GetGuid() == orderId)
+            .GetProperty("outstandingQuantity").GetDecimal().Should().Be(3m);
+
+        // The replacements complete it.
+        using HttpResponseMessage replacement = await PostAsJsonAsync(
+            client,
+            FormattableString.Invariant($"/api/v1/purchasing/orders/{orderId}/receipts"),
+            ReceiptBody(lineId, received: 3m, unitCost: 100m),
+            receiver);
+        replacement.StatusCode.Should().Be(HttpStatusCode.OK, await replacement.Content.ReadAsStringAsync());
 
         (HttpStatusCode _, JsonElement completed) = await GetOrderAsync(client, receiver, orderId);
         completed.GetProperty("status").GetString().Should().Be("FullyReceived");

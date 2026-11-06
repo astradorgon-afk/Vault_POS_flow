@@ -59,7 +59,9 @@ public sealed class TransferRepository(PosDbContext context) : ITransferReposito
             .FirstOrDefaultAsync(l => l.Id == locationId, cancellationToken)
             .ConfigureAwait(false);
 
-        return location is null ? null : new TransferLocationInfo(location.Kind, location.TimeZoneId);
+        return location is null
+            ? null
+            : new TransferLocationInfo(location.Kind, location.TimeZoneId, location.IsActive);
     }
 
     /// <inheritdoc />

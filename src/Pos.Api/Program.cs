@@ -87,6 +87,8 @@ try
     builder.Services.AddAuthorization();
     builder.Services.AddSignalR();
     builder.Services.AddSingleton<INotificationPublisher, SignalRNotificationPublisher>();
+    builder.Services.AddSingleton<IInventoryChangePublisher, SignalRInventoryChangePublisher>();
+    builder.Services.AddSingleton<ITransferChangePublisher, SignalRTransferChangePublisher>();
     builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
     builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
@@ -139,11 +141,15 @@ try
                 QueueLimit = 0,
             }));
 
+        // Each signed-in account has its own budget; anonymous callers share
+        // their address's. A store's registers and every web user reach the API
+        // from one address, so an address-wide budget would throttle a whole
+        // branch at once. The limiter therefore runs after authentication.
         options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
             RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.User.Identity?.Name
-                              ?? httpContext.Connection.RemoteIpAddress?.ToString()
-                              ?? "anonymous",
+                partitionKey: httpContext.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value is { Length: > 0 } userId
+                    ? "user:" + userId
+                    : "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = rateLimits.GlobalPermitLimit,
@@ -175,8 +181,6 @@ try
     app.UseWhen(
         context => !context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase),
         builder => builder.UseHttpsRedirection());
-
-    app.UseRateLimiter();
 
     // Unhandled exceptions never reach the client as detail: the log carries the
     // exception, the response carries only a code and the correlation id.
@@ -220,6 +224,29 @@ try
     }));
 
     app.UseAuthentication();
+    app.Use(async (context, next) =>
+    {
+        if (context.User.FindFirst(Pos.Infrastructure.Identity.PosClaimTypes.AuthenticationMethod)?.Value == "pwa-provision")
+        {
+            string path = context.Request.Path.Value ?? string.Empty;
+            bool allowed = HttpMethods.IsGet(context.Request.Method) && (
+                path.Equals("/api/v1/sync/baseline", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/categories", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/units", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/suppliers", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/catalog/products", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/inventory/stock-levels", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/api/v1/purchasing/orders", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/api/v1/purchasing/orders/", StringComparison.OrdinalIgnoreCase));
+            if (!allowed)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+        }
+        await next(context);
+    });
+    app.UseRateLimiter();
     app.UseAuthorization();
 
     if (app.Environment.IsDevelopment())
@@ -248,10 +275,13 @@ try
 
     app.MapAuthEndpoints();
     app.MapDeviceEndpoints();
+    app.MapPwaProvisionEndpoints();
     app.MapSyncEndpoints();
     app.MapLocationEndpoints();
+    app.MapLocationHistoryEndpoints();
     app.MapCatalogEndpoints();
     app.MapProductCurationEndpoints();
+    app.MapProductChangeApprovalEndpoints();
     app.MapInventoryEndpoints();
     app.MapInventoryTimelineEndpoints();
     app.MapInventoryExceptionEndpoints();
@@ -260,6 +290,7 @@ try
     app.MapPurchaseEndpoints();
     app.MapDirectDeliveryEndpoints();
     app.MapSupplierReturnEndpoints();
+    app.MapSupplyRequestEndpoints();
     app.MapTransferEndpoints();
     app.MapQuarantineEndpoints();
     app.MapReceiptEndpoints();
@@ -273,6 +304,8 @@ try
     app.MapNotificationEndpoints();
     app.MapDashboardEndpoints();
     app.MapStoreMonitoringEndpoints();
+    app.MapProductAnalyticsEndpoints();
+    app.MapAuditEndpoints();
     app.MapHub<NotificationHub>(NotificationHub.Route).RequireAuthorization();
 
     await app.RunAsync();
@@ -326,7 +359,8 @@ internal static class DatabaseStartup
 
         PosDbContext context = scope.ServiceProvider.GetRequiredService<PosDbContext>();
 
-        if (database.ApplyMigrationsOnStartup && app.Environment.IsDevelopment())
+        if (database.ApplyMigrationsOnStartup &&
+            (app.Environment.IsDevelopment() || database.AllowProductionStartupMigration))
         {
             await context.Database.MigrateAsync().ConfigureAwait(false);
         }

@@ -35,7 +35,7 @@
     <div class="nt-tabs" role="tablist">
         @foreach (ReadFilter tab in Enum.GetValues<ReadFilter>())
         {
-            <button class="@(readFilter == tab ? "active" : string.Empty)" type="button" role="tab" aria-selected="@(readFilter == tab)" @onclick="() => readFilter = tab">
+            <button class="@(readFilter == tab ? "active" : string.Empty)" type="button" role="tab" aria-selected="@((readFilter == tab) ? "true" : "false")" @onclick="() => SetReadFilter(tab)">
                 @tab <span>@Count(tab)</span>
             </button>
         }
@@ -59,7 +59,7 @@
             <div class="nt-empty">
                 <span><AppIcon Name="check" /></span>
                 <h2>@(readFilter == ReadFilter.Unread ? "Nothing waiting for you." : "No notifications here.")</h2>
-                <p>@(HasNarrowing ? "Try a wider date range or clear the category filter." : "New alerts will appear here as work changes.")</p>
+                <p>@(HasNarrowing ? "Try a wider date range or clear the category filter." : readFilter == ReadFilter.Unread ? "Alerts you have read are kept under the Read tab." : "New alerts will appear here as work changes.")</p>
                 @if (HasNarrowing)
                 {
                     <button type="button" @onclick="ClearFilters">Clear filters</button>
@@ -68,6 +68,14 @@
         }
         else
         {
+            @if (Store.UnreadCount > Store.Items.Count)
+            {
+                <p class="nt-more">
+                    Newest first — this list holds the @(Store.Items.Count.ToString("N0")) most recent alerts.
+                    @Store.UnreadCount.ToString("N0") are still unread overall, so the badge also counts older
+                    alerts beyond this list.
+                </p>
+            }
             @foreach (PosNotification item in Visible)
             {
                 bool unread = item.ReadAtUtc is null;
@@ -97,6 +105,30 @@
                     </span>
                 </article>
             }
+
+            @if (Filtered.Count > PageSize)
+            {
+                <footer class="nt-pager">
+                    <span>
+                        Showing @(((CurrentPage - 1) * PageSize + 1).ToString("N0", CultureInfo.InvariantCulture))–@(Math.Min(CurrentPage * PageSize, Filtered.Count).ToString("N0", CultureInfo.InvariantCulture)) of @Filtered.Count.ToString("N0", CultureInfo.InvariantCulture)
+                    </span>
+                    <div>
+                        <button type="button" aria-label="Previous page" @onclick="() => GoToPage(CurrentPage - 1)" disabled="@(CurrentPage == 1)">‹</button>
+                        @foreach (int? link in PageLinks)
+                        {
+                            if (link is { } number)
+                            {
+                                <button type="button" class="@(number == CurrentPage ? "is-current" : null)" aria-label="Page @number" aria-current="@(number == CurrentPage ? "page" : null)" @onclick="() => GoToPage(number)">@number</button>
+                            }
+                            else
+                            {
+                                <span class="nt-pager-gap" aria-hidden="true">…</span>
+                            }
+                        }
+                        <button type="button" aria-label="Next page" @onclick="() => GoToPage(CurrentPage + 1)" disabled="@(CurrentPage == PageCount)">›</button>
+                    </div>
+                </footer>
+            }
         }
     </section>
 
@@ -105,7 +137,7 @@
         <div class="nt-side-list">
             @foreach (ReadFilter filter in Enum.GetValues<ReadFilter>())
             {
-                <button class="@(readFilter == filter ? "active" : string.Empty)" type="button" @onclick="() => readFilter = filter">
+                <button class="@(readFilter == filter ? "active" : string.Empty)" type="button" @onclick="() => SetReadFilter(filter)">
                     <AppIcon Name="@(filter switch { ReadFilter.Unread => "circle", ReadFilter.Read => "check", _ => "list" })" />
                     <span>@(filter == ReadFilter.All ? "All notifications" : filter.ToString())</span>
                     <b>@Count(filter)</b>
@@ -116,7 +148,7 @@
         <h3><label for="nt-range">Date range</label></h3>
         <div class="nt-select">
             <AppIcon Name="calendar" />
-            <select id="nt-range" @bind="range">
+            <select id="nt-range" @bind="Range">
                 <option value="@DateRange.Day">Last 24 hours</option>
                 <option value="@DateRange.Week">Last 7 days</option>
                 <option value="@DateRange.Month">Last 30 days</option>
@@ -128,8 +160,8 @@
         <div class="nt-side-list">
             @foreach (string category in Categories)
             {
-                <button class="@(categoryFilter == category ? "active" : string.Empty)" type="button" aria-pressed="@(categoryFilter == category)"
-                        @onclick="() => categoryFilter = categoryFilter == category ? null : category">
+                <button class="@(categoryFilter == category ? "active" : string.Empty)" type="button" aria-pressed="@((categoryFilter == category) ? "true" : "false")"
+                        @onclick="() => ToggleCategory(category)">
                     <AppIcon Name="@CategoryIcon(category)" />
                     <span>@category</span>
                     <b>@InRange.Count(item => Category(item) == category)</b>
@@ -140,15 +172,27 @@
 </div>
 
 @code {
-    private static readonly string[] Categories = ["System", "Sales", "Inventory", "Purchasing", "Operations"];
+    // Sales alerts still arrive and still show in the list; they just are not a
+    // filter here, because sales are reviewed on the sales pages, not this feed.
+    private static readonly string[] Categories = ["System", "Inventory", "Purchasing", "Operations"];
+
+    private const int PageSize = 15;
 
     private readonly Dictionary<Guid, string> locationNames = [];
     private ReadFilter readFilter;
     private DateRange range = DateRange.All;
     private string? categoryFilter;
-    private bool working;
 
-    private enum ReadFilter { All, Unread, Read }
+    /// <summary>The chosen window; picking a new one starts back at page one.</summary>
+    private DateRange Range
+    {
+        get => range;
+        set { range = value; page = 1; }
+    }
+    private bool working;
+    private int page = 1;
+
+    private enum ReadFilter { Unread, All, Read }
     private enum DateRange { Day, Week, Month, All }
 
     private IEnumerable<PosNotification> InRange
@@ -162,15 +206,61 @@
                 DateRange.Month => DateTimeOffset.UtcNow.AddDays(-30),
                 _ => null,
             };
+
+            // The API already returns only the alerts this account may see, and
+            // the bell and sidebar badges count that same feed. Filtering again
+            // by the chosen work location hid the whole list from an owner
+            // working across locations: the badge read 1,274 while every tab
+            // here read 0. Each row names its location instead.
             return Store.Items.Where(item => since is null || item.CreatedAtUtc >= since);
         }
     }
 
     private IEnumerable<PosNotification> InCategory => InRange.Where(item => categoryFilter is null || Category(item) == categoryFilter);
 
-    private List<PosNotification> Visible => [.. InCategory
+    /// <summary>Every alert that matches the filters, newest first.</summary>
+    private List<PosNotification> Filtered => [.. InCategory
         .Where(item => Matches(item, readFilter))
         .OrderByDescending(item => item.CreatedAtUtc)];
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(Filtered.Count / (double)PageSize));
+
+    /// <summary>The page being shown, clamped in case filtering shrank the list.</summary>
+    private int CurrentPage => Math.Clamp(page, 1, PageCount);
+
+    private List<PosNotification> Visible => [.. Filtered.Skip((CurrentPage - 1) * PageSize).Take(PageSize)];
+
+    private IReadOnlyList<int?> PageLinks
+    {
+        get
+        {
+            List<int?> links = [];
+            int start = Math.Max(1, Math.Min(CurrentPage - 1, PageCount - 3));
+            int end = Math.Min(PageCount, start + 3);
+            if (start > 1)
+            {
+                links.Add(1);
+                if (start > 2) { links.Add(null); }
+            }
+
+            for (int number = start; number <= end; number++) { links.Add(number); }
+
+            if (end < PageCount)
+            {
+                if (end < PageCount - 1) { links.Add(null); }
+                links.Add(PageCount);
+            }
+
+            return links;
+        }
+    }
+
+    private void GoToPage(int number) => page = Math.Clamp(number, 1, PageCount);
+
+    /// <summary>Changing any filter starts the list again at the first page.</summary>
+    private void SetReadFilter(ReadFilter filter) { readFilter = filter; page = 1; }
+
+    private void ToggleCategory(string category) { categoryFilter = categoryFilter == category ? null : category; page = 1; }
 
     private bool HasNarrowing => range != DateRange.All || categoryFilter is not null;
 
@@ -241,7 +331,9 @@
     {
         range = DateRange.All;
         categoryFilter = null;
+        page = 1;
     }
+
 
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
@@ -253,7 +345,8 @@
     };
 
     // NotificationKind: 1 expiring, 2 expired, 3 low stock, 4 receiving discrepancy, 5 transfer shortage, 6 emergency transfer.
-    // ReferenceDocumentType: 3 transfer order, 6 sale, 7 sales return, 8 adjustment, 9 count, 10 quarantine.
+    // ReferenceDocumentType: 6 sale, 7 sales return. Transfers, adjustments, counts and quarantine
+    // are worked on the registers' office console, so the web has no page to open for them.
     private static string Category(PosNotification item) => (item.Kind, item.ReferenceDocumentType) switch
     {
         (_, 6 or 7) => "Sales",
@@ -285,17 +378,13 @@
 
     private static string? TargetHref(PosNotification item) => (item.ReferenceDocumentType, item.ReferenceDocumentId) switch
     {
-        (3, Guid id) => $"transfers/{id}",
         (6, Guid id) => $"sales/{id}",
         (7, Guid id) => $"returns/{id}",
-        (8, Guid id) => $"inventory/adjustments/{id}",
-        (9, Guid id) => $"inventory/counts/{id}",
-        (10, Guid id) => $"quarantine/{id}",
         _ => null,
     };
 
     private static string Badge(int count) => count > 99 ? "99+" : count.ToString(CultureInfo.InvariantCulture);
-    private static string When(DateTimeOffset at) => at.ToLocalTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
+    private static string When(DateTimeOffset at) => at.InStoreTime().ToString("MMM d, yyyy · hh:mm tt", CultureInfo.InvariantCulture);
 
     public void Dispose() => Store.Changed -= OnChanged;
 }

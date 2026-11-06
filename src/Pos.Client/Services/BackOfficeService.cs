@@ -288,11 +288,23 @@ public sealed class BackOfficeService(HttpClient http, RegisterService register,
                 $"/api/v1/inventory/timeline/{Uri.EscapeDataString(documentType)}/{documentId:D}"),
             cancellationToken);
 
-    /// <summary>Gets scoped inventory availability and threshold totals.</summary>
+    /// <summary>Gets this register's store stock, product by product, with thresholds and days of cover.</summary>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The report, or why it could not be read.</returns>
+    public Task<ApiResult<PosStockLevelReport>> GetStoreStockLevelsAsync(CancellationToken cancellationToken)
+        => DeviceLocationId is { } store
+            ? GetAsync<PosStockLevelReport>(
+                FormattableString.Invariant($"/api/v1/inventory/stock-levels?locationId={store:D}"), cancellationToken)
+            : Task.FromResult(ApiResult<PosStockLevelReport>.Failure("This register is not set up for a store yet."));
+
+    /// <summary>Gets inventory availability and threshold totals for this register's store.</summary>
     public Task<ApiResult<PosInventoryOverview>> GetInventoryOverviewAsync(
         CancellationToken cancellationToken)
         => GetAsync<PosInventoryOverview>(
-            "/api/v1/dashboard/inventory-overview", cancellationToken);
+            DeviceLocationId is { } store
+                ? FormattableString.Invariant($"/api/v1/dashboard/inventory-overview?locationId={store:D}")
+                : "/api/v1/dashboard/inventory-overview",
+            cancellationToken);
 
     /// <summary>Gets products with repeated posted count variances in the last window.</summary>
     public Task<ApiResult<List<PosRepeatVariance>>> GetRepeatVariancesAsync(
@@ -367,6 +379,34 @@ public sealed class BackOfficeService(HttpClient http, RegisterService register,
         => GetAsync<PosScannedProduct>(
             FormattableString.Invariant($"/api/v1/catalog/products/by-barcode/{Uri.EscapeDataString(barcode.Trim())}"),
             cancellationToken);
+
+    /// <summary>
+    /// Finds the product a scanned code belongs to, trying its equivalent retail
+    /// forms (a UPC-A scan against an EAN-13 barcode, and the other way round).
+    /// </summary>
+    /// <param name="raw">What was scanned or typed.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The product, or the reason none was found.</returns>
+    public async Task<ApiResult<PosScannedProduct>> FindProductByScanAsync(string raw, CancellationToken cancellationToken)
+    {
+        string code = Pos.Shared.Scanning.BarcodeText.Clean(raw);
+        if (code.Length == 0)
+        {
+            return ApiResult<PosScannedProduct>.Failure("Nothing was scanned.");
+        }
+
+        ApiResult<PosScannedProduct>? last = null;
+        foreach (string variant in Pos.Shared.Scanning.BarcodeText.LookupVariants(code))
+        {
+            last = await GetProductByBarcodeAsync(variant, cancellationToken).ConfigureAwait(false);
+            if (last.IsSuccess || last.ErrorCode is not ("catalog.barcode_unknown" or "catalog.barcode_retired"))
+            {
+                return last;
+            }
+        }
+
+        return last!;
+    }
 
     /// <summary>Raises a quarantine incident for goods found while receiving.</summary>
     public Task<ApiResult<PosReference>> CreateQuarantineIncidentAsync(

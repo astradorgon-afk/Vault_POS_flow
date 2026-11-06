@@ -167,7 +167,7 @@ public sealed class InventoryLedger(
     /// </summary>
     /// <param name="ex">The save failure.</param>
     /// <returns>True when the failure is balance contention.</returns>
-    private static bool IsBalanceCompetition(DbUpdateException ex)
+    internal static bool IsBalanceCompetition(DbUpdateException ex)
     {
         if (ex is DbUpdateConcurrencyException)
         {

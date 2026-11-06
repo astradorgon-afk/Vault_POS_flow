@@ -135,6 +135,27 @@ public sealed class PurchaseOrderEndpointTests(PosApiFactory factory)
     }
 
     [Fact]
+    public async Task OwnerMaySelfApproveTheirPurchaseOrder()
+    {
+        Seed seed = await SeedAsync("owner-self");
+        await factory.CreateUserAsync("po-owner-self-approver", Roles.Owner, tier: ApprovalTier.Unlimited);
+        using HttpClient client = factory.CreateClient();
+        string owner = await SignInAsync(client, "po-owner-self-approver");
+
+        Guid orderId = await CreateOrderAsync(client, owner, seed, quantity: 5m, unitCost: 10m);
+        (await PostAsync(client, $"/api/v1/purchasing/orders/{orderId}/submit", owner)).StatusCode
+            .Should().Be(HttpStatusCode.OK);
+
+        using HttpResponseMessage approve = await PostAsync(
+            client, $"/api/v1/purchasing/orders/{orderId}/approve", owner);
+
+        approve.StatusCode.Should().Be(HttpStatusCode.OK, await approve.Content.ReadAsStringAsync());
+
+        (HttpStatusCode _, JsonElement order) = await GetOrderAsync(client, owner, orderId);
+        order.GetProperty("status").GetString().Should().Be("Approved");
+    }
+
+    [Fact]
     public async Task Approval_ByAUserWithNoTier_IsRefused()
     {
         Seed seed = await SeedAsync("tier");

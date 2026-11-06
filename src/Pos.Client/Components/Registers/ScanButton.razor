@@ -1,0 +1,12 @@
+@* On an Android handheld, fires its built-in scanner from the screen. Hidden
+   on the desktop, where the scanner has its own trigger. *@
+@if (ScannerTrigger.IsAvailable)
+{
+    <button type="button" class="scan-trigger" @onclick="Fire" title="Fire the handheld's scanner" aria-label="Scan with the handheld's scanner">
+        <span aria-hidden="true">▥</span> Scan
+    </button>
+}
+
+@code {
+    private static void Fire() => ScannerTrigger.Fire();
+}

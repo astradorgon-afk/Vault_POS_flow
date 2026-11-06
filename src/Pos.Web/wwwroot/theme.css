@@ -1,0 +1,641 @@
+/* VaultFlow theme layer ----------------------------------------------------------
+   Loaded after every other stylesheet. The pages grew their own headings,
+   buttons, fields, cards and chips over time (titles from 27px to 2.3rem, controls
+   from 37px to 44px tall, card corners from 2px to 20px). This layer gives them
+   one set of decisions without rewriting each page's own stylesheet:
+
+     type      page title 1.65rem Manrope · lead .9rem · kicker .68rem caps
+     controls  40px tall, 9px corners, one focus ring
+     surfaces  white, 1px line, 12px corners, a quiet two-layer shadow
+     tables    one header style, tabular figures, a light row hover
+
+   Selectors are prefixed with .app-main .content where a page's scoped
+   stylesheet (.x[b-…]) would otherwise outrank them. */
+
+:root {
+    --paper: #f4f6f3;
+    --panel: #ffffff;
+    --line: #e1e7e1;
+    --line-strong: #cbd5cd;
+    --muted: #5f6d65;
+    --sidebar: #10291e;
+    --sidebar-ink: #c6d8ce;
+    --sidebar-muted: #7d9d8d;
+    --focus-ring: 0 0 0 3px rgba(36, 90, 66, .18);
+    --radius-card: 12px;
+    --radius-control: 9px;
+    --control-height: 40px;
+    --shadow-card: 0 1px 2px rgba(16, 41, 30, .05), 0 1px 4px rgba(16, 41, 30, .04);
+    --shadow-lift: 0 2px 6px rgba(16, 41, 30, .06), 0 12px 28px -14px rgba(16, 41, 30, .22);
+    --title-size: 1.65rem;
+}
+
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* ---- Shell: sidebar ------------------------------------------------------ */
+
+/* Desktop only: below 900px the sidebar is a drawer and the shell is one column. */
+@media (min-width: 901px) {
+    .app-shell { grid-template-columns: 252px minmax(0, 1fr); }
+}
+.sidebar { background: var(--sidebar); box-shadow: none; border-right: 1px solid rgba(0, 0, 0, .2); }
+.brand-block { min-height: 60px; padding: 12px 18px; border-bottom-color: rgba(255, 255, 255, .07); }
+.brand-glyph { width: 34px; height: 34px; border-radius: 9px; font-size: .95rem; }
+.brand strong { font-size: 1rem; letter-spacing: -.01em; }
+.brand small { color: var(--sidebar-muted); font-size: .68rem; }
+
+.nav-stack { gap: 0; padding: 10px 10px 16px; scrollbar-color: #2f4f40 transparent; }
+.nav-group { gap: 1px; margin-bottom: 6px; }
+.nav-group + .nav-group { padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .05); }
+.nav-heading { margin: 8px 10px 4px; color: var(--sidebar-muted); font-size: .62rem; letter-spacing: .12em; }
+.nav-link { position: relative; min-height: 36px; gap: 10px; padding: 0 10px; border-radius: 8px; color: var(--sidebar-ink); font-size: .84rem; font-weight: 600; }
+.nav-link svg { width: 18px; height: 18px; flex-basis: 18px; color: #86a898; }
+.nav-link:hover { background: rgba(255, 255, 255, .06); color: #fff; transform: none; }
+.nav-link.active { background: rgba(185, 243, 205, .13); color: #fff; font-weight: 700; box-shadow: none; }
+.nav-link.active::before { content: ""; position: absolute; left: -10px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--mint); }
+.nav-link.active svg { color: var(--mint); }
+.nav-link small { padding: 1px 7px; font-size: .64rem; }
+
+.sidebar-footer { padding: 10px 14px 14px; border-top-color: rgba(255, 255, 255, .07); }
+.sidebar-footer > div { margin-bottom: 8px; }
+.sidebar-footer span { color: var(--sidebar-muted); }
+.sign-out { min-height: 36px; border-color: rgba(255, 255, 255, .12); border-radius: 8px; font-size: .82rem; }
+
+/* ---- Shell: top bar and breadcrumb ------------------------------------- */
+
+.top-row { min-height: 60px; background: rgba(255, 255, 255, .9); border-bottom-color: var(--line); box-shadow: none; }
+.workspace-context { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.page-back { height: 34px; padding: 0 11px 0 9px; border-color: var(--line-strong); border-radius: 8px; font-size: .8rem; box-shadow: none; }
+.page-trail ol { gap: 8px; color: var(--muted); font-size: .84rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.page-trail li { display: inline-flex; align-items: center; white-space: nowrap; }
+.page-trail li + li::before { margin-right: 8px; color: #a7b3ab; }
+.page-trail a { color: var(--muted); text-decoration: none; }
+.page-trail a:hover { color: var(--forest); text-decoration: underline; text-underline-offset: 3px; }
+.page-trail strong { color: var(--ink); font-weight: 700; text-overflow: ellipsis; overflow: hidden; }
+.notification-bell { width: 38px; height: 38px; border-radius: 9px; }
+.operator-mark { width: 34px; height: 34px; font-size: .68rem; }
+.operator strong { font-size: .8rem; }
+.operator small { font-size: .7rem; }
+
+.content { width: min(100%, 1440px); padding: 28px clamp(18px, 2.4vw, 34px) 40px; }
+
+/* ---- Page headings --------------------------------------------------------
+   Every page's own header wrapper keeps its layout; the type inside it is one. */
+
+.app-main .content h1 {
+    margin: .3rem 0 .35rem;
+    color: var(--ink);
+    font: 750 var(--title-size)/1.2 'Manrope', sans-serif;
+    letter-spacing: -.022em;
+}
+.app-main .content h1 + p,
+.app-main .content .office-lead,
+.app-main .content .po-heading p {
+    max-width: 68ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: .9rem;
+    line-height: 1.5;
+}
+.app-main .content .eyebrow,
+.app-main .content .office-kicker,
+.app-main .content .cs-eyebrow,
+.app-main .content .po-page .eyebrow {
+    color: #4b6a5a;
+    font-size: .68rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+.app-main .content h2 { letter-spacing: -.012em; }
+.restock-head { padding-bottom: 18px; }
+.office-head { margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+
+/* ---- Surfaces --------------------------------------------------------------- */
+
+.app-main .content :is(
+    .restock-card, .qr-card, .results-panel, .open-count, .action-panel, .ov-card,
+    .ov-kpi, .st-card, .st-activity, .dashboard-section, .detail-panel, .nt-list,
+    .nt-side, .nt-toolbar, .sync-card, .cs-card, .location-ledger, .attention-list) {
+    border-color: var(--line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+}
+.app-main .content .search-strip,
+.app-main .content .head-pickers {
+    border-color: var(--line);
+    border-radius: var(--radius-card);
+    box-shadow: none;
+}
+.app-main .content .head-pickers { padding: 10px; }
+.app-main .content .restock-card > header { background: #fafbfa; }
+
+/* ---- Controls --------------------------------------------------------------- */
+
+.app-main .content :is(.search-action, .restock-refresh, .ov-button, .sync-button, .po-page .po-primary, .po-page .po-outline) {
+    min-height: var(--control-height);
+    border-radius: var(--radius-control);
+    font-size: .84rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.app-main .content .search-action { height: auto; min-width: 0; padding: 0 16px; }
+.app-main .content .search-action:not(:disabled):hover { background: var(--forest-bright); }
+.app-main .content .search-action:disabled { opacity: .45; cursor: not-allowed; }
+.app-main .content .search-action.secondary {
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--forest);
+}
+.app-main .content .search-action.secondary:not(:disabled):hover { border-color: #9cbfaa; background: var(--mint-soft); }
+.app-main .content .search-action.danger:not(:disabled):hover { background: #fbe2df; color: var(--danger); }
+.app-main .content .restock-refresh { padding: 0 14px; }
+
+.app-main .content :is(.location-picker select, .location-picker input, .reason-input, .qr-field, .restock-field > input, .restock-field > select, .line-product-search, .line-quantity) {
+    min-height: var(--control-height);
+    height: var(--control-height);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-control);
+    background-color: #fff;
+    color: var(--ink);
+    font-size: .86rem;
+    transition: border-color .15s, box-shadow .15s;
+}
+.app-main .content :is(input, select, textarea):focus-visible {
+    border-color: var(--forest-bright);
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+.app-main .content .location-picker > span,
+.app-main .content .decision-note > span {
+    color: var(--muted);
+    font-size: .68rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+/* Two-choice filters that act as tabs read as one segmented control. */
+.app-main .content .restock-filters button { min-height: 36px; border-radius: 8px; font-size: .82rem; }
+
+/* ---- Tables ------------------------------------------------------------------ */
+
+.app-main .content :is(.sales-table, .qr-table, .st-ledger, .lines-table, .payments-table) th {
+    background: #f8faf8;
+    color: #5f6d65;
+    font-size: .66rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.app-main .content :is(.sales-table, .qr-table, .st-ledger) tbody tr:hover { background: #f6f9f7; }
+.app-main .content :is(.sales-table, .qr-table) td { font-size: .86rem; }
+
+/* ---- Status pills: one size, one palette ----------------------------------- */
+
+.app-main .content :is(.ov-pill, .status-chip, .st-activity-status, .restock-status) {
+    padding: 3px 9px;
+    border-radius: 99px;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .01em;
+    white-space: nowrap;
+}
+
+/* ---- Overview ------------------------------------------------------------------ */
+
+.app-main .content .ov-hero {
+    min-height: 0;
+    padding: 20px 24px;
+    border-radius: var(--radius-card);
+    background: linear-gradient(100deg, #fff 0%, #f7faf8 55%, #e8f3ec 100%);
+    box-shadow: var(--shadow-card);
+}
+.app-main .content .ov-hero h1 { font-size: 1.5rem; }
+.app-main .content .ov-hero p { font-size: .88rem; }
+.ov-hero-art { width: clamp(130px, 13vw, 180px); margin: -10px 0 -22px; }
+
+.start-tasks {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+}
+.start-task {
+    min-height: 68px;
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: #fff;
+    color: var(--ink);
+    text-decoration: none;
+    box-shadow: var(--shadow-card);
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.start-task:hover { border-color: #a9c9b5; box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+.start-task-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: var(--mint-soft); color: var(--forest); }
+.start-task-icon svg { width: 19px; height: 19px; }
+.start-task-copy { display: grid; gap: 2px; min-width: 0; }
+.start-task-copy strong { font: 700 .9rem/1.25 'Manrope', sans-serif; }
+.start-task-copy small { overflow: hidden; color: var(--muted); font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.start-task-arrow { width: 16px; color: #8a978f; }
+.start-task.is-primary { border-color: var(--forest); background: var(--forest); color: #fff; }
+.start-task.is-primary .start-task-icon { background: var(--mint); }
+.start-task.is-primary .start-task-copy small { color: #bcd2c5; }
+.start-task.is-primary .start-task-arrow { color: var(--mint); }
+.start-task.is-primary:hover { background: var(--forest-bright); }
+
+.app-main .content .ov-kpis { gap: 14px; margin-top: 14px; }
+.app-main .content .ov-kpi { min-height: 0; padding: 16px 18px; }
+.app-main .content .ov-kpi-icon { width: 36px; height: 36px; margin-bottom: 10px; border-radius: 9px; }
+.app-main .content .ov-kpi-icon svg { width: 18px; }
+.app-main .content .ov-kpi-label { font-size: .8rem; }
+.app-main .content .ov-kpi strong { margin: 6px 0 10px; font-size: 1.65rem; }
+.app-main .content .ov-grid,
+.app-main .content .ov-main { gap: 14px; }
+.app-main .content .ov-grid { margin-top: 14px; }
+.app-main .content .dashboard-section { margin-top: 14px; padding: 20px 22px; }
+.app-main .content .section-heading h2 { font-size: 1.1rem; }
+
+/* ---- Transfer decision ----------------------------------------------------- */
+
+.decision-note { display: grid; gap: 6px; margin-bottom: 12px; }
+.decision-note small { margin-left: 6px; color: #8a978f; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.app-main .content .decision-note .reason-input { width: 100%; max-width: none; }
+.app-main .content .action-panel .open-count-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* ---- Module tabs --------------------------------------------------------------
+   Pages that are views of one job (restock approvals, fulfillment, requests
+   and all transfers; best sellers and store movement) switch like tabs. They
+   sit above the page title as underlined section tabs, so they never read as
+   another copy of a page's own segmented filters below the title. */
+
+.section-tabs {
+    max-width: 100%;
+    margin: -6px 0 16px;
+    display: flex;
+    gap: 22px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line);
+    scrollbar-width: none;
+}
+.section-tabs::-webkit-scrollbar { display: none; }
+.section-tabs a {
+    flex: none;
+    padding: 4px 1px 10px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    color: var(--muted);
+    font-size: .84rem;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.section-tabs a:hover { color: var(--forest); border-bottom-color: var(--line-strong); }
+.section-tabs a.active { color: var(--forest); border-bottom-color: var(--forest); }
+.restock-page > .section-tabs { margin-bottom: -2px; }
+
+/* A link that does a button's job looks like one. */
+.app-main .content a.search-action { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* The top bar already names who is signed in on desktop; the sidebar keeps
+   only Sign out there, so the daily pages fit without scrolling. Phones,
+   where the top bar hides the name, still show it in the menu. */
+@media (min-width: 901px) {
+    .sidebar-footer > div { display: none; }
+    .sidebar-footer { padding-top: 10px; }
+    .nav-link { min-height: 35px; }
+}
+
+/* ---- Collapsible menu groups ------------------------------------------------- */
+
+.nav-stack button.nav-heading {
+    width: calc(100% - 20px);
+    padding: 2px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-weight: 800;
+    text-align: left;
+    cursor: pointer;
+}
+.nav-stack button.nav-heading:hover:not(:disabled) { color: #d5e6dc; }
+.nav-stack button.nav-heading:disabled { cursor: default; }
+.nav-stack button.nav-heading i {
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform .15s;
+}
+.nav-stack button.nav-heading[aria-expanded="false"] i { transform: rotate(-45deg); }
+.nav-stack button.nav-heading:disabled i { opacity: .35; }
+
+/* ---- Transfers list ---------------------------------------------------------- */
+
+.app-main .content .head-pickers .head-primary { align-self: flex-end; }
+.open-count-hint { margin-top: 4px; color: var(--muted); font-size: .8rem; }
+.open-count-hint a { color: var(--forest); font-weight: 700; }
+.advanced-options { margin-top: 12px; }
+.advanced-options > summary {
+    width: fit-content;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.advanced-options > summary:hover { color: var(--forest); }
+.advanced-options[open] > summary { margin-bottom: 8px; }
+.advanced-options .location-picker { max-width: 320px; }
+
+/* ---- Sign-in ----------------------------------------------------------------- */
+
+.login-panel h2 { font-size: 2rem; letter-spacing: -.03em; }
+.login-panel .option-note { margin: 6px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.45; }
+
+/* ---- Phone ------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+    .top-row { background: rgba(255, 255, 255, .94); }
+    .content { padding: 16px 16px calc(96px + env(safe-area-inset-bottom)); }
+    .sidebar { background: var(--sidebar); }
+    .nav-link.active::before { left: -10px; }
+}
+
+@media (max-width: 650px) {
+    :root { --title-size: 1.4rem; }
+    .app-main .content .ov-hero { padding: 16px 18px; }
+    .app-main .content .ov-hero h1 { font-size: 1.3rem; }
+    .start-tasks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .start-task { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-height: 0; padding: 12px; }
+    .start-task-copy small, .start-task-arrow { display: none; }
+    .start-task-copy strong { font-size: .84rem; }
+    .start-task-icon { width: 32px; height: 32px; }
+
+    /* Two stylesheets disagreed here (a 2-column grid vs. a swipe carousel
+       whose negative margin missed the page gutter). A 2x2 grid shows all
+       four figures at once and lines up with everything above and below. */
+    .app-main .content .ov-kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-inline: 0;
+        padding: 0;
+        overflow: visible;
+    }
+    .app-main .content .ov-kpi { flex: initial; min-height: 0; padding: 12px; }
+    .app-main .content .ov-kpi-label { align-items: flex-start; font-size: .74rem; line-height: 1.25; white-space: normal; }
+    .app-main .content .ov-kpi strong { margin: 4px 0 2px; font-size: 1.15rem; }
+    .app-main .content .ov-kpi-foot small { display: none; }
+
+    .app-main .content .action-panel .open-count-actions > * { flex: 1 1 auto; }
+}
+
+/* A grid's auto column grows to its widest child; on a phone the Activity
+   log's filters pushed the whole page sideways. */
+.app-main .content .audit-page { grid-template-columns: minmax(0, 1fr); }
+
+/* ---- Phone: calm, one thing at a time --------------------------------------
+   On a phone the app bar already names the page and the tab bar says where
+   you are. List pages therefore skip their kicker, title and description
+   (the title stays for screen readers), helper prose that explains the
+   desktop layout is dropped, Refresh buttons go (lists update live and
+   pull-to-refresh reloads), and control groups lose their boxes. Detail
+   pages keep their title: it carries the document's identity. */
+@media (max-width: 650px) {
+    .page-trail ol li:not(:last-child) { display: none; }
+    .page-trail strong { font: 700 1.02rem/1.2 'Manrope', sans-serif; letter-spacing: -.01em; }
+
+    .app-main.is-top .content h1:not(.ov-hero-copy h1) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+    }
+    .app-main.is-top .content :is(.eyebrow, .office-kicker):has(+ h1),
+    .app-main.is-top .content h1 + p,
+    .app-main .content .office-lead { display: none; }
+    .app-main.is-top .content :is(.office-head, .restock-head, .qr-head, .pos-head, .po-heading, .sync-page-head,
+        .receiving-head, .audit-head, .fleet-head, .report-page-head, .pa-head, .lx-top, .st-head) {
+        margin-bottom: 12px;
+        padding-bottom: 0;
+        border-bottom: 0;
+        gap: 10px;
+    }
+    .restock-page { gap: 12px; }
+
+    /* Explanations that only make sense with a desktop's room to spare. */
+    .app-main .content :is(.search-note, .restock-card > header p, .restock-card > header .eyebrow,
+        .open-count-title > span:not(.open-count-hint), .ov-card-head p, .scanner-help, .damage-help,
+        .cs-help, .st-quiet-banner p) { display: none; }
+    .refresh-action { display: none !important; }
+
+    /* Filters and actions sit on the page, not in another box. */
+    .app-main .content .head-pickers {
+        width: 100%;
+        padding: 0;
+        gap: 8px;
+        border: 0;
+        background: none;
+        box-shadow: none;
+    }
+    .app-main .content .head-pickers .head-primary { flex: 1 1 0; width: auto; }
+    .app-main .content .head-pickers .location-picker { flex: 1 1 100%; min-width: 0; }
+    .app-main .content .head-pickers .location-picker:has(input[type="date"]) { flex: 1 1 calc(50% - 4px); }
+    .app-main .content .search-strip { margin-bottom: 10px; padding: 8px 12px; font-size: .8rem; }
+
+    /* Cards breathe without a second frame of padding. */
+    .app-main .content .restock-card > header { padding: 14px 16px; }
+    .app-main .content .restock-steps { gap: 20px; padding: 16px; }
+    .app-main .content .open-count { padding: 14px; }
+
+    /* Overview: a greeting, not a banner. */
+    .app-main .content .ov-hero { min-height: 0; padding: 2px 2px 0; border: 0; background: none; box-shadow: none; }
+    .app-main .content .ov-hero .eyebrow { display: none; }
+    .app-main .content .ov-hero h1 { margin: 0; font-size: 1.25rem; }
+    .app-main .content .ov-card { padding: 14px; }
+
+    /* Delivery rows: name and route on full width, the state underneath. */
+    .app-main .content .receiving-row {
+        min-height: 0;
+        padding: 12px 14px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas: "mark main arrow" "mark state arrow";
+        align-items: center;
+        gap: 6px 12px;
+    }
+    .app-main .content .receiving-row-mark { grid-area: mark; align-self: start; width: 32px; height: 32px; }
+    .app-main .content .receiving-row-main { grid-area: main; }
+    .app-main .content .receiving-row-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app-main .content .receiving-row .receiving-state { grid-area: state; justify-self: start; margin-left: 0; }
+
+    /* Restock rows: details across the full width, state and next step below. */
+    .app-main .content .restock-row {
+        min-height: 0;
+        padding: 12px 16px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas: "main main" "state action";
+        align-items: center;
+        gap: 8px 10px;
+    }
+    .app-main .content .restock-row > div { grid-area: main; }
+    .app-main .content .restock-row > .restock-status { grid-area: state; justify-self: start; }
+    .app-main .content .restock-row > .restock-row-action,
+    .app-main .content .restock-row > .restock-status + span[aria-hidden="true"] { grid-area: action; justify-self: end; }
+    .app-main .content .receiving-row-arrow { grid-area: arrow; }
+
+    /* Store cards: the headline figures, without the small print under each. */
+    .app-main .content .st-stats { min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+    .app-main .content .st-stats small,
+    .app-main .content .sk-live { display: none; }
+
+    /* Notifications: the tabs already filter unread, all and read. */
+    .nt-hero,
+    .nt-side > h3:first-child,
+    .nt-side > h3:first-child + .nt-side-list { display: none; }
+    .app-main .content .nt-side > h3:nth-of-type(2) { margin-top: 0; padding-top: 0; border-top: 0; }
+    .app-main .content .nt-toolbar { margin-top: 0; }
+}
+
+/* ---- Phone: page by page -----------------------------------------------------
+   Desktop tables become stacked rows, per-line tools become one compact row,
+   and summary figures sit side by side instead of one card per screen. */
+@media (max-width: 650px) {
+    /* Activity log: one entry per card-like row, no clipped columns. */
+    .app-main .content .audit-table-scroll { max-height: none; overflow: visible; }
+    .app-main .content .audit-table-scroll table,
+    .app-main .content .audit-table-scroll tbody { display: block; }
+    .app-main .content .audit-table-scroll thead { display: none; }
+    .app-main .content .audit-table-scroll .audit-day,
+    .app-main .content .audit-table-scroll .audit-day th { display: flex; position: static; }
+    .app-main .content .audit-table-scroll .audit-day th { width: 100%; }
+    .app-main .content .audit-table-scroll .audit-row {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr) 14px;
+        grid-template-areas: "when action open" "when who open" "when place open" "when record open";
+        gap: 2px 12px;
+        padding: 12px 14px;
+        border-top: 1px solid var(--line);
+    }
+    .app-main .content .audit-table-scroll .audit-row > td { padding: 0; border: 0; font-size: .8rem; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(1) { grid-area: when; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(2) { grid-area: action; font-weight: 700; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(3) { grid-area: who; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(4) { grid-area: place; color: var(--muted); font-size: .74rem; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(5) { grid-area: record; max-width: none; }
+    .app-main .content .audit-table-scroll .audit-row > td:nth-child(6) { grid-area: open; align-self: center; }
+    .app-main .content .audit-table-scroll .audit-row :is(.audit-code, td:nth-child(3) small) { display: none; }
+    .app-main .content .audit-table-scroll .audit-row td:nth-child(3) :is(button, strong) { display: inline; }
+    .app-main .content .audit-open-button { padding: 0; font-size: 0; }
+    .app-main .content .audit-open-button span { font-size: 1.2rem; color: var(--muted); }
+
+    /* Products: name over its barcode, state and chevron on the right. */
+    .app-main .content .catalog-product {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-areas: "id state chev" "code state chev";
+        align-items: center;
+        gap: 4px 10px;
+        min-height: 0;
+        padding: 10px 0;
+    }
+    .app-main .content .catalog-product .product-identity { grid-area: id; }
+    .app-main .content .catalog-product .product-meta { display: contents; }
+    .app-main .content .catalog-product .product-meta :is(code, .catalog-nocode) { grid-area: code; justify-self: start; max-width: 100%; padding: 2px 7px; }
+    .app-main .content .catalog-product .catalog-more { display: none; }
+    .app-main .content .catalog-product .product-status { grid-area: state; }
+    .app-main .content .catalog-product .product-chevron { grid-area: chev; }
+
+    /* Product barcodes: the code, what it scans as, and its actions. */
+    .app-main .content .barcode-table :is(th, td):is(:nth-child(2), :nth-child(4), :nth-child(5)) { display: none; }
+    .app-main .content .barcode-table :is(th, td) { padding-inline: 10px; }
+
+    /* Any remaining wide table scrolls inside its card rather than being cut. */
+    .app-main .content :is(.results-panel, .qr-results) { overflow-x: auto; }
+
+    /* Devices: three counts side by side. */
+    .app-main .content .fleet-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .app-main .content .fleet-summary > article { min-width: 0; min-height: 0; padding: 10px 12px; }
+    .app-main .content .fleet-summary > article small { display: none; }
+    .app-main .content .fleet-summary > article span { font-size: .62rem; line-height: 1.25; }
+    .app-main .content .fleet-summary > article strong { margin: 4px 0 0; font-size: 1.35rem; }
+
+    /* The count toolbar stacks into a column on a phone, where the filters'
+       desktop flex widths (190px, 230px) turned into tall empty heights. */
+    .app-main .content .sheet-toolbar > :is(.sheet-search, .sheet-category) { flex: 0 0 auto; }
+
+    /* Section tabs stay pinned under the app bar while a long list scrolls. */
+    .app-main .content .section-tabs {
+        position: sticky;
+        top: calc(56px + env(safe-area-inset-top));
+        z-index: 15;
+        margin: -16px -16px 12px;
+        padding: 8px 16px 0;
+        background: var(--paper);
+    }
+
+    /* New purchase order: the running total docks on the tab bar, edge to
+       edge, so content no longer shows through a gap beneath it. */
+    .app-main .content .pn-bar {
+        bottom: calc(65px + env(safe-area-inset-bottom));
+        margin-inline: -16px;
+        padding: 10px 16px;
+        border-width: 1px 0 0;
+        border-radius: 0;
+        background: #fff;
+        box-shadow: 0 -8px 18px -14px rgba(16, 41, 30, .3);
+    }
+
+    /* Count sheets and transfer pick/receive sheets: one tool row per line. */
+    .app-main .content :is(.cs-row, .cs-table--lean .cs-row) { min-height: 0; gap: 10px 12px; padding: 14px 16px; }
+    .app-main .content .cs-due-cell { top: 14px; right: 16px; }
+    .app-main .content .cs-stepper { height: 44px; }
+    .app-main .content .cs-actions { grid-template-columns: auto minmax(0, 1fr); align-items: center; padding-top: 0; border-top: 0; }
+    .app-main .content .cs-actions .cs-row-scan { grid-column: auto; min-height: 38px; padding: 0 14px; font-size: .76rem; }
+    .app-main .content .cs-actions .cs-sku { justify-self: end; text-align: right; }
+
+    /* Receiving rows: scan, issue and batch as one compact tool row. */
+    .app-main .content .product-row { min-height: 0; gap: 10px 12px; padding: 14px 16px; }
+    .app-main .content .action-stack { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding-top: 0; border-top: 0; }
+    .app-main .content .action-stack button,
+    .app-main .content .action-stack .row-scan {
+        grid-column: auto;
+        min-height: 40px;
+        padding: 4px 6px;
+        flex-direction: column;
+        gap: 2px;
+        font-size: .64rem;
+        line-height: 1.15;
+        text-align: center;
+    }
+}
+
+/* Sign-in on a phone: the brand as a header, the form first. Only the web
+   loads this sheet, so the device client's shared sign-in is unchanged. */
+@media (max-width: 560px) {
+    .login-story { min-height: 0; padding: 20px 24px 22px; gap: 10px; justify-content: flex-start; }
+    .login-story h1 { margin: 10px 0 0; font-size: 1.9rem; letter-spacing: -.04em; }
+    .login-story .eyebrow, .login-story p, .login-story > small { display: none; }
+    .login-panel { padding: 26px 24px 32px; place-items: start center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .start-task, .start-task:hover { transition: none; transform: none; }
+}

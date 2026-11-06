@@ -294,16 +294,17 @@ public sealed class CreateSalesReturnCommandHandlerTests
     }
 
     [Fact]
-    public async Task SaleFromAnotherDevice_ReturnsConflict()
+    public async Task ASaleRungAtAnotherCounterInTheStore_CanBeReturnedHere()
     {
-        Sale sale = NewSale();
+        Sale sale = NewSale(device: DeviceId.New());
         _repository.GetByIdAsync(sale.Id, Arg.Any<CancellationToken>()).Returns(sale);
-        CreateSalesReturnCommand command = Command(sale) with { DeviceId = DeviceId.New() };
+
+        // This register's own shift takes the return.
+        CreateSalesReturnCommand command = Command(sale) with { DeviceId = TestDevice, ShiftId = _openShift.Id };
 
         Result<SalesReturnId> result = await _handler.HandleAsync(command, CancellationToken.None);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("sale.return.device_mismatch");
+        result.IsSuccess.Should().BeTrue();
     }
 
     // ------------------------------------------------------------------
@@ -480,13 +481,14 @@ public sealed class CreateSalesReturnCommandHandlerTests
 
     private static Sale NewSale(
         IReadOnlyList<ItemSpec>? items = null,
-        IReadOnlyList<PaymentSpec>? payments = null)
+        IReadOnlyList<PaymentSpec>? payments = null,
+        DeviceId? device = null)
         => Sale.Create(
             DocumentNumber.FromTrustedSource("SAL-2026-000001"),
             EventId.New(),
             TestStore,
             TestShiftId,
-            TestDevice,
+            device ?? TestDevice,
             customerId: null,
             BusinessDate,
             Now,

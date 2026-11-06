@@ -2,7 +2,10 @@
 @implements IDisposable
 @inject NavigationManager Navigation
 @inject NotificationStore Notifications
+@inject OfflineReadinessNotice OfflineNotice
 @inject UserSession Session
+@inject PageTrail Trail
+@inject KeyboardScanListener Scanner
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -16,15 +19,32 @@
         <button class="nav-scrim" type="button" aria-label="Close navigation" @onclick="CloseNavigation"></button>
     }
 
-    <main class="app-main">
+    @* Top-level pages are named by the app bar; on a phone they need not repeat
+       the name. Detail pages keep theirs: it carries the document's identity. *@
+    <main class="app-main @(Trail.Current.Parent is null ? "is-top" : "is-detail")">
         <header class="top-row">
-            <button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@navigationOpen" @onclick="ToggleNavigation">
+            <button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@(navigationOpen ? "true" : "false")" @onclick="ToggleNavigation">
                 <AppIcon Name="menu" />
             </button>
 
+            @{ PagePlace place = Trail.Current; }
             <div class="workspace-context">
-                <span>@WorkspaceSection</span>
-                <strong>@WorkspaceTitle</strong>
+                @if (place.Parent is { } parent)
+                {
+                    <a class="page-back" href="@parent.Href" title="Back to @parent.Label" aria-label="Back to @parent.Label">
+                        <span aria-hidden="true">←</span><em>Back</em>
+                    </a>
+                }
+                <nav class="page-trail" aria-label="Breadcrumb">
+                    <ol>
+                        <li>@place.Section</li>
+                        @if (place.Parent is { } up && up.Label != place.Section)
+                        {
+                            <li><a href="@up.Href">@up.Label</a></li>
+                        }
+                        <li><strong aria-current="page">@place.Title</strong></li>
+                    </ol>
+                </nav>
             </div>
 
             <AuthorizeView>
@@ -49,8 +69,58 @@
             </AuthorizeView>
         </header>
 
+        @if (OfflineNotice.IsVisible)
+        {
+            <section class="offline-ready-banner" role="status" aria-label="Offline access notice">
+                <span class="offline-ready-icon" aria-hidden="true"><AppIcon Name="check" /></span>
+                <div class="offline-ready-copy">
+                    <strong>Offline access is ready on this device.</strong>
+                    <small>@(OfflineNotice.IsInstalled
+                        ? "You can open your saved workspace from the sign-in page without a connection."
+                        : "Install VaultFlow to open it from your home screen.")</small>
+                    <p id="offline-install-status"></p>
+                    @if (!OfflineNotice.IsInstalled)
+                    {
+                        <p id="offline-install-steps">If no install prompt opens, use your browser menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+                    }
+                </div>
+                <div class="offline-ready-actions">
+                    @if (!OfflineNotice.IsInstalled)
+                    {
+                        <button type="button" class="offline-ready-install" data-vaultflow-install>Install VaultFlow</button>
+                    }
+                    <button type="button" class="offline-ready-dismiss" aria-label="Dismiss offline notice" @onclick="DismissOfflineNotice">
+                        <AppIcon Name="close" />
+                    </button>
+                </div>
+            </section>
+        }
+
         <article id="main-content" class="content" tabindex="-1">@Body</article>
+        <ScanFeedback Hint="Open an inventory page to use it." />
     </main>
+
+    <AuthorizeView>
+        <Authorized>
+            <nav class="tabbar" aria-label="Main">
+                @foreach (Tab tab in Tabs)
+                {
+                    <NavLink class="tab-item" href="@tab.Href" Match="@(tab.Href.Length == 0 || tab.Href == "restock" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                        <AppIcon Name="@tab.Icon" />
+                        <span>@tab.Label</span>
+                    </NavLink>
+                }
+                <button type="button" class="tab-item @(navigationOpen ? "active" : null)" aria-expanded="@(navigationOpen ? "true" : "false")" aria-controls="primary-navigation" @onclick="ToggleNavigation">
+                    <AppIcon Name="menu" />
+                    <span>More</span>
+                    @if (Notifications.UnreadCount > 0)
+                    {
+                        <b class="tab-badge" aria-label="@Notifications.UnreadCount unread">@BadgeCount</b>
+                    }
+                </button>
+            </nav>
+        </Authorized>
+    </AuthorizeView>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -65,7 +135,9 @@
         ? "99+"
         : Notifications.UnreadCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    private string ScopeLabel => Session.Current?.User.HasAllLocations == true
+    private string ScopeLabel => Session.WorkLocationName is { Length: > 0 } chosen
+        ? chosen
+        : Session.Current?.User.HasAllLocations == true
         ? "All locations"
         : Session.Current?.User.Locations.Count switch
         {
@@ -74,54 +146,12 @@
             _ => "No location",
         };
 
-    private string WorkspaceSection => CurrentPath switch
-    {
-        var path when path.StartsWith("admin/", StringComparison.Ordinal) => "Administration",
-        var path when path.StartsWith("catalog/", StringComparison.Ordinal) => "Catalogue",
-        var path when path.StartsWith("sales", StringComparison.Ordinal) || path.StartsWith("returns", StringComparison.Ordinal) || path is "receipts" or "stores" or "inventory/stock" => "Stores",
-        var path when path.StartsWith("sync/", StringComparison.Ordinal) => "System operations",
-        var path when path.StartsWith("inventory/", StringComparison.Ordinal) || path.StartsWith("transfers", StringComparison.Ordinal) || path.StartsWith("quarantine", StringComparison.Ordinal) => "Inventory operations",
-        "reports" => "Reporting",
-        "notifications" => "Activity",
-        _ => "Your workspace",
-    };
-
-    private string WorkspaceTitle => CurrentPath switch
-    {
-        "" => "Overview",
-        "notifications" => "Notifications",
-        "stores" => "Store performance",
-        "inventory/stock" => "Store inventory",
-        "sales" => "Sales ledger",
-        var path when path.StartsWith("sales/", StringComparison.Ordinal) => "Sale detail",
-        var path when path.StartsWith("returns/", StringComparison.Ordinal) => "Return detail",
-        "receipts" => "Payment receipts",
-        "catalog/prices" => "Price schedule",
-        "reports" => "Daily reports",
-        "inventory/counts" => "Stock counts",
-        var path when path.StartsWith("inventory/counts/", StringComparison.Ordinal) => "Count detail",
-        "inventory/adjustments" => "Stock adjustments",
-        var path when path.StartsWith("inventory/adjustments/", StringComparison.Ordinal) => "Adjustment detail",
-        "inventory/exceptions" => "Inventory exceptions",
-        var path when path.StartsWith("inventory/timeline/", StringComparison.Ordinal) => "Stock timeline",
-        "transfers" => "Transfers",
-        "transfers/replenishment" => "Replenishment",
-        var path when path.StartsWith("transfers/", StringComparison.Ordinal) => "Transfer detail",
-        "quarantine" => "Quarantine",
-        var path when path.StartsWith("quarantine/", StringComparison.Ordinal) => "Quarantine incident",
-        "admin/locations" => "Locations",
-        "admin/users" => "People & roles",
-        "admin/devices" => "Devices",
-        "sync/failures" => "Sync failures",
-        _ => "VaultFlow",
-    };
-
-    private string CurrentPath => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
-
     protected override void OnInitialized()
     {
         Notifications.Changed += OnNotificationsChanged;
+        OfflineNotice.Changed += OnNotificationsChanged;
         Navigation.LocationChanged += OnLocationChanged;
+        Trail.Changed += OnNotificationsChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -129,11 +159,83 @@
         if (firstRender)
         {
             await Notifications.InitializeAsync();
+            try
+            {
+                await Scanner.StartAsync();
+            }
+            catch (JSException)
+            {
+                // Scanning is a convenience; the page works without it.
+            }
         }
     }
 
     private void ToggleNavigation() => navigationOpen = !navigationOpen;
+
+    // The four places this person uses most, by what they may do; the rest sit
+    // under More. The role's own daily task comes straight after Home so the
+    // four-tab cut never drops it (it used to lose an owner's Approvals tab).
+    private IEnumerable<Tab> Tabs
+    {
+        get
+        {
+            bool owner = Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+            List<Tab> tabs = [new(string.Empty, "home", "Home")];
+
+            if (owner && Session.HasPermission("transfer.approve"))
+            {
+                tabs.Add(new("restock/approvals", "check", "Approvals"));
+            }
+            else if (Session.WorkLocationKind == 0 &&
+                Session.Current?.User.Roles.Any(role => role is "MainInventoryManager" or "InventoryStaff") == true &&
+                Session.HasPermission("transfer.pick") && Session.HasPermission("transfer.dispatch"))
+            {
+                tabs.Add(new("restock/fulfillment", "box-out", "Fulfill"));
+            }
+            else if (Session.WorkLocationKind == 1 &&
+                Session.HasPermission("transfer.request") && Session.HasPermission("transfer.view"))
+            {
+                tabs.Add(new("restock", "box-in", "Restock"));
+            }
+
+            if (Session.HasPermission("inventory.view"))
+            {
+                tabs.Add(new("inventory/stock", "box", "Stock"));
+            }
+
+            if (!owner && Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive"))
+            {
+                tabs.Add(new("receiving", "receipt", "Receiving"));
+            }
+
+            if (Session.HasPermission("sale.view"))
+            {
+                tabs.Add(new("analytics/products", "trend-up", "Analytics"));
+            }
+
+            if (owner && Session.HasPermission("purchase.view"))
+            {
+                tabs.Add(new("purchasing", "list", "Orders"));
+            }
+
+            if (Session.HasPermission("transfer.view"))
+            {
+                tabs.Add(new("transfers", "transfer", "Transfers"));
+            }
+
+            if (Session.HasAnyPermission("user.manage", "role.manage"))
+            {
+                tabs.Add(new("admin/users", "people", "People"));
+            }
+
+            tabs.Add(new("notifications", "bell", "Alerts"));
+            return tabs.Take(4);
+        }
+    }
+
+    private sealed record Tab(string Href, string Icon, string Label);
     private void CloseNavigation() => navigationOpen = false;
+    private void DismissOfflineNotice() => OfflineNotice.Dismiss();
     private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
@@ -155,6 +257,8 @@
     public void Dispose()
     {
         Notifications.Changed -= OnNotificationsChanged;
+        OfflineNotice.Changed -= OnNotificationsChanged;
         Navigation.LocationChanged -= OnLocationChanged;
+        Trail.Changed -= OnNotificationsChanged;
     }
 }

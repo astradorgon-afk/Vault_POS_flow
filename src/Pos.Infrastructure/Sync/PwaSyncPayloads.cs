@@ -1,0 +1,60 @@
+namespace Pos.Infrastructure.Sync;
+
+/// <summary>A purchase draft and its proposed products form one sync event.</summary>
+public sealed record PurchaseDraftSyncPayload(
+    Guid? SupplierId,
+    string? CustomSupplierName,
+    Guid DestinationLocationId,
+    string? CurrencyCode,
+    DateTimeOffset? ExpectedAtUtc,
+    IReadOnlyList<PwaProposedProduct> ProposedProducts,
+    IReadOnlyList<PwaPurchaseLine> Lines);
+
+public sealed record PwaProposedProduct(
+    Guid ClientId,
+    string Sku,
+    string Name,
+    Guid CategoryId,
+    Guid BaseUnitOfMeasureId,
+    string? Barcode,
+    decimal DefaultPurchaseCost);
+
+public sealed record PwaPurchaseLine(
+    Guid? ProductId,
+    Guid? ProposedProductClientId,
+    Guid UnitOfMeasureId,
+    decimal OrderedQuantity,
+    decimal UnitCost);
+
+/// <summary>Physical counts against a previously downloaded order.</summary>
+public sealed record PwaReceivingSyncPayload(
+    Guid PurchaseOrderId,
+    IReadOnlyList<PwaReceivingLine> Lines,
+    IReadOnlyList<PwaUnexpectedGood> UnexpectedGoods,
+    bool DocumentsMissing,
+    string? SupplierDeliveryReceiptNumber = null,
+    string? SupplierOfficialReceiptNumber = null,
+    DateTimeOffset? SupplierReleasedAtUtc = null);
+
+public sealed record PwaReceivingLine(
+    Guid PurchaseOrderLineId,
+    decimal QuantityReceived,
+    decimal QuantityDamaged,
+    decimal QuantityWrongItem,
+    decimal QuantityExpired,
+    decimal UnitCost,
+    string? LotNumber,
+    DateOnly? ManufacturedOn,
+    DateOnly? ExpiresOn);
+
+public sealed record PwaUnexpectedGood(string Barcode, string Description, decimal Quantity);
+
+/// <summary>
+/// A store restock request drafted while offline. The destination is always the
+/// device's own store; the server resolves the main warehouse itself.
+/// </summary>
+public sealed record PwaRestockSyncPayload(
+    Guid DestinationLocationId,
+    IReadOnlyList<PwaRestockLine> Lines);
+
+public sealed record PwaRestockLine(Guid ProductId, decimal Quantity);

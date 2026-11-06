@@ -34,6 +34,13 @@
             <span>To</span>
             <input type="date" @bind="to" disabled="@(selectedLocationId is null)"/>
         </label>
+        @if (CanViewSales)
+        {
+            <button type="button" class="search-action" @onclick="SearchAsync"
+                    disabled="@(searching || selectedLocationId is null)">
+                @(searching ? "Searching…" : "Find sales")
+            </button>
+        }
     </div>
 </section>
 
@@ -48,11 +55,7 @@
 else
 {
     <section class="search-strip">
-        <span>@(results.Count) transaction@(results.Count == 1 ? "" : "s")@(searched ? $" · {searchedRange}" : "")</span>
-        <button type="button" class="search-action" @onclick="SearchAsync"
-                disabled="@(searching || selectedLocationId is null)">
-            @(searching ? "Searching…" : "Find sales")
-        </button>
+        <span>@SummaryLabel@(searched ? $" · {searchedRange}" : "")</span>
     </section>
 
     @if (!string.IsNullOrWhiteSpace(message))
@@ -79,16 +82,25 @@ else
                     @foreach (PosSaleSummary sale in results)
                     {
                         <tr @key="sale.Id" @onclick="() => OpenSale(sale.Id)">
-                            <td class="sale-number">@sale.Number</td>
+                            <td class="sale-number"><a href="@($"/sales/{sale.Id:D}")" @onclick:stopPropagation="true">@sale.Number</a></td>
                             <td><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></td>
                             <td>@sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</td>
-                            <td>@sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@sale.CompletedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@Money(sale.GrossTotal)</td>
                             <td><strong>@Money(sale.NetTotal)</strong></td>
                         </tr>
                     }
                 </tbody>
             </table>
+            @if (results.Count < total)
+            {
+                <footer class="results-more">
+                    <span>Showing @results.Count.ToString("N0", CultureInfo.InvariantCulture) of @total.ToString("N0", CultureInfo.InvariantCulture)</span>
+                    <button type="button" class="more-action" @onclick="LoadMoreAsync" disabled="@loadingMore">
+                        @(loadingMore ? "Loading…" : $"Show {Math.Min(PageSize, total - results.Count):N0} more")
+                    </button>
+                </footer>
+            }
         }
     </section>
 }
@@ -100,10 +112,17 @@ else
     private DateOnly? from;
     private DateOnly? to;
     private bool loadingLocations = true;
+    private const int PageSize = 100;
+    private int total;
     private bool searching;
+    private bool loadingMore;
     private bool searched;
     private string? message;
     private string searchedRange = string.Empty;
+
+    private string SummaryLabel => searched
+        ? $"{total.ToString("N0", CultureInfo.InvariantCulture)} transaction{(total == 1 ? "" : "s")}"
+        : "No search yet";
 
     private bool CanViewSales => Session.Current?.User.Permissions.Contains("sale.view", StringComparer.Ordinal) == true;
 
@@ -134,10 +153,9 @@ else
             return;
         }
 
-        HashSet<Guid> assigned = [.. Session.Current?.User.Locations ?? []];
         locations.AddRange(response.Value.Where(location =>
             location.Kind == 1 &&
-            (Session.Current?.User.HasAllLocations == true || assigned.Contains(location.Id))));
+            Session.CanUseInventoryLocation(location.Id)));
         selectedLocationId = locations.Count == 1 ? locations[0].Id : null;
         if (locations.Count == 0)
         {
@@ -159,6 +177,7 @@ else
     {
         selectedLocationId = Guid.TryParse(e.Value?.ToString(), out Guid id) ? id : null;
         results.Clear();
+        total = 0;
         searched = false;
         message = null;
     }
@@ -175,13 +194,15 @@ else
         searched = true;
         message = null;
         results.Clear();
+        total = 0;
         try
         {
-            ApiResult<List<PosSaleSummary>> response = await Api.SearchSalesAsync(
-                locationId, from, to, CancellationToken.None);
+            ApiResult<PosSalePage> response = await Api.SearchSalesAsync(
+                locationId, from, to, 0, PageSize, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
 
-            results.AddRange(response.Value);
+            results.AddRange(response.Value.Sales);
+            total = response.Value.Total;
             searchedRange = BuildRangeLabel();
             if (results.Count == 0)
             {
@@ -190,6 +211,26 @@ else
         }
         catch (HttpRequestException) { message = "The sales ledger is unavailable. Try again shortly."; }
         finally { searching = false; }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (selectedLocationId is not { } locationId) return;
+
+        loadingMore = true;
+        try
+        {
+            ApiResult<PosSalePage> response = await Api.SearchSalesAsync(
+                locationId, from, to, results.Count, PageSize, CancellationToken.None);
+            if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+
+            // New sales may have synced since the first page; skip any already shown.
+            HashSet<Guid> shown = [.. results.Select(sale => sale.Id)];
+            results.AddRange(response.Value.Sales.Where(sale => !shown.Contains(sale.Id)));
+            total = Math.Max(response.Value.Total, results.Count);
+        }
+        catch (HttpRequestException) { message = "The sales ledger is unavailable. Try again shortly."; }
+        finally { loadingMore = false; }
     }
 
     private string BuildRangeLabel()

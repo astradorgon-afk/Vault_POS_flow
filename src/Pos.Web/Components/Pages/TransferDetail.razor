@@ -1,24 +1,27 @@
 @page "/transfers/{TransferId:guid}"
-@using System.Globalization
-@attribute [Authorize(Policy = "transfer.view")]
+@attribute [Authorize]
 @rendermode InteractiveServer
+@using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
+@inject NavigationManager Navigation
+@inject PageTrail Trail
 
-<PageTitle>Transfer · VaultFlow</PageTitle>
+<PageTitle>@(IsStoreRestock ? "Restock request" : "Transfer") · VaultFlow</PageTitle>
+<div class="inventory-workflow web-workflow">
 
-<div class="office-head">
-    <div>
-        <p class="office-kicker">Transfer</p>
-        <h1 class="office-title">@(detail?.Transfer.Number ?? "Transfer")</h1>
-        <p class="office-lead">Follow the stock from the source shelf to your receiving bay — and record every arrival honestly.</p>
-    </div>
-    <div class="head-pickers">
-        <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
-        @if (IsEmergency)
-        {
-            <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
-        }
+<div class="office-head tr-head">
+    <div class="tr-head-copy">
+        <p class="office-kicker">@(IsStoreRestock ? "Store supplies" : "Transfer")</p>
+        <div class="tr-title-row">
+            <h1 class="office-title">@(detail is null ? "Transfer" : string.IsNullOrWhiteSpace(detail.Transfer.Number) ? IsStoreRestock ? $"Restock request {TransferLabels.ShortId(TransferId)}" : "Transfer" : detail.Transfer.Number)</h1>
+            <span class="@StatusChipClass(detail?.Transfer.Status ?? "Draft")">@SplitWords(detail?.Transfer.Status ?? "Unknown")</span>
+            @if (IsEmergency)
+            {
+                <span class="status-chip sc-emergency">EMERGENCY — PENDING CENTRAL REVIEW</span>
+            }
+        </div>
+        <p class="office-lead">@(IsStoreRestock ? "The owner reviews the store request before the warehouse picks and dispatches it." : "Follow the stock from the source shelf to your receiving bay — and record every arrival honestly.")</p>
     </div>
 </div>
 
@@ -49,42 +52,75 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
-    <section class="transfer-summary">
-        <div><span>Route</span><strong class="route">@SourceLabel → @DestinationLabel</strong></div>
-        <div><span>Kind</span><strong>@KindLabel</strong></div>
-        <div><span>Mode</span><strong>@ModeLabel</strong></div>
-        <div><span>Value</span><strong>@(detail.Transfer.TotalValue > 0 ? Money(detail.Transfer.TotalValue) : "Not picked yet")</strong></div>
-        <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
-        <div><span>Created</span><strong>@detail.Transfer.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
-        <div><span>Dispatched</span><strong>@(detail.Transfer.DispatchedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
-        <div><span>Received</span><strong>@(detail.Transfer.ReceivedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</strong></div>
+    <div class="tr-layout">
+    <div class="tr-col-main">
+    <section class="transfer-route" aria-label="Transfer route">
+        <div class="transfer-route-stop"><span>From</span><strong>@SourceCode</strong><small>@SourceName</small></div>
+        <span class="transfer-route-arrow" aria-hidden="true">→</span>
+        <div class="transfer-route-stop"><span>Deliver to</span><strong>@DestinationCode</strong><small>@DestinationName</small></div>
     </section>
+
+    @if (InTransit)
+    {
+        <section class="tr-notice" role="status">
+            <div class="tr-notice-row">
+                <span class="tr-notice-icon" aria-hidden="true">↗</span>
+                <div>
+                    <strong>@DispatchedNoticeTitle</strong>
+                    <p>The products are in transit. @(IsStoreRestock ? "Store staff" : "Destination staff") can record what arrived.</p>
+                </div>
+            </div>
+        </section>
+    }
+
+    @* Once in transit the notice above already says it; one message, not two. *@
+    @if (!InTransit && IsStoreRestock && Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) && !string.IsNullOrWhiteSpace(WarehouseStepMessage))
+    {
+        <section class="restock-warehouse-step" role="status">
+            <strong>@WarehouseStepTitle</strong>
+            <span>@WarehouseStepMessage</span>
+        </section>
+    }
 
     @if (!string.IsNullOrWhiteSpace(detail.ReviewNote))
     {
         <div class="note-box"><span>Review note</span>@detail.ReviewNote</div>
     }
 
-    <section class="lines-panel">
-        <div class="lines-title">
-            <strong>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</strong>
-            <span>Picked quantities are what the source actually sent; the difference shows up as a discrepancy when you count the boxes.</span>
+    <section class="tr-section">
+        <div class="tr-section-title"><h2>Transfer overview</h2></div>
+        <div class="transfer-summary">
+            <div><span>Kind</span><strong>@KindLabel</strong></div>
+            <div><span>Mode</span><strong>@ModeLabel</strong></div>
+            <div><span>Value</span><strong>@Money(detail.Transfer.TotalValue)</strong></div>
+            <div><span>Lines</span><strong>@detail.Lines.Count</strong></div>
+            @if (detail.Transfer.DispatchedAtUtc is { } released)
+            {
+                <div><span>Released</span><strong>@released.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</strong></div>
+            }
+            @if (detail.Transfer.DeliveryReceiptNumber is { } deliveryReceipt)
+            {
+                <div><span>Delivery receipt</span><strong>@deliveryReceipt</strong></div>
+            }
         </div>
-        <table class="sales-table counts-table">
-            <thead>
-                <tr><th>#</th><th>Product</th><th>Requested</th><th>Picked</th><th>Received</th><th>Damaged</th><th>State</th></tr>
-            </thead>
-            <tbody>
-                @foreach (PosTransferLineView line in detail.Lines)
-                {
-                    <tr>
-                        <td>@line.LineNo</td>
-                        <td><strong>@(line.ProductName ?? "Unknown product")</strong></td>
-                        <td>@Quantity(line.RequestedQuantity)</td>
-                        <td>@Quantity(line.PickedQuantity)</td>
-                        <td>@Quantity(line.ReceivedQuantity)</td>
-                        <td>@Quantity(line.DamagedQuantity)</td>
-                        <td>
+    </section>
+
+    <section class="tr-section">
+        <div class="tr-section-title">
+            <h2>@(detail.Transfer.DispatchedAtUtc is null ? "Requested items" : "Items in transit")</h2>
+            <span>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</span>
+        </div>
+        <p class="tr-hint">@(detail.Transfer.DispatchedAtUtc is null
+            ? "Follow each product from the request through picking and dispatch."
+            : "Compare dispatched quantities with what the store actually receives.")</p>
+        <div class="line-item-cards">
+            @foreach (PosTransferLineView line in detail.Lines)
+            {
+                <article class="line-item">
+                    <div class="line-item-top">
+                        <div class="line-item-num">@line.LineNo.ToString("D2", CultureInfo.InvariantCulture)</div>
+                        <div class="line-item-name">
+                            <h3>@(line.ProductName ?? "Unknown product")</h3>
                             @if (line.DiscrepancyState is { Length: > 0 })
                             {
                                 <span class="status-chip sc-issue">@SplitWords(line.DiscrepancyState)</span>
@@ -101,61 +137,599 @@ else
                             {
                                 <span class="status-chip sc-dispatched">in transit</span>
                             }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+                        </div>
+                    </div>
+                    <div class="line-quantities">
+                        <div><small>Requested</small><strong>@Quantity(line.RequestedQuantity)</strong></div>
+                        <div><small>Picked</small><strong>@Quantity(line.PickedQuantity)</strong></div>
+                        <div><small>Dispatched</small><strong>@(detail.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity))</strong></div>
+                    </div>
+                    <div class="line-item-foot">
+                        <span>Received <b>@(line.ReceivedQuantity == 0m ? "—" : Quantity(line.ReceivedQuantity))</b></span>
+                        <span>Damaged <b>@(line.DamagedQuantity == 0m ? "—" : Quantity(line.DamagedQuantity))</b></span>
+                    </div>
+                </article>
+            }
+        </div>
     </section>
 
-    <section class="custody-panel">
-        <div class="custody-title">
-            <strong>Chain of custody</strong>
-            <button type="button" class="search-action" @onclick="ToggleCustodyAsync">
-                @(custodyShown ? "Hide timeline" : custodyLoading ? "Loading…" : "Show timeline")
-            </button>
-        </div>
-        @if (custodyShown)
-        {
-            @if (custody.Count == 0)
+    @if (ShowSubmit)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Submit for review</strong><span>The route owner approves the request before anything moves.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="SubmitAsync" disabled="@acting">@(acting ? "Submitting…" : "Submit transfer")</button>
+            </div>
+        </section>
+    }
+
+    @* One place to decide. A submitted request no longer has to be marked
+       "under review" first: approving records the review and the approval as
+       two custody events, exactly as the two separate clicks did. *@
+    @if (ShowDecision)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Decide the request</strong><span>Approval moves it to picking; rejection returns it to the requester as a draft.</span></div>
+            @if (IsStoreRestock)
             {
-                <div class="results-empty"><span>No custody events recorded for this transfer yet.</span></div>
+                <div class="restock-approval-lines">
+                    @foreach (ApprovalRow row in approvalRows)
+                    {
+                        <div class="restock-approval-line" @key="row.LineNo">
+                            <div><strong>@row.ProductName</strong><small>Store requested @Quantity(row.Requested)</small></div>
+                            <label>Approve quantity
+                                <input type="number" min="0.001" step="0.001" value="@row.Approved" @onchange="(e) => OnApprovalQuantityChanged(row, e)" />
+                            </label>
+                        </div>
+                    }
+                </div>
+                <p class="restock-approval-hint">Adjust quantities before approving. Each approved quantity must be greater than zero.</p>
+            }
+            <label class="decision-note">
+                <span>Note <small>optional to approve · required to reject</small></span>
+                <input type="text" class="reason-input" placeholder="Add context for the requester" @bind="decisionNote" @bind:event="oninput" />
+            </label>
+            <div class="open-count-actions">
+                @if (Status == "Submitted")
+                {
+                    <button type="button" class="search-action secondary" @onclick="ReviewAsync" disabled="@acting" title="Tell others you are looking at it without deciding yet">Mark under review</button>
+                }
+                <button type="button" class="search-action danger" @onclick="RejectAsync" disabled="@(acting || string.IsNullOrWhiteSpace(decisionNote))" title="@(string.IsNullOrWhiteSpace(decisionNote) ? "Write a note explaining the rejection first" : null)">Reject</button>
+                <button type="button" class="search-action" @onclick="ApproveAsync" disabled="@(acting || (IsStoreRestock && !CanApproveQuantities))">@(acting ? "Saving…" : "Approve")</button>
+            </div>
+        </section>
+    }
+
+    @* Picking and receiving both wear the goods-receiving count sheet: a table
+       of rows with a stepper, a per-row scan, and a footer carrying the running
+       total next to the button that commits it. The page already has a sticky
+       side column for the timeline, so the total sits in a footer strip rather
+       than a second narrow column. *@
+    @if (ShowPick)
+    {
+        <section class="cs-sheet">
+            <div class="cs-card">
+                <div class="cs-card-head">
+                    <div>
+                        <div class="cs-eyebrow">Warehouse pick</div>
+                        <h2>Pick the stock</h2>
+                        <p>Enter or scan the quantity actually picked for each product. Uncounted products stay at zero.</p>
+                    </div>
+                    <span class="cs-count">@PickedLines of @pickRows.Count</span>
+                </div>
+
+                <div class="cs-toolbar">
+                    <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                    <button type="button" class="cs-btn" disabled="@acting" @onclick="PickAllRequested">
+                        <AppIcon Name="check" /> Pick all requested
+                    </button>
+                </div>
+                @* A wedge scanner types wherever focus is, so it needs no row. *@
+                <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
+                <p class="cs-note">@(message is null ? "Each scan adds one unit to the product it belongs to. A line cannot be picked past what the store requested." : message)</p>
+
+                <ScanTarget OnScan="OnScannedAsync" />
+
+                <div class="cs-table-head" aria-hidden="true">
+                    <span>Product</span><span>Left</span><span>Picking now</span><span>Already picked</span><span>Actions</span>
+                </div>
+
+                <div class="cs-rows">
+                    @foreach (PickRow row in pickRows)
+                    {
+                        <article class="cs-row @(scanned.ContainsKey(row.LineNo) ? "is-hit" : null)" @key="row.LineNo" aria-label="@row.ProductName">
+                            <div class="cs-product">
+                                <div class="cs-name">@row.ProductName</div>
+                                <div class="cs-sku">Requested @Quantity(row.Requested)</div>
+                                @if (scanned.ContainsKey(row.LineNo))
+                                {
+                                    <div class="cs-flag">Counted by scan</div>
+                                }
+                            </div>
+
+                            <div class="cs-due-cell"><span class="cs-due">@Quantity(row.Requested - row.Picked)</span></div>
+
+                            <div class="cs-qty-cell" data-label="PICKING NOW">
+                                <div class="cs-stepper">
+                                    <button type="button" aria-label="One fewer @row.ProductName"
+                                            disabled="@(row.Quantity <= 0m)" @onclick="() => StepPick(row, -1m)">−</button>
+                                    <input type="number" min="0" max="@(row.Requested - row.Picked)" step="1" inputmode="numeric"
+                                           aria-label="Picked quantity for @row.ProductName"
+                                           value="@row.Quantity" @onchange="e => OnPickQuantityChanged(row, e)" />
+                                    <button type="button" aria-label="One more @row.ProductName"
+                                            disabled="@(row.Quantity >= row.Requested - row.Picked)" @onclick="() => StepPick(row, 1m)">+</button>
+                                </div>
+                                <button type="button" class="cs-text-btn" disabled="@(row.Quantity == row.Requested - row.Picked)"
+                                        @onclick="() => SetPick(row, row.Requested - row.Picked)">Pick all @Quantity(row.Requested - row.Picked)</button>
+                            </div>
+
+                            <div class="cs-second-cell">
+                                <span class="cs-second-label">Already picked</span>
+                                <strong>@Quantity(row.Picked)</strong>
+                                <div class="cs-derived @(row.Picked + row.Quantity >= row.Requested ? "is-up" : "is-flat")">@Quantity(row.Picked + row.Quantity) of @Quantity(row.Requested)</div>
+                            </div>
+
+                            <div class="cs-actions">
+                                <button type="button" class="cs-row-scan" @onclick="() => OpenScan(row.LineNo, row.ProductName)"
+                                        aria-label="Scan barcode for @row.ProductName">
+                                    <AppIcon Name="camera" /> Scan barcode
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+
+                <div class="cs-foot">
+                    <div class="cs-foot-facts">
+                        <span class="cs-foot-fact">Lines picked <strong>@PickedLines of @pickRows.Count</strong></span>
+                        <span class="cs-foot-fact is-key">Units picking now <strong>@Quantity(PickingNowUnits)</strong></span>
+                        <span class="cs-foot-fact">Still requested <strong>@Quantity(PickRemainingUnits)</strong></span>
+                    </div>
+                    <button type="button" class="cs-btn cs-primary" @onclick="BeginPickAsync" disabled="@(!CanPickNow || acting)">
+                        <AppIcon Name="check" /> @(acting ? "Accepting…" : "Accept request")
+                    </button>
+                </div>
+
+                <div class="cs-helper">
+                    <AppIcon Name="info" />
+                    Leave a line at zero when none of it was picked. Picking does not move stock — dispatch does.
+                </div>
+            </div>
+        </section>
+    }
+
+    @if (ShowReady)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Picking complete</strong><span>@(CanDispatchOnceReady
+                ? "Dispatch now to post the movement to the ledger, or mark it ready for a colleague to dispatch."
+                : "Once ready, the transfer can be dispatched and the ledger moves the stock.")</span></div>
+            <div class="open-count-actions">
+                @if (CanDispatchOnceReady)
+                {
+                    <button type="button" class="search-action secondary" @onclick="ReadyAsync" disabled="@acting">Mark ready only</button>
+                    <button type="button" class="search-action" @onclick="ReadyAndDispatchAsync" disabled="@acting">@(acting ? "Working…" : "Mark ready and dispatch")</button>
+                }
+                else
+                {
+                    <button type="button" class="search-action" @onclick="ReadyAsync" disabled="@acting">@(acting ? "Marking…" : "Mark ready for dispatch")</button>
+                }
+            </div>
+        </section>
+    }
+
+    @if (ShowDispatch)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Dispatch</strong><span>Posts the movement to the ledger — the source's available stock drops and the goods go in transit.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="BeginDispatchAsync" disabled="@acting">@(acting ? "Dispatching…" : "Dispatch transfer")</button>
+            </div>
+        </section>
+    }
+
+    @if (ownerDispatchConfirmation && IsOwner)
+    {
+        <div class="owner-dispatch-backdrop" @onclick="CancelOwnerDispatch">
+            <section class="owner-dispatch-dialog" role="alertdialog" aria-modal="true" aria-labelledby="owner-dispatch-title" tabindex="-1" @onclick:stopPropagation="true">
+                <span class="eyebrow">Owner confirmation</span>
+                <h2 id="owner-dispatch-title">Dispatch as owner?</h2>
+                <p>Dispatch is normally handled by Main Inventory staff. Continuing will mark this request as Dispatched, move its picked products out of main warehouse available stock, and record them as in transit to the destination store. Store staff will still need to record receipt.</p>
+                <div class="open-count-actions owner-dispatch-actions">
+                    <button type="button" class="search-action owner-dispatch-cancel" @onclick="CancelOwnerDispatch">Go back</button>
+                    <button type="button" class="search-action" @onclick="ConfirmOwnerDispatchAsync" disabled="@acting">Override and dispatch</button>
+                </div>
+            </section>
+        </div>
+    }
+
+    @if (ownerPickConfirmation && IsOwner)
+    {
+        <div class="owner-dispatch-backdrop" @onclick="CancelOwnerPick">
+            <section class="owner-dispatch-dialog" role="alertdialog" aria-modal="true" aria-labelledby="owner-pick-title" tabindex="-1" @onclick:stopPropagation="true">
+                <span class="eyebrow">Owner confirmation</span>
+                <h2 id="owner-pick-title">Pick as owner?</h2>
+                <p>Picking is normally done by Main Inventory staff, off the shelf, counting as they go. Continuing will record these quantities as picked in your name and commit the warehouse to sending them. Nothing moves yet — dispatch does that — but these are the numbers the store will be told to expect.</p>
+                <div class="open-count-actions owner-dispatch-actions">
+                    <button type="button" class="search-action owner-dispatch-cancel" @onclick="CancelOwnerPick">Go back</button>
+                    <button type="button" class="search-action" @onclick="ConfirmOwnerPickAsync" disabled="@acting">Override and record the pick</button>
+                </div>
+            </section>
+        </div>
+    }
+
+    @if (ShowReceive)
+    {
+        <section class="cs-sheet">
+            <div class="cs-card">
+                <div class="cs-card-head">
+                    <div>
+                        <div class="cs-eyebrow">Arriving stock</div>
+                        <h2>Count what arrived</h2>
+                        <p>Count the good units and the damaged ones separately. Shortfalls are kept on the books as a discrepancy for review.</p>
+                    </div>
+                    <span class="cs-count">@ReceivedLines of @receiveRows.Count</span>
+                </div>
+
+                <div class="cs-toolbar">
+                    <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each item row</span>
+                    <button type="button" class="cs-btn" disabled="@acting" @onclick="ReceiveAllAwaiting">
+                        <AppIcon Name="check" /> Mark all arrived good
+                    </button>
+                </div>
+                @* A wedge scanner types wherever focus is, so it needs no row. *@
+                <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan.</p>
+                @* Good and damaged are two separate counts here, not a total and a
+                   deduction: the receipt posts each one on its own. *@
+                <p class="cs-note">Count the units that arrived usable under Good, and the units that arrived broken under Damaged. Together they are what the delivery brought.</p>
+
+                <ScanTarget OnScan="OnScannedAsync" Enabled="@(!ShowPick)" />
+
+                <div class="cs-table-head" aria-hidden="true">
+                    <span>Product</span><span>Awaiting</span><span>Good</span><span>Damaged</span><span>Actions</span>
+                </div>
+
+                <div class="cs-rows">
+                    @foreach (ReceiveRow row in receiveRows)
+                    {
+                        <article class="cs-row @(scanned.ContainsKey(row.LineNo) ? "is-hit" : null)" @key="(row.LineNo, row.BatchId)" aria-label="@row.ProductName">
+                            <div class="cs-product">
+                                <div class="cs-name">@row.ProductName</div>
+                                <div class="cs-sku">@(row.BatchId is null ? "any lot" : $"lot {row.BatchId.Value.ToString("D", CultureInfo.InvariantCulture)[..8]}")</div>
+                                @if (row.Received + row.Damaged > row.Remaining)
+                                {
+                                    <div class="cs-flag is-warn">More than was sent — raises a discrepancy</div>
+                                }
+                            </div>
+
+                            <div class="cs-due-cell"><span class="cs-due">@Quantity(row.Remaining)</span></div>
+
+                            <div class="cs-qty-cell" data-label="GOOD">
+                                <div class="cs-stepper">
+                                    <button type="button" aria-label="One fewer @row.ProductName"
+                                            disabled="@(row.Received <= 0m)" @onclick="() => StepReceive(row, -1m)">−</button>
+                                    <input type="number" min="0" step="1" inputmode="numeric"
+                                           aria-label="Good quantity received for @row.ProductName"
+                                           value="@row.Received" @onchange="e => OnReceiveQuantityChanged(row, e, true)" />
+                                    <button type="button" aria-label="One more @row.ProductName"
+                                            @onclick="() => StepReceive(row, 1m)">+</button>
+                                </div>
+                                <button type="button" class="cs-text-btn" disabled="@(row.Received == row.Remaining)"
+                                        @onclick="() => SetReceive(row, row.Remaining)">Receive all @Quantity(row.Remaining)</button>
+                            </div>
+
+                            <div class="cs-second-cell">
+                                <label class="cs-second-field">
+                                    <span class="cs-second-label">Damaged</span>
+                                    <span class="cs-second-input">
+                                        <input type="number" min="0" step="1" inputmode="numeric"
+                                               aria-label="Damaged quantity for @row.ProductName"
+                                               value="@row.Damaged" @onchange="e => OnReceiveQuantityChanged(row, e, false)" />
+                                    </span>
+                                </label>
+                                <div class="cs-derived @(row.Damaged > 0m ? "is-down" : "is-flat")">@Quantity(row.Received + row.Damaged) arrived in total</div>
+                            </div>
+
+                            <div class="cs-actions">
+                                <button type="button" class="cs-row-scan" @onclick="() => OpenScan(row.LineNo, row.ProductName)"
+                                        aria-label="Scan barcode for @row.ProductName">
+                                    <AppIcon Name="camera" /> Scan barcode
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+
+                <div class="cs-foot">
+                    <div class="cs-foot-facts">
+                        <span class="cs-foot-fact">Items counted <strong>@ReceivedLines of @receiveRows.Count</strong></span>
+                        <span class="cs-foot-fact">Arrived <strong>@Quantity(ReceivedUnits + DamagedUnits) of @Quantity(AwaitingUnits)</strong></span>
+                        <span class="cs-foot-fact">Damaged <strong>@Quantity(DamagedUnits)</strong></span>
+                        <span class="cs-foot-fact is-key">Good units <strong>@Quantity(ReceivedUnits)</strong></span>
+                    </div>
+                    <button type="button" class="cs-btn cs-primary" @onclick="ReceiveAsync" disabled="@(!CanReceiveNow || acting)">
+                        <AppIcon Name="check" /> @(acting ? "Posting…" : "Post receipt")
+                    </button>
+                </div>
+
+                <div class="cs-helper">
+                    <AppIcon Name="info" />
+                    Leave a line at 0 for items that did not arrive. Anything short of what was sent stays open as a discrepancy.
+                </div>
+            </div>
+        </section>
+    }
+
+    @if (ShowVerify)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Verify and close</strong><span>Confirms every allocation was accounted for — closes the transfer and clears the books.</span></div>
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="VerifyAsync" disabled="@acting">@(acting ? "Verifying…" : "Verify transfer")</button>
+            </div>
+        </section>
+    }
+
+    @if (ShowCentralReview)
+    {
+        <section class="action-panel">
+            <div class="action-title"><strong>Central review of an emergency</strong><span>Ratifying keeps the posted movement; rejecting reverses it and opens an incident.</span></div>
+            <input type="text" class="reason-input" placeholder="Review note (required to reject)" @bind="centralNote" />
+            <div class="open-count-actions">
+                <button type="button" class="search-action" @onclick="() => CentralReviewAsync(true)" disabled="@acting">Ratify</button>
+                <button type="button" class="search-action danger" @onclick="() => CentralReviewAsync(false)" disabled="@(acting || string.IsNullOrWhiteSpace(centralNote))">Reject</button>
+            </div>
+        </section>
+    }
+
+    </div><!-- /.tr-col-main -->
+
+    <aside class="tr-col-side">
+    <section class="tr-section panel tr-timeline">
+        <h2>Activity timeline</h2>
+        <div class="tr-events">
+            @{ List<TimelineEvent> timeline = TimelineEvents; }
+            @for (int index = 0; index < timeline.Count; index++)
+            {
+                TimelineEvent timelineEvent = timeline[index];
+                <div class="tr-event @timelineEvent.State" @key="index">
+                    <i aria-hidden="true"></i>
+                    <div>
+                        <strong>@timelineEvent.Title</strong>
+                        <span>@timelineEvent.Subtitle</span>
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="tr-section panel tr-actions">
+        <h2>Transfer actions</h2>
+        <div class="tr-print">
+            <WorkflowPrintButton Document="@BuildPrintReceipt()" />
+        </div>
+        @if (ShowCancelBeforeDispatch)
+        {
+            <details class="tr-cancel">
+                <summary>Abandon this transfer <span aria-hidden="true">⌄</span></summary>
+                <p>Nothing has left the warehouse yet, so there is no ledger movement to reverse — the request is simply dropped. Use this when the stock it was picked against is no longer there and the transfer cannot go.</p>
+                <label for="tr-abandon-reason">Reason</label>
+                <textarea id="tr-abandon-reason" rows="3" maxlength="500" placeholder="Explain why it cannot go…"
+                          @bind="cancelReason" @bind:event="oninput"></textarea>
+                <button type="button" class="tr-cancel-submit" @onclick="CancelBeforeDispatchAsync"
+                        disabled="@(acting || string.IsNullOrWhiteSpace(cancelReason))">
+                    @(acting ? "Abandoning…" : "Abandon transfer")
+                </button>
+            </details>
+        }
+        @if (ShowCancelDispatch)
+        {
+            <details class="tr-cancel">
+                <summary>Cancel the dispatch <span aria-hidden="true">⌄</span></summary>
+                <p>Only valid before the goods physically leave the source. Cancelling reverses the ledger movement when the backend permits it.</p>
+                <label for="tr-cancel-reason">Reason for cancellation</label>
+                <textarea id="tr-cancel-reason" rows="3" maxlength="500" placeholder="Explain the cancellation…"
+                          @bind="cancelReason" @bind:event="oninput"></textarea>
+                <button type="button" class="tr-cancel-submit" @onclick="CancelDispatchAsync"
+                        disabled="@(acting || string.IsNullOrWhiteSpace(cancelReason))">
+                    @(acting ? "Cancelling…" : "Request cancellation")
+                </button>
+            </details>
+        }
+    </section>
+    </aside><!-- /.tr-col-side -->
+    </div><!-- /.tr-layout -->
+
+    @* Rendered by the app rather than a native dialog, which would need interop. *@
+    @if (scanRowLineNo is not null)
+    {
+        <div class="cs-dlg-scrim" @onclick="CloseScan"></div>
+        <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="transfer-scan-title">
+            <h2 id="transfer-scan-title">Scan product barcode</h2>
+            <p class="cs-dlg-product">@scanRowName</p>
+            <p class="cs-dlg-lead">Point the camera at this product's barcode. Each scan counts one unit against the line it belongs to, whichever row it was opened from.</p>
+            <CameraScanner Enabled="@(!acting)" />
+            <label class="cs-field">Barcode value
+                <input type="text" inputmode="numeric" class="cs-code-input" placeholder="Enter barcode value"
+                       autocomplete="off" @bind="scanCode" @bind:event="oninput"
+                       @onkeydown="OnScanCodeKeyAsync" /></label>
+            <footer>
+                <span class="cs-dlg-status">@(message ?? "Ready to scan.")</span>
+                <button type="button" class="cs-btn" @onclick="CloseScan">Done</button>
+                <button type="button" class="cs-btn cs-primary" disabled="@string.IsNullOrWhiteSpace(scanCode)"
+                        @onclick="SubmitScanCodeAsync">Add one unit</button>
+            </footer>
+        </div>
+    }
+}
+
+</div>
+
+@code {
+    private sealed record ApprovalRow(int LineNo, string ProductName, decimal Requested, decimal Approved);
+    private sealed record PickRow(int LineNo, string ProductName, decimal Requested, decimal Picked, decimal Quantity);
+    private sealed record ReceiveRow(
+        int LineNo,
+        Guid? BatchId,
+        string ProductName,
+        decimal Remaining,
+        decimal Received,
+        decimal Damaged);
+
+    /// <summary>One milestone on the activity timeline; State is done, current or future.</summary>
+    private sealed record TimelineEvent(string Title, string Subtitle, string State);
+
+    private readonly List<PosLocation> locations = [];
+    private readonly List<PosTransferCustodyEventSummary> custody = [];
+    private readonly List<PickRow> pickRows = [];
+    private readonly List<ApprovalRow> approvalRows = [];
+    private readonly List<ReceiveRow> receiveRows = [];
+
+    // Lines counted by scanning in this visit; each scan adds one unit.
+    private readonly Dictionary<int, decimal> scanned = [];
+    private ScanLine? scanQueue;
+
+    private Task OnScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    {
+        scanQueue ??= new ScanLine(CountScannedAsync);
+        return scanQueue.EnqueueAsync(scan);
+    }
+
+    private async Task CountScannedAsync(Pos.Shared.Scanning.BarcodeScan scan)
+    {
+        if (detail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ApiResult<PosScannedProduct> found = await Api.FindProductByScanAsync(scan.Code, CancellationToken.None);
+            if (found is not { IsSuccess: true, Value: { } product })
+            {
+                message = $"{scan.Code}: {found.Error ?? "not a known product."}";
+                return;
+            }
+
+            PosTransferLineView? line = detail.Lines.FirstOrDefault(l => l.ProductId == product.Id);
+            if (line is null)
+            {
+                message = $"{product.Name} is not on this transfer.";
+                return;
+            }
+
+            if (ShowPick && pickRows.FindIndex(r => r.LineNo == line.LineNo) is var pick and >= 0)
+            {
+                decimal count = pickRows[pick].Quantity + 1m;
+                if (count > pickRows[pick].Requested - pickRows[pick].Picked)
+                {
+                    message = $"{product.Name}: the remaining request has already been counted.";
+                    return;
+                }
+
+                scanned[line.LineNo] = count;
+                pickRows[pick] = pickRows[pick] with { Quantity = count };
+                message = $"{product.Name}: {Quantity(count)} picked by scan (requested {Quantity(pickRows[pick].Requested)}).";
+            }
+            else if (ShowReceive && receiveRows.FindIndex(r => r.LineNo == line.LineNo) is var receive and >= 0)
+            {
+                decimal count = scanned.GetValueOrDefault(line.LineNo) + 1m;
+                scanned[line.LineNo] = count;
+                receiveRows[receive] = receiveRows[receive] with { Received = count };
+                message = $"{product.Name}: {Quantity(count)} received by scan (awaiting {Quantity(receiveRows[receive].Remaining)}).";
             }
             else
             {
-                <ol class="custody-list">
-                    @foreach (PosTransferCustodyEventSummary custodyEvent in custody)
-                    {
-                        <li>
-                            <span class="custody-kind">@SplitWords(custodyEvent.Kind)</span>
-                            <span class="custody-date">@custodyEvent.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
-                            <span class="custody-note">@(string.IsNullOrWhiteSpace(custodyEvent.Note) ? "—" : custodyEvent.Note)</span>
-                        </li>
-                    }
-                </ol>
+                scanned.Remove(line.LineNo);
+                message = $"{product.Name} has nothing left to pick or receive.";
             }
         }
-    </section>
-}
-
-@code {
-    private readonly List<PosLocation> locations = [];
-    private readonly List<PosTransferCustodyEventSummary> custody = [];
+        catch (HttpRequestException)
+        {
+            message = "Head office could not be reached to look that barcode up.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
 
     private PosTransferDetail? detail;
     private string? message;
+    // One note for the decision: optional on approval, the reason on rejection.
+    private string decisionNote = string.Empty;
+    private string cancelReason = string.Empty;
+    private string centralNote = string.Empty;
 
     private bool loading = true;
-    private bool custodyShown;
-    private bool custodyLoading;
+    private bool acting;
+    private bool ownerDispatchConfirmation;
+    private bool ownerPickConfirmation;
 
     [Parameter] public Guid TransferId { get; set; }
 
     private bool CanViewTransfers => Session.HasPermission("transfer.view");
+    private bool CanRequest => Session.HasPermission("transfer.request");
+    private bool CanApprove => Session.HasPermission("transfer.approve");
+    private bool CanPick => Session.HasPermission("transfer.pick");
+    private bool CanDispatch => Session.HasPermission("transfer.dispatch");
+    private bool CanReceive => Session.HasPermission("transfer.receive");
+    private bool CanVerify => Session.HasPermission("transfer.verify");
+    private bool IsOwner => Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
+
     private string Status => detail?.Transfer.Status ?? string.Empty;
     private string Mode => detail?.Mode ?? string.Empty;
 
     private bool IsEmergency => Mode == "EmergencyOffline";
+    private bool IsStoreRestock => Mode == "StoreRestock";
+
+    private bool ShowSubmit => Status == "Draft" && CanRequest && (!IsStoreRestock || detail?.Transfer.CreatedByUserId == Session.Current?.User.Id);
+    private bool ShowDecision => Status is "Submitted" or "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
+    // The pick panel stays visible for the source side from the moment the        // request is approved; its rows start at zero, so the quantity inputs must
+    // be on screen before any picking can be recorded. The "Accept request"
+    // button itself stays disabled until a quantity is entered (CanPickNow).
+    private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    private bool ShowReady => Status == "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    private bool ShowDispatch => Status == "Ready" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    // The same rule ShowDispatch applies once the transfer is Ready.
+    private bool CanDispatchOnceReady => CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    // Picking does not move stock, so anything short of Dispatched can simply be
+    // dropped. Without this a transfer whose stock was consumed elsewhere after
+    // picking is stranded: it cannot dispatch, and the only cancel on offer
+    // required it to have dispatched first.
+    private bool ShowCancelBeforeDispatch => Status is "Draft" or "Submitted" or "InReview" or "Approved" or "Picking" or "Ready"
+        && CanPick
+        && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+
+    private bool ShowCancelDispatch => Status == "Dispatched" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    private bool ShowReceive => Status is "Dispatched" or "PartiallyReceived" && CanReceive && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.DestinationLocationId)) && receiveRows.Count > 0;
+    private bool ShowVerify => Status == "Received" && CanVerify && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.DestinationLocationId));
+    private bool ShowCentralReview => Status == "PendingCentralReview" && CanApprove;
+
+    private string WarehouseStepTitle => Status switch
+    {
+        "Submitted" => "Waiting for owner approval",
+        "InReview" => "Owner review in progress",
+        "Approved" => "Approved and ready to pick",
+        "Picking" => "Continue picking the products",
+        "Ready" => "Ready to dispatch to the store",
+        "Dispatched" => "Products have left the main warehouse",
+        _ => string.Empty,
+    };
+    private string WarehouseStepMessage => Status switch
+    {
+        "Submitted" => "The owner must review and approve this request before warehouse staff can pick or dispatch its products.",
+        "InReview" => "The owner is reviewing this request. Once approved, it will appear under To fulfill here.",
+        "Approved" => "Enter the quantities picked from main warehouse stock and select Accept request. Then mark the request ready and dispatch it to the store.",
+        "Picking" => "Enter any remaining quantities and select Accept request. When picking is complete, mark the request ready and dispatch it.",
+        "Ready" => "Select Dispatch transfer below to move the picked products out of main warehouse stock and send them to the store.",
+        "Dispatched" => "The products are in transit. Store staff can open this request and record what arrived.",
+        _ => string.Empty,
+    };
+
+    private bool CanPickNow => pickRows.Any(row => row.Quantity > 0m);
+    private bool CanReceiveNow => receiveRows.Any(row => row.Received > 0m || row.Damaged > 0m);
+    private bool CanApproveQuantities => approvalRows.Count > 0 && approvalRows.All(row => row.Approved > 0m);
 
     private string KindLabel => detail is not { } transfer ? string.Empty : transfer.Kind switch
     {
@@ -170,11 +744,68 @@ else
         "Normal" => "Normal",
         "PreApproved" => "Pre-approved",
         "EmergencyOffline" => "Emergency",
+        "StoreRestock" => "Store restock",
         _ => Mode,
     };
 
     private string SourceLabel => LocationLabel(detail?.Transfer.SourceLocationId);
     private string DestinationLabel => LocationLabel(detail?.Transfer.DestinationLocationId);
+
+    // The route panel shows the short code over the full name, as in the design.
+    private string SourceCode => LocationCode(detail?.Transfer.SourceLocationId);
+    private string SourceName => LocationName(detail?.Transfer.SourceLocationId);
+    private string DestinationCode => LocationCode(detail?.Transfer.DestinationLocationId);
+    private string DestinationName => LocationName(detail?.Transfer.DestinationLocationId);
+
+    private bool InTransit => detail?.Transfer is { DispatchedAtUtc: not null, ReceivedAtUtc: null };
+
+    private string DispatchedNoticeTitle => detail is { Kind: "WarehouseToStore" }
+        ? "Products have left the main warehouse"
+        : "Products have left the source";
+
+    private WorkflowReceipt BuildPrintReceipt()
+    {
+        PosTransferDetail transfer = detail!;
+        string? dispatchedAt = transfer.Transfer.DispatchedAtUtc is { } dispatched
+            ? dispatched.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)
+            : null;
+
+        WorkflowReceiptLine[] lines = [.. transfer.Lines.Select(line => new WorkflowReceiptLine(
+            line.ProductName ?? $"Product on line {line.LineNo}",
+            null,
+            [
+                Quantity(line.RequestedQuantity),
+                transfer.Transfer.DispatchedAtUtc is null ? "—" : Quantity(line.PickedQuantity),
+                Quantity(line.ReceivedQuantity),
+                Quantity(line.DamagedQuantity),
+            ]))];
+
+        // The DR is the paper the driver signs for, so it heads the printed
+        // copy rather than being buried in a table column.
+        List<WorkflowReceiptDetail> details = [];
+        if (transfer.Transfer.DeliveryReceiptNumber is { } deliveryReceipt)
+        {
+            details.Add(new WorkflowReceiptDetail("Delivery receipt (DR)", deliveryReceipt));
+        }
+
+        return new WorkflowReceipt(
+            IsStoreRestock ? "Product request" : "Inventory transfer",
+            string.IsNullOrWhiteSpace(transfer.Transfer.Number)
+                ? $"Transfer {TransferLabels.ShortId(TransferId)}"
+                : transfer.Transfer.Number,
+            SplitWords(transfer.Transfer.Status),
+            "From",
+            SourceLabel,
+            "Deliver to",
+            DestinationLabel,
+            IsStoreRestock ? "Requested" : "Created",
+            transfer.Transfer.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture),
+            "Released",
+            dispatchedAt ?? "Not yet released",
+            [IsStoreRestock ? "Needed / approved" : "Requested", "Released", "Received", "Damaged"],
+            lines,
+            details);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -190,9 +821,13 @@ else
 
     private async Task LoadLocationsAsync()
     {
-        ApiResult<List<PosLocation>> response = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
+        ApiResult<List<PosLocation>> response = await Api.GetLocationsAsync(CancellationToken.None);
         if (response.IsSuccess && response.Value is not null)
         {
+            // Kind 0 is the Main Warehouse, Kind 1 a store; a transfer's route
+            // can start or end at either, and this list resolves both to a name.
+            // Closed locations are included: this list only ever names a route
+            // that was chosen while both ends were open.
             locations.AddRange(response.Value.Where(location => location.Kind is 0 or 1));
         }
     }
@@ -215,8 +850,31 @@ else
                 return;
             }
 
+            if (!Session.CanUseInventoryLocation(response.Value.Transfer.SourceLocationId) &&
+                !Session.CanUseInventoryLocation(response.Value.Transfer.DestinationLocationId))
+            {
+                message = "This transfer is outside your assigned locations.";
+                loading = false;
+                return;
+            }
+
             detail = response.Value;
+            if (IsStoreRestock)
+            {
+                NavCrumb parent = IsOwner
+                    ? new("Restock approvals", "restock/approvals")
+                    : Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) &&
+                      !Session.CanUseInventoryLocation(detail.Transfer.DestinationLocationId)
+                        ? new("Restock fulfillment", "restock/fulfillment")
+                        : new("Restock requests", "restock");
+                Trail.Name("Restock request", parent);
+            }
             loading = false;
+
+            BuildPickRows();
+            BuildApprovalRows();
+            BuildReceiveRows();
+            await LoadCustodyAsync();
         }
         catch (HttpRequestException)
         {
@@ -225,15 +883,502 @@ else
         }
     }
 
-    private async Task ToggleCustodyAsync()
+    private void BuildPickRows()
     {
-        if (custodyShown || custody.Count > 0)
+        pickRows.Clear();
+        if (detail is null)
         {
-            custodyShown = !custodyShown;
             return;
         }
 
-        custodyLoading = true;
+        foreach (PosTransferLineView line in detail.Lines)
+        {
+            decimal remaining = line.RequestedQuantity - line.PickedQuantity;
+            if (remaining <= 0m)
+            {
+                continue;
+            }
+
+            pickRows.Add(new PickRow(
+                line.LineNo,
+                line.ProductName ?? $"Line {line.LineNo}",
+                line.RequestedQuantity,
+                line.PickedQuantity,
+                0m));
+        }
+    }
+
+    private void BuildApprovalRows()
+    {
+        approvalRows.Clear();
+        if (detail is null) { return; }
+        approvalRows.AddRange(detail.Lines.Select(line => new ApprovalRow(
+            line.LineNo,
+            line.ProductName ?? $"Line {line.LineNo}",
+            line.RequestedQuantity,
+            line.RequestedQuantity)));
+    }
+
+    private void OnApprovalQuantityChanged(ApprovalRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? value : 0m;
+        int index = approvalRows.IndexOf(row);
+        if (index >= 0) { approvalRows[index] = row with { Approved = quantity }; }
+    }
+
+    private void BuildReceiveRows()
+    {
+        receiveRows.Clear();
+        if (detail is null)
+        {
+            return;
+        }
+
+        foreach (PosTransferLineView line in detail.Lines)
+        {
+            foreach (PosTransferAllocationView allocation in line.Allocations)
+            {
+                decimal remaining = allocation.PickedQuantity
+                    - allocation.ReceivedQuantity
+                    - allocation.DamagedQuantity;
+                if (remaining <= 0m)
+                {
+                    continue;
+                }
+
+                receiveRows.Add(new ReceiveRow(
+                    line.LineNo,
+                    allocation.BatchId,
+                    line.ProductName ?? $"Line {line.LineNo}",
+                    remaining,
+                    remaining,
+                    0m));
+            }
+        }
+    }
+
+    private int PickedLines => pickRows.Count(row => row.Quantity > 0m);
+
+    private decimal PickingNowUnits => pickRows.Sum(row => row.Quantity);
+
+    private decimal PickRemainingUnits => pickRows.Sum(row => row.Requested - row.Picked - row.Quantity);
+
+    private int ReceivedLines => receiveRows.Count(row => row.Received > 0m || row.Damaged > 0m);
+
+    private decimal ReceivedUnits => receiveRows.Sum(row => row.Received);
+
+    private decimal DamagedUnits => receiveRows.Sum(row => row.Damaged);
+
+    private decimal AwaitingUnits => receiveRows.Sum(row => row.Remaining);
+
+    /// <summary>Sets a pick row's quantity, clamped to what is still requested.</summary>
+    private void SetPick(PickRow row, decimal quantity)
+    {
+        int index = pickRows.IndexOf(row);
+        if (index >= 0)
+        {
+            pickRows[index] = pickRows[index] with { Quantity = Math.Clamp(quantity, 0m, row.Requested - row.Picked) };
+        }
+    }
+
+    private void StepPick(PickRow row, decimal delta) => SetPick(row, row.Quantity + delta);
+
+    /// <summary>Picks the whole outstanding request on every line.</summary>
+    private void PickAllRequested()
+    {
+        for (int index = 0; index < pickRows.Count; index++)
+        {
+            PickRow row = pickRows[index];
+            pickRows[index] = row with { Quantity = row.Requested - row.Picked };
+        }
+    }
+
+    /// <summary>Sets a receive row's arrived quantity. Over-receipt is allowed:
+    /// more than was sent is a real discrepancy the receipt has to carry.</summary>
+    private void SetReceive(ReceiveRow row, decimal quantity)
+    {
+        int index = receiveRows.IndexOf(row);
+        if (index >= 0)
+        {
+            receiveRows[index] = receiveRows[index] with { Received = Math.Max(0m, quantity) };
+        }
+    }
+
+    private void StepReceive(ReceiveRow row, decimal delta) => SetReceive(row, row.Received + delta);
+
+    /// <summary>Counts every line at what is still awaited.</summary>
+    private void ReceiveAllAwaiting()
+    {
+        for (int index = 0; index < receiveRows.Count; index++)
+        {
+            ReceiveRow row = receiveRows[index];
+            receiveRows[index] = row with { Received = row.Remaining };
+        }
+    }
+
+    private int? scanRowLineNo;
+    private string scanRowName = string.Empty;
+    private string scanCode = string.Empty;
+
+    private void OpenScan(int lineNo, string productName)
+    {
+        scanRowLineNo = lineNo;
+        scanRowName = productName;
+        scanCode = string.Empty;
+    }
+
+    private void CloseScan()
+    {
+        scanRowLineNo = null;
+        scanCode = string.Empty;
+    }
+
+    /// <summary>
+    /// Counts the code typed in the scan dialog, for a camera that will not open.
+    /// </summary>
+    /// <remarks>
+    /// It runs the scan path rather than trusting the row the dialog was opened
+    /// from, so a carton scanned against the wrong line still lands on the
+    /// product it actually belongs to.
+    /// </remarks>
+    private async Task SubmitScanCodeAsync()
+    {
+        string code = Pos.Shared.Scanning.BarcodeText.Clean(scanCode);
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        scanCode = string.Empty;
+        await CountScannedAsync(new Pos.Shared.Scanning.BarcodeScan(
+            code,
+            Pos.Shared.Scanning.ScanSource.Simulated,
+            DateTimeOffset.UtcNow));
+    }
+
+    private Task OnScanCodeKeyAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+        => e.Key == "Enter" ? SubmitScanCodeAsync() : Task.CompletedTask;
+
+    private void OnPickQuantityChanged(PickRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? Math.Clamp(value, 0m, row.Requested - row.Picked)
+            : 0m;
+        int index = pickRows.IndexOf(row);
+        if (index >= 0)
+        {
+            pickRows[index] = pickRows[index] with { Quantity = quantity };
+        }
+    }
+
+    private void OnReceiveQuantityChanged(ReceiveRow row, Microsoft.AspNetCore.Components.ChangeEventArgs e, bool good)
+    {
+        decimal quantity = decimal.TryParse(e.Value?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value)
+            ? value
+            : 0m;
+        int index = receiveRows.IndexOf(row);
+        if (index >= 0)
+        {
+            receiveRows[index] = good
+                ? receiveRows[index] with { Received = quantity }
+                : receiveRows[index] with { Damaged = quantity };
+        }
+    }
+
+    private async Task SubmitAsync() => await RunActionAsync("Submitting…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.SubmitTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ReviewAsync() => await RunActionAsync("Reviewing…", async () =>
+    {
+        string? failure = await MarkReviewedAsync(DecisionNoteOrNull);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        decisionNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private string? DecisionNoteOrNull => string.IsNullOrWhiteSpace(decisionNote) ? null : decisionNote.Trim();
+
+    /// <summary>Records the review step the server requires before approval.</summary>
+    private async Task<string?> MarkReviewedAsync(string? note)
+    {
+        ApiResult<PosReference> response = await Api.PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/transfers/{TransferId:D}/review"),
+            new PosTransferReasonRequest(note),
+            CancellationToken.None);
+        return response.IsSuccess ? null : response.Error;
+    }
+
+    private async Task ApproveAsync() => await RunActionAsync("Approving…", async () =>
+    {
+        if (IsStoreRestock && !CanApproveQuantities) { return "Enter a positive approved quantity for every product."; }
+        List<PosTransferAmendment>? amendments = IsStoreRestock
+            ? [.. approvalRows.Where(row => row.Approved != row.Requested)
+                .Select(row => new PosTransferAmendment(row.LineNo, row.Approved))]
+            : null;
+        if (Status == "Submitted")
+        {
+            // Approving a submitted request is the reviewer's decision too;
+            // record the review first so the custody trail keeps both steps.
+            string? reviewFailure = await MarkReviewedAsync(null);
+            if (reviewFailure is not null)
+            {
+                await LoadDetailAsync();
+                return reviewFailure;
+            }
+        }
+
+        ApiResult<PosReference> response = await Api.ApproveTransferAsync(
+            TransferId,
+            new PosApproveTransferRequest(amendments, DecisionNoteOrNull),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            // The review may have been recorded; show the state as it now is.
+            await LoadDetailAsync();
+            return response.Error;
+        }
+
+        decisionNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task RejectAsync() => await RunActionAsync("Rejecting…", async () =>
+    {
+        if (DecisionNoteOrNull is not { } reason)
+        {
+            return "Write a note explaining why the request is rejected.";
+        }
+
+        ApiResult<PosReference> response = await Api.RejectTransferAsync(
+            TransferId,
+            reason,
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        decisionNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    /// <summary>
+    /// Asks an owner to confirm before picking in place of warehouse staff.
+    /// Picking is the count that the store is later measured against, so an
+    /// owner doing it alone is the same separation-of-duties gap that dispatch
+    /// already warns about.
+    /// </summary>
+    private async Task BeginPickAsync()
+    {
+        if (acting) { return; }
+        if (IsOwner)
+        {
+            ownerPickConfirmation = true;
+            return;
+        }
+
+        await PickAsync();
+    }
+
+    private async Task ConfirmOwnerPickAsync()
+    {
+        if (!IsOwner || !ownerPickConfirmation || acting) { return; }
+        ownerPickConfirmation = false;
+        await PickAsync();
+    }
+
+    private void CancelOwnerPick() => ownerPickConfirmation = false;
+
+    private async Task PickAsync() => await RunActionAsync("Recording…", async () =>
+    {
+        List<PosTransferPickLine> allocations =
+        [
+            .. pickRows
+                .Where(row => row.Quantity > 0m)
+                .Select(row => new PosTransferPickLine(null, row.LineNo, row.Quantity)),
+        ];
+
+        ApiResult<PosReference> response = await Api.PickTransferAsync(
+            TransferId,
+            new PosPickTransferRequest(allocations),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ReadyAsync() => await RunActionAsync("Marking…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.ReadyTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    /// <summary>
+    /// Ready and dispatch in one go for someone allowed to do both. Still two
+    /// server transitions, so the custody trail is unchanged; an owner still
+    /// gets the dispatch confirmation.
+    /// </summary>
+    private async Task ReadyAndDispatchAsync()
+    {
+        await ReadyAsync();
+        if (Status == "Ready" && message is null)
+        {
+            await BeginDispatchAsync();
+        }
+    }
+
+    private async Task BeginDispatchAsync()
+    {
+        if (acting) { return; }
+        if (IsOwner)
+        {
+            ownerDispatchConfirmation = true;
+            return;
+        }
+
+        await DispatchAsync();
+    }
+
+    private async Task ConfirmOwnerDispatchAsync()
+    {
+        if (!IsOwner || !ownerDispatchConfirmation || acting) { return; }
+        ownerDispatchConfirmation = false;
+        await DispatchAsync();
+    }
+
+    private void CancelOwnerDispatch() => ownerDispatchConfirmation = false;
+
+    private async Task DispatchAsync() => await RunActionAsync("Dispatching…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.DispatchTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task CancelBeforeDispatchAsync() => await RunActionAsync("Abandoning…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.CancelTransferBeforeDispatchAsync(
+            TransferId, cancelReason.Trim(), CancellationToken.None);
+
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        cancelReason = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task CancelDispatchAsync() => await RunActionAsync("Cancelling…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.CancelTransferDispatchAsync(
+            TransferId,
+            cancelReason.Trim(),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        cancelReason = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task ReceiveAsync() => await RunActionAsync("Posting…", async () =>
+    {
+        List<PosTransferReceiveLine> receives =
+        [
+            .. receiveRows
+                .Where(row => row.Received > 0m || row.Damaged > 0m)
+                .Select(row => new PosTransferReceiveLine(row.LineNo, row.BatchId, row.Received, row.Damaged)),
+        ];
+
+        if (receives.Count == 0)
+        {
+            return "Enter a counted quantity first.";
+        }
+
+        ApiResult<PosReference> response = await Api.ReceiveTransferAsync(
+            TransferId,
+            new PosReceiveTransferRequest(receives),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task VerifyAsync() => await RunActionAsync("Verifying…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.VerifyTransferAsync(TransferId, CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        await LoadDetailAsync();
+        return null;
+    });
+
+    private async Task CentralReviewAsync(bool approve) => await RunActionAsync("Reviewing…", async () =>
+    {
+        ApiResult<PosReference> response = await Api.ReviewCentralTransferAsync(
+            TransferId,
+            approve,
+            string.IsNullOrWhiteSpace(centralNote) ? null : centralNote.Trim(),
+            CancellationToken.None);
+        if (!response.IsSuccess)
+        {
+            return response.Error;
+        }
+
+        centralNote = string.Empty;
+        await LoadDetailAsync();
+        return null;
+    });
+
+    // The custody log feeds the activity timeline. It is a convenience, so a
+    // failure here leaves the timeline to fall back to the transfer's own dates.
+    private async Task LoadCustodyAsync()
+    {
+        custody.Clear();
         try
         {
             ApiResult<List<PosTransferCustodyEventSummary>> response = await Api.GetTransferCustodyAsync(
@@ -242,13 +1387,122 @@ else
             {
                 custody.AddRange(response.Value);
             }
-            else if (response.Error is { Length: > 0 })
+        }
+        catch (HttpRequestException)
+        {
+            // The timeline falls back to the transfer's own milestones below.
+        }
+    }
+
+    /// <summary>
+    /// The design's activity timeline: every custody event as a milestone, the
+    /// latest one marked current, plus a future "receiving" step while the
+    /// products are still in transit.
+    /// </summary>
+    private List<TimelineEvent> TimelineEvents
+    {
+        get
+        {
+            List<TimelineEvent> events = [];
+            List<(string Title, string Subtitle)> marks = [];
+
+            if (custody.Count > 0)
             {
-                message = response.Error;
-                return;
+                marks.AddRange(custody.Select(custodyEvent => (
+                    TimelineTitle(custodyEvent),
+                    TimelineSubtitle(custodyEvent))));
+            }
+            else if (detail is not null)
+            {
+                marks.Add(("Request created", FormatStamp(detail.Transfer.CreatedAtUtc)));
+                if (detail.ApprovedAtUtc is { } approvedAt)
+                {
+                    marks.Add((
+                        string.IsNullOrWhiteSpace(detail.ApprovedByDisplayName)
+                            ? "Approved"
+                            : $"Approved by {detail.ApprovedByDisplayName}",
+                        FormatStamp(approvedAt)));
+                }
+
+                if (detail.Transfer.DispatchedAtUtc is { } dispatchedAt)
+                {
+                    marks.Add(("Dispatched from source", FormatStamp(dispatchedAt)));
+                }
+
+                if (detail.Transfer.ReceivedAtUtc is { } receivedAt)
+                {
+                    marks.Add((IsStoreRestock ? "Store receiving" : "Received at destination", FormatStamp(receivedAt)));
+                }
             }
 
-            custodyShown = true;
+            for (int index = 0; index < marks.Count; index++)
+            {
+                events.Add(new TimelineEvent(
+                    marks[index].Title,
+                    marks[index].Subtitle,
+                    index == marks.Count - 1 ? "current" : "done"));
+            }
+
+            if (detail is { Transfer.DispatchedAtUtc: not null, Transfer.ReceivedAtUtc: null })
+            {
+                events.Add(new TimelineEvent(
+                    IsStoreRestock ? "Store receiving" : "Receiving at destination",
+                    "Not yet recorded",
+                    "future"));
+            }
+
+            return events;
+        }
+    }
+
+    private string TimelineTitle(PosTransferCustodyEventSummary custodyEvent) => custodyEvent.Kind switch
+    {
+        "Created" => "Request created",
+        "EmergencyCreated" => "Emergency transfer created",
+        "Submitted" => "Submitted for review",
+        "Reviewed" => "Review started",
+        "Approved" or "ApprovedWithAmendment" or "PreApprovedApproval"
+            => string.IsNullOrWhiteSpace(detail?.ApprovedByDisplayName)
+                ? "Approved"
+                : $"Approved by {detail!.ApprovedByDisplayName}",
+        "Rejected" => "Rejected",
+        "Picked" => "Picked at the source",
+        "Ready" => "Ready for dispatch",
+        "Dispatched" => "Dispatched from source",
+        "DispatchCancelled" => "Dispatch cancelled",
+        "Received" => IsStoreRestock ? "Store receiving" : "Received at destination",
+        "Resolved" => "Discrepancy resolved",
+        "Verified" => "Verified and closed",
+        "CentralReviewRatified" => "Emergency ratified centrally",
+        "CentralReviewRejected" => "Emergency rejected centrally",
+        _ => SplitWords(custodyEvent.Kind),
+    };
+
+    private static string TimelineSubtitle(PosTransferCustodyEventSummary custodyEvent)
+    {
+        string stamp = FormatStamp(custodyEvent.OccurredAtUtc);
+        return string.IsNullOrWhiteSpace(custodyEvent.Note) ? stamp : $"{stamp} · {custodyEvent.Note}";
+    }
+
+    private static string FormatStamp(DateTimeOffset at)
+        => at.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture);
+
+    private async Task RunActionAsync(string working, Func<Task<string?>> action)
+    {
+        if (acting)
+        {
+            return;
+        }
+
+        acting = true;
+        message = null;
+        try
+        {
+            string? failure = await action().ConfigureAwait(false);
+            if (failure is not null)
+            {
+                message = failure;
+            }
         }
         catch (HttpRequestException)
         {
@@ -256,7 +1510,7 @@ else
         }
         finally
         {
-            custodyLoading = false;
+            acting = false;
         }
     }
 
@@ -269,6 +1523,26 @@ else
 
         PosLocation? location = locations.FirstOrDefault(l => l.Id == id);
         return location?.Code ?? id.ToString("D", CultureInfo.InvariantCulture)[..8];
+    }
+
+    private string LocationCode(Guid? locationId)
+    {
+        if (locationId is not { } id)
+        {
+            return "—";
+        }
+
+        return locations.FirstOrDefault(l => l.Id == id)?.Code ?? id.ToString("D", CultureInfo.InvariantCulture)[..8];
+    }
+
+    private string LocationName(Guid? locationId)
+    {
+        if (locationId is not { } id)
+        {
+            return "—";
+        }
+
+        return locations.FirstOrDefault(l => l.Id == id)?.Name ?? "—";
     }
 
     private static string Quantity(decimal value)
@@ -307,4 +1581,3 @@ else
         _ => "status-chip",
     };
 }
-

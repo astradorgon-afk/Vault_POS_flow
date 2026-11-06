@@ -9,7 +9,9 @@ using Pos.Domain.Common;
 using Pos.Domain.Inventory;
 using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
+using Pos.Domain.Purchasing;
 using Pos.Domain.Sales;
+using Pos.Domain.Transfers;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
 
@@ -28,6 +30,44 @@ public static class StoreMonitoringEndpoints
 
     /// <summary>The longest period a performance request may cover.</summary>
     private const int MaxPeriodDays = 366;
+    private static readonly TimeZoneInfo StoreTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila");
+
+    private sealed class StoreMovementAccumulator(Location location, DateOnly periodStart, int periodDays)
+    {
+        public Location Location { get; } = location;
+        public int PeriodDays { get; } = periodDays;
+        public DateOnly PeriodStart { get; } = periodStart;
+        public decimal IncomingUnits { get; set; }
+        public int InboundTransfers { get; set; }
+        public int InboundReceipts { get; set; }
+        public decimal OutgoingUnits { get; set; }
+        public int OutboundTransfers { get; set; }
+        public int RestockRequests { get; set; }
+        public int PendingApprovalRequests { get; set; }
+        public int AwaitingDispatchRequests { get; set; }
+        public DateTimeOffset? LastIncomingAtUtc { get; set; }
+        public DateTimeOffset? LastOutgoingAtUtc { get; set; }
+        public List<StoreMovementItem> RecentItems { get; } = [];
+        public decimal[] DailyIncoming { get; } = new decimal[7];
+        public decimal[] DailyOutgoing { get; } = new decimal[7];
+
+        public void AddItems(IEnumerable<StoreMovementItem> items) => RecentItems.AddRange(items);
+
+        public void AddDailyUnits(DateTimeOffset occurredAtUtc, decimal units, bool incoming)
+        {
+            DateOnly date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(occurredAtUtc, StoreTimeZone).DateTime);
+            int dayOffset = Math.Clamp(date.DayNumber - PeriodStart.DayNumber, 0, PeriodDays - 1);
+            int bucket = Math.Min(6, dayOffset * 7 / PeriodDays);
+            if (incoming)
+            {
+                DailyIncoming[bucket] += units;
+            }
+            else
+            {
+                DailyOutgoing[bucket] += units;
+            }
+        }
+    }
 
     public static IEndpointRouteBuilder MapStoreMonitoringEndpoints(this IEndpointRouteBuilder app)
     {
@@ -39,6 +79,13 @@ public static class StoreMonitoringEndpoints
             .WithTags("Dashboard")
             .WithName("GetStorePerformance")
             .WithSummary("Gets each store's sales, takings and transactions over a period of business dates.");
+
+        app.MapGet("/api/v1/dashboard/store-movements", GetStoreMovementsAsync)
+            .RequireAuthorization()
+            .WithMetadata(new RequirePermissionAttribute(Permissions.Transfer.View) { Scope = ScopeSource.None })
+            .WithTags("Dashboard")
+            .WithName("GetStoreMovements")
+            .WithSummary("Gets dispatched product movements and restock requests for stores and the main warehouse over a period.");
 
         app.MapGet("/api/v1/inventory/stock-levels", GetStockLevelsAsync)
             .RequireAuthorization()
@@ -76,6 +123,9 @@ public static class StoreMonitoringEndpoints
 
         List<Location> stores = await context.Locations
             .AsNoTracking()
+            // A store that closed mid-period still rang up the sales it rang up.
+            // Closed stores are loaded and then dropped below unless the period
+            // actually holds trade for them.
             .Where(l => l.Kind == LocationKind.Store)
             .OrderBy(l => l.Code)
             .ToListAsync(cancellationToken)
@@ -83,66 +133,127 @@ public static class StoreMonitoringEndpoints
         stores = [.. stores.Where(s => authorization.HasAllLocations || authorization.Locations.Contains(s.Id))];
         List<LocationId> storeIds = [.. stores.Select(s => s.Id)];
 
-        List<Sale> sales = await context.Sales
+        // PostgreSQL sums everything itself: a busy chain rings up thousands of
+        // sales a week and the report must count every one of them. SQLite keeps
+        // money and instants as text, so there the same query runs over the rows.
+        IQueryable<Sale> inPeriod = context.Sales
             .AsNoTracking()
-            .Include(s => s.Items)
-            .Include(s => s.Payments)
-            .AsSplitQuery()
-            .Where(s => storeIds.Contains(s.LocationId) && s.BusinessDate >= start && s.BusinessDate <= end)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .Where(s => storeIds.Contains(s.LocationId) && s.BusinessDate >= start && s.BusinessDate <= end);
 
-        List<SalesReturn> returns = await context.SalesReturns
-            .AsNoTracking()
-            .Include(r => r.Refunds)
-            .Where(r => storeIds.Contains(r.LocationId) && r.BusinessDate >= start && r.BusinessDate <= end)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var days = await AggregateAsync(
+            context,
+            inPeriod.Select(s => new { s.LocationId, s.BusinessDate, s.Status, s.NetTotal, s.GrossTotal, s.DiscountTotal, s.CompletedAtUtc }),
+            rows => rows
+                .GroupBy(s => new { s.LocationId, s.BusinessDate, s.Status })
+                .Select(g => new
+                {
+                    g.Key.LocationId,
+                    g.Key.BusinessDate,
+                    g.Key.Status,
+                    Count = g.Count(),
+                    Net = g.Sum(s => s.NetTotal),
+                    Gross = g.Sum(s => s.GrossTotal),
+                    Discount = g.Sum(s => s.DiscountTotal),
+                    LastAt = g.Max(s => s.CompletedAtUtc),
+                }),
+            cancellationToken).ConfigureAwait(false);
+
+        var payments = await AggregateAsync(
+            context,
+            context.Payments.AsNoTracking().Join(
+                inPeriod.Where(s => s.Status == SaleStatus.Completed),
+                p => EF.Property<SaleId>(p, "SaleId"),
+                s => s.Id,
+                (p, s) => new { s.LocationId, p.Method, p.Amount }),
+            rows => rows
+                .GroupBy(p => new { p.LocationId, p.Method })
+                .Select(g => new { g.Key.LocationId, g.Key.Method, Amount = g.Sum(p => p.Amount) }),
+            cancellationToken).ConfigureAwait(false);
+
+        var refunds = await AggregateAsync(
+            context,
+            context.Refunds.AsNoTracking().Join(
+                context.SalesReturns.Where(r => storeIds.Contains(r.LocationId) && r.BusinessDate >= start && r.BusinessDate <= end),
+                f => f.SalesReturnId,
+                r => r.Id,
+                (f, r) => new { r.LocationId, f.Amount }),
+            rows => rows
+                .GroupBy(f => f.LocationId)
+                .Select(g => new { LocationId = g.Key, Amount = g.Sum(f => f.Amount) }),
+            cancellationToken).ConfigureAwait(false);
+
+        var products = await AggregateAsync(
+            context,
+            context.SaleItems.AsNoTracking().Join(
+                inPeriod.Where(s => s.Status == SaleStatus.Completed),
+                i => i.SaleId,
+                s => s.Id,
+                (i, s) => new { s.LocationId, i.ProductId, i.ProductName, i.Quantity, i.NetAmount }),
+            rows => rows
+                .GroupBy(i => new { i.LocationId, i.ProductId })
+                .Select(g => new
+                {
+                    g.Key.LocationId,
+                    g.Key.ProductId,
+                    Name = g.Max(i => i.ProductName),
+                    Quantity = g.Sum(i => i.Quantity),
+                    Net = g.Sum(i => i.NetAmount),
+                }),
+            cancellationToken).ConfigureAwait(false);
 
         List<StorePerformance> performance = [];
         foreach (Location store in stores)
         {
-            List<Sale> storeSales = [.. sales.Where(s => s.LocationId == store.Id)];
-            List<Sale> completed = [.. storeSales.Where(s => s.Status == SaleStatus.Completed)];
-            List<Sale> voided = [.. storeSales.Where(s => s.Status == SaleStatus.Voided)];
-            decimal refunded = returns
-                .Where(r => r.LocationId == store.Id)
-                .SelectMany(r => r.Refunds)
-                .Sum(f => f.Amount);
-            decimal net = completed.Sum(s => s.NetTotal);
+            var storeDays = days.Where(d => d.LocationId == store.Id).ToList();
+
+            // A closed store earns its row by having traded in the period; an
+            // open one keeps its row even on a quiet week, because a quiet week
+            // is itself worth seeing.
+            if (!store.IsActive && storeDays.Count == 0
+                && refunds.All(r => r.LocationId != store.Id))
+            {
+                continue;
+            }
+
+            var completed = storeDays.Where(d => d.Status == SaleStatus.Completed).ToList();
+            var voided = storeDays.Where(d => d.Status == SaleStatus.Voided).ToList();
+            decimal refunded = refunds.Where(r => r.LocationId == store.Id).Sum(r => r.Amount);
+            decimal net = completed.Sum(d => d.Net);
+            int transactions = completed.Sum(d => d.Count);
 
             List<StoreDailySales> daily = [];
             for (DateOnly day = start; day <= end; day = day.AddDays(1))
             {
-                List<Sale> onDay = [.. completed.Where(s => s.BusinessDate == day)];
-                daily.Add(new StoreDailySales(day, onDay.Sum(s => s.NetTotal), onDay.Count));
+                var onDay = completed.Where(d => d.BusinessDate == day).ToList();
+                daily.Add(new StoreDailySales(day, onDay.Sum(d => d.Net), onDay.Sum(d => d.Count), onDay.Sum(d => d.Gross)));
             }
 
-            List<StoreTopProduct> topProducts = [.. completed
-                .SelectMany(s => s.Items)
-                .GroupBy(i => (i.ProductId, i.ProductName))
-                .Select(g => new StoreTopProduct(
-                    g.Key.ProductId.Value, g.Key.ProductName, g.Sum(i => i.Quantity), g.Sum(i => i.NetAmount)))
-                .OrderByDescending(p => p.NetSales)
-                .Take(5)];
+            List<StoreTopProduct> topProducts = [.. products
+                .Where(p => p.LocationId == store.Id)
+                .OrderByDescending(p => p.Net)
+                .Take(5)
+                .Select(p => new StoreTopProduct(p.ProductId.Value, p.Name ?? string.Empty, p.Quantity, p.Net))];
+
+            decimal PaymentTotal(PaymentMethod method)
+                => payments.Where(p => p.LocationId == store.Id && p.Method == method).Sum(p => p.Amount);
 
             performance.Add(new StorePerformance(
                 store.Id.Value,
                 store.Code,
                 store.Name,
                 net,
-                completed.Sum(s => s.GrossTotal),
-                completed.Sum(s => s.DiscountTotal),
-                completed.Count,
-                completed.Count == 0 ? 0m : decimal.Round(net / completed.Count, 2),
-                voided.Count,
-                voided.Sum(s => s.NetTotal),
+                completed.Sum(d => d.Gross),
+                completed.Sum(d => d.Discount),
+                transactions,
+                transactions == 0 ? 0m : decimal.Round(net / transactions, 2),
+                voided.Sum(d => d.Count),
+                voided.Sum(d => d.Net),
                 refunded,
                 net - refunded,
-                PaymentTotal(completed, PaymentMethod.Cash),
-                PaymentTotal(completed, PaymentMethod.Card),
-                PaymentTotal(completed, PaymentMethod.EWallet),
-                storeSales.Count == 0 ? null : storeSales.Max(s => s.CompletedAtUtc),
+                PaymentTotal(PaymentMethod.Cash),
+                PaymentTotal(PaymentMethod.Card),
+                PaymentTotal(PaymentMethod.EWallet),
+                storeDays.Count == 0 ? null : storeDays.Max(d => d.LastAt),
                 daily,
                 topProducts));
         }
@@ -150,8 +261,367 @@ public static class StoreMonitoringEndpoints
         return TypedResults.Ok(new StorePerformanceReport(start, end, performance));
     }
 
-    private static decimal PaymentTotal(IEnumerable<Sale> sales, PaymentMethod method)
-        => sales.SelectMany(s => s.Payments).Where(p => p.Method == method).Sum(p => p.Amount);
+    private static async Task<IResult> GetStoreMovementsAsync(
+        PosDbContext context,
+        DatabasePermissionEvaluator evaluator,
+        ICurrentUser currentUser,
+        ISystemClock clock,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        CancellationToken cancellationToken)
+    {
+        UserAuthorization authorization = await evaluator
+            .GetAuthorizationAsync(currentUser.UserId ?? UserId.Empty, cancellationToken)
+            .ConfigureAwait(false);
+
+        DateOnly end = to ?? clock.BusinessDateFor("Asia/Manila");
+        DateOnly start = from ?? end.AddDays(-6);
+        if (start > end || end.DayNumber - start.DayNumber >= MaxPeriodDays)
+        {
+            return ProblemDetailsMapping.ToProblem(
+                Result.Failure(Error.Validation(
+                    "store_movements.period_invalid",
+                    FormattableString.Invariant($"Choose a period of 1 to {MaxPeriodDays} days that ends on or after it starts."))),
+                currentUser.CorrelationId.Value);
+        }
+
+        DateTimeOffset startUtc = StartOfStoreDayUtc(start);
+        DateTimeOffset endUtc = StartOfStoreDayUtc(end.AddDays(1));
+
+        List<Location> stores = await context.Locations
+            .AsNoTracking()
+            // Closed locations are loaded too, and dropped again at the end
+            // unless the period shows them doing something. A store that traded
+            // last month is part of last month's picture; one that closed before
+            // the period began would only be an empty card dragging the totals.
+            .Where(location =>
+                location.Kind == LocationKind.Store || location.Kind == LocationKind.MainWarehouse)
+            .OrderBy(location => location.Kind)
+            .ThenBy(location => location.Code)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        stores = [.. stores.Where(store => authorization.HasAllLocations || authorization.Locations.Contains(store.Id))];
+        Dictionary<Guid, StoreMovementAccumulator> movements = stores.ToDictionary(
+            store => store.Id.Value,
+            store => new StoreMovementAccumulator(store, start, end.DayNumber - start.DayNumber + 1));
+
+        List<Transfer> transfers = [];
+        List<GoodsReceipt> receipts = [];
+        if (movements.Count > 0)
+        {
+            LocationId[] storeIds = [.. stores.Select(store => store.Id)];
+
+            // Goods off a supplier's truck come in through the same door as a
+            // transfer, so a warehouse that took a delivery today must not read as
+            // having received nothing. Only posted receipts count — a voided one
+            // never reached the ledger.
+            receipts = await context.GoodsReceipts
+                .AsNoTracking()
+                .Where(receipt => storeIds.Contains(receipt.DestinationLocationId))
+                .Where(receipt => receipt.Status == GoodsReceiptStatus.Posted
+                    && receipt.ReceivedAtUtc >= startUtc
+                    && receipt.ReceivedAtUtc < endUtc)
+                .Include(receipt => receipt.Lines)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            transfers = await context.Transfers
+                .AsNoTracking()
+                .Where(transfer => storeIds.Contains(transfer.SourceLocationId) || storeIds.Contains(transfer.DestinationLocationId))
+                .Where(transfer =>
+                    (transfer.Mode == TransferMode.StoreRestock && transfer.CreatedAtUtc >= startUtc && transfer.CreatedAtUtc < endUtc)
+                    || (transfer.DispatchedAtUtc != null && transfer.DispatchedAtUtc >= startUtc && transfer.DispatchedAtUtc < endUtc)
+                    // A transfer that left before the period but arrived inside it
+                    // is this period's intake for the destination, so it has to be
+                    // fetched even though its dispatch falls outside.
+                    || (transfer.ReceivedAtUtc != null && transfer.ReceivedAtUtc >= startUtc && transfer.ReceivedAtUtc < endUtc))
+                .Include(transfer => transfer.Lines)
+                .Include(transfer => transfer.Allocations)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        HashSet<Guid> routeLocationIds = [.. transfers
+            .SelectMany(transfer => new[] { transfer.SourceLocationId.Value, transfer.DestinationLocationId.Value })
+            .Distinct()];
+        List<Location> routeLocations = routeLocationIds.Count == 0
+            ? []
+            : await context.Locations
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        Dictionary<Guid, string> locationNames = routeLocations
+            .Where(location => routeLocationIds.Contains(location.Id.Value))
+            .ToDictionary(location => location.Id.Value, location => location.Name);
+
+        ProductId[] productIds = [.. transfers
+            .SelectMany(transfer => transfer.Lines)
+            .Select(line => line.ProductId)
+            .Concat(receipts.SelectMany(receipt => receipt.Lines).Select(line => line.ProductId))
+            .Distinct()];
+        List<Product> products = productIds.Length == 0
+            ? []
+            : await context.Products
+                .AsNoTracking()
+                .Where(product => productIds.Contains(product.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        Dictionary<Guid, string> productNames = products
+            .ToDictionary(product => product.Id.Value, product => product.Name);
+
+        List<StoreMovementActivity> activity = [];
+        int dispatchedTransferCount = 0;
+
+        foreach (GoodsReceipt receipt in receipts)
+        {
+            if (!movements.TryGetValue(receipt.DestinationLocationId.Value, out StoreMovementAccumulator? receiving))
+            {
+                continue;
+            }
+
+            // Accepted units only. What was refused as damaged, wrong or expired
+            // was never taken into stock, so counting it here would show goods the
+            // location does not have.
+            decimal acceptedUnits = receipt.Lines.Sum(line => line.QuantityAccepted);
+
+            receiving.IncomingUnits += acceptedUnits;
+            receiving.InboundReceipts++;
+            receiving.LastIncomingAtUtc = Latest(receiving.LastIncomingAtUtc, receipt.ReceivedAtUtc);
+            receiving.AddDailyUnits(receipt.ReceivedAtUtc, acceptedUnits, incoming: true);
+            receiving.AddItems(receipt.Lines
+                .Where(line => line.QuantityAccepted > 0m)
+                .Select(line => new StoreMovementItem(
+                    productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
+                    receipt.Number,
+                    "Received from supplier",
+                    line.QuantityAccepted,
+                    receipt.ReceivedAtUtc)));
+        }
+
+        foreach (Transfer transfer in transfers)
+        {
+            bool requestInPeriod = transfer.Mode == TransferMode.StoreRestock
+                && transfer.CreatedAtUtc >= startUtc
+                && transfer.CreatedAtUtc < endUtc;
+            bool dispatchInPeriod = transfer.Status != TransferStatus.Cancelled
+                && transfer.DispatchedAtUtc is { } dispatchedAt
+                && dispatchedAt >= startUtc
+                && dispatchedAt < endUtc;
+            bool receiptInPeriod = transfer.Status != TransferStatus.Cancelled
+                && transfer.ReceivedAtUtc is { } receivedAt
+                && receivedAt >= startUtc
+                && receivedAt < endUtc;
+            decimal requestedUnits = transfer.Lines.Sum(line => line.RequestedQuantity);
+            decimal dispatchedUnits = transfer.Allocations.Sum(allocation => allocation.Quantity);
+            Guid sourceId = transfer.SourceLocationId.Value;
+            Guid destinationId = transfer.DestinationLocationId.Value;
+            string reference = string.IsNullOrWhiteSpace(transfer.Number)
+                ? $"REQ-{transfer.Id.Value.ToString("N")[..8].ToUpperInvariant()}"
+                : transfer.Number;
+
+            if (requestInPeriod && movements.TryGetValue(destinationId, out StoreMovementAccumulator? requestStore))
+            {
+                requestStore.RestockRequests++;
+                if (transfer.Status is TransferStatus.Submitted or TransferStatus.InReview)
+                {
+                    requestStore.PendingApprovalRequests++;
+                }
+                else if (transfer.Status is TransferStatus.Approved or TransferStatus.Picking or TransferStatus.Ready)
+                {
+                    requestStore.AwaitingDispatchRequests++;
+                }
+
+                requestStore.AddItems(transfer.Lines.Select(line => new StoreMovementItem(
+                    productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
+                    reference,
+                    "Requested",
+                    line.RequestedQuantity,
+                    transfer.CreatedAtUtc)));
+
+                activity.Add(new StoreMovementActivity(
+                    transfer.Id.Value,
+                    reference,
+                    "Store request",
+                    transfer.Status.ToString(),
+                    sourceId,
+                    locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
+                    destinationId,
+                    locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
+                    requestedUnits,
+                    transfer.CreatedAtUtc));
+            }
+
+            // The destination counts what it signed for, when it signed for it.
+            // Crediting the arrival at dispatch would hand a store stock that is
+            // still on the truck, and date the receipt to the moment it left.
+            if (receiptInPeriod
+                && transfer.ReceivedAtUtc is { } actualReceivedAt
+                && movements.TryGetValue(destinationId, out StoreMovementAccumulator? destinationStore))
+            {
+                // Good condition only. Damaged units arrived but are not stock the
+                // destination can sell, and a short allocation never arrived at all.
+                decimal receivedUnits = transfer.Allocations.Sum(allocation => allocation.ReceivedQuantity);
+
+                destinationStore.IncomingUnits += receivedUnits;
+                destinationStore.InboundTransfers++;
+                destinationStore.LastIncomingAtUtc = Latest(destinationStore.LastIncomingAtUtc, actualReceivedAt);
+                destinationStore.AddDailyUnits(actualReceivedAt, receivedUnits, incoming: true);
+                destinationStore.AddItems(TransferItems(
+                    transfer,
+                    productNames,
+                    reference,
+                    "Received",
+                    allocation => allocation.ReceivedQuantity,
+                    actualReceivedAt));
+            }
+
+            if (!dispatchInPeriod)
+            {
+                continue;
+            }
+
+            DateTimeOffset actualDispatchedAt = transfer.DispatchedAtUtc!.Value;
+            dispatchedTransferCount++;
+            if (movements.TryGetValue(sourceId, out StoreMovementAccumulator? sourceStore))
+            {
+                sourceStore.OutgoingUnits += dispatchedUnits;
+                sourceStore.OutboundTransfers++;
+                sourceStore.LastOutgoingAtUtc = Latest(sourceStore.LastOutgoingAtUtc, actualDispatchedAt);
+                sourceStore.AddDailyUnits(actualDispatchedAt, dispatchedUnits, incoming: false);
+                sourceStore.AddItems(TransferItems(
+                    transfer,
+                    productNames,
+                    reference,
+                    "Sent",
+                    allocation => allocation.Quantity,
+                    actualDispatchedAt));
+            }
+
+            activity.Add(new StoreMovementActivity(
+                transfer.Id.Value,
+                reference,
+                "Dispatched transfer",
+                transfer.Status.ToString(),
+                sourceId,
+                locationNames.GetValueOrDefault(sourceId) ?? sourceId.ToString("N")[..8].ToUpperInvariant(),
+                destinationId,
+                locationNames.GetValueOrDefault(destinationId) ?? destinationId.ToString("N")[..8].ToUpperInvariant(),
+                dispatchedUnits,
+                actualDispatchedAt)
+            {
+                DeliveryReceiptNumber = transfer.DeliveryReceiptNumber,
+            });
+        }
+
+        List<StoreMovement> storeResults = [.. movements.Values
+            .Where(movement => movement.Location.IsActive || HasActivity(movement))
+            .Select(movement => new StoreMovement(
+            movement.Location.Id.Value,
+            movement.Location.Code,
+            movement.Location.Name,
+            movement.IncomingUnits,
+            movement.InboundTransfers,
+            movement.InboundReceipts,
+            movement.OutgoingUnits,
+            movement.OutboundTransfers,
+            movement.RestockRequests,
+            movement.PendingApprovalRequests,
+            movement.AwaitingDispatchRequests,
+            movement.LastIncomingAtUtc,
+            movement.LastOutgoingAtUtc,
+            [.. movement.RecentItems
+                .OrderByDescending(item => item.OccurredAtUtc)
+                .Take(3)],
+            [.. Enumerable.Range(0, 7).Select(index => new StoreMovementChartPoint(
+                index,
+                movement.DailyIncoming[index],
+                movement.DailyOutgoing[index]))]))];
+
+        return TypedResults.Ok(new StoreMovementReport(
+            start,
+            end,
+            dispatchedTransferCount,
+            storeResults,
+            [.. activity.OrderByDescending(entry => entry.OccurredAtUtc).Take(60)]));
+    }
+
+    /// <summary>
+    /// A transfer's lines as movement items: what left the source when it was
+    /// dispatched, or what arrived when the destination received it. The two
+    /// differ in both quantity and instant, so the caller supplies each.
+    /// </summary>
+    /// <param name="transfer">The transfer.</param>
+    /// <param name="productNames">Product names by identifier.</param>
+    /// <param name="reference">The transfer number shown against each item.</param>
+    /// <param name="direction">"Sent" or "Received".</param>
+    /// <param name="quantity">Which allocation quantity to measure.</param>
+    /// <param name="occurredAtUtc">When this end of the move happened.</param>
+    /// <returns>One item per line that moved anything.</returns>
+    private static IEnumerable<StoreMovementItem> TransferItems(
+        Transfer transfer,
+        IReadOnlyDictionary<Guid, string> productNames,
+        string reference,
+        string direction,
+        Func<TransferPickAllocation, decimal> quantity,
+        DateTimeOffset occurredAtUtc)
+    {
+        Dictionary<int, decimal> unitsByLine = transfer.Allocations
+            .GroupBy(allocation => allocation.LineNo)
+            .ToDictionary(group => group.Key, group => group.Sum(quantity));
+
+        return transfer.Lines
+            .Select(line => new StoreMovementItem(
+                productNames.GetValueOrDefault(line.ProductId.Value) ?? "Unknown product",
+                reference,
+                direction,
+                unitsByLine.GetValueOrDefault(line.LineNo),
+                occurredAtUtc))
+            .Where(item => item.Units > 0m);
+    }
+
+    /// <summary>
+    /// Whether a location did anything in the period. Only asked of closed
+    /// locations, which earn their place in the report by what they did rather
+    /// than by still being open.
+    /// </summary>
+    /// <param name="movement">The accumulated figures for one location.</param>
+    /// <returns><see langword="true"/> when the period holds something to show.</returns>
+    private static bool HasActivity(StoreMovementAccumulator movement)
+        => movement.IncomingUnits > 0m
+            || movement.OutgoingUnits > 0m
+            || movement.InboundReceipts > 0
+            || movement.RestockRequests > 0
+            || movement.RecentItems.Count > 0;
+
+    private static DateTimeOffset StartOfStoreDayUtc(DateOnly date)
+    {
+        DateTime localStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, StoreTimeZone));
+    }
+
+    private static DateTimeOffset? Latest(DateTimeOffset? current, DateTimeOffset? candidate)
+        => candidate is { } value && (current is null || value > current.Value) ? value : current;
+
+    /// <summary>
+    /// Runs a grouping over <paramref name="rows"/> in the database, or, on
+    /// SQLite (which stores money and instants as text), over the loaded rows.
+    /// </summary>
+    internal static async Task<List<TResult>> AggregateAsync<TRow, TResult>(
+        PosDbContext context,
+        IQueryable<TRow> rows,
+        Func<IQueryable<TRow>, IQueryable<TResult>> aggregate,
+        CancellationToken cancellationToken)
+    {
+        if (!context.IsSqlite)
+        {
+            return await aggregate(rows).ToListAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        List<TRow> loaded = await rows.ToListAsync(cancellationToken).ConfigureAwait(false);
+        return [.. aggregate(loaded.AsQueryable())];
+    }
 
     private static async Task<IResult> GetStockLevelsAsync(
         PosDbContext context,
@@ -224,6 +694,20 @@ public static class StoreMonitoringEndpoints
             .ToDictionaryAsync(x => x.ProductId, x => x.Quantity, cancellationToken)
             .ConfigureAwait(false);
 
+        // When each product last sold here, however long ago, so stock that has
+        // stopped moving can be told apart from stock that is merely slow.
+        Dictionary<ProductId, DateOnly> lastSold = await context.SaleItems
+            .AsNoTracking()
+            .Join(
+                context.Sales.Where(s => s.LocationId == scope && s.Status == SaleStatus.Completed),
+                item => item.SaleId,
+                sale => sale.Id,
+                (item, sale) => new { item.ProductId, sale.BusinessDate })
+            .GroupBy(x => x.ProductId)
+            .Select(g => new { ProductId = g.Key, Last = g.Max(x => x.BusinessDate) })
+            .ToDictionaryAsync(x => x.ProductId, x => x.Last, cancellationToken)
+            .ConfigureAwait(false);
+
         List<StockLevelRow> rows = [];
         foreach (Product product in products)
         {
@@ -262,7 +746,8 @@ public static class StoreMonitoringEndpoints
                 setting?.MaximumStock,
                 dailyRate,
                 daysOfCover,
-                Classify(available, setting)));
+                Classify(available, setting),
+                lastSold.TryGetValue(product.Id, out DateOnly sold) ? sold : null));
         }
 
         return TypedResults.Ok(new StockLevelReport(
@@ -333,10 +818,70 @@ public sealed record StorePerformance(
     IReadOnlyList<StoreTopProduct> TopProducts);
 
 /// <summary>One business date's completed sales at a store.</summary>
-public sealed record StoreDailySales(DateOnly Date, decimal NetSales, int Transactions);
+public sealed record StoreDailySales(DateOnly Date, decimal NetSales, int Transactions, decimal GrossSales);
 
 /// <summary>One of a store's best sellers over the period.</summary>
 public sealed record StoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);
+
+/// <summary>Every store's incoming and outgoing product movement over a date range.</summary>
+public sealed record StoreMovementReport(
+    DateOnly From,
+    DateOnly To,
+    int DispatchedTransferCount,
+    IReadOnlyList<StoreMovement> Stores,
+    IReadOnlyList<StoreMovementActivity> RecentActivity);
+
+/// <summary>
+/// A store's product movement over the period: what transfers dispatched in and
+/// out, what suppliers delivered in, and its restock request activity.
+/// </summary>
+public sealed record StoreMovement(
+    Guid LocationId,
+    string Code,
+    string Name,
+    decimal IncomingUnits,
+    int InboundTransfers,
+    int InboundReceipts,
+    decimal OutgoingUnits,
+    int OutboundTransfers,
+    int RestockRequests,
+    int PendingApprovalRequests,
+    int AwaitingDispatchRequests,
+    DateTimeOffset? LastIncomingAtUtc,
+    DateTimeOffset? LastOutgoingAtUtc,
+    IReadOnlyList<StoreMovementItem> RecentItems,
+    IReadOnlyList<StoreMovementChartPoint> DailyMovement);
+
+/// <summary>A product line from a recent request or completed movement.</summary>
+public sealed record StoreMovementItem(
+    string ProductName,
+    string Reference,
+    string Direction,
+    decimal Units,
+    DateTimeOffset OccurredAtUtc);
+
+/// <summary>One of seven buckets across the selected movement period.</summary>
+public sealed record StoreMovementChartPoint(
+    int Bucket,
+    decimal IncomingUnits,
+    decimal OutgoingUnits);
+
+/// <summary>A store request or dispatch recorded during the selected period.</summary>
+public sealed record StoreMovementActivity(
+    Guid TransferId,
+    string Reference,
+    string Kind,
+    string Status,
+    Guid SourceLocationId,
+    string SourceLocationName,
+    Guid DestinationLocationId,
+    string DestinationLocationName,
+    decimal ProductUnits,
+    DateTimeOffset OccurredAtUtc)
+{
+    /// <summary>The DR number issued when the stock was released, when dispatched.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>A location's stock per product; the daily sales rate averages the
 /// last <c>SalesRateDays</c> days.</summary>
@@ -369,4 +914,5 @@ public sealed record StockLevelRow(
     decimal? MaximumStock,
     decimal DailySales,
     decimal? DaysOfCover,
-    string Status);
+    string Status,
+    DateOnly? LastSoldOn = null);

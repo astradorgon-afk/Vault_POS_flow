@@ -70,11 +70,10 @@ public sealed class CreateSalesReturnCommandHandler(
                 ReturnCommandErrors.LocationMismatch(SalesReturnId.Empty, command.LocationId));
         }
 
-        if (command.DeviceId != sale.DeviceId)
-        {
-            return Result<SalesReturnId>.Failure(
-                ReturnCommandErrors.DeviceMismatch(SalesReturnId.Empty, command.DeviceId));
-        }
+        // Any register in the store may take the return: a customer comes back
+        // to whichever counter is open, not the one that rang the sale. Only an
+        // offline register is limited to its own sales, because it cannot see
+        // the others' (POS.md section 6).
 
         // ------------------------------------------------------------------
         // 2. Verify the device-allocated RET number's device code matches,

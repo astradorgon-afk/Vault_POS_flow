@@ -56,9 +56,40 @@ public sealed class CreateTransferCommandHandler(
                 TransferErrors.DestinationLocationExternal(command.DestinationLocationId));
         }
 
+        // Closing a location takes it out of service: no new stock leaves it and
+        // none arrives. Everything already on its books stays readable.
+        if (!source.IsActive)
+        {
+            return Result<TransferOrderId>.Failure(TransferErrors.SourceLocationClosed(command.SourceLocationId));
+        }
+
+        if (!destination.IsActive)
+        {
+            return Result<TransferOrderId>.Failure(
+                TransferErrors.DestinationLocationClosed(command.DestinationLocationId));
+        }
+
         TransferKind kind = KindFor(source.Kind, destination.Kind);
         TransferMode mode = TransferMode.Normal;
         PreApprovalToken? token = null;
+
+        if (command.Mode == TransferMode.StoreRestock)
+        {
+            if (kind != TransferKind.WarehouseToStore || command.PreApprovalTokenId is not null ||
+                !currentUser.AssignedLocations.Contains(command.DestinationLocationId))
+            {
+                return Result<TransferOrderId>.Failure(Error.Forbidden(
+                    "restock.invalid_route",
+                    "Restock requests must go from the main warehouse to one of your assigned stores."));
+            }
+
+            mode = TransferMode.StoreRestock;
+        }
+        else if (command.Mode != TransferMode.Normal)
+        {
+            return Result<TransferOrderId>.Failure(Error.Validation(
+                "transfer.invalid_mode", "This transfer mode cannot be requested here."));
+        }
 
         if (command.PreApprovalTokenId is { } tokenId)
         {
@@ -184,6 +215,12 @@ public sealed class SubmitTransferCommandHandler(
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
         }
 
+        if (transfer.Mode == TransferMode.StoreRestock &&
+            transfer.CreatedByUserId != (currentUser.UserId ?? UserId.Empty))
+        {
+            return Result<TransferOrderId>.Failure(RestockOwnerGuard.CreatorRequired);
+        }
+
         if (transfer.Mode == TransferMode.PreApproved)
         {
             return await SubmitPreApprovedAsync(transfer, cancellationToken).ConfigureAwait(false);
@@ -254,6 +291,11 @@ public sealed class ReviewTransferCommandHandler(
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
         }
 
+        if (transfer.Mode == TransferMode.StoreRestock && !RestockOwnerGuard.IsOwner(currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockOwnerGuard.OwnerRequired);
+        }
+
         Result reviewed = transfer.Review(currentUser.UserId ?? UserId.Empty, clock.UtcNow, command.Note);
 
         return reviewed.IsSuccess
@@ -287,6 +329,11 @@ public sealed class ApproveTransferCommandHandler(
         if (transfer is null)
         {
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
+        }
+
+        if (transfer.Mode == TransferMode.StoreRestock && !RestockOwnerGuard.IsOwner(currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockOwnerGuard.OwnerRequired);
         }
 
         ProductId[] productIds = [.. transfer.Lines.Select(l => l.ProductId).Distinct()];
@@ -354,10 +401,28 @@ public sealed class RejectTransferCommandHandler(
             return Result<TransferOrderId>.Failure(TransferErrors.TransferUnknown(command.TransferId));
         }
 
+        if (transfer.Mode == TransferMode.StoreRestock && !RestockOwnerGuard.IsOwner(currentUser))
+        {
+            return Result<TransferOrderId>.Failure(RestockOwnerGuard.OwnerRequired);
+        }
+
         Result rejected = transfer.Reject(currentUser.UserId ?? UserId.Empty, clock.UtcNow, command.Note);
 
         return rejected.IsSuccess
             ? Result<TransferOrderId>.Success(transfer.Id)
             : Result<TransferOrderId>.Failure(rejected.Errors);
     }
+}
+
+internal static class RestockOwnerGuard
+{
+    public static Error OwnerRequired { get; } = Error.Forbidden(
+        "restock.owner_required", "Only the owner can review or decide a store restock request.");
+
+    public static Error CreatorRequired { get; } = Error.Forbidden(
+        "restock.creator_required", "Only the store user who created this request can submit it.");
+
+    public static bool IsOwner(ICurrentUser user) => user.RoleSnapshot?
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Contains(Roles.Owner, StringComparer.Ordinal) == true;
 }

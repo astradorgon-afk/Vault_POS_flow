@@ -7,4 +7,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The same generated catalogue the API's development seeder uses, so the
+         demo sells each product at the rate its opening stock was sized for. -->
+    <Compile Include="..\..\src\Pos.Infrastructure\Identity\DevelopmentCatalogue.cs" Link="Shared\DevelopmentCatalogue.cs" />
+  </ItemGroup>
+
 </Project>

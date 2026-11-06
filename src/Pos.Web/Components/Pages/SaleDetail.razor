@@ -5,6 +5,7 @@
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 @inject IJSRuntime Js
+@inject PageTrail Trail
 
 <PageTitle>Sale @sale?.Number · VaultFlow</PageTitle>
 
@@ -25,7 +26,7 @@ else if (sale is not null)
             <p>
                 @(storeName is null ? "Unknown store" : storeName) ·
                 @sale.BusinessDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ·
-                Completed @sale.CompletedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
+                Completed @sale.CompletedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)
             </p>
         </div>
         <div class="sale-head-actions"><span class="status-chip status-@sale.Status.ToLowerInvariant()">@sale.Status</span></div>
@@ -162,7 +163,13 @@ else if (sale is not null)
 
             ApiResult<PosSaleDetail> response = await Api.GetSaleAsync(Id, CancellationToken.None);
             if (!response.IsSuccess || response.Value is null) { message = response.Error; return; }
+            if (!Session.CanUseInventoryLocation(response.Value.LocationId))
+            {
+                message = "This sale is outside your selected work location.";
+                return;
+            }
             sale = response.Value;
+            Trail.Name($"Sale {sale.Number}");
 
             ApiResult<List<PosLocation>> locations = await Api.GetAsync<List<PosLocation>>(
                 "/api/v1/locations", CancellationToken.None);

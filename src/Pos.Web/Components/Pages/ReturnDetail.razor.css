@@ -1,31 +1,15 @@
-.sale-head { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:26px; }
-.sale-head h1 { margin:.3rem 0 .3rem; font:800 clamp(1.5rem,2.4vw,2rem)/1.1 'Manrope'; letter-spacing:-.03em; }
 .sale-head p { margin:0; color:var(--muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .sale-head p a { color:var(--forest); font-weight:700; }
 .blind-chip { padding:3px 9px; border-radius:999px; background:#f6e7e5; color:#8b3b35; font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 .remaining { display:grid; justify-items:end; font:700 1.7rem 'Manrope'; color:var(--forest); flex:none; }
 .remaining span { font:700 .66rem 'DM Sans'; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; }
-.sale-blocked { max-width:700px; padding:40px; border:1px solid #e7c1bd; border-radius:18px; background:#fff5f4; }
-.sale-blocked>span { color:#9a4039; font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.1em; }
-.sale-blocked h2 { margin:8px 0; }
-.sale-blocked p { margin:0; color:var(--muted); }
 .pos-message { margin:14px 0; padding:11px 13px; border-left:3px solid var(--amber); background:#fff8e6; color:#6d5420; font-size:.84rem; }
 .detail-panel { margin-bottom:18px; border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; }
-.detail-panel>header { padding:18px 20px 0; display:flex; align-items:center; justify-content:space-between; }
-.detail-panel h2 { margin:4px 0 14px; font:700 1.5rem 'Manrope'; }
-.detail-panel h2 em { display:inline-grid; min-width:25px; height:25px; place-items:center; border-radius:50%; background:var(--forest); color:white; font:normal 700 .72rem 'DM Sans'; }
 .panel-empty { padding:30px; color:var(--muted); }
 .refund-history { margin-top:18px; }
-.lines-table,.payments-table { width:100%; border-collapse:collapse; }
-.lines-table th,.payments-table th { padding:11px 14px; text-align:left; color:var(--muted); font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; border-bottom:1px solid var(--line); }
-.lines-table td,.payments-table td { padding:12px 14px; border-bottom:1px solid var(--line); font-size:.86rem; }
-.lines-table tbody tr:last-child td,.payments-table tbody tr:last-child td { border-bottom:0; }
-.lines-table .num,.payments-table .num { text-align:right; white-space:nowrap; }
-.lines-table small { display:block; color:var(--muted); font-size:.74rem; }
 .method-chip { padding:2px 8px; border-radius:999px; background:#eef1ed; color:var(--ink); font-size:.72rem; font-weight:700; text-transform:capitalize; }
 .actions-panel { margin-bottom:18px; border:1px solid var(--line); border-radius:16px; background:var(--panel); overflow:hidden; }
 .actions-panel>header { padding:20px; border-bottom:1px solid var(--line); }
-.actions-panel h2 { margin:4px 0 3px; font:700 1.45rem 'Manrope'; }
 .actions-panel header p { max-width:640px; margin:0; color:var(--muted); font-size:.84rem; }
 .dispose-row { display:grid; grid-template-columns:minmax(180px,1fr) 110px 150px 150px 1fr auto; align-items:end; gap:10px; padding:16px 20px; border-bottom:1px solid var(--line); }
 .dispose-row:last-child { border-bottom:0; }
@@ -47,4 +31,4 @@
 .refund-form button:disabled { opacity:.5; }
 .action-hint { padding:0 20px 18px; color:var(--muted); font-size:.86rem; font-weight:600; }
 @media(max-width:1100px){.dispose-row{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:620px){.sale-head{align-items:stretch;flex-direction:column}.remaining{justify-items:start}.dispose-row{grid-template-columns:1fr}.refund-form{align-items:stretch;flex-direction:column}}
+@media(max-width:620px){.remaining{justify-items:start}.dispose-row{grid-template-columns:1fr}.refund-form{align-items:stretch;flex-direction:column}}

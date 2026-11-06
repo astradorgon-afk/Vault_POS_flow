@@ -145,25 +145,19 @@ jobs:
       - name: Install the MAUI Windows workload
         run: dotnet workload install maui-windows --version 10.0.301
 
-      - name: Build
-        run: >-
-          dotnet build src/Pos.Client/Pos.Client.csproj
-          --configuration Release
-          --framework net10.0-windows10.0.19041.0
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
 
-      # WindowsPackageType is currently None, so this is an unpackaged
-      # validation handoff rather than a signed MSIX release.
-      - name: Publish unpackaged Windows candidate
-        run: >-
-          dotnet publish src/Pos.Client/Pos.Client.csproj
-          --configuration Release
-          --framework net10.0-windows10.0.19041.0
+      - name: Build Windows installer
+        shell: pwsh
+        run: ./scripts/build-desktop-installer.ps1
 
-      - name: Upload Windows candidate
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: vaultflow-windows-unpackaged-${{ github.sha }}
-          path: artifacts/bin/Pos.Client/release_net10.0-windows10.0.19041.0/**
+          name: vaultflow-windows-installer-${{ github.sha }}
+          path: artifacts/installer/VaultFlow-POS-Setup-*-win-x64.exe
           if-no-files-found: error
           retention-days: 14
 

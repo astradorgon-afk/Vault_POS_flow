@@ -1,0 +1,4 @@
+.workflow-print-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; padding:0 16px; border:1px solid #c8d8ce; border-radius:9px; background:#fff; color:#174331; font:700 .84rem 'DM Sans',sans-serif; cursor:pointer; }
+.workflow-print-button:hover:not(:disabled) { background:#e9f7ed; border-color:#9dcbb0; }
+.workflow-print-button:disabled { opacity:.55; cursor:not-allowed; }
+.workflow-print-button:focus-visible { outline:3px solid #39a978; outline-offset:3px; }

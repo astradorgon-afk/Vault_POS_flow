@@ -10,10 +10,16 @@ using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
 using Pos.Application.Sales;
+using Pos.Application.Catalog;
+using Pos.Application.Purchasing;
+using Pos.Application.Transfers;
 using NSubstitute;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
+using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
 using Pos.Domain.Sales;
+using Pos.Domain.Transfers;
 using Pos.Infrastructure.Configuration;
 using Pos.Infrastructure.Identity;
 using Pos.Infrastructure.Persistence;
@@ -291,6 +297,12 @@ public sealed class SyncPushServiceTests
         response.Results.Single().ErrorCode.Should().Be("shift.already_open");
         response.NextCursor.Should().Be(1);
 
+        SyncPushResponse duplicate = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+        duplicate.Results.Single().Outcome.Should().Be("RequiresReview");
+        duplicate.Results.Single().ErrorCode.Should().Be("shift.already_open");
+        duplicate.Results.Single().Message.Should().Be("The shift is already open.");
+
         await using PosDbContext context = host.CreateContext();
         (await context.ProcessedSyncEvents.SingleAsync()).Outcome.Should().Be(SyncProcessingOutcome.RequiresReview);
         (await context.SyncFailures.SingleAsync()).ErrorCode.Should().Be("shift.already_open");
@@ -534,6 +546,113 @@ public sealed class SyncPushServiceTests
         response.LastAcceptedSequence.Should().Be(1);
         response.OpenFailureCount.Should().Be(1);
         response.CurrentFeedCursor.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PwaPurchaseDraft_CreatesProposedProductsAndOrderAsOneEvent()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        Guid proposalId = Guid.NewGuid();
+        ProductId productId = ProductId.New();
+        PurchaseOrderId orderId = PurchaseOrderId.New();
+        UnitOfMeasureId unitId = UnitOfMeasureId.New();
+        PurchaseDraftSyncPayload payload = new(
+            null, "New supplier", host.Location.Value, "PHP", null,
+            [new PwaProposedProduct(proposalId, "PWA-1", "New product",
+                CategoryId.New().Value, unitId.Value, "5901234123457", 10m)],
+            [new PwaPurchaseLine(null, proposalId, unitId.Value, 2m, 10m)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaPurchaseDraft");
+
+        host.Dispatcher.SendAsync<ProductId>(Arg.Any<CreateProductCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<ProductId>.Success(productId));
+        host.Dispatcher.SendAsync<PurchaseOrderId>(Arg.Any<CreatePurchaseOrderCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PurchaseOrderId>.Success(orderId));
+
+        SyncPushResponse first = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+        SyncPushResponse duplicate = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        first.Results.Single().Outcome.Should().Be("Accepted");
+        first.Results.Single().EntityId.Should().Be(orderId.Value);
+        duplicate.Results.Single().EntityId.Should().Be(orderId.Value);
+        await host.Dispatcher.Received(1).SendAsync<PurchaseOrderId>(
+            Arg.Is<CreatePurchaseOrderCommand>(command =>
+                command.DestinationLocationId == host.Location &&
+                command.Lines.Single().ProductId == productId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PwaRestockDraft_CreatesTheRequestAndSubmitsItForApproval()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        await using PosDbContext seed = host.CreateContext();
+        seed.Locations.Add(Location.Create(
+            Organization.DefaultId, "MAIN", "Main Warehouse", LocationKind.MainWarehouse, "Asia/Manila").Value);
+        await seed.SaveChangesAsync();
+
+        ProductId productId = ProductId.New();
+        TransferOrderId transferId = TransferOrderId.New();
+        PwaRestockSyncPayload payload = new(host.Location.Value, [new PwaRestockLine(productId.Value, 3m)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaRestockDraft");
+
+        host.Dispatcher.SendAsync<TransferOrderId>(Arg.Any<CreateTransferCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<TransferOrderId>.Success(transferId));
+        host.Dispatcher.SendAsync<TransferOrderId>(Arg.Any<SubmitTransferCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result<TransferOrderId>.Success(transferId));
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("Accepted");
+        response.Results.Single().EntityId.Should().Be(transferId.Value);
+        await host.Dispatcher.Received(1).SendAsync<TransferOrderId>(
+            Arg.Is<CreateTransferCommand>(command =>
+                command.DestinationLocationId == host.Location &&
+                command.Mode == TransferMode.StoreRestock &&
+                command.Lines.Single().ProductId == productId &&
+                command.Lines.Single().RequestedQuantity == 3m),
+            Arg.Any<CancellationToken>());
+        await host.Dispatcher.Received(1).SendAsync<TransferOrderId>(
+            Arg.Is<SubmitTransferCommand>(command => command.TransferId == transferId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PwaRestockDraft_ForAnotherLocation_IsRejectedForScope()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        PwaRestockSyncPayload payload = new(LocationId.New().Value, [new PwaRestockLine(ProductId.New().Value, 1m)]);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaRestockDraft");
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("Rejected");
+        response.Results.Single().ErrorCode.Should().Be("sync.restock_scope");
+        await host.Dispatcher.DidNotReceive().SendAsync<TransferOrderId>(
+            Arg.Any<CreateTransferCommand>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PwaUnexpectedGoods_AreRetainedForReviewWithoutPostingStock()
+    {
+        await using TestHost host = await TestHost.CreateAsync();
+        PwaReceivingSyncPayload payload = new(
+            Guid.NewGuid(),
+            [new PwaReceivingLine(Guid.NewGuid(), 1m, 0m, 0m, 0m, 10m, null, null, null)],
+            [new PwaUnexpectedGood("UNKNOWN", "Extra box", 1m)],
+            false);
+        SyncPushEvent item = host.Event(1, System.Text.Json.JsonSerializer.Serialize(payload), "PwaReceivingCount");
+
+        SyncPushResponse response = await host.Service.PushAsync(
+            new SyncPushRequest(host.Device.Id.Value, host.Now, 1, [item]), CancellationToken.None);
+
+        response.Results.Single().Outcome.Should().Be("RequiresReview");
+        response.Results.Single().ErrorCode.Should().Be("sync.unexpected_goods");
+        await host.Dispatcher.DidNotReceive().SendAsync<GoodsReceiptId>(
+            Arg.Any<CreateGoodsReceiptCommand>(), Arg.Any<CancellationToken>());
     }
 
     private sealed class TestHost : IAsyncDisposable

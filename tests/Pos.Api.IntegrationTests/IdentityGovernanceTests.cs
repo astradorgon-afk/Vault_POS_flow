@@ -58,8 +58,22 @@ public sealed class IdentityGovernanceTests
         }
 
         await ExpectAsync(cashierRoleId, cashierPermissions.Append(Permissions.Inventory.NegativeStock), "identity.privilege_escalation_forbidden");
-        await ExpectAsync(ownerRoleId, [Permissions.Catalog.View], "identity.target_outranks_caller");
+        // The Owner role is the yardstick the outranking rule measures against,
+        // so it is refused outright rather than only to callers it outranks.
+        await ExpectAsync(ownerRoleId, [Permissions.Catalog.View], "identity.owner_role_immutable");
         await ExpectAsync(adminRoleId, [Permissions.Catalog.View], "identity.self_administration_forbidden");
+
+        // Not even the owner may edit it: an editable Owner role would let
+        // whoever holds it lower the bar the safeguards hold everyone else to.
+        await host.CreateUserAsync("gv-owner", Roles.Owner, tier: ApprovalTier.Unlimited);
+        string owner = await SignInAsync(client, "gv-owner");
+
+        using (HttpResponseMessage byOwner = await SendAsync(client, HttpMethod.Put, $"/api/v1/roles/{ownerRoleId}/permissions", owner,
+            new { permissions = new[] { Permissions.Catalog.View }, reason = "Attempted change for the test" }))
+        {
+            byOwner.StatusCode.Should().Be(HttpStatusCode.Forbidden, await byOwner.Content.ReadAsStringAsync());
+            (await ReadErrorCodeAsync(byOwner)).Should().Be("identity.owner_role_immutable");
+        }
 
         // Removing a default grant must survive the seeder that runs at every start.
         using (HttpResponseMessage narrowed = await SendAsync(client, HttpMethod.Put, $"/api/v1/roles/{cashierRoleId}/permissions", admin,

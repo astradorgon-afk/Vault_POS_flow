@@ -5,10 +5,15 @@ using Microsoft.EntityFrameworkCore;
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Sales;
+using Pos.Application.Catalog;
+using Pos.Application.Purchasing;
 using Pos.Application.Transfers;
 using Pos.Domain.Common;
 using Pos.Domain.Devices;
+using Pos.Domain.Locations;
+using Pos.Domain.Organizations;
 using Pos.Domain.Transfers;
+using Pos.Domain.Purchasing;
 using Pos.Infrastructure.Offline;
 using Pos.Infrastructure.Persistence;
 
@@ -24,6 +29,7 @@ public sealed class SyncPushService(
     ICurrentUserOverride replayOverride)
 {
     private static readonly TimeSpan GapTimeout = TimeSpan.FromMinutes(30);
+    private static readonly JsonSerializerOptions PwaJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>Processes one push batch in device-sequence order.</summary>
     public async Task<SyncPushResponse> PushAsync(
@@ -61,7 +67,7 @@ public sealed class SyncPushService(
             results.Add(await ProcessOneAsync(
                 request.DeviceId,
                 authenticatedUser.Value,
-                device.LocationId,
+                device.AllowedLocationIds,
                 item,
                 now,
                 cancellationToken).ConfigureAwait(false));
@@ -118,29 +124,35 @@ public sealed class SyncPushService(
             stored.DeviceUptimeTicks,
             stored.CorrelationId.Value);
 
-        await using IUnitOfWorkTransaction transaction =
-            await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        Result<Guid> replay = await ReplayBusinessEventAsync(item, cancellationToken).ConfigureAwait(false);
+        Result<Guid> replay;
         DateTimeOffset now = clock.UtcNow;
-        if (replay.IsSuccess)
+        await using (IUnitOfWorkTransaction transaction =
+            await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false))
         {
-            stored.MarkAccepted(now, $"{{\"entityId\":\"{replay.Value}\"}}");
-            failure.Resolve(now, "Automatically replayed successfully.");
-        }
-        else
-        {
-            failure.ScheduleRetry(now);
-        }
+            replay = await ReplayBusinessEventAsync(item, cancellationToken).ConfigureAwait(false);
+            if (replay.IsSuccess)
+            {
+                stored.MarkAccepted(now, $"{{\"entityId\":\"{replay.Value}\"}}");
+                failure.Resolve(now, "Automatically replayed successfully.");
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return Result.Success();
+            }
 
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+        }
+        context.ChangeTracker.Clear();
+        SyncFailure retry = await context.SyncFailures.SingleAsync(f => f.Id == failureId, cancellationToken)
+            .ConfigureAwait(false);
+        retry.ScheduleRetry(now);
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return replay.IsSuccess ? Result.Success() : Result.Failure(replay.Error);
+        return Result.Failure(replay.Error);
     }
 
     private async Task<SyncPushEventResult> ProcessOneAsync(
         Guid deviceId,
         UserId authenticatedUser,
-        LocationId deviceLocation,
+        IReadOnlyList<LocationId> deviceLocations,
         SyncPushEvent item,
         DateTimeOffset now,
         CancellationToken cancellationToken)
@@ -199,10 +211,11 @@ public sealed class SyncPushService(
                     "The event identifier was replayed with different device metadata.");
             }
 
-            return SyncPushEventResult.Duplicate(item.EventId, existing.Outcome, existing.AppliedAtUtc);
+            return SyncPushEventResult.Duplicate(item.EventId, existing.Outcome, existing.AppliedAtUtc,
+                existing.ResponseJson);
         }
 
-        if (item.UserId != authenticatedUser.Value || item.LocationId != deviceLocation.Value)
+        if (item.UserId != authenticatedUser.Value || !deviceLocations.Contains(new LocationId(item.LocationId)))
         {
             return SyncPushEventResult.Rejected(item.EventId, "sync.event_scope", "The event identity or location is outside the authenticated device scope.");
         }
@@ -293,33 +306,51 @@ public sealed class SyncPushService(
 
         if (IsReplayableEvent(item.EventType))
         {
-            await using IUnitOfWorkTransaction transaction =
-                await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-            Result<Guid> replay = await ReplayBusinessEventAsync(item, cancellationToken).ConfigureAwait(false);
-            if (replay.IsSuccess)
+            Result<Guid> replay;
+            await using (IUnitOfWorkTransaction transaction =
+                await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false))
             {
-                await RecordProcessedAsync(
-                    item,
-                    deviceId,
-                    checkpoint,
-                    isNewCheckpoint,
-                    SyncProcessingOutcome.Accepted,
-                    now,
-                    responseJson: $"{{\"entityId\":\"{replay.Value}\"}}",
-                    cancellationToken).ConfigureAwait(false);
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                return SyncPushEventResult.Accepted(item.EventId, now);
+                replay = await ReplayBusinessEventAsync(item, cancellationToken).ConfigureAwait(false);
+                if (replay.IsSuccess)
+                {
+                    await RecordProcessedAsync(
+                        item,
+                        deviceId,
+                        checkpoint,
+                        isNewCheckpoint,
+                        SyncProcessingOutcome.Accepted,
+                        now,
+                        responseJson: $"{{\"entityId\":\"{replay.Value}\"}}",
+                        cancellationToken).ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    return SyncPushEventResult.Accepted(item.EventId, now, replay.Value);
+                }
+
+                // A compound event can create products before a later line fails.
+                // The entire business operation must roll back before we retain
+                // its failure in the inbox.
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             }
 
             string? remediation = RemediationForReplayFailure(replay.Error);
-            bool hardConflict = replay.Error.Code == "transfer.invalid_state";
+            bool hardConflict = replay.Error.Type == ErrorType.Conflict &&
+                replay.Error.Code != "sync.unexpected_goods" &&
+                (item.EventType is "TransferReceived" or "PwaPurchaseDraft" or "PwaReceivingCount"
+                    or "PwaRestockDraft");
             SyncProcessingOutcome failedOutcome = hardConflict
                 ? SyncProcessingOutcome.Conflict
                 : RequiresReviewAfterReplayFailure(replay.Error)
                 ? SyncProcessingOutcome.RequiresReview
                 : SyncProcessingOutcome.Rejected;
 
+            context.ChangeTracker.Clear();
+            await using IUnitOfWorkTransaction failureTransaction =
+                await unitOfWork.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            SyncDeviceCheckpoint? reloadedCheckpoint = await context.SyncDeviceCheckpoints
+                .SingleOrDefaultAsync(c => c.DeviceId == new DeviceId(deviceId), cancellationToken)
+                .ConfigureAwait(false);
+            isNewCheckpoint = reloadedCheckpoint is null;
+            checkpoint = reloadedCheckpoint ?? new SyncDeviceCheckpoint(new DeviceId(deviceId), 0, now);
             await RecordProcessedAsync(
                 item,
                 deviceId,
@@ -327,7 +358,7 @@ public sealed class SyncPushService(
                 isNewCheckpoint,
                 failedOutcome,
                 now,
-                responseJson: JsonSerializer.Serialize(new { code = replay.Error.Code, remediation }),
+                responseJson: JsonSerializer.Serialize(new { code = replay.Error.Code, message = replay.Error.Message, remediation }),
                 cancellationToken).ConfigureAwait(false);
             context.SyncFailures.Add(new SyncFailure(
                 new EventId(item.EventId),
@@ -336,7 +367,7 @@ public sealed class SyncPushService(
                 replay.Error.Message,
                 now));
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await failureTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return hardConflict
                 ? SyncPushEventResult.Conflict(item.EventId, replay.Error.Code, replay.Error.Message)
                 : failedOutcome == SyncProcessingOutcome.RequiresReview
@@ -403,6 +434,22 @@ public sealed class SyncPushService(
             return await ReplayTransferReceiptAsync(item, cancellationToken).ConfigureAwait(false);
         }
 
+        if (item.EventType == "PwaPurchaseDraft")
+        {
+            return await ReplayPwaPurchaseDraftAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (item.EventType == "PwaReceivingCount")
+        {
+            return await ReplayPwaReceivingAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (item.EventType == "PwaRestockDraft")
+        {
+            return await ReplayPwaRestockAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+
+
         return Result<Guid>.Failure(Error.Validation(
             "sync.event_type_unknown", "The event type is not supported by the replay handler."));
     }
@@ -417,6 +464,193 @@ public sealed class SyncPushService(
         => error.Code is "sale.product_unknown" or "sale.customer_unknown"
             ? "QuarantineAndReview"
             : null;
+
+    private async Task<Result<Guid>> ReplayPwaPurchaseDraftAsync(
+        SyncPushEvent item,
+        CancellationToken cancellationToken)
+    {
+        PurchaseDraftSyncPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<PurchaseDraftSyncPayload>(item.PayloadJson, PwaJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.payload_invalid", "The purchase draft is invalid."));
+        }
+
+        if (payload is null || payload.DestinationLocationId != item.LocationId ||
+            payload.Lines is null || payload.Lines.Count == 0 || payload.Lines.Count > 200 ||
+            payload.ProposedProducts is null || payload.ProposedProducts.Count > 100)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.purchase_scope", "The purchase draft or location is invalid."));
+        }
+
+        Dictionary<Guid, ProductId> proposedIds = [];
+        foreach (PwaProposedProduct proposal in payload.ProposedProducts)
+        {
+            if (proposal.ClientId == Guid.Empty || !proposedIds.TryAdd(proposal.ClientId, ProductId.Empty))
+            {
+                return Result<Guid>.Failure(Error.Validation("sync.proposal_duplicate", "A proposed product identifier is invalid or repeated."));
+            }
+
+            Result<ProductId> created = await dispatcher.SendAsync(new CreateProductCommand(
+                proposal.Sku, proposal.Name, new CategoryId(proposal.CategoryId),
+                new UnitOfMeasureId(proposal.BaseUnitOfMeasureId),
+                DefaultPurchaseCost: proposal.DefaultPurchaseCost,
+                InitialBarcode: proposal.Barcode), cancellationToken).ConfigureAwait(false);
+            if (created.IsFailure)
+            {
+                return Result<Guid>.Failure(created.Errors);
+            }
+
+            proposedIds[proposal.ClientId] = created.Value;
+        }
+
+        List<PurchaseOrderLineSpec> lines = [];
+        foreach (PwaPurchaseLine line in payload.Lines)
+        {
+            ProductId productId;
+            if (line.ProductId is { } existing && line.ProposedProductClientId is null)
+            {
+                productId = new ProductId(existing);
+            }
+            else if (line.ProductId is null && line.ProposedProductClientId is { } clientId &&
+                     proposedIds.TryGetValue(clientId, out ProductId proposed))
+            {
+                productId = proposed;
+            }
+            else
+            {
+                return Result<Guid>.Failure(Error.Validation("sync.purchase_line_invalid", "A purchase line has no valid product."));
+            }
+
+            lines.Add(new PurchaseOrderLineSpec(productId, new UnitOfMeasureId(line.UnitOfMeasureId),
+                line.OrderedQuantity, line.UnitCost));
+        }
+
+        Result<PurchaseOrderId> order = await dispatcher.SendAsync(new CreatePurchaseOrderCommand(
+            payload.SupplierId is { } supplier ? new SupplierId(supplier) : SupplierId.Empty,
+            new LocationId(payload.DestinationLocationId), lines, payload.CurrencyCode,
+            payload.ExpectedAtUtc, payload.CustomSupplierName), cancellationToken).ConfigureAwait(false);
+
+        return order.IsSuccess ? Result<Guid>.Success(order.Value.Value) : Result<Guid>.Failure(order.Errors);
+    }
+
+    private async Task<Result<Guid>> ReplayPwaReceivingAsync(
+        SyncPushEvent item,
+        CancellationToken cancellationToken)
+    {
+        PwaReceivingSyncPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<PwaReceivingSyncPayload>(item.PayloadJson, PwaJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.payload_invalid", "The receiving count is invalid."));
+        }
+
+        if (payload is null || payload.Lines is null || payload.Lines.Count == 0 || payload.Lines.Count > 200 ||
+            payload.UnexpectedGoods is null)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.receiving_invalid", "The receiving count has no valid lines."));
+        }
+
+        if (payload.UnexpectedGoods.Count > 0)
+        {
+            return Result<Guid>.Failure(Error.Conflict("sync.unexpected_goods", "Unexpected goods require quarantine review before this receipt can be posted."));
+        }
+
+        PurchaseOrder? order = await context.PurchaseOrders.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.Id == new PurchaseOrderId(payload.PurchaseOrderId), cancellationToken)
+            .ConfigureAwait(false);
+        if (order is null || order.DestinationLocationId.Value != item.LocationId)
+        {
+            return Result<Guid>.Failure(Error.Conflict("sync.order_changed", "The cached order is no longer available at this location."));
+        }
+
+        Result<GoodsReceiptId> receipt = await dispatcher.SendAsync(new CreateGoodsReceiptCommand(
+            new PurchaseOrderId(payload.PurchaseOrderId),
+            [.. payload.Lines.Select(line => new GoodsReceiptLineSpec(
+                new PurchaseOrderLineId(line.PurchaseOrderLineId), line.QuantityReceived,
+                line.QuantityDamaged, line.QuantityWrongItem, line.QuantityExpired,
+                line.UnitCost, line.LotNumber, line.ManufacturedOn, line.ExpiresOn))],
+            payload.DocumentsMissing,
+            payload.SupplierDeliveryReceiptNumber,
+            payload.SupplierOfficialReceiptNumber,
+            payload.SupplierReleasedAtUtc), cancellationToken).ConfigureAwait(false);
+
+        return receipt.IsSuccess ? Result<Guid>.Success(receipt.Value.Value) : Result<Guid>.Failure(receipt.Errors);
+    }
+
+    /// <summary>
+    /// Replays a restock request drafted while offline. The draft is raised and
+    /// submitted in one event, so it reaches the owner's approval queue the
+    /// moment the device reconnects instead of waiting for someone to open the
+    /// online page and press submit.
+    /// </summary>
+    private async Task<Result<Guid>> ReplayPwaRestockAsync(
+        SyncPushEvent item,
+        CancellationToken cancellationToken)
+    {
+        PwaRestockSyncPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<PwaRestockSyncPayload>(item.PayloadJson, PwaJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.payload_invalid", "The restock request is invalid."));
+        }
+
+        if (payload is null || payload.DestinationLocationId != item.LocationId ||
+            payload.Lines is null || payload.Lines.Count == 0 || payload.Lines.Count > 200)
+        {
+            return Result<Guid>.Failure(Error.Validation("sync.restock_scope", "The restock request or location is invalid."));
+        }
+
+        HashSet<Guid> products = [];
+        foreach (PwaRestockLine line in payload.Lines)
+        {
+            if (line.ProductId == Guid.Empty || !products.Add(line.ProductId) || line.Quantity <= 0m)
+            {
+                return Result<Guid>.Failure(Error.Validation(
+                    "sync.restock_line_invalid",
+                    "Every restock line needs a distinct product and a positive quantity."));
+            }
+        }
+
+        Location? warehouse = await context.Locations.AsNoTracking()
+            .Where(location => location.Kind == LocationKind.MainWarehouse && location.IsActive)
+            .OrderBy(location => location.Code)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (warehouse is null)
+        {
+            return Result<Guid>.Failure(Error.NotFound(
+                "restock.warehouse_unavailable", "No active main warehouse is available."));
+        }
+
+        Result<TransferOrderId> created = await dispatcher.SendAsync(
+            new CreateTransferCommand(
+                warehouse.Id,
+                new LocationId(payload.DestinationLocationId),
+                [.. payload.Lines.Select(line => new TransferLineSpec(
+                    new ProductId(line.ProductId), line.Quantity))],
+                Mode: TransferMode.StoreRestock),
+            cancellationToken).ConfigureAwait(false);
+        if (created.IsFailure)
+        {
+            return Result<Guid>.Failure(created.Errors);
+        }
+
+        Result<TransferOrderId> submitted = await dispatcher.SendAsync(
+            new SubmitTransferCommand(created.Value), cancellationToken).ConfigureAwait(false);
+        return submitted.IsSuccess
+            ? Result<Guid>.Success(created.Value.Value)
+            : Result<Guid>.Failure(submitted.Errors);
+    }
 
     private async Task<Result<Guid>> ReplayTransferReceiptAsync(
         SyncPushEvent item,
@@ -586,7 +820,8 @@ public sealed class SyncPushService(
                 locationId,
                 payload.BusinessDate,
                 payload.OpeningFloat,
-                shiftId),
+                shiftId,
+                payload.OpenedAtUtc == default ? null : payload.OpenedAtUtc),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -629,7 +864,8 @@ public sealed class SyncPushService(
         => eventType is "ShiftOpened" or "ShiftSuspended" or "ShiftResumed";
 
     private static bool IsReplayableEvent(string eventType)
-        => IsShiftEvent(eventType) || eventType is "SaleCompleted" or "TransferReceived";
+        => IsShiftEvent(eventType) || eventType is "SaleCompleted" or "TransferReceived"
+            or "PwaPurchaseDraft" or "PwaReceivingCount" or "PwaRestockDraft";
 }
 
 public sealed record SyncPushRequest(Guid DeviceId, DateTimeOffset ClientSentAtUtc, long DeviceUptimeTicks, IReadOnlyList<SyncPushEvent> Events);
@@ -652,7 +888,8 @@ public sealed record SyncPushEventResult(
     DateTimeOffset? AppliedAtUtc,
     string? ErrorCode,
     string? Message,
-    string? Remediation = null)
+    string? Remediation = null,
+    Guid? EntityId = null)
 {
     public static SyncPushEventResult Rejected(Guid id, string code, string message, string? remediation = null)
         => new(id, "Rejected", null, code, message, remediation);
@@ -663,8 +900,37 @@ public sealed record SyncPushEventResult(
     public static SyncPushEventResult Conflict(Guid id, string code, string message)
         => new(id, "Conflict", null, code, message);
 
-    public static SyncPushEventResult Duplicate(Guid id, SyncProcessingOutcome outcome, DateTimeOffset appliedAtUtc)
-        => new(id, outcome == SyncProcessingOutcome.RequiresReview ? "RequiresReview" : outcome.ToString(), appliedAtUtc, null, null);
+    public static SyncPushEventResult Duplicate(Guid id, SyncProcessingOutcome outcome, DateTimeOffset appliedAtUtc, string? responseJson)
+    {
+        string? code = null, message = null, remediation = null;
+        Guid? entityId = null;
+        if (!string.IsNullOrWhiteSpace(responseJson))
+        {
+            try
+            {
+                using JsonDocument response = JsonDocument.Parse(responseJson);
+                JsonElement root = response.RootElement;
+                if (root.TryGetProperty("entityId", out JsonElement entity) && Guid.TryParse(entity.GetString(), out Guid parsed))
+                {
+                    entityId = parsed;
+                }
+                if (root.TryGetProperty("code", out JsonElement failureCode))
+                {
+                    code = failureCode.GetString();
+                }
+                if (root.TryGetProperty("message", out JsonElement failureMessage))
+                {
+                    message = failureMessage.GetString();
+                }
+                if (root.TryGetProperty("remediation", out JsonElement failureRemediation))
+                {
+                    remediation = failureRemediation.GetString();
+                }
+            }
+            catch (JsonException) { /* Older stored responses may not contain JSON. */ }
+        }
+        return new(id, outcome.ToString(), appliedAtUtc, code, message, remediation, entityId);
+    }
 
     public static SyncPushEventResult Parked(Guid id, DateTimeOffset appliedAtUtc)
         => new(id, "RequiresReview", appliedAtUtc, "sync.handler_unavailable", "The event was recorded for server-side review.");
@@ -672,8 +938,8 @@ public sealed record SyncPushEventResult(
     public static SyncPushEventResult RequiresReview(Guid id, DateTimeOffset appliedAtUtc, string code, string message)
         => new(id, "RequiresReview", appliedAtUtc, code, message);
 
-    public static SyncPushEventResult Accepted(Guid id, DateTimeOffset appliedAtUtc)
-        => new(id, "Accepted", appliedAtUtc, null, null);
+    public static SyncPushEventResult Accepted(Guid id, DateTimeOffset appliedAtUtc, Guid entityId)
+        => new(id, "Accepted", appliedAtUtc, null, null, EntityId: entityId);
 }
 
 public sealed record SyncPushResponse(

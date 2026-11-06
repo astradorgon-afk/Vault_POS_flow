@@ -72,6 +72,117 @@ public sealed class MasterDataRepository(PosDbContext context) : IMasterDataRepo
     }
 
     /// <inheritdoc />
+    public async Task<Result<LocationId>> UpdateLocationAsync(
+        LocationId locationId,
+        string? code,
+        string? name,
+        LocationKind kind,
+        string? timeZoneId,
+        CancellationToken cancellationToken)
+    {
+        // Opted into tracking explicitly: the context defaults to NoTracking
+        // because reads dominate, and a detached mutation would silently save
+        // nothing. This is the same intent marker used on the identity write
+        // paths.
+        Location? location = await context.Locations
+            .AsTracking()
+            .FirstOrDefaultAsync(l => l.Id == locationId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (location is null)
+        {
+            return Result<LocationId>.Failure(LocationErrors.Unknown(locationId));
+        }
+
+        Result applied = location.UpdateDetails(code, name, kind, timeZoneId);
+
+        if (applied.IsFailure)
+        {
+            return Result<LocationId>.Failure(applied.Errors);
+        }
+
+        // The aggregate decides what a valid code looks like; only the database
+        // can decide whether another row already holds it, so the check lives
+        // here, inside the same save that would write the conflict.
+        bool codeTaken = await context.Locations
+            .AnyAsync(
+                l => l.Id != locationId
+                    && l.OrganizationId == location.OrganizationId
+                    && l.Code == location.Code,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (codeTaken)
+        {
+            return Result<LocationId>.Failure(LocationErrors.DuplicateCode(location.Code));
+        }
+
+        if (kind == LocationKind.MainWarehouse)
+        {
+            // Backs the partial unique index on one active main warehouse, so a
+            // second one reports a business conflict instead of a dead insert.
+            bool mainTaken = await context.Locations
+                .AnyAsync(
+                    l => l.Id != locationId
+                        && l.OrganizationId == location.OrganizationId
+                        && l.Kind == LocationKind.MainWarehouse
+                        && l.IsActive,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (mainTaken)
+            {
+                return Result<LocationId>.Failure(LocationErrors.MultipleActiveMainWarehouses);
+            }
+        }
+
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<LocationId>.Success(location.Id);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<LocationId>> CloseLocationAsync(
+        LocationId locationId,
+        DateOnly closingDate,
+        CancellationToken cancellationToken)
+    {
+        Location? location = await context.Locations
+            .AsTracking()
+            .FirstOrDefaultAsync(l => l.Id == locationId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (location is null)
+        {
+            return Result<LocationId>.Failure(LocationErrors.Unknown(locationId));
+        }
+
+        // Guard before mutating: a failure returns without saving, and keeping
+        // the entity untouched means a surrounding transaction can never pick
+        // the half-closed row up through a later save.
+        if (!location.IsActive)
+        {
+            return Result<LocationId>.Failure(LocationErrors.AlreadyClosed);
+        }
+
+        if (location.IsSystemCreated)
+        {
+            return Result<LocationId>.Failure(LocationErrors.CannotCloseSystemLocation);
+        }
+
+        Result applied = location.Close(closingDate);
+
+        if (applied.IsFailure)
+        {
+            return Result<LocationId>.Failure(applied.Errors);
+        }
+
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return Result<LocationId>.Success(location.Id);
+    }
+
+    /// <inheritdoc />
     public async Task<Result<CategoryId>> CreateCategoryAsync(
         ProductCategory category,
         CancellationToken cancellationToken)

@@ -206,6 +206,13 @@ public sealed class SeedingOptions
     /// standard-role authority and a published credential.
     /// </summary>
     public bool EnableDevelopmentAccounts { get; set; }
+
+    /// <summary>
+    /// Gets or sets the password the development accounts share. Null keeps the
+    /// published development password; a public demo supplies its own secret so
+    /// the seeded accounts are not open to anyone who has read the source.
+    /// </summary>
+    public string? DevelopmentAccountPassword { get; set; }
 }
 
 /// <summary>
@@ -263,6 +270,12 @@ public sealed class DatabaseOptions
     /// running application's database role hold no schema rights.
     /// </remarks>
     public bool ApplyMigrationsOnStartup { get; set; }
+
+    /// <summary>
+    /// Allows one production instance to run startup migrations for a temporary
+    /// preview host that has no pre-deploy command. Never enable for replicas.
+    /// </summary>
+    public bool AllowProductionStartupMigration { get; set; }
 
     /// <summary>Gets or sets whether development seed data is loaded at start-up.</summary>
     public bool SeedDevelopmentData { get; set; }

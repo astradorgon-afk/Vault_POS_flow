@@ -46,6 +46,28 @@ public sealed class ChangeFeedWireTests
     }
 
     [Fact]
+    public async Task ReadBaseline_CarriesTheProductCategoryToTheTill_AndToleratesAnOlderServerWithout()
+    {
+        await using TemporaryDeviceDatabase database = await TemporaryDeviceDatabase.CreateAsync();
+        Guid filed = Guid.CreateVersion7();
+        Guid unfiled = Guid.CreateVersion7();
+
+        (string, JsonElement)[] items =
+        [
+            Item("ProductChanged", new { productId = filed, sku = "RG-1001", name = "Golden Grain Premium Jasmine Rice 5kg", isActive = true, tracksBatches = false, tracksExpiry = false, sourceVersion = 0L, updatedAtUtc = Now, category = "Rice & Grains" }),
+            Item("ProductChanged", new { productId = unfiled, sku = "CN-1002", name = "Sea Pearl Tuna Flakes in Oil 155g", isActive = true, tracksBatches = false, tracksExpiry = false, sourceVersion = 0L, updatedAtUtc = Now }),
+        ];
+
+        Result<ChangeFeedBaseline> baseline = ChangeFeedWire.ReadBaseline(3, items);
+        baseline.IsSuccess.Should().BeTrue();
+        (await database.Applier.ReplaceBaselineAsync(baseline.Value)).IsSuccess.Should().BeTrue();
+
+        await using PosDeviceDbContext context = await database.OpenContextAsync();
+        (await context.Products.SingleAsync(p => p.Id == new ProductId(filed))).Category.Should().Be("Rice & Grains");
+        (await context.Products.SingleAsync(p => p.Id == new ProductId(unfiled))).Category.Should().BeNull();
+    }
+
+    [Fact]
     public void Read_RefusesAChangeTypeThisClientDoesNotKnow()
     {
         Result<ChangeFeedChange> result = ChangeFeedWire.Read(4, "SupplierChanged", Element(new { supplierId = Guid.CreateVersion7() }));

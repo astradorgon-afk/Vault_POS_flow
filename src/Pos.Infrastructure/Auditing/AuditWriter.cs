@@ -19,6 +19,13 @@ namespace Pos.Infrastructure.Auditing;
 /// The actor is read from the ambient request context rather than passed in at
 /// each call site, so a caller cannot record someone else as having done it.
 /// </para>
+/// <para>
+/// Sign-in, sign-out and token events are the exception, and the reason the
+/// entry may name an actor: they are decided before there is an authenticated
+/// caller, so the ambient identity is empty and every one of them used to read
+/// back as "System". The ambient identity still wins wherever there is one, so
+/// an authenticated caller cannot attribute its own action to anybody else.
+/// </para>
 /// </remarks>
 /// <param name="context">The database context.</param>
 /// <param name="currentUser">The caller.</param>
@@ -33,14 +40,16 @@ public sealed class AuditWriter(
     {
         ArgumentNullException.ThrowIfNull(entry);
 
+        bool anonymous = currentUser.UserId is null;
+
         AuditLogEntry record = AuditLogEntry.Record(
             entry.Action,
             entry.EntityType,
             entry.EntityId,
             clock.UtcNow,
             currentUser.CorrelationId,
-            currentUser.UserId,
-            currentUser.RoleSnapshot,
+            anonymous ? entry.ActorUserId : currentUser.UserId,
+            anonymous ? entry.ActorRoleSnapshot : currentUser.RoleSnapshot,
             currentUser.DeviceId,
             entry.LocationId,
             currentUser.IpAddress,

@@ -1,5 +1,6 @@
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
+using Pos.Domain.Locations;
 using Pos.Domain.Organizations;
 
 namespace Pos.Application.Common.Abstractions;
@@ -30,6 +31,41 @@ public interface IMasterDataRepository
     Task<Result<LocationId>> UpdateLocationSettingsAsync(
         LocationId locationId,
         LocationSettings settings,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces a location's descriptive details: code, name, kind and timezone.
+    /// Uniqueness of the code and the single-active-main-warehouse rule are
+    /// checked here, inside the caller's transaction, so a conflict can never be
+    /// saved.
+    /// </summary>
+    /// <param name="locationId">The location to change.</param>
+    /// <param name="code">The short unique code.</param>
+    /// <param name="name">The human-readable name.</param>
+    /// <param name="kind">The kind; not <see cref="LocationKind.External"/>.</param>
+    /// <param name="timeZoneId">IANA timezone identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identifier, or a not-found/conflict failure.</returns>
+    Task<Result<LocationId>> UpdateLocationAsync(
+        LocationId locationId,
+        string? code,
+        string? name,
+        Pos.Domain.Locations.LocationKind kind,
+        string? timeZoneId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Closes a location: the domain's form of deletion, since a location that
+    /// ever held stock must keep its ledger rows. Refused while any balance,
+    /// shift, transfer or purchase order at that location is still open.
+    /// </summary>
+    /// <param name="locationId">The location to close.</param>
+    /// <param name="closingDate">The effective closing business date.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identifier, or a not-found/conflict failure.</returns>
+    Task<Result<LocationId>> CloseLocationAsync(
+        LocationId locationId,
+        DateOnly closingDate,
         CancellationToken cancellationToken);
 
     /// <summary>Persists a newly created category.</summary>

@@ -140,12 +140,14 @@ public sealed class ShiftEndpointTests(PosApiFactory factory)
     {
         LocationId external = await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
 
+        // A manager scoped to the external location holds shift.open there, so
+        // the refusal comes from the location kind, not from authorization.
         await factory.CreateUserAsync(
-            "s4-owner", Roles.Owner, tier: ApprovalTier.Unlimited, employeeCode: "s4own");
+            "s4-manager", Roles.StoreManager, [external], ApprovalTier.Unlimited, employeeCode: "s4mgr");
         DeviceId externalDevice = await factory.CreateDeviceAsync("X01", external);
 
         using HttpClient client = factory.CreateClient();
-        string ownerToken = await PinSignInAsync(client, "s4own", externalDevice.Value);
+        string managerToken = await PinSignInAsync(client, "s4mgr", externalDevice.Value);
 
         using HttpResponseMessage response = await PostJsonAsync(
             client,
@@ -157,7 +159,7 @@ public sealed class ShiftEndpointTests(PosApiFactory factory)
                 businessDate = BusinessDate,
                 openingFloat = 0m,
             },
-            ownerToken);
+            managerToken);
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
         (await ReadErrorCodeAsync(response)).Should().Be("shift.location_external");

@@ -117,15 +117,15 @@ public static class TerminalEndpoints
     {
         LocationId scope = new(locationId);
 
-        List<RegisterSummary> registers = await context.Devices
+        List<Device> devices = await context.Devices
             .AsNoTracking()
-            .Where(device => device.LocationId == scope
-                && device.Platform == DevicePlatform.Web
-                && device.Status == DeviceStatus.Active)
+            .Where(device => device.Platform == DevicePlatform.Web && device.Status == DeviceStatus.Active)
             .OrderBy(device => device.Name)
-            .Select(device => new RegisterSummary(device.Id.Value, device.ShortCode, device.Name))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+        List<RegisterSummary> registers = [.. devices
+            .Where(device => device.CanOperateAt(scope))
+            .Select(device => new RegisterSummary(device.Id.Value, device.ShortCode, device.Name))];
 
         return TypedResults.Ok(registers);
     }
@@ -316,7 +316,7 @@ public static class TerminalEndpoints
                 "device.not_active", "The register is not active. Ask an administrator."));
         }
 
-        if (device.LocationId != locationId)
+        if (!device.CanOperateAt(locationId))
         {
             return Result<Device>.Failure(Error.Conflict(
                 "device.wrong_location", "The register belongs to another store."));

@@ -1,0 +1,407 @@
+﻿@page "/catalog"
+@attribute [Authorize(Policy = "product.view")]
+@rendermode InteractiveServer
+@using System.Globalization
+@* Loading, lookup and creation live in Products.razor.cs. *@
+
+<PageTitle>Products &amp; barcodes · VaultFlow</PageTitle>
+
+<section class="catalog-page">
+    <header class="office-head">
+        <div>
+            <h1 class="office-title">Products &amp; barcodes</h1>
+            <p class="office-lead">Manage your products, scan or search by barcode, and keep track of your inventory.</p>
+        </div>
+        @if (CanCreate)
+        {
+            <button type="button" class="search-action add-product" @onclick="ToggleCreate"><span aria-hidden="true">+</span> @(showCreate ? "Close form" : "Add product")</button>
+        }
+    </header>
+
+    @if (showCreate && CanCreate)
+    {
+        <div class="modal-scrim" @onclick="TryDismiss"></div>
+        <div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="create-product-title"
+             tabindex="-1" @ref="modalRef" @onkeydown="OnModalKey">
+            <header class="modal-head">
+                <span class="modal-mark" aria-hidden="true"><AppIcon Name="box" /></span>
+                <div>
+                    <h2 id="create-product-title">Add product</h2>
+                    <p>Create a new item in your product catalogue.</p>
+                </div>
+                @* Esc and the backdrop keep a half-filled form; this is a
+                   deliberate click, so it always closes. *@
+                <button type="button" class="modal-close" aria-label="Close" @onclick="ToggleCreate">&times;</button>
+            </header>
+
+            <div class="modal-body">
+
+                <section class="form-block">
+                    <h3><span class="form-block-mark" aria-hidden="true"><AppIcon Name="bottle" /></span>Basic information</h3>
+                    <label class="field">
+                        <span class="field-label">Product name <b class="req" aria-label="required">*</b></span>
+                        <input maxlength="128" @bind="newName" @bind:event="oninput" placeholder="e.g. Aloe Isla Shampoo Anti-Hairfall 170ml" />
+                    </label>
+                    <div class="field-pair">
+                        <label class="field">
+                            <span class="field-label">Category <b class="req" aria-label="required">*</b></span>
+                            <select @bind="newCategoryId">
+                                <option value="">Select a category</option>
+                                @foreach (PosCategory category in categories.Where(category => category.IsActive))
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">SKU <b class="req" aria-label="required">*</b></span>
+                            <input maxlength="32" @bind="newSku" @bind:event="oninput" placeholder="e.g. PC-1017" />
+                            @* House SKU conventions vary, so a guess is offered rather than filled in. *@
+                            @if (SuggestedSku is { } suggestion)
+                            {
+                                <button type="button" class="field-action" @onclick="() => newSku = suggestion">Use @suggestion</button>
+                            }
+                        </label>
+                    </div>
+                </section>
+
+                @* The page is about barcodes, so this section carries the accent. *@
+                <section class="form-block is-barcode">
+                    <h3><span class="form-block-mark" aria-hidden="true"><AppIcon Name="tag" /></span>Barcode information</h3>
+                    <label class="field">
+                        <span class="field-label">Primary barcode</span>
+                        <input class="code-input" type="text" inputmode="numeric" aria-label="Barcode for the new product"
+                               @bind="newBarcode" @bind:event="oninput" @bind:after="OnNewBarcodeTypedAsync"
+                               placeholder="Scan or enter barcode number" />
+                    </label>
+                    <p class="field-note">Optional. Barcode must be unique across products.</p>
+                    <div class="barcode-camera"><CameraScanner Enabled="@(!working)" /></div>
+                    @if (barcodeTaken is { } owner)
+                    {
+                        <p class="form-warn is-blocking">
+                            <b>Already registered.</b> That code already scans as <strong>@owner</strong>, and a barcode can only ever belong to one product.
+                        </p>
+                    }
+                    else if (CatalogView.CheckDigitWarning(newBarcode) is { } mistyped)
+                    {
+                        <p class="form-warn">@mistyped</p>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(newBarcode))
+                    {
+                        <p class="form-good">Free to use — nothing is registered against this code.</p>
+                    }
+                </section>
+
+                <section class="form-block">
+                    <h3><span class="form-block-mark" aria-hidden="true"><AppIcon Name="settings" /></span>Additional details</h3>
+                    <div class="field-pair">
+                        <label class="field">
+                            <span class="field-label">Unit of measure <b class="req" aria-label="required">*</b></span>
+                            <select @bind="newUnitId">
+                                <option value="">Select a unit</option>
+                                @foreach (PosUnitOfMeasure unit in units)
+                                {
+                                    <option value="@unit.Id">@unit.Name (@unit.Code)</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Description <small>(optional)</small></span>
+                            <textarea rows="2" maxlength="512" @bind="newDescription" @bind:event="oninput" placeholder="Add any additional product details…"></textarea>
+                        </label>
+                    </div>
+                    <div class="field-pair">
+                        <label class="field">
+                            <span class="field-label">Brand</span>
+                            <select @bind="newBrandId">
+                                <option value="">No brand</option>
+                                @foreach (PosBrand brand in brands)
+                                {
+                                    <option value="@brand.Id">@brand.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Primary supplier</span>
+                            <select @bind="newSupplierId">
+                                <option value="">None</option>
+                                @foreach (PosSupplier supplier in suppliers)
+                                {
+                                    <option value="@supplier.Id">@supplier.Name</option>
+                                }
+                            </select>
+                        </label>
+                    </div>
+                    <label class="field field-half">
+                        <span class="field-label">Default cost</span>
+                        <input type="number" min="0" step="0.01" @bind="newCost" />
+                        <small class="field-note">Per base unit, until a receipt says otherwise.</small>
+                    </label>
+
+                    @* Each of these is awkward to change once stock exists, so each says what it means. *@
+                    <div class="switch-rows">
+                        <label class="switch-row">
+                            <span class="switch-copy">
+                                <strong>Batch tracked</strong>
+                                <small>Stock is held per delivery batch, and counted per batch.</small>
+                            </span>
+                            <input class="switch-input" type="checkbox" @bind="newTracksBatches" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="switch-row">
+                            <span class="switch-copy">
+                                <strong>Has an expiry date</strong>
+                                <small>Expiry runs can quarantine it once it is past date.</small>
+                            </span>
+                            <input class="switch-input" type="checkbox" @bind="newTracksExpiry" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="switch-row">
+                            <span class="switch-copy">
+                                <strong>VAT exempt</strong>
+                                <small>Sold without VAT added.</small>
+                            </span>
+                            <input class="switch-input" type="checkbox" @bind="newVatExempt" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                        </label>
+                    </div>
+                    @if (newTracksExpiry)
+                    {
+                        <label class="field field-half">
+                            <span class="field-label">Shelf life (days)</span>
+                            <input type="number" min="1" @bind="newShelfLifeDays" placeholder="e.g. 365" />
+                            <small class="field-note">Recorded against the product. Expiry dates themselves are entered per delivery at goods receiving.</small>
+                        </label>
+                    }
+                </section>
+
+                @* What the form adds up to so far, and what still stands in the way. *@
+                <section class="preview-card" aria-live="polite">
+                    <span class="preview-mark" aria-hidden="true"><AppIcon Name="receipt" /></span>
+                    <div>
+                        <strong>Product preview <em>(not yet saved)</em></strong>
+                        <span>@(string.IsNullOrWhiteSpace(newName) ? "Unnamed product" : newName) <i aria-hidden="true">·</i> @(string.IsNullOrWhiteSpace(newSku) ? "No SKU" : newSku)</span>
+                        <span>
+                            @(string.IsNullOrWhiteSpace(newBarcode) ? "No barcode" : newBarcode) <i aria-hidden="true">·</i>
+                            <b class="preview-state @(CreateBlockedReason is null ? "is-ready" : null)">@(CreateBlockedReason ?? "Ready to create")</b>
+                        </span>
+                    </div>
+                </section>
+
+            </div>
+
+            <footer class="modal-foot">
+                <button type="button" class="action-button" @onclick="ResetCreateForm" disabled="@(working || !IsFormDirty)">Clear</button>
+                <button type="button" class="search-action" @onclick="CreateProductAsync" disabled="@(CreateBlockedReason is not null || working)">
+                    <AppIcon Name="check" /> @(working ? "Creating…" : "Create product")
+                </button>
+            </footer>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="pos-message" role="status">@message</div>
+    }
+
+    <section class="search-strip">
+        <label class="catalog-search">
+            <span class="catalog-sr">Search the catalogue</span>
+            <input type="search" @bind="search" @bind:event="oninput" @bind:after="OnSearchTypedAsync"
+                   placeholder="Search product name, SKU or barcode..." />
+        </label>
+        <label class="catalog-toggle">
+            <input type="checkbox" @bind="includeInactive" @bind:after="ReloadAsync" />
+            <span>Include discontinued</span>
+        </label>
+        <label class="catalog-toggle">
+            <span>Rows</span>
+            <select @bind="pageSize" @bind:after="ReloadAsync">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </label>
+        <span class="catalog-count">@total.ToString("N0", CultureInfo.InvariantCulture) product@(total == 1 ? "" : "s")</span>
+    </section>
+
+    <button type="button" class="barcode-disclosure @(showBarcodeDesk ? "is-open" : null)" aria-expanded="@showBarcodeDesk" @onclick="ToggleBarcodeDesk">
+        <span class="barcode-disclosure-icon" aria-hidden="true"><AppIcon Name="tag" /></span>
+        <span class="barcode-disclosure-label">@(showBarcodeDesk ? "Close barcode lookup" : "Scan or identify a barcode")</span>
+        <span class="barcode-disclosure-sign" aria-hidden="true">@(showBarcodeDesk ? "−" : "+")</span>
+    </button>
+
+    @* The reason this page exists. A code that resolves to nothing is a dead
+       end everywhere else in the system; here it becomes a question with two
+       answers. *@
+    <ScanTarget OnScan="OnScannedAsync" />
+    @if (showBarcodeDesk)
+    {
+    <section class="code-desk" aria-label="Identify a barcode">
+        <div class="code-desk-head">
+            <strong>What is this barcode?</strong>
+            <span>Scan a code or type it. If nothing is registered against it, you can say what it is.</span>
+        </div>
+        <div class="code-desk-entry">
+            <input type="text" inputmode="numeric" placeholder="Scan or type a barcode…"
+                   aria-label="Barcode to identify"
+                   @bind="lookupCode" @bind:event="oninput" @onkeydown="OnLookupKeyAsync" />
+            <button type="button" class="search-action" @onclick="LookupAsync"
+                    disabled="@(looking || string.IsNullOrWhiteSpace(lookupCode))">
+                @(looking ? "Looking…" : "Identify")
+            </button>
+        </div>
+        <CameraScanner Enabled="@(!looking)" />
+        @if (CatalogView.CheckDigitWarning(lookupCode) is { } typo)
+        {
+            <p class="code-desk-note">@typo</p>
+        }
+
+        @if (lookupResult is { } found)
+        {
+            <div class="code-desk-hit" role="status">
+                <span class="code-desk-badge is-known">Registered</span>
+                <div>
+                    <a href="@($"/catalog/products/{found.Id:D}")"><strong>@found.Name</strong></a>
+                    <span>@found.Sku · scanned code @lookupEchoed</span>
+                </div>
+            </div>
+        }
+        else if (lookupMissing is { } missing)
+        {
+            <div class="code-desk-miss" role="status">
+                <span class="code-desk-badge is-unknown">Not registered</span>
+                <div>
+                    <strong>@missing</strong>
+                    <span>Nothing in the catalogue answers to this code.</span>
+                </div>
+                @if (CanManageBarcodes || CanCreate)
+                {
+                    <div class="code-desk-actions">
+                        @if (CanManageBarcodes)
+                        {
+                            <button type="button" class="action-button" @onclick="BeginAttach">Attach to an existing product</button>
+                        }
+                        @if (CanCreate)
+                        {
+                            <button type="button" class="action-button" @onclick="BeginCreateWithCode">Create a new product for it</button>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <span class="code-desk-note">Ask an administrator for the <code>product.barcode.manage</code> permission to register it.</span>
+                }
+            </div>
+        }
+        else if (lookupError is { } problem)
+        {
+            <div class="pos-message" role="alert">@problem</div>
+        }
+    </section>
+    }
+
+    @if (attaching is { } pending)
+    {
+        <section class="attach-panel" aria-label="Attach barcode to a product">
+            <header>
+                <strong>Attach <code>@pending</code> to a product</strong>
+                <button type="button" class="action-button subtle" @onclick="CancelAttach">Dismiss</button>
+            </header>
+            <p>Pick the product this code should scan as. Search below, then choose it.</p>
+            <div class="attach-chosen">
+                @if (attachTarget is { } target)
+                {
+                    <span><strong>@target.Name</strong> · @target.Sku</span>
+                    <button type="button" class="search-action" @onclick="ConfirmAttachAsync" disabled="@working">
+                        @(working ? "Attaching…" : "Attach this code")
+                    </button>
+                }
+                else
+                {
+                    <span class="attach-hint">No product chosen yet — pick one from the list below.</span>
+                }
+            </div>
+        </section>
+    }
+
+    <section class="results-panel" aria-live="polite">
+        @if (loading)
+        {
+            <div class="results-empty">Loading the catalogue…</div>
+        }
+        else if (products.Count == 0)
+        {
+            <div class="results-empty">
+                <strong>No products matched.</strong>
+                <span>Try a different term, or add the product.</span>
+            </div>
+        }
+        else
+        {
+            <div class="catalog-grid">
+                @foreach (IGrouping<Guid, PosCatalogProduct> group in products.GroupBy(product => product.CategoryId).OrderByDescending(group => group.Count()).ThenBy(group => CategoryName(group.Key), StringComparer.OrdinalIgnoreCase))
+                {
+                    string categoryName = CategoryName(group.Key);
+                    string tone = CategoryTone(categoryName);
+                    <section class="category-card @tone" @key="group.Key" aria-label="@categoryName">
+                        <button type="button" class="category-head" aria-expanded="@(!collapsedCategories.Contains(group.Key))" @onclick="() => ToggleCategory(group.Key)">
+                            <span class="category-icon"><AppIcon Name="@CategoryIcon(categoryName)" /></span>
+                            <strong>@categoryName</strong>
+                            <small>@group.Count() product@(group.Count() == 1 ? "" : "s")</small>
+                            <span class="category-chevron" aria-hidden="true">›</span>
+                        </button>
+                        @if (!collapsedCategories.Contains(group.Key))
+                        {
+                            <div class="category-products" tabindex="0" role="group" aria-label="@(categoryName + " products")">
+                                @foreach (PosCatalogProduct product in group)
+                                {
+                                    <button type="button" @key="product.Id" class="catalog-product @(attachTarget?.Id == product.Id ? "is-chosen" : null)"
+                                            @onclick="() => OnRowAsync(product)" aria-label="@((attaching is not null ? "Choose" : "Open") + " " + product.Name)">
+                                        <span class="product-identity"><strong>@product.Name</strong><small>@product.Sku</small></span>
+                                        <span class="product-meta">
+                                            @if (product.Barcodes.Count == 0)
+                                            {
+                                                <span class="catalog-nocode">No barcode</span>
+                                            }
+                                            else
+                                            {
+                                                <code title="@string.Join(", ", product.Barcodes)">@product.Barcodes[0]</code>
+                                                @if (product.Barcodes.Count > 1)
+                                                {
+                                                    <span class="catalog-more" title="@string.Join(", ", product.Barcodes.Skip(1))">+@(product.Barcodes.Count - 1)</span>
+                                                }
+                                            }
+                                            <span class="product-status @(product.IsActive ? "is-active" : "is-inactive")">@(product.IsActive ? "Active" : "Discontinued")</span>
+                                            <span class="product-chevron" aria-hidden="true">@(attaching is not null ? "+" : "›")</span>
+                                        </span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </section>
+                }
+            </div>
+            <footer class="catalog-pager">
+                <span>
+                    Showing @((offset + 1).ToString("N0", CultureInfo.InvariantCulture))–@(Math.Min(offset + products.Count, total).ToString("N0", CultureInfo.InvariantCulture)) of @total.ToString("N0", CultureInfo.InvariantCulture) products
+                </span>
+                <div>
+                    <button type="button" aria-label="Previous page" @onclick="PreviousAsync" disabled="@(offset == 0 || loading)">‹</button>
+                    @foreach (int? page in PageLinks)
+                    {
+                        if (page is { } number)
+                        {
+                            <button type="button" class="@(number == CurrentPage ? "is-current" : null)" aria-label="Page @number" aria-current="@(number == CurrentPage ? "page" : null)" @onclick="() => GoToPageAsync(number)">@number</button>
+                        }
+                        else
+                        {
+                            <span class="pager-ellipsis" aria-hidden="true">…</span>
+                        }
+                    }
+                    <button type="button" aria-label="Next page" @onclick="NextAsync" disabled="@(offset + pageSize >= total || loading)">›</button>
+                </div>
+            </footer>
+        }
+    </section>
+</section>

@@ -1,11 +1,11 @@
 @page "/inventory/counts/{CountId:guid}"
-@using System.Globalization
-@attribute [Authorize(Policy = "inventory.view")]
+@attribute [Authorize]
 @rendermode InteractiveServer
-@inject VaultFlowApiClient Api
-@inject UserSession Session
+@using System.Globalization
+@* State, loading and commands live in InventoryCountDetail.razor.cs. *@
 
 <PageTitle>Stock count · VaultFlow</PageTitle>
+<div class="inventory-workflow web-workflow">
 
 @if (!CanViewInventory)
 {
@@ -27,18 +27,37 @@ else
 {
     PosInventoryCountSummary count = detail.Count;
 
+    @* Worked out once per render: the row list is walked several times below
+       (count, page maths, the rows themselves) and on a full physical that is
+       hundreds of lines each time. *@
+    List<(Guid Id, string Name)> sheetCategories = SheetCategories();
+    List<PosInventoryCountLineView> matching = FilteredLines();
+    int pageCount = PageCountFor(matching.Count);
+    int currentPage = Math.Min(page, pageCount - 1);
+    int firstShown = currentPage * PageSize;
+    List<PosInventoryCountLineView> shown = [.. matching.Skip(firstShown).Take(PageSize)];
+
     <div class="office-head">
         <div>
-            <p class="office-kicker">Stock count · @StoreName(count.LocationId)</p>
+            <p class="office-kicker"><a class="count-back" href="/inventory/counts">Stock counts</a> · @StoreName(count.LocationId)</p>
             <h1 class="office-title">@count.Number</h1>
-            <p class="office-lead">@SplitWords(count.Kind) · @count.Lines line@(count.Lines == 1 ? "" : "s")@(count.PostedAtUtc is { } posted ? $" · posted {posted.ToLocalTime():MMM d, yyyy}" : "")</p>
+            <p class="office-lead">@SplitWords(count.Kind) · @count.Lines line@(count.Lines == 1 ? "" : "s")@(count.PostedAtUtc is { } posted ? $" · posted {posted.InStoreTime():MMM d, yyyy}" : "")</p>
         </div>
         <span class="@StatusChipClass(count.Status)">@SplitWords(count.Status)</span>
     </div>
 
+    @* An error and a confirmation used to render identically, so "Counts saved."
+       and a refusal from head office looked the same at a glance. *@
     @if (!string.IsNullOrWhiteSpace(message))
     {
-        <div class="pos-message" role="status">@message</div>
+        <div class="cs-banner @(messageIsError ? "is-error" : "is-ok")" role="@(messageIsError ? "alert" : "status")">
+            <AppIcon Name="@(messageIsError ? "alert" : "check")" />
+            <div class="cs-banner-text">
+                <strong>@(messageIsError ? "That did not go through" : "Done")</strong>
+                <span>@message</span>
+            </div>
+            <button type="button" class="cs-banner-x" aria-label="Dismiss this message" @onclick="DismissMessage">×</button>
+        </div>
     }
 
     @if (!string.IsNullOrWhiteSpace(detail.Note))
@@ -46,192 +65,336 @@ else
         <div class="count-note"><strong>Note:</strong> @detail.Note</div>
     }
 
-    <section class="count-meta">
-        <span><strong>Snapshot</strong>@detail.SnapshotTakenAtUtc.ToLocalTime().ToString("MMM d, yyyy HH:mm", CultureInfo.InvariantCulture)</span>
-        <span><strong>Created</strong>@detail.Count.CreatedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</span>
-        @if (detail.SubmittedByUserId is { })
-        {
-            <span><strong>Submitted</strong>yes</span>
-        }
-        @if (detail.ApprovedByUserId is { })
-        {
-            <span><strong>Approved</strong>yes</span>
-        }
-        @if (!string.IsNullOrWhiteSpace(detail.LastRejectionReason))
-        {
-            <span><strong>Returned</strong>@detail.LastRejectionReason</span>
-        }
-        @if (!string.IsNullOrWhiteSpace(detail.CancellationReason))
-        {
-            <span><strong>Cancelled</strong>@detail.CancellationReason</span>
-        }
-    </section>
-
-    <section class="results-panel sheet-panel" aria-live="polite">
-        <table class="sheet-table">
-            <thead>
-                <tr><th>#</th><th>Product</th><th>Batch</th><th>System</th><th>Counted</th><th>Variance</th><th>Unit cost</th><th>Value</th><th>Counted at</th></tr>
-            </thead>
-            <tbody>
-                @foreach (PosInventoryCountLineView line in detail.Lines)
-                {
-                    <tr @key="line.LineNo">
-                        <td class="sheet-line-no">@line.LineNo</td>
-                        <td>
-                            <div class="product-name">@ProductDisplayName(line.ProductId)</div>
-                            @if (ProductSku(line.ProductId) is { } sku)
-                            {
-                                <div class="product-sku">@sku</div>
-                            }
-                        </td>
-                        <td>@(line.BatchId is { } batchId ? ShortId(batchId) : "—")</td>
-                        <td class="sheet-number">@(line.SystemQuantity.ToString("0.######", CultureInfo.InvariantCulture))</td>
-                        <td><span class="sheet-number">@(line.PhysicalQuantity?.ToString("0.######", CultureInfo.InvariantCulture) ?? "—")</span></td>
-                        <td class="@VarianceTone(VarianceOf(line))">@(VarianceOf(line) is { } variance ? $"{variance:+#.###;-#.###;0}" : "—")</td>
-                        <td class="sheet-number">@line.UnitCost.ToString("C", CultureInfo.GetCultureInfo("en-PH"))</td>
-                        <td class="sheet-number">@(ValueOf(line) is { } value ? value.ToString("C", CultureInfo.GetCultureInfo("en-PH")) : "—")</td>
-                        <td class="sheet-muted">@(line.CountedAtUtc?.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "—")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </section>
-}
-
-@code {
-    [Parameter] public Guid CountId { get; set; }
-
-    private readonly List<PosLocation> locations = [];
-    private readonly Dictionary<Guid, (string Sku, string Name)> productNames = [];
-
-    private PosInventoryCountDetail? detail;
-    private bool loadingDetail = true;
-    private string? message;
-
-    private bool CanViewInventory => Session.HasPermission("inventory.view");
-    protected override async Task OnInitializedAsync()
+    @if (!string.IsNullOrWhiteSpace(detail.LastRejectionReason) && IsCounting)
     {
-        if (!CanViewInventory)
-        {
-            loadingDetail = false;
-            return;
-        }
-
-        await LoadDetailAsync();
+        <div class="count-sent-back" role="alert">
+            <strong>Sent back for recounting.</strong>
+            <span>@detail.LastRejectionReason</span>
+        </div>
     }
 
-    private async Task LoadDetailAsync()
-    {
-        loadingDetail = true;
-        try
-        {
-            ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
-            if (locationResponse.IsSuccess && locationResponse.Value is not null)
-            {
-                locations.AddRange(locationResponse.Value.Where(x => x.Kind == 1));
-            }
+    @* The sheet follows the goods-receiving layout: the lines on the left, and
+       a summary column on the right carrying the two numbers every decision
+       rests on — how much is left to count, and what the variance would do to
+       stock if it were posted — together with the buttons that act on them.
+       Keeping the buttons beside those numbers is the point: on a full physical
+       the sheet runs to hundreds of lines, and actions parked under the last
+       one are unreachable without scrolling the whole count. *@
+    <div class="cs-layout">
+        <div class="cs-main">
+            <section class="cs-card">
+                <div class="cs-card-head">
+                    <div>
+                        <div class="cs-eyebrow">Physical count</div>
+                        <h2>Count what is on the shelf</h2>
+                        <p>Enter the quantity found for each line. Every line needs a number before the sheet can be submitted.</p>
+                    </div>
+                    <span class="cs-count">@sheet.CountedLines of @sheet.TotalLines</span>
+                </div>
 
-            ApiResult<PosInventoryCountDetail> response = await Api.GetInventoryCountAsync(CountId, CancellationToken.None);
-            if (!response.IsSuccess || response.Value is null)
-            {
-                message = response.Error ?? "This count could not be found.";
-                return;
-            }
-
-            detail = response.Value;
-            await LoadProductNamesAsync(detail.Lines.Select(line => line.ProductId).Distinct().ToArray());
-        }
-        catch (HttpRequestException)
-        {
-            message = "The inventory service is unavailable. Try again shortly.";
-        }
-        finally
-        {
-            loadingDetail = false;
-        }
-    }
-
-    private async Task LoadProductNamesAsync(IReadOnlyCollection<Guid> ids)
-    {
-        HashSet<Guid> wanted = [.. ids];
-        foreach (Guid id in wanted)
-        {
-            productNames[id] = (ShortId(id), "Product");
-        }
-
-        try
-        {
-            for (int offset = 0; offset < 2000 && wanted.Count > 0; offset += 200)
-            {
-                ApiResult<List<PosProductSummary>> response = await Api.GetProductsAsync(null, offset, 200, CancellationToken.None);
-                if (!response.IsSuccess || response.Value is null || response.Value.Count == 0)
+                @if (IsCounting && CanCount)
                 {
-                    break;
+                    <div class="cs-toolbar">
+                        <span class="cs-scan-hint"><AppIcon Name="camera" /> Scan products from each line</span>
+                        <button type="button" class="cs-btn" disabled="@busy" @onclick="MatchAllToSystem">
+                            <AppIcon Name="check" /> Match all to system
+                        </button>
+                    </div>
+                    @* A wedge scanner types wherever focus is, so it needs no row. *@
+                    <p class="cs-help">Handheld scanner? Click anywhere outside a field, then scan. Each scan adds one unit to that product's line.</p>
+                    <p class="cs-note">@(scanNote ?? "Variance is counted − system. A shortfall writes stock off when the count is approved, so recount before submitting anything you are unsure of.")</p>
+
+                    <ScanTarget OnScan="OnScannedAsync" Enabled="@(!busy)" />
                 }
 
-                foreach (PosProductSummary product in response.Value)
-                {
-                    if (wanted.Remove(product.Id))
+                @* On a full physical the sheet runs to hundreds of lines. Finding one
+                   product, or just what is left to do, is the whole job. *@
+                <section class="sheet-toolbar" aria-label="Find lines">
+                    <label class="sheet-search">
+                        <span class="sheet-sr">Search this sheet</span>
+                        <input type="search" @bind="SearchText" @bind:event="oninput" placeholder="Search product or SKU…" />
+                    </label>
+                    @if (sheetCategories.Count > 0)
                     {
-                        productNames[product.Id] = (product.Sku, product.Name);
+                        <label class="sheet-category">
+                            <span class="sheet-sr">Category</span>
+                            <select @bind="CategoryChoice" aria-label="Filter by category">
+                                <option value="">All categories</option>
+                                @foreach ((Guid Id, string Name) category in sheetCategories)
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                        </label>
                     }
-                }
+                    <div class="sheet-filters" role="group" aria-label="Show lines">
+                        @foreach ((CountSheetFilter Key, string Label) choice in FilterChoices)
+                        {
+                            <button type="button" class="sheet-filter @(filter == choice.Key ? "is-on" : null)"
+                                    aria-pressed="@(filter == choice.Key ? "true" : "false")"
+                                    @onclick="() => SetFilter(choice.Key)">
+                                @choice.Label<b>@sheet.CountFor(choice.Key).ToString("N0", CultureInfo.InvariantCulture)</b>
+                            </button>
+                        }
+                    </div>
+                </section>
 
-                if (response.Value.Count < 200)
+                <div class="cs-table-head" aria-hidden="true">
+                    <span>Product</span><span>System</span><span>Counted</span><span>Variance</span><span>Actions</span>
+                </div>
+
+                <div class="cs-rows" aria-live="polite">
+                    @if (matching.Count == 0)
+                    {
+                        <div class="cs-empty">
+                            <strong>No lines match.</strong>
+                            <p>Clear the search, pick another category, or choose a different set of lines.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (PosInventoryCountLineView line in shown)
+                        {
+                            <article class="cs-row @RowClass(line)" @key="line.LineNo" aria-label="@ProductDisplayName(line.ProductId)">
+                                <div class="cs-product">
+                                    <div class="cs-name">@ProductDisplayName(line.ProductId)</div>
+                                    <div class="cs-sku">
+                                        @(ProductSku(line.ProductId) ?? $"Line {line.LineNo}")
+                                        @if (line.BatchId is { } batchId)
+                                        {
+                                            <text> · lot @ShortId(batchId)</text>
+                                        }
+                                    </div>
+                                    @if (line.IsRepeatVariance)
+                                    {
+                                        <div class="cs-flag is-warn" title="This product already varied at this store within the last 90 days">Repeat variance</div>
+                                    }
+                                </div>
+
+                                <div class="cs-due-cell"><span class="cs-due is-quiet">@Quantity(line.SystemQuantity)</span></div>
+
+                                <div class="cs-qty-cell" data-label="COUNTED">
+                                    @if (IsCounting && CanCount)
+                                    {
+                                        <div class="cs-stepper">
+                                            <button type="button" aria-label="One fewer @ProductDisplayName(line.ProductId)"
+                                                    disabled="@((sheet.Quantity(line) ?? 0m) <= 0m)" @onclick="() => Step(line, -1m)">−</button>
+                                            <input type="number" min="0" step="0.001" inputmode="decimal"
+                                                   class="@(sheet.IsDirty(line.LineNo) ? "is-dirty" : null)"
+                                                   aria-label="@($"Counted quantity for {ProductDisplayName(line.ProductId)}")"
+                                                   value="@(sheet.Draft(line.LineNo)?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty)"
+                                                   @onchange="e => OnGaugeChanged(line.LineNo, e)" />
+                                            <button type="button" aria-label="One more @ProductDisplayName(line.ProductId)"
+                                                    @onclick="() => Step(line, 1m)">+</button>
+                                        </div>
+                                        <button type="button" class="cs-text-btn" disabled="@(sheet.Quantity(line) == line.SystemQuantity)"
+                                                @onclick="() => MatchSystem(line)">Match system @Quantity(line.SystemQuantity)</button>
+                                        @if (LineError(line.LineNo) is { } lineError)
+                                        {
+                                            <p class="cs-line-error" role="alert"><AppIcon Name="alert" /> @lineError</p>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="cs-due">@(line.PhysicalQuantity is { } saved ? Quantity(saved) : "—")</span>
+                                    }
+                                </div>
+
+                                <div class="cs-second-cell" aria-label="Variance">
+                                    <span class="cs-second-label">Variance</span>
+                                    <strong class="@VarianceTone(sheet.Variance(line))">@(sheet.Variance(line) is { } variance ? variance.ToString("+#.###;-#.###;0", CultureInfo.InvariantCulture) : "—")</strong>
+                                    <div class="cs-derived @VarianceBand(sheet.Value(line))">@(sheet.Value(line) is { } value ? Money(value) : "not counted")</div>
+                                </div>
+
+                                <div class="cs-actions">
+                                    @if (IsCounting && CanCount)
+                                    {
+                                        <button type="button" class="cs-row-scan" @onclick="() => OpenScan(line)"
+                                                aria-label="Scan barcode for @ProductDisplayName(line.ProductId)">
+                                            <AppIcon Name="camera" /> Scan barcode
+                                        </button>
+                                    }
+                                    <span class="cs-sku">@(line.CountedAtUtc?.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) ?? "Not counted")</span>
+                                </div>
+                            </article>
+                        }
+                    }
+                </div>
+
+                @if (matching.Count > 0)
                 {
-                    break;
+                    <nav class="cs-pager" aria-label="Sheet pages">
+                        <span class="cs-pager-count">
+                            Showing @((firstShown + 1).ToString("N0", CultureInfo.InvariantCulture))–@((firstShown + shown.Count).ToString("N0", CultureInfo.InvariantCulture))
+                            of @matching.Count.ToString("N0", CultureInfo.InvariantCulture) line@(matching.Count == 1 ? "" : "s")
+                        </span>
+                        @if (pageCount > 1)
+                        {
+                            <div class="cs-pager-steps">
+                                <button type="button" class="cs-btn" disabled="@(currentPage == 0)"
+                                        @onclick="() => GoToPage(currentPage - 1, pageCount)">Previous</button>
+                                <span class="cs-pager-page">Page @((currentPage + 1).ToString("N0", CultureInfo.InvariantCulture)) of @pageCount.ToString("N0", CultureInfo.InvariantCulture)</span>
+                                <button type="button" class="cs-btn" disabled="@(currentPage >= pageCount - 1)"
+                                        @onclick="() => GoToPage(currentPage + 1, pageCount)">Next</button>
+                            </div>
+                        }
+                    </nav>
                 }
-            }
-        }
-        catch (HttpRequestException)
-        {
-        }
+
+                <div class="cs-helper">
+                    <AppIcon Name="info" />
+                    Counted is what is physically on the shelf, not the difference. Enter zero when none of a product was found.
+                </div>
+            </section>
+        </div>
+
+        <aside class="cs-side">
+            <section class="cs-card">
+                <div class="cs-card-head">
+                    <h2>Count summary</h2>
+                    <span class="cs-card-icon" aria-hidden="true"><AppIcon Name="box" /></span>
+                </div>
+                <div class="cs-summary">
+                    <div class="cs-summary-row"><span>Lines counted</span><strong>@sheet.CountedLines of @sheet.TotalLines</strong></div>
+                    <div class="cs-summary-row"><span>Still to count</span><strong>@sheet.RemainingLines</strong></div>
+                    <div class="cs-summary-row"><span>Lines varying</span><strong>@sheet.VaryingLines</strong></div>
+                    <div class="cs-summary-row"><span title="The figure an approver's tier is measured against">Absolute variance</span><strong>@Money(sheet.AbsoluteVarianceValue)</strong></div>
+                    <div class="cs-summary-row cs-summary-key @(sheet.NetVarianceValue == 0m ? null : "is-warn")"><span>Net variance</span><strong>@Money(sheet.NetVarianceValue)</strong></div>
+
+                    <div class="cs-progress" role="progressbar" aria-label="Lines counted"
+                         aria-valuemin="0" aria-valuemax="@sheet.TotalLines" aria-valuenow="@sheet.CountedLines">
+                        <div style="width:@(PercentCounted.ToString("0.#", CultureInfo.InvariantCulture))%"></div>
+                    </div>
+
+                    @if (IsCounting && CanCount)
+                    {
+                        <button type="button" class="cs-btn cs-primary cs-submit" @onclick="SaveCountsAsync" disabled="@(busy || !sheet.HasUnsavedChanges)">
+                            <AppIcon Name="check" /> @(busy ? "Saving…" : "Save counts")
+                        </button>
+                        <button type="button" class="cs-btn cs-submit" @onclick="SubmitAsync" disabled="@(busy || !sheet.IsComplete)">
+                            Submit for approval
+                        </button>
+                        <button type="button" class="cs-btn cs-danger cs-submit" @onclick="ToggleCancel" disabled="@busy">
+                            Cancel count
+                        </button>
+                        <p class="cs-summary-foot">
+                            @(sheet.HasUnsavedChanges
+                                ? "Unsaved changes on this sheet."
+                                : sheet.IsComplete
+                                    ? "Every line has a quantity. Ready to submit."
+                                    : $"Every line needs a quantity before this sheet can be submitted — {sheet.RemainingLines} to go.")
+                        </p>
+                    }
+                    else if (IsPendingApproval && CanApproveCount)
+                    {
+                        <button type="button" class="cs-btn cs-primary cs-submit" @onclick="ToggleApprove" disabled="@busy">
+                            <AppIcon Name="check" /> Approve &amp; post
+                        </button>
+                        <button type="button" class="cs-btn cs-submit" @onclick="ToggleReject" disabled="@busy">
+                            Send back
+                        </button>
+                        <p class="cs-summary-foot">Approving writes the variance to stock and cannot be undone.</p>
+                    }
+                    else if (IsPendingApproval && CanCount)
+                    {
+                        <button type="button" class="cs-btn cs-danger cs-submit" @onclick="ToggleCancel" disabled="@busy">
+                            Cancel count
+                        </button>
+                        <p class="cs-summary-foot">This sheet is waiting for an approver.</p>
+                    }
+                    else
+                    {
+                        <p class="cs-summary-foot">This sheet is closed to further counting.</p>
+                    }
+                </div>
+            </section>
+
+            <section class="cs-card">
+                <div class="cs-card-head"><h2>Sheet details</h2></div>
+                <div class="cs-summary">
+                    <div class="cs-summary-row"><span>Snapshot</span><strong>@detail.SnapshotTakenAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
+                    <div class="cs-summary-row"><span>Created</span><strong>@detail.Count.CreatedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</strong></div>
+                    @if (detail.SubmittedByUserId is { } submitter)
+                    {
+                        <div class="cs-summary-row"><span>Submitted</span><strong>@(PersonName(submitter) ?? "yes")</strong></div>
+                    }
+                    @if (detail.ApprovedByUserId is { } approver)
+                    {
+                        <div class="cs-summary-row"><span>Approved</span><strong>@(PersonName(approver) ?? "yes")</strong></div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(detail.CancellationReason))
+                    {
+                        <div class="cs-summary-row"><span>Cancelled</span><strong>@detail.CancellationReason</strong></div>
+                    }
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    @* Rendered by the app rather than a native dialog, which would need interop. *@
+    @if (scanLine is { } scanning)
+    {
+        <div class="cs-dlg-scrim" @onclick="CloseScan"></div>
+        <div class="cs-dlg" role="dialog" aria-modal="true" aria-labelledby="count-scan-title">
+            <h2 id="count-scan-title">Scan product barcode</h2>
+            <p class="cs-dlg-product">@ProductDisplayName(scanning.ProductId) <i aria-hidden="true">·</i> @(ProductSku(scanning.ProductId) ?? $"Line {scanning.LineNo}")</p>
+            <p class="cs-dlg-lead">Point the camera at this product's barcode. Each scan adds one unit to the line it belongs to, whichever row it was opened from.</p>
+            <CameraScanner Enabled="@(!busy)" />
+            <label class="cs-field">Barcode value
+                <input type="text" inputmode="numeric" class="cs-code-input" placeholder="Enter barcode value"
+                       autocomplete="off" @bind="scanCode" @bind:event="oninput"
+                       @onkeydown="OnScanCodeKeyAsync" /></label>
+            <footer>
+                <span class="cs-dlg-status">@(scanNote ?? "Ready to scan.")</span>
+                <button type="button" class="cs-btn" @onclick="CloseScan">Done</button>
+                <button type="button" class="cs-btn cs-primary" disabled="@string.IsNullOrWhiteSpace(scanCode)"
+                        @onclick="SubmitScanCodeAsync">Add one unit</button>
+            </footer>
+        </div>
     }
 
-    private static decimal? VarianceOf(PosInventoryCountLineView line)
-        => line.PhysicalQuantity is { } physical ? physical - line.SystemQuantity : null;
-
-    private static decimal? ValueOf(PosInventoryCountLineView line)
-        => VarianceOf(line) is { } variance ? variance * line.UnitCost : null;
-
-    private static string VarianceTone(decimal? variance)
-        => variance is null || variance == 0m ? "sheet-number" : variance > 0m ? "sheet-gain" : "sheet-loss";
-
-    private string StoreName(Guid locationId)
-        => locations.FirstOrDefault(location => location.Id == locationId)?.Name ?? "store";
-
-    private string ProductDisplayName(Guid productId)
-        => productNames.TryGetValue(productId, out (string Sku, string Name) product)
-            ? product.Name
-            : $"Product {ShortId(productId)}";
-
-    private string? ProductSku(Guid productId)
-        => productNames.TryGetValue(productId, out (string Sku, string Name) product) && !string.IsNullOrWhiteSpace(product.Sku)
-            ? product.Sku
-            : null;
-
-    private static string ShortId(Guid value) => value.ToString("D", CultureInfo.InvariantCulture)[..8];
-
-    private static string SplitWords(string value)
+    @* Approving writes movements to the ledger and cannot be undone, so it says
+       what it is about to post before it does it. *@
+    @if (approving)
     {
-        if (string.IsNullOrEmpty(value))
-        {
-            return value;
-        }
-
-        return string.Concat(value.Select((character, index) =>
-            index > 0 && char.IsUpper(character)
-                ? $" {char.ToLowerInvariant(character)}"
-                : character.ToString()));
+        <section class="reason-editor confirm-post" role="alertdialog" aria-labelledby="confirm-post-title">
+            <strong id="confirm-post-title">Post this variance to stock?</strong>
+            <p>
+                @sheet.VaryingLines of @sheet.TotalLines line@(sheet.TotalLines == 1 ? "" : "s") disagree with the ledger,
+                a net of <b class="@VarianceTone(sheet.NetVarianceValue)">@Money(sheet.NetVarianceValue)</b>
+                (@Money(sheet.AbsoluteVarianceValue) absolute). This writes count adjustments against @StoreName(count.LocationId) and cannot be undone.
+            </p>
+            <div class="reason-actions">
+                <button type="button" class="action-button primary" @onclick="ApproveAsync" disabled="@busy">@(busy ? "Posting…" : "Yes, post the variance")</button>
+                <button type="button" class="action-button subtle" @onclick="DismissPrompt">Not yet</button>
+            </div>
+        </section>
     }
 
-    private static string StatusChipClass(string status) => status switch
+    @if (cancelling)
     {
-        "Counting" => "status-chip sc-counting",
-        "PendingApproval" => "status-chip sc-pending-approval",
-        "Posted" => "status-chip sc-posted",
-        "Cancelled" => "status-chip sc-cancelled",
-        _ => "status-chip",
-    };
+        <section class="reason-editor">
+            <label class="reason-label" for="cancel-reason">Reason for cancelling</label>
+            <input id="cancel-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Optional" />
+            <div class="reason-actions">
+                <button type="button" class="action-button danger" @onclick="CancelCountAsync" disabled="@busy">@(busy ? "Cancelling…" : "Confirm cancel")</button>
+                <button type="button" class="action-button subtle" @onclick="DismissPrompt">Dismiss</button>
+            </div>
+        </section>
+    }
+
+    @if (rejecting)
+    {
+        <section class="reason-editor">
+            <label class="reason-label" for="reject-reason">Reason for sending back</label>
+            <input id="reject-reason" class="reason-input" type="text" @bind="reasonText" placeholder="Say what needs recounting" />
+            <div class="reason-actions">
+                <button type="button" class="action-button" @onclick="RejectAsync" disabled="@busy">@(busy ? "Returning…" : "Confirm send back")</button>
+                <button type="button" class="action-button subtle" @onclick="DismissPrompt">Dismiss</button>
+            </div>
+        </section>
+    }
 }
+
+</div>
 

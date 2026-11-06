@@ -1,0 +1,35 @@
+@* Put on any screen that takes products: while it is shown (and Enabled), every
+   scan from any scanner goes to OnScan. The newest ScanTarget on screen wins,
+   so a dialog over a list gets the scans and hands them back when it closes. *@
+@using Pos.Shared.Scanning
+@implements IDisposable
+@inject ScanRouter Router
+
+@code {
+    private IDisposable? _claim;
+
+    /// <summary>Gets or sets what to do with each scan.</summary>
+    [Parameter, EditorRequired]
+    public EventCallback<BarcodeScan> OnScan { get; set; }
+
+    /// <summary>Gets or sets whether this screen is taking scans right now.</summary>
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Enabled && _claim is null)
+        {
+            _claim = Router.Claim(scan => InvokeAsync(() => OnScan.InvokeAsync(scan)));
+        }
+        else if (!Enabled && _claim is not null)
+        {
+            _claim.Dispose();
+            _claim = null;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _claim?.Dispose();
+}

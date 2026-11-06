@@ -1,0 +1,49 @@
+.approvals-page { display:block; }
+.approvals-page .office-head { align-items:flex-end; margin-bottom:22px; }
+.approvals-page .office-title { margin:0; color:#123644; font:800 clamp(1.6rem,2vw,2rem)/1.15 'Manrope',sans-serif; letter-spacing:-.035em; }
+.approvals-page .office-lead { margin:9px 0 0; max-width:46rem; color:#78909c; font-size:.84rem; }
+.approvals-toggle { display:flex; align-items:center; gap:9px; color:#6c8896; font-size:.78rem; white-space:nowrap; }
+.approvals-toggle input { width:18px; height:18px; accent-color:var(--forest); }
+
+.approvals-empty { min-height:200px; display:grid; place-content:center; justify-items:center; color:var(--muted); text-align:center; }
+.approvals-empty strong { color:var(--ink); }
+.approvals-empty span { margin-top:5px; font-size:.82rem; }
+
+.approvals-list { display:grid; gap:14px; }
+.approval-card { padding:18px 20px; border:1px solid #dfe8eb; border-radius:14px; background:#fff; box-shadow:var(--shadow-card); }
+/* A pending request is the only kind that needs doing something about. */
+.approval-card.is-pending { border-left:3px solid var(--amber); }
+.approval-card header { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+.approval-what { display:grid; gap:4px; min-width:0; }
+.approval-what strong { color:var(--ink); font:700 .98rem 'Manrope',sans-serif; }
+.approval-what span { color:var(--muted); font-size:.8rem; }
+.approval-what i { margin:0 5px; color:#b3c6cc; font-style:normal; }
+
+.approval-status { flex:none; padding:4px 11px; border-radius:99px; font-weight:800; font-size:.66rem; letter-spacing:.06em; text-transform:uppercase; }
+.status-pending { background:var(--amber); color:#4a3a10; }
+.status-approved { background:var(--mint); color:var(--forest); }
+.status-rejected { background:#f4ebeb; color:#a45e5e; }
+.status-withdrawn { background:#eef3f5; color:#5c7480; }
+.status-failed { background:#fff5f4; color:#7d3a33; }
+
+.approval-reason { margin:13px 0 0; padding:11px 14px; border-radius:10px; background:#f7faf9; color:#3f5a52; font-size:.85rem; line-height:1.5; }
+.approval-who,.approval-decision { margin:10px 0 0; color:var(--muted); font-size:.78rem; }
+.approval-who strong,.approval-decision strong { color:var(--ink); font-weight:700; }
+.approval-failure { margin:10px 0 0; padding:10px 13px; border-left:3px solid var(--danger); border-radius:0 9px 9px 0; background:#fff5f4; color:#7d3a33; font-size:.8rem; }
+
+.approval-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid #eef3f4; }
+.approval-actions input { flex:1 1 220px; min-width:0; height:40px; padding:0 12px; border:1px solid #dfe9eb; border-radius:9px; background:#fff; color:var(--ink); font-size:.82rem; }
+.approval-actions input:focus-visible { outline:3px solid rgba(36,90,66,.18); outline-offset:1px; border-color:var(--forest-bright); }
+.approval-hint { color:var(--muted); font-size:.79rem; }
+.action-button { min-height:40px; padding:0 14px; border:1px solid var(--line-strong); border-radius:9px; background:#fff; color:var(--ink); font-weight:800; font-size:.8rem; cursor:pointer; }
+.action-button:hover:enabled { border-color:var(--forest-bright); color:var(--forest); }
+.action-button:disabled { opacity:.5; cursor:default; }
+.search-action { min-height:40px; padding:0 16px; border:0; border-radius:9px; background:var(--forest); color:#fff; font-weight:800; font-size:.8rem; cursor:pointer; }
+.search-action:hover:enabled { background:var(--forest-bright); }
+.search-action:disabled { opacity:.5; cursor:default; }
+
+@media(max-width:620px){
+    .approvals-page .office-head { align-items:stretch; flex-direction:column; }
+    .approval-card header { flex-direction:column; }
+    .approval-actions input { flex-basis:100%; }
+}

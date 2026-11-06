@@ -364,6 +364,12 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
     private readonly List<GoodsReceiptLine> _lines = [];
     private readonly List<ReceivingDiscrepancy> _discrepancies = [];
 
+    /// <summary>
+    /// The longest supplier document number kept, so a stray reference on a
+    /// supplier's paperwork cannot blow out the column or the printout.
+    /// </summary>
+    public const int SupplierDocumentNumberMaxLength = 40;
+
     private GoodsReceipt(
         GoodsReceiptId id,
         PurchaseOrderId purchaseOrderId,
@@ -417,6 +423,30 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
     /// <summary>Gets whether the delivery arrived without its expected documents.</summary>
     public bool DocumentsMissing { get; private set; }
 
+    /// <summary>
+    /// Gets the supplier's Delivery Receipt number, transcribed from the
+    /// paperwork that arrived with the goods.
+    /// </summary>
+    /// <remarks>
+    /// This is the supplier's own document, so it is captured verbatim rather
+    /// than allocated by this system — the counter table never issues it.
+    /// </remarks>
+    public string? SupplierDeliveryReceiptNumber { get; private set; }
+
+    /// <summary>
+    /// Gets the supplier's Official Receipt number, transcribed from the
+    /// supplier's collection paperwork. Null when nothing was collected on
+    /// delivery.
+    /// </summary>
+    public string? SupplierOfficialReceiptNumber { get; private set; }
+
+    /// <summary>
+    /// Gets when the supplier released the goods. This is the moment they left
+    /// the supplier's premises, which can be well before <see cref="ReceivedAtUtc"/>,
+    /// so the two are deliberately kept apart.
+    /// </summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; private set; }
+
     /// <summary>Gets the business date the receipt belongs to.</summary>
     public DateOnly BusinessDate { get; private set; }
 
@@ -461,6 +491,9 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
     /// <param name="businessDate">The business date of the receiving location.</param>
     /// <param name="receivedBy">Who is recording the receipt.</param>
     /// <param name="now">The current instant.</param>
+    /// <param name="supplierDeliveryReceiptNumber">The supplier's DR number, if presented.</param>
+    /// <param name="supplierOfficialReceiptNumber">The supplier's OR number, if presented.</param>
+    /// <param name="supplierReleasedAtUtc">When the supplier released the goods.</param>
     /// <returns>The planned receipt, or the validation failures.</returns>
     public static Result<GoodsReceipt> Create(
         PurchaseOrderId purchaseOrderId,
@@ -473,7 +506,10 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
         bool documentsMissing,
         DateOnly businessDate,
         UserId receivedBy,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? supplierDeliveryReceiptNumber = null,
+        string? supplierOfficialReceiptNumber = null,
+        DateTimeOffset? supplierReleasedAtUtc = null)
     {
         if (purchaseOrderId.IsEmpty)
         {
@@ -739,6 +775,12 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
             anyVariance,
             RoundMoney(varianceValueAtStake));
 
+        receipt.SupplierDeliveryReceiptNumber =
+            NormaliseSupplierDocumentNumber(supplierDeliveryReceiptNumber);
+        receipt.SupplierOfficialReceiptNumber =
+            NormaliseSupplierDocumentNumber(supplierOfficialReceiptNumber);
+        receipt.SupplierReleasedAtUtc = supplierReleasedAtUtc;
+
         foreach (GoodsReceiptLine line in lines)
         {
             receipt._lines.Add(line);
@@ -846,6 +888,28 @@ public sealed class GoodsReceipt : AggregateRoot<GoodsReceiptId>
     /// <summary>Rounds to the monetary storage scale.</summary>
     private static decimal RoundMoney(decimal value)
         => decimal.Round(value, Money.StorageScale, Money.IntermediateRounding);
+
+    /// <summary>
+    /// Trims a transcribed supplier document number and bounds its length.
+    /// Whitespace becomes null so an untouched field reads as "not presented"
+    /// rather than as an empty string, and an over-long value is cut the same
+    /// way a lot number is — a delivery is never refused over the length of a
+    /// reference the supplier printed.
+    /// </summary>
+    /// <param name="value">The raw value as typed by the receiver.</param>
+    /// <returns>The cleaned number, or null when nothing was presented.</returns>
+    private static string? NormaliseSupplierDocumentNumber(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        string trimmed = value.Trim();
+        return trimmed.Length > SupplierDocumentNumberMaxLength
+            ? trimmed[..SupplierDocumentNumberMaxLength]
+            : trimmed;
+    }
 
     private static decimal VariancePercent(decimal poUnitCost, decimal receiptUnitCost)
     {

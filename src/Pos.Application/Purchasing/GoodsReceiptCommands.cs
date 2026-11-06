@@ -13,10 +13,16 @@ namespace Pos.Application.Purchasing;
 /// <param name="PurchaseOrderId">The order being received against.</param>
 /// <param name="Lines">The receipt lines as counted by the receiver.</param>
 /// <param name="DocumentsMissing">Whether the delivery arrived without its expected documents.</param>
+/// <param name="SupplierDeliveryReceiptNumber">The supplier's DR number, transcribed from their paperwork.</param>
+/// <param name="SupplierOfficialReceiptNumber">The supplier's OR number, transcribed from their paperwork.</param>
+/// <param name="SupplierReleasedAtUtc">When the supplier released the goods to us.</param>
 public sealed record CreateGoodsReceiptCommand(
     PurchaseOrderId PurchaseOrderId,
     IReadOnlyList<GoodsReceiptLineSpec> Lines,
-    bool DocumentsMissing = false)
+    bool DocumentsMissing = false,
+    string? SupplierDeliveryReceiptNumber = null,
+    string? SupplierOfficialReceiptNumber = null,
+    DateTimeOffset? SupplierReleasedAtUtc = null)
     : ICommand<GoodsReceiptId>, IAuthorizedMessage
 {
     /// <inheritdoc />

@@ -114,6 +114,9 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
     /// <summary>Gets product barcodes.</summary>
     public DbSet<ProductBarcode> ProductBarcodes => Set<ProductBarcode>();
 
+    /// <summary>Catalogue changes held for the owner's approval.</summary>
+    public DbSet<ProductChangeRequest> ProductChangeRequests => Set<ProductChangeRequest>();
+
     /// <summary>Gets product price rows.</summary>
     public DbSet<ProductPrice> ProductPrices => Set<ProductPrice>();
 
@@ -161,6 +164,12 @@ public class PosDbContext(DbContextOptions<PosDbContext> options)
 
     /// <summary>Gets the supplier return lines.</summary>
     public DbSet<SupplierReturnLine> SupplierReturnLines => Set<SupplierReturnLine>();
+
+    /// <summary>Gets the warehouse supply requests.</summary>
+    public DbSet<SupplyRequest> SupplyRequests => Set<SupplyRequest>();
+
+    /// <summary>Gets the warehouse supply request lines.</summary>
+    public DbSet<SupplyRequestLine> SupplyRequestLines => Set<SupplyRequestLine>();
 
     /// <summary>Gets the transfer orders.</summary>
     public DbSet<Transfer> Transfers => Set<Transfer>();

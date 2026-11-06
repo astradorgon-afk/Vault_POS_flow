@@ -60,3 +60,27 @@ public interface INotificationPublisher
     /// <summary>Delivers the notification as a real-time hint; durable storage remains authoritative.</summary>
     Task PublishAsync(Notification notification, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Tells connected clients that stock moved at some locations, once the change
+/// is committed. It carries no quantities: clients reload what they show.
+/// </summary>
+public interface IInventoryChangePublisher
+{
+    /// <summary>Announces that stock at these locations has changed.</summary>
+    Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Tells connected clients that a workflow document changed state at some
+/// locations once the change is committed: a transfer (submitted, approved,
+/// picked, dispatched, received), a stock count, or a supplier purchase order.
+/// It carries no details: clients reload the lists they show, which is how a
+/// store's request history, count list and receiving list stay current
+/// without polling.
+/// </summary>
+public interface ITransferChangePublisher
+{
+    /// <summary>Announces that transfers touching these locations have changed.</summary>
+    Task PublishAsync(IReadOnlyCollection<LocationId> locations, CancellationToken cancellationToken);
+}

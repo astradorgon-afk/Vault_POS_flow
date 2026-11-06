@@ -5,19 +5,18 @@
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 
-<PageTitle>Inventory exceptions · VaultFlow</PageTitle>
+<PageTitle>Stock exceptions · VaultFlow</PageTitle>
 
 <div class="office-head">
     <div>
         <p class="office-kicker">Inventory control</p>
-        <h1 class="office-title">Inventory exceptions</h1>
+        <h1 class="office-title">Stock exceptions</h1>
         <p class="office-lead">Stock draws the ledger refused because there wasn't enough on hand. Repeated attempts on one product and location are a shrinkage signal.</p>
     </div>
     <div class="head-pickers">
         <label class="location-picker">
             <span>Location</span>
             <select value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChangedAsync">
-                <option value="">All locations</option>
                 @foreach (PosLocation location in locations)
                 {
                     <option value="@location.Id">@location.Code · @location.Name</option>
@@ -70,8 +69,8 @@
                             </td>
                             <td class="sheet-number sheet-loss">@row.Attempts</td>
                             <td class="sheet-number">@row.TotalShortfall.ToString("0.######", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@row.FirstAttemptAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td class="sheet-muted">@row.LastAttemptAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@row.FirstAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@row.LastAttemptAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                         </tr>
                     }
                 </tbody>
@@ -94,7 +93,7 @@
                     @foreach (PosNegativeStockAttemptView attempt in attempts)
                     {
                         <tr @key="attempt.Id">
-                            <td class="sheet-muted">@attempt.AttemptedAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sheet-muted">@attempt.AttemptedAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)</td>
                             <td>@(attempt.LocationCode ?? ShortId(attempt.LocationId))</td>
                             <td>
                                 <div class="product-name">@(attempt.ProductName ?? "—")</div>
@@ -132,7 +131,8 @@
         ApiResult<List<PosLocation>> locationResponse = await Api.GetAsync<List<PosLocation>>("/api/v1/locations", CancellationToken.None);
         if (locationResponse.IsSuccess && locationResponse.Value is not null)
         {
-            locations.AddRange(locationResponse.Value);
+            locations.AddRange(locationResponse.Value.Where(location => Session.CanUseInventoryLocation(location.Id)));
+            selectedLocationId = Session.WorkLocationId;
         }
 
         await LoadAsync();
@@ -152,7 +152,7 @@
         {
             if (viewMode == "summary")
             {
-                ApiResult<List<PosNegativeStockAttemptSummaryRow>> response = await Api.GetNegativeStockAttemptSummaryAsync(selectedLocationId, CancellationToken.None);
+                ApiResult<List<PosNegativeStockAttemptSummaryRow>> response = await Api.GetNegativeStockAttemptSummaryAsync(Session.WorkLocationId, CancellationToken.None);
                 if (!response.IsSuccess || response.Value is null)
                 {
                     message = response.Error;
@@ -164,7 +164,7 @@
             }
             else
             {
-                ApiResult<List<PosNegativeStockAttemptView>> response = await Api.GetNegativeStockAttemptsAsync(selectedLocationId, CancellationToken.None);
+                ApiResult<List<PosNegativeStockAttemptView>> response = await Api.GetNegativeStockAttemptsAsync(Session.WorkLocationId, CancellationToken.None);
                 if (!response.IsSuccess || response.Value is null)
                 {
                     message = response.Error;

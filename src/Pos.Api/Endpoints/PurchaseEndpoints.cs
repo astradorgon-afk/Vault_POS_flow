@@ -63,7 +63,8 @@ public sealed record PurchaseOrderSummary(
     decimal GrandTotal,
     Guid CreatedByUserId,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? OrderedAtUtc);
+    DateTimeOffset? OrderedAtUtc,
+    decimal OutstandingQuantity = 0m);
 
 /// <summary>A purchase order line.</summary>
 public sealed record PurchaseOrderLineSummary(
@@ -73,7 +74,9 @@ public sealed record PurchaseOrderLineSummary(
     Guid UnitOfMeasureId,
     decimal OrderedQuantity,
     decimal UnitCost,
-    decimal LineTotal);
+    decimal LineTotal,
+    string? ProductSku = null,
+    string? ProductName = null);
 
 /// <summary>An approval decision recorded against a purchase order.</summary>
 public sealed record PurchaseApprovalSummary(
@@ -101,14 +104,24 @@ public sealed record PurchaseOrderDetail(
     string? CancelledReason,
     string? ClosedReason,
     IReadOnlyList<PurchaseOrderLineSummary> Lines,
-    IReadOnlyList<PurchaseApprovalSummary> Approvals);
+    IReadOnlyList<PurchaseApprovalSummary> Approvals)
+{
+    /// <summary>The receiving location's calendar for date validation and display.</summary>
+    public string? ReceivingTimeZoneId { get; init; }
+}
 
 /// <summary>The body of a goods receipt creation.</summary>
 /// <param name="Lines">The received lines with their disposition plans.</param>
 /// <param name="DocumentsMissing">Whether the delivery arrived without the expected documents.</param>
+/// <param name="SupplierDeliveryReceiptNumber">The supplier's DR number, transcribed from their paperwork.</param>
+/// <param name="SupplierOfficialReceiptNumber">The supplier's OR number, transcribed from their paperwork.</param>
+/// <param name="SupplierReleasedAtUtc">When the supplier released the goods to us.</param>
 public sealed record CreateGoodsReceiptBody(
     IReadOnlyList<CreateGoodsReceiptLineBody> Lines,
-    bool DocumentsMissing = false);
+    bool DocumentsMissing = false,
+    string? SupplierDeliveryReceiptNumber = null,
+    string? SupplierOfficialReceiptNumber = null,
+    DateTimeOffset? SupplierReleasedAtUtc = null);
 
 /// <summary>One line of a goods receipt creation.</summary>
 /// <param name="PurchaseOrderLineId">The purchase order line being received against.</param>
@@ -144,7 +157,17 @@ public sealed record GoodsReceiptSummary(
     DateTimeOffset ReceivedAtUtc,
     Guid ReceivedByUserId,
     bool CostVariancePendingApproval,
-    decimal CostVarianceValueAtStake);
+    decimal CostVarianceValueAtStake)
+{
+    /// <summary>The supplier's Delivery Receipt number, as they printed it.</summary>
+    public string? SupplierDeliveryReceiptNumber { get; init; }
+
+    /// <summary>The supplier's Official Receipt number, as they printed it.</summary>
+    public string? SupplierOfficialReceiptNumber { get; init; }
+
+    /// <summary>When the supplier released the goods, which may precede arrival.</summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; init; }
+}
 
 /// <summary>A goods receipt line.</summary>
 public sealed record GoodsReceiptLineSummary(
@@ -195,7 +218,17 @@ public sealed record GoodsReceiptDetail(
     bool CostVariancePendingApproval,
     decimal CostVarianceValueAtStake,
     IReadOnlyList<GoodsReceiptLineSummary> Lines,
-    IReadOnlyList<ReceivingDiscrepancySummary> Discrepancies);
+    IReadOnlyList<ReceivingDiscrepancySummary> Discrepancies)
+{
+    /// <summary>The supplier's Delivery Receipt number, as they printed it.</summary>
+    public string? SupplierDeliveryReceiptNumber { get; init; }
+
+    /// <summary>The supplier's Official Receipt number, as they printed it.</summary>
+    public string? SupplierOfficialReceiptNumber { get; init; }
+
+    /// <summary>When the supplier released the goods, which may precede arrival.</summary>
+    public DateTimeOffset? SupplierReleasedAtUtc { get; init; }
+}
 
 /// <summary>Purchase order lifecycle endpoints.</summary>
 public static class PurchaseEndpoints
@@ -358,7 +391,48 @@ public static class PurchaseEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return TypedResults.Ok(orders);
+        return TypedResults.Ok(await WithOutstandingAsync(context, orders, cancellationToken).ConfigureAwait(false));
+    }
+
+    // What the supplier still owes on orders that stopped short: partly
+    // received, or closed before everything good arrived. Refused units
+    // (damaged, wrong item, expired) do not count as delivered.
+    private static async Task<List<PurchaseOrderSummary>> WithOutstandingAsync(
+        PosDbContext context,
+        List<PurchaseOrderSummary> orders,
+        CancellationToken cancellationToken)
+    {
+        PurchaseOrderId[] ids = [.. orders
+            .Where(o => o.Status is nameof(PurchaseOrderStatus.PartiallyReceived) or nameof(PurchaseOrderStatus.Closed))
+            .Select(o => new PurchaseOrderId(o.Id))];
+        if (ids.Length == 0)
+        {
+            return orders;
+        }
+
+        // SQLite stores decimals as text, so the sums are taken in memory.
+        List<PurchaseOrderLine> lines = await context.PurchaseOrderLines
+            .AsNoTracking()
+            .Where(l => ids.Contains(l.PurchaseOrderId))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        List<GoodsReceiptLine> received = await context.GoodsReceipts
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.PurchaseOrderId) && r.Status == GoodsReceiptStatus.Posted)
+            .SelectMany(r => r.Lines)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        Dictionary<PurchaseOrderLineId, decimal> goodByLine = received
+            .GroupBy(l => l.PurchaseOrderLineId)
+            .ToDictionary(g => g.Key, g => g.Sum(l => l.QuantityReceived - l.QuantityRejected));
+        Dictionary<Guid, decimal> outstanding = lines
+            .GroupBy(l => l.PurchaseOrderId.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Sum(l => Math.Max(0m, l.OrderedQuantity - goodByLine.GetValueOrDefault(l.Id))));
+
+        return [.. orders.Select(o => outstanding.TryGetValue(o.Id, out decimal due) ? o with { OutstandingQuantity = due } : o)];
     }
 
     private static async Task<IResult> CreatePurchaseOrderAsync(
@@ -436,12 +510,38 @@ public static class PurchaseEndpoints
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return detail is null
-            ? ProblemDetailsMapping.ToProblem(
+        if (detail is null)
+        {
+            return ProblemDetailsMapping.ToProblem(
                 Result.Failure(PurchasingErrors.OrderUnknown(new PurchaseOrderId(id))),
-                currentUser.CorrelationId.Value)
-            : TypedResults.Ok(detail);
+                currentUser.CorrelationId.Value);
+        }
+
+        string? receivingTimeZone = await context.Locations.AsNoTracking()
+            .Where(l => l.Id == new LocationId(detail.DestinationLocationId))
+            .Select(l => l.TimeZoneId)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Name each line, so a reviewer checks products rather than identifiers.
+        ProductId[] productIds = [.. detail.Lines.Select(l => new ProductId(l.ProductId)).Distinct()];
+        Dictionary<Guid, LineProduct> names = await context.Products
+            .AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .Select(p => new LineProduct(p.Id.Value, p.Sku.Value, p.Name))
+            .ToDictionaryAsync(p => p.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(detail with
+        {
+            ReceivingTimeZoneId = receivingTimeZone,
+            Lines = [.. detail.Lines.Select(line => names.TryGetValue(line.ProductId, out LineProduct? product)
+                ? line with { ProductSku = product.Sku, ProductName = product.Name }
+                : line)],
+        });
     }
+
+    private sealed record LineProduct(Guid Id, string Sku, string Name);
 
     private static async Task<IResult> SubmitPurchaseOrderAsync(
         Guid id,
@@ -560,7 +660,10 @@ public static class PurchaseEndpoints
                         l.LotNumber,
                         l.ManufacturedOn,
                         l.ExpiresOn))],
-                    body.DocumentsMissing),
+                    body.DocumentsMissing,
+                    body.SupplierDeliveryReceiptNumber,
+                    body.SupplierOfficialReceiptNumber,
+                    body.SupplierReleasedAtUtc),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -590,7 +693,12 @@ public static class PurchaseEndpoints
                 r.ReceivedAtUtc,
                 r.ReceivedByUserId.Value,
                 r.CostVariancePendingApproval,
-                r.CostVarianceValueAtStake))
+                r.CostVarianceValueAtStake)
+            {
+                SupplierDeliveryReceiptNumber = r.SupplierDeliveryReceiptNumber,
+                SupplierOfficialReceiptNumber = r.SupplierOfficialReceiptNumber,
+                SupplierReleasedAtUtc = r.SupplierReleasedAtUtc,
+            })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -656,7 +764,12 @@ public static class PurchaseEndpoints
                         d.ResolutionNote,
                         d.ResolvedByUserId != null ? d.ResolvedByUserId.Value.Value : null,
                         d.ResolvedAtUtc))
-                    .ToList()))
+                    .ToList())
+            {
+                SupplierDeliveryReceiptNumber = r.SupplierDeliveryReceiptNumber,
+                SupplierOfficialReceiptNumber = r.SupplierOfficialReceiptNumber,
+                SupplierReleasedAtUtc = r.SupplierReleasedAtUtc,
+            })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 

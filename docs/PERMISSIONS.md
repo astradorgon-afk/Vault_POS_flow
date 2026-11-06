@@ -212,18 +212,18 @@ is offline-capable.
 | `quarantine.release` / `reject` | ✓ | ✓ | ✓ | — | — | — | — |
 | `receipt.create` | ✓ | ✓ | ✓ | S | — | — | — |
 | `receipt.view` | ✓ | ✓ | ✓ | S | — | — | ✓ |
-| `sale.create` | ✓ | — | — | S | — | S | — |
-| `sale.discount` / `price_override` | ✓ | — | — | S | — | — | — |
-| `sale.void` | ✓ | — | — | S | — | — | — |
-| `sale.return` | ✓ | — | — | S | — | S | — |
-| `sale.return_blind` / `refund` | ✓ | — | — | S | — | — | — |
-| `sale.reprint` | ✓ | — | — | S | — | — | — |
-| `sale.expired_override` | ✓ | — | — | S | — | — | — |
-| `shift.open` / `shift.close` | ✓ | — | — | S | — | S | — |
-| `shift.close.other` | ✓ | — | — | S | — | — | — |
-| `cashdrawer.open_without_sale` | ✓ | — | — | S | — | — | — |
+| `sale.create` | — | — | — | S | — | S | — |
+| `sale.discount` / `price_override` | — | — | — | S | — | — | — |
+| `sale.void` | — | — | — | S | — | — | — |
+| `sale.return` | — | — | — | S | — | S | — |
+| `sale.return_blind` / `refund` | — | — | — | S | — | — | — |
+| `sale.reprint` | — | — | — | S | — | — | — |
+| `sale.expired_override` | — | — | — | S | — | — | — |
+| `shift.open` / `shift.close` | — | — | — | S | — | S | — |
+| `shift.close.other` | — | — | — | S | — | — | — |
+| `cashdrawer.open_without_sale` | — | — | — | S | — | — | — |
 | `customer.view` | ✓ | — | — | S | — | S | ✓ |
-| `customer.manage` | ✓ | — | — | S | — | S | — |
+| `customer.manage` | — | — | — | S | — | S | — |
 | `report.view` | ✓ | ✓ | ✓ | S | S | — | ✓ |
 | `report.view.financial` | ✓ | ✓ | ✓ | S | — | — | ✓ |
 | `audit.view` | ✓ | ✓ | — | — | — | — | ✓ |
@@ -232,6 +232,11 @@ is offline-capable.
 | `sync.manage` | ✓ | ✓ | ✓ | — | — | — | — |
 | `location.manage` / `settings.manage` | ✓ | ✓ | — | — | — | — | — |
 | `location.all` | ✓ | ✓ | ✓ | — | — | — | ✓ |
+
+Till permissions (`sale.*` except `sale.view`, `shift.*`, `cashdrawer.*`, `customer.manage`)
+are deliberately not in the Owner bundle: the owner monitors trade, the register staff
+run it. The seeder retires these from an Owner role that still holds them by default
+(`Roles.RetiredDefaultGrants`); a grant an administrator added by hand is kept.
 
 **Auditor is strictly read-only.** The role holds no permission whose code
 implies mutation, and an architecture test asserts that the Auditor role's

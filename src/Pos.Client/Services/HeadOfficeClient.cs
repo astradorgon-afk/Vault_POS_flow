@@ -10,7 +10,8 @@ namespace Pos.Client.Services;
 /// <param name="DeviceId">The register's identity.</param>
 /// <param name="ShortCode">The code its offline documents are numbered under.</param>
 /// <param name="LocationId">The store it trades at.</param>
-public sealed record EnrolledDevice(Guid DeviceId, string ShortCode, Guid LocationId);
+/// <param name="AllowedLocationIds">Every location this device may open.</param>
+public sealed record EnrolledDevice(Guid DeviceId, string ShortCode, Guid LocationId, IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 /// <summary>A signed-in session with head office.</summary>
 /// <param name="AccessToken">The short-lived bearer token.</param>
@@ -22,13 +23,23 @@ public sealed record HeadOfficeSession(string AccessToken, string RefreshToken, 
 /// <param name="UserId">Their identifier.</param>
 /// <param name="DisplayName">Their display name.</param>
 /// <param name="Permissions">Their effective permissions for this session.</param>
-public sealed record HeadOfficeUser(Guid UserId, string DisplayName, IReadOnlyList<string> Permissions);
+/// <param name="Locations">The locations they may use.</param>
+/// <param name="HasAllLocations">Whether they may use every location.</param>
+public sealed record HeadOfficeUser(
+    Guid UserId,
+    string DisplayName,
+    IReadOnlyList<string> Permissions,
+    IReadOnlyList<Guid>? Locations = null,
+    bool HasAllLocations = false);
 
 /// <summary>A store a register can be set up for.</summary>
 /// <param name="Id">The location identifier.</param>
 /// <param name="Code">Its short code.</param>
 /// <param name="Name">Its name.</param>
 public sealed record StoreChoice(Guid Id, string Code, string Name);
+
+/// <summary>Current location assignments returned to an enrolled register.</summary>
+public sealed record DeviceLocationAssignment(Guid DefaultLocationId, IReadOnlyList<StoreChoice> Locations);
 
 /// <summary>The product identity fields a register needs when it submits a sale.</summary>
 /// <param name="Id">The product identifier.</param>
@@ -82,10 +93,11 @@ public sealed record RegisterSalePayment(
     decimal? Tendered,
     string? ProviderReference);
 
-/// <summary>A sale accepted by head office.</summary>
-/// <param name="Id">The sale identifier.</param>
+/// <summary>A sale accepted by head office, or queued on the register while it was offline.</summary>
+/// <param name="Id">The sale identifier, or the queued event's identifier for an offline sale.</param>
 /// <param name="Number">The printed sale number.</param>
-public sealed record CompletedRegisterSale(Guid Id, string Number);
+/// <param name="QueuedOffline">Whether the sale is waiting on the register to be sent to head office.</param>
+public sealed record CompletedRegisterSale(Guid Id, string Number, bool QueuedOffline = false);
 
 /// <summary>The X-REPORT facts head office keeps for a cashier shift.</summary>
 /// <param name="ShiftId">The shift identifier.</param>
@@ -200,6 +212,34 @@ public sealed class HeadOfficeException : Exception
         : base(message, innerException)
     {
     }
+
+    /// <summary>
+    /// Gets a value indicating whether head office could not be reached or could
+    /// not answer at all (no route, timeout, or a 5xx from it or its proxy), as
+    /// opposed to answering with a refusal. Only this kind of failure lets the
+    /// register fall back to working offline.
+    /// </summary>
+    public bool IsUnreachable { get; init; }
+
+    /// <summary>Gets the HTTP status head office answered with, when it answered.</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>Gets the stable error code head office answered with, when it answered with one.</summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether head office refused this call because the
+    /// device itself has been suspended or revoked, as opposed to the
+    /// credentials being wrong. A register that sees this is no longer trusted
+    /// under its current identity and must be paired again.
+    /// </summary>
+    public bool DeviceRevoked => ErrorCode == DeviceNotOperationalErrorCode;
+
+    /// <summary>The error code head office answers with when a device is suspended or revoked.</summary>
+    public const string DeviceNotOperationalErrorCode = "auth.device_not_operational";
+
+    /// <summary>The local account snapshot lacks access to the selected location.</summary>
+    public const string OfflineLocationAccessMissingErrorCode = "register.offline_location_access_missing";
 }
 
 /// <summary>
@@ -207,7 +247,8 @@ public sealed class HeadOfficeException : Exception
 /// because a manager chooses it at set-up; nothing here remembers it.
 /// </summary>
 /// <param name="http">The shared HTTP client.</param>
-public sealed class HeadOfficeClient(HttpClient http)
+/// <param name="reachability">Where each call's reachability is reported for the status banner.</param>
+public sealed class HeadOfficeClient(HttpClient http, HeadOfficeReachability reachability)
 {
     private const string DeviceHeader = "X-Device-Id";
 
@@ -253,6 +294,22 @@ public sealed class HeadOfficeClient(HttpClient http)
         return new HeadOfficeSession(response.AccessToken, response.RefreshToken, response.User);
     }
 
+    /// <summary>Exchanges a session's single-use refresh token for a new pair.</summary>
+    public async Task<HeadOfficeSession> RefreshAsync(
+        Uri server, string refreshToken, Guid deviceId, CancellationToken cancellationToken)
+    {
+        SignInResponse response = await SendAsync<SignInResponse>(
+            HttpMethod.Post,
+            server,
+            "api/v1/auth/refresh",
+            new { refreshToken },
+            accessToken: null,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return new HeadOfficeSession(response.AccessToken, response.RefreshToken, response.User);
+    }
+
     /// <summary>Ends a session. Best effort: a register that cannot reach head office still signs out locally.</summary>
     public async Task SignOutAsync(Uri server, string refreshToken, Guid? deviceId, CancellationToken cancellationToken)
     {
@@ -280,6 +337,24 @@ public sealed class HeadOfficeClient(HttpClient http)
             .Where(l => l.Kind == StoreKind && l.IsActive)
             .OrderBy(l => l.Code, StringComparer.Ordinal)
             .Select(l => new StoreChoice(l.Id, l.Code, l.Name))];
+    }
+
+    /// <summary>Refreshes the assigned locations for this enrolled device.</summary>
+    public async Task<DeviceLocationAssignment> GetDeviceLocationsAsync(
+        Uri server, Guid deviceId, CancellationToken cancellationToken)
+    {
+        DeviceLocationsResponse response = await SendAsync<DeviceLocationsResponse>(
+            HttpMethod.Get,
+            server,
+            $"api/v1/devices/{deviceId:D}/locations",
+            null,
+            accessToken: null,
+            deviceId,
+            cancellationToken).ConfigureAwait(false);
+
+        return new DeviceLocationAssignment(
+            response.DefaultLocationId,
+            [.. response.Locations.Select(location => new StoreChoice(location.Id, location.Code, location.Name))]);
     }
 
     /// <summary>Registers this machine as a new register and returns its one-time enrolment code.</summary>
@@ -315,6 +390,12 @@ public sealed class HeadOfficeClient(HttpClient http)
         Uri server, string accessToken, Guid deviceId, CancellationToken cancellationToken)
         => SendAsync<SyncBaselineResponse>(
             HttpMethod.Get, server, "api/v1/sync/baseline", null, accessToken, deviceId, cancellationToken);
+
+    /// <summary>Uploads a batch of business events this register queued while it was offline.</summary>
+    public Task<SyncPushResponse> PushEventsAsync(
+        Uri server, string accessToken, Guid deviceId, SyncPushRequest batch, CancellationToken cancellationToken)
+        => SendAsync<SyncPushResponse>(
+            HttpMethod.Post, server, "api/v1/sync/push", batch, accessToken, deviceId, cancellationToken);
 
     /// <summary>Loads the product identifiers needed to turn cached catalogue rows into sale lines.</summary>
     public async Task<IReadOnlyDictionary<Guid, ProductSaleReference>> GetProductSaleReferencesAsync(
@@ -480,20 +561,35 @@ public sealed class HeadOfficeClient(HttpClient http)
         }
         catch (HttpRequestException ex)
         {
+            reachability.Report(reachable: false);
             throw new HeadOfficeException(
                 FormattableString.Invariant($"Head office could not be reached at {server}. Check the address and that it is running."),
-                ex);
+                ex)
+            { IsUnreachable = true };
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new HeadOfficeException("Head office took too long to answer. Try again.", ex);
+            reachability.Report(reachable: false);
+            throw new HeadOfficeException("Head office took too long to answer. Try again.", ex) { IsUnreachable = true };
         }
 
         using (response)
         {
+            // A 5xx is head office (or the proxy in front of it) failing to
+            // answer, not a decision about this request: treat it like no route.
+            bool serverDown = (int)response.StatusCode >= 500;
+            reachability.Report(reachable: !serverDown);
+
             if (!response.IsSuccessStatusCode)
             {
-                throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+                (string message, string? errorCode) = await DescribeFailureAsync(response, cancellationToken)
+                    .ConfigureAwait(false);
+                throw new HeadOfficeException(message)
+                {
+                    IsUnreachable = serverDown,
+                    StatusCode = (int)response.StatusCode,
+                    ErrorCode = errorCode,
+                };
             }
 
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent
@@ -546,7 +642,8 @@ public sealed class HeadOfficeClient(HttpClient http)
         return response.Id;
     }
 
-    /// <summary>Finds completed sales at a store for a business-date window.</summary>
+    /// <summary>Finds a store's newest sales in a business-date window, optionally
+    /// only those whose receipt number contains <paramref name="number"/>.</summary>
     public async Task<IReadOnlyList<RegisterSaleSummary>> SearchSalesAsync(
         Uri server,
         string accessToken,
@@ -554,9 +651,16 @@ public sealed class HeadOfficeClient(HttpClient http)
         Guid locationId,
         DateOnly? from,
         DateOnly? to,
+        string? number,
+        int limit,
         CancellationToken cancellationToken)
     {
-        string path = FormattableString.Invariant($"api/v1/sales?locationId={locationId:D}");
+        string path = FormattableString.Invariant($"api/v1/sales?locationId={locationId:D}&limit={limit}");
+        if (!string.IsNullOrWhiteSpace(number))
+        {
+            path += "&number=" + Uri.EscapeDataString(number.Trim());
+        }
+
         if (from is { } fromDate)
         {
             path += FormattableString.Invariant($"&from={fromDate:yyyy-MM-dd}");
@@ -768,7 +872,9 @@ public sealed class HeadOfficeClient(HttpClient http)
         using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new HeadOfficeException(await DescribeFailureAsync(response, cancellationToken).ConfigureAwait(false));
+            (string message, string? errorCode) = await DescribeFailureAsync(response, cancellationToken)
+                .ConfigureAwait(false);
+            throw new HeadOfficeException(message) { StatusCode = (int)response.StatusCode, ErrorCode = errorCode };
         }
 
         return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -787,21 +893,24 @@ public sealed class HeadOfficeClient(HttpClient http)
         }
     }
 
-        private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<(string Message, string? ErrorCode)> DescribeFailureAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
         {
             Problem? problem = await response.Content
                 .ReadFromJsonAsync<Problem>(Json, cancellationToken)
                 .ConfigureAwait(false);
-            if (problem?.Detail is { Length: > 0 } detail)
-            {
-                return detail;
-            }
 
-            if (problem?.Title is { Length: > 0 } title)
+            string? message = problem?.Detail is { Length: > 0 } detail
+                ? detail
+                : problem?.Title is { Length: > 0 } title
+                    ? title
+                    : null;
+
+            if (message is not null)
             {
-                return title;
+                return (message, problem?.ErrorCode);
             }
         }
         catch (JsonException)
@@ -809,12 +918,16 @@ public sealed class HeadOfficeClient(HttpClient http)
             // Not a problem document; fall through to the status code.
         }
 
-        return FormattableString.Invariant($"Head office refused the request ({(int)response.StatusCode} {response.ReasonPhrase}).");
+        return (
+            FormattableString.Invariant($"Head office refused the request ({(int)response.StatusCode} {response.ReasonPhrase})."),
+            null);
     }
 
     private sealed record SignInResponse(string AccessToken, string RefreshToken, HeadOfficeUser User);
 
     private sealed record LocationRow(Guid Id, string Code, string Name, int Kind, bool IsActive);
+
+    private sealed record DeviceLocationsResponse(Guid DefaultLocationId, IReadOnlyList<LocationRow> Locations);
 
     private sealed record RegistrationResponse(Guid DeviceId, string ShortCode, string? EnrolmentCode);
 
@@ -872,5 +985,5 @@ public sealed class HeadOfficeClient(HttpClient http)
 
     private sealed record IdResponse(Guid Id);
 
-    private sealed record Problem(string? Title, string? Detail);
+    private sealed record Problem(string? Title, string? Detail, string? ErrorCode);
 }

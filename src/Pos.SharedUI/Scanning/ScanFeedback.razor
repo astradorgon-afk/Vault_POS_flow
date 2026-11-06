@@ -1,0 +1,58 @@
+@* A small note for a scan no open screen was waiting for, so a scan is never
+   silently lost. Put it once in the app's layout. *@
+@using Pos.Shared.Scanning
+@implements IDisposable
+@inject ScanRouter Router
+
+@if (_shown is { } scan)
+{
+    <div class="scan-feedback" role="status">
+        <span class="scan-feedback-mark" aria-hidden="true">▥</span>
+        <span><strong>@scan.Code</strong> scanned. @Hint</span>
+        <button type="button" aria-label="Dismiss" @onclick="Dismiss">×</button>
+    </div>
+}
+
+@code {
+    private BarcodeScan? _shown;
+    private CancellationTokenSource? _fade;
+
+    /// <summary>Gets or sets where to scan products, e.g. "Open the till or a stock count to use it."</summary>
+    [Parameter]
+    public string Hint { get; set; } = "Open a screen that takes products to use it.";
+
+    /// <inheritdoc />
+    protected override void OnInitialized() => Router.Unclaimed += OnUnclaimed;
+
+    private void OnUnclaimed(BarcodeScan scan) => _ = InvokeAsync(async () =>
+    {
+        _shown = scan;
+        StateHasChanged();
+        _fade?.Cancel();
+        CancellationTokenSource fade = new();
+        _fade = fade;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), fade.Token);
+            _shown = null;
+            StateHasChanged();
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer scan replaced it.
+        }
+    });
+
+    private void Dismiss()
+    {
+        _fade?.Cancel();
+        _shown = null;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Router.Unclaimed -= OnUnclaimed;
+        _fade?.Cancel();
+    }
+}

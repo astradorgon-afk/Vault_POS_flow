@@ -85,6 +85,9 @@ public static class AuditActions
     /// <summary>Device lifecycle.</summary>
     public static class Devices
     {
+        /// <summary>A device's allowed locations changed.</summary>
+        public const string LocationsChanged = "device.locations.changed";
+
         /// <summary>An enrolment code was issued.</summary>
         public const string EnrolmentCodeIssued = "device.enrolment_code.issued";
 
@@ -102,6 +105,9 @@ public static class AuditActions
 
         /// <summary>A device reported a clock far from the server's.</summary>
         public const string ClockSkewDetected = "device.clock_skew";
+
+        /// <summary>An administrator requested an employee-scoped PWA snapshot.</summary>
+        public const string PwaEmployeeProvisioned = "device.pwa_employee.provisioned";
     }
 
     /// <summary>Catalog changes.</summary>
@@ -181,8 +187,20 @@ public static class AuditActions
         /// <summary>A purchase order was created.</summary>
         public const string OrderCreated = "purchase.order.created";
 
+        /// <summary>A purchase order was submitted for approval and numbered.</summary>
+        public const string OrderSubmitted = "purchase.order.submitted";
+
         /// <summary>A purchase order was approved.</summary>
         public const string OrderApproved = "purchase.order.approved";
+
+        /// <summary>An approved order was sent to the supplier.</summary>
+        public const string OrderSent = "purchase.order.sent";
+
+        /// <summary>A purchase order was cancelled or withdrawn.</summary>
+        public const string OrderCancelled = "purchase.order.cancelled";
+
+        /// <summary>A purchase order was closed out.</summary>
+        public const string OrderClosed = "purchase.order.closed";
 
         /// <summary>A purchase order was rejected or cancelled.</summary>
         public const string OrderRejected = "purchase.order.rejected";
@@ -195,13 +213,28 @@ public static class AuditActions
 
         /// <summary>A supplier delivered directly to a store.</summary>
         public const string DirectToStoreDelivery = "purchase.direct_to_store";
+
+        /// <summary>The warehouse asked to be restocked.</summary>
+        public const string SupplyRequested = "purchase.supply.requested";
+
+        /// <summary>A supply request was turned into a purchase order.</summary>
+        public const string SupplyOrdered = "purchase.supply.ordered";
+
+        /// <summary>A supply request was turned down or withdrawn.</summary>
+        public const string SupplyClosed = "purchase.supply.closed";
     }
 
     /// <summary>Transfer actions.</summary>
     public static class Transfers
     {
+        /// <summary>A transfer draft was created.</summary>
+        public const string Created = "transfer.created";
+
         /// <summary>A transfer was requested.</summary>
         public const string Requested = "transfer.requested";
+
+        /// <summary>An approver started reviewing a transfer.</summary>
+        public const string ReviewStarted = "transfer.review.started";
 
         /// <summary>A transfer was approved.</summary>
         public const string Approved = "transfer.approved";
@@ -212,8 +245,20 @@ public static class AuditActions
         /// <summary>A transfer was dispatched.</summary>
         public const string Dispatched = "transfer.dispatched";
 
+        /// <summary>Picking was recorded for a transfer.</summary>
+        public const string Picked = "transfer.picked";
+
+        /// <summary>A transfer was marked ready to dispatch.</summary>
+        public const string Ready = "transfer.ready";
+
+        /// <summary>A transfer dispatch was cancelled.</summary>
+        public const string DispatchCancelled = "transfer.dispatch.cancelled";
+
         /// <summary>A transfer was received.</summary>
         public const string Received = "transfer.received";
+
+        /// <summary>A transfer was verified and closed.</summary>
+        public const string Verified = "transfer.verified";
 
         /// <summary>A transfer discrepancy was raised.</summary>
         public const string DiscrepancyRaised = "transfer.discrepancy.raised";

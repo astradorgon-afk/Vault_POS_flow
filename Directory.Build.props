@@ -18,6 +18,8 @@
     <Version>0.1.0</Version>
     <NeutralLanguage>en</NeutralLanguage>
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <!-- Old local verification outputs under project folders are never app content. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\artifacts\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!--

@@ -1,134 +1,196 @@
 @page "/office"
 @layout Layout.OfficeLayout
+@using System.Globalization
 
-<div class="office-page">
-    <div class="vf-hero">
+<PageTitle>Office · VaultFlow</PageTitle>
+
+<div class="office-page ov">
+    <header class="ov-head">
         <div>
-            <p class="vf-eyebrow">Store Operations</p>
-            <h1>Office</h1>
-            <p class="vf-subtitle">Stock visibility, counts, transfers, receiving and the daily report for this register's store.</p>
+            <p class="vf-eyebrow">@DateTimeOffset.Now.ToString("dddd, d MMMM", CultureInfo.InvariantCulture)</p>
+            <h1>@Greeting, @FirstName</h1>
+            <p class="ov-sub">@(_stock?.Name ?? "Your store") at a glance.</p>
         </div>
-    </div>
+        @if (CanViewInventory)
+        {
+            <button type="button" class="office-button ghost" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "Loading…" : "↻ Refresh")</button>
+        }
+    </header>
 
-    @if (_overview is { } overview)
+    @if (_error is not null)
     {
-        <div class="vf-stat-grid six">
-            <div class="vf-stat-card">
-                <div class="vf-stat-row">
-                    <div class="vf-stat-icon">▤</div>
-                    <div>
-                        <div class="vf-stat-label">Available Quantity</div>
-                        <div class="vf-stat-value">@FormatQuantity(overview.AvailableQuantity)</div>
-                    </div>
-                </div>
-                <div class="vf-stat-edge"></div>
-            </div>
-            <div class="vf-stat-card gold">
-                <div class="vf-stat-row">
-                    <div class="vf-stat-icon">⇄</div>
-                    <div>
-                        <div class="vf-stat-label">In Transit</div>
-                        <div class="vf-stat-value">@FormatQuantity(overview.InTransitQuantity)</div>
-                    </div>
-                </div>
-                <div class="vf-stat-edge"></div>
-            </div>
-            <div class="vf-stat-card">
-                <div class="vf-stat-row">
-                    <div class="vf-stat-icon">▣</div>
-                    <div>
-                        <div class="vf-stat-label">In Quarantine</div>
-                        <div class="vf-stat-value">@FormatQuantity(overview.QuarantineQuantity)</div>
-                    </div>
-                </div>
-                <div class="vf-stat-edge"></div>
-            </div>
-            <div class="vf-stat-card @(overview.LowStockItems > 0 ? "gold" : "")">
-                <div class="vf-stat-row">
-                    <div class="vf-stat-icon">◷</div>
-                    <div>
-                        <div class="vf-stat-label">Low Stock</div>
-                        <div class="vf-stat-value">@overview.LowStockItems</div>
-                    </div>
-                </div>
-                <div class="vf-stat-edge"></div>
-            </div>
-            <div class="vf-stat-card @(overview.OutOfStockItems > 0 ? "red" : "")">
-                <div class="vf-stat-row">
-                    <div class="vf-stat-icon">!</div>
-                    <div>
-                        <div class="vf-stat-label">Out of Stock</div>
-                        <div class="vf-stat-value">@overview.OutOfStockItems</div>
-                    </div>
-                </div>
-                <div class="vf-stat-edge"></div>
-            </div>
-            <div class="vf-stat-card">
-                <div class="vf-stat-row">
-                    <div class="vf-stat-icon">▲</div>
-                    <div>
-                        <div class="vf-stat-label">Over Stock</div>
-                        <div class="vf-stat-value">@overview.OverStockItems</div>
-                    </div>
-                </div>
-                <div class="vf-stat-edge"></div>
-            </div>
-        </div>
-    }
-    else if (_error is not null)
-    {
-        <div class="office-error">@_error</div>
+        <div class="office-error" role="alert">@_error</div>
     }
 
-    <div class="office-card-grid">
-        @if (Api.HasPermission(PermissionsSaleCreate))
-        {
-            <button class="office-card" @onclick="OpenTill">
-                <span class="office-card-glyph" aria-hidden="true">▪</span>
-                <span class="office-card-title">Open the till</span>
-                <span class="office-card-meta">Take the register to the counter and trade.</span>
+    @if (CanViewInventory && _stock is { } stock)
+    {
+        int total = stock.Products.Count;
+        int inStock = stock.Products.Count(p => p.Available > 0);
+        int outCount = stock.Products.Count(p => p.Status == "Out");
+        int lowCount = stock.Products.Count(p => p.Status == "Low");
+
+        <section class="ov-kpis" aria-label="Stock figures">
+            <button type="button" class="ov-kpi" @onclick='() => Go("/inventory")'>
+                <span class="ov-kpi-label">Products in stock</span>
+                <strong>@inStock.ToString("N0", CultureInfo.InvariantCulture)<small> of @total.ToString("N0", CultureInfo.InvariantCulture)</small></strong>
+                <span class="ov-meter"><i style="width:@Pct(inStock, total)%"></i></span>
             </button>
+            <button type="button" class="ov-kpi @(outCount + lowCount > 0 ? "alert" : "")" @onclick='() => Go("/inventory?status=attention")'>
+                <span class="ov-kpi-label">Need restocking</span>
+                <strong>@(outCount + lowCount)</strong>
+                <span class="ov-kpi-note">@outCount out of stock · @lowCount low</span>
+            </button>
+            <button type="button" class="ov-kpi" @onclick='() => Go("/transfers")'>
+                <span class="ov-kpi-label">On the way</span>
+                <strong>@StockText.Quantity(stock.Products.Sum(p => p.InTransit))</strong>
+                <span class="ov-kpi-note">units in transfers and deliveries</span>
+            </button>
+            <button type="button" class="ov-kpi" @onclick='() => Go("/inventory")'>
+                <span class="ov-kpi-label">On hold</span>
+                <strong>@StockText.Quantity(stock.Products.Sum(p => p.OnHold))</strong>
+                <span class="ov-kpi-note">quarantined, damaged or awaiting checks</span>
+            </button>
+        </section>
+
+        <section class="ov-health" aria-label="Stock health">
+            <div class="ov-health-head">
+                <h2>Stock health</h2>
+                <span>@total products in this store's range</span>
+            </div>
+            <div class="ov-health-bar" role="img" aria-label="@HealthSummary(stock)">
+                @foreach (string s in StockText.Statuses)
+                {
+                    int count = stock.Products.Count(p => p.Status == s);
+                    @if (count > 0)
+                    {
+                        <i class="tone-@StockText.Tone(s)" style="flex:@count" title="@StockText.Label(s): @count"></i>
+                    }
+                }
+            </div>
+            <ul class="ov-legend">
+                @foreach (string s in StockText.Statuses)
+                {
+                    string key = s;
+                    <li><button type="button" @onclick='() => Go($"/inventory?status={key}")'><i class="tone-@StockText.Tone(key)"></i>@StockText.Label(key) <strong>@stock.Products.Count(p => p.Status == key)</strong></button></li>
+                }
+            </ul>
+        </section>
+    }
+
+    <div class="ov-columns">
+        @if (CanViewInventory && _stock is { } attentionStock)
+        {
+            List<PosStockLevel> urgent = [.. attentionStock.Products
+                .Where(p => p.Status is "Out" or "Low")
+                .OrderBy(p => StockText.Rank(p.Status))
+                .ThenBy(p => p.DaysOfCover ?? decimal.MaxValue)
+                .ThenBy(p => p.Name)
+                .Take(8)];
+
+            <section class="ov-panel">
+                <header>
+                    <h2>Needs attention</h2>
+                    @if (urgent.Count > 0)
+                    {
+                        <button type="button" class="inv-link" @onclick='() => Go("/inventory?status=attention")'>See all →</button>
+                    }
+                </header>
+                @if (urgent.Count == 0)
+                {
+                    <p class="ov-calm">✓ Nothing is low or out of stock.</p>
+                }
+                else
+                {
+                    <ul class="ov-urgent">
+                        @foreach (PosStockLevel p in urgent)
+                        {
+                            <li>
+                                <button type="button" @onclick='() => Go($"/inventory?q={Uri.EscapeDataString(p.Sku)}")'>
+                                    <span class="ov-urgent-name"><strong>@p.Name</strong><small>@p.Category · @p.Sku</small></span>
+                                    <span class="ov-urgent-qty">@StockText.Quantity(p.Available) left<small>@StockText.Cover(p)</small></span>
+                                    <span class="inv-pill tone-@StockText.Tone(p.Status)">@StockText.Label(p.Status)</span>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
         }
 
-        @if (Api.HasPermission(PermissionsInventoryView))
-        {
-            <button class="office-card" @onclick="OpenCounts">
-                <span class="office-card-glyph" aria-hidden="true">≡</span>
-                <span class="office-card-title">Stock counts</span>
-                <span class="office-card-meta">Open a full, category or cycle count and record what is on the shelf.</span>
-            </button>
-        }
+        <div class="ov-stack">
+        <section class="ov-panel">
+            <header><h2>Jump to</h2></header>
+            <div class="ov-actions">
+                @if (Api.HasPermission(PermissionsSaleCreate))
+                {
+                    <button type="button" @onclick='() => Go("/register")'><span class="ov-icon">▪</span><strong>Open the till</strong><small>Sell at the counter</small></button>
+                }
+                @if (CanViewInventory)
+                {
+                    <button type="button" @onclick='() => Go("/inventory")'><span class="ov-icon">▦</span><strong>Inventory</strong><small>Stock by category</small></button>
+                    <button type="button" @onclick='() => Go("/inventory/counts")'><span class="ov-icon">≡</span><strong>Stock counts</strong><small>Count what is on the shelf</small></button>
+                }
+                @if (Api.HasPermission(PermissionsTransferView))
+                {
+                    <button type="button" @onclick='() => Go("/transfers")'><span class="ov-icon">⇄</span><strong>Transfers</strong><small>Move stock between locations</small></button>
+                }
+                @if (Api.HasPermission(PermissionsPurchasingView))
+                {
+                    <button type="button" @onclick='() => Go("/purchasing/orders")'><span class="ov-icon">▣</span><strong>Goods receiving</strong><small>Check deliveries in</small></button>
+                }
+                @if (Api.HasPermission(PermissionsReportsView))
+                {
+                    <button type="button" @onclick='() => Go("/reports")'><span class="ov-icon">▤</span><strong>Daily reports</strong><small>Sales and shift totals</small></button>
+                }
+                <button type="button" @onclick='() => Go("/scanner")'><span class="ov-icon">▥</span><strong>Scanner test</strong><small>Check a barcode scanner</small></button>
+            </div>
+        </section>
 
-        @if (Api.HasPermission(PermissionsTransferView))
+        @if (CanViewInventory && _stock is { } idleStock)
         {
-            <button class="office-card" @onclick="OpenTransfers">
-                <span class="office-card-glyph" aria-hidden="true">⇄</span>
-                <span class="office-card-title">Transfers</span>
-                <span class="office-card-meta">Raise a stock movement, then pick, dispatch and receive it.</span>
-            </button>
-        }
+            DateOnly today = StockText.Today;
+            List<PosStockLevel> idle = [.. idleStock.Products.Where(p => StockText.IsIdle(p, today))];
+            List<PosStockLevel> shown = [.. (CanSeeCost ? idle.OrderByDescending(p => p.StockValue) : idle.OrderByDescending(p => p.Available))
+                .ThenBy(p => p.Name)
+                .Take(5)];
 
-        @if (Api.HasPermission(PermissionsPurchasingView))
-        {
-            <button class="office-card" @onclick="OpenReceiving">
-                <span class="office-card-glyph" aria-hidden="true">▣</span>
-                <span class="office-card-title">Goods receiving</span>
-                <span class="office-card-meta">Reconcile a purchase order against what actually arrived.</span>
-            </button>
+            <section class="ov-panel">
+                <header>
+                    <div>
+                        <h2>Not selling</h2>
+                        <p class="ov-panel-sub">Plenty on hand, no sale in @StockText.IdleDays+ days@(CanSeeCost && idle.Count > 0 ? $" · {StockText.Money(idle.Sum(p => p.StockValue))} tied up" : "")</p>
+                    </div>
+                    @if (idle.Count > 0)
+                    {
+                        <button type="button" class="inv-link" @onclick='() => Go("/inventory?status=idle")'>See all @idle.Count →</button>
+                    }
+                </header>
+                @if (idle.Count == 0)
+                {
+                    <p class="ov-calm">✓ Everything on the shelf has sold in the last month.</p>
+                }
+                else
+                {
+                    <ul class="ov-urgent">
+                        @foreach (PosStockLevel p in shown)
+                        {
+                            <li>
+                                <button type="button" @onclick='() => Go($"/inventory?q={Uri.EscapeDataString(p.Sku)}")'>
+                                    <span class="ov-urgent-name"><strong>@p.Name</strong><small>@p.Category · @StockText.LastSold(p, today)</small></span>
+                                    <span class="ov-urgent-qty">@StockText.Quantity(p.Available) on hand@(CanSeeCost ? (MarkupString)$"<small>{StockText.Money(p.StockValue)}</small>" : default)</span>
+                                    <span class="inv-pill tone-info">Idle</span>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
         }
-
-        @if (Api.HasPermission(PermissionsReportsView))
-        {
-            <button class="office-card" @onclick="OpenReports">
-                <span class="office-card-glyph" aria-hidden="true">▤</span>
-                <span class="office-card-title">Daily reports</span>
-                <span class="office-card-meta">Close-of-trade sales, payments and shift totals by business date.</span>
-            </button>
-        }
+        </div>
     </div>
 
     @if (!Api.HasPermission(PermissionsSaleCreate)
-        && !Api.HasPermission(PermissionsInventoryView)
+        && !CanViewInventory
         && !Api.HasPermission(PermissionsTransferView)
         && !Api.HasPermission(PermissionsPurchasingView)
         && !Api.HasPermission(PermissionsReportsView))
@@ -149,35 +211,68 @@
     private const string PermissionsReportsView = "report.view";
 
     [Inject] private BackOfficeService Api { get; set; } = default!;
+    [Inject] private RegisterService Register { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
 
-    private PosInventoryOverview? _overview;
+    private PosStockLevelReport? _stock;
     private string? _error;
+    private bool _loading;
+
+    private bool CanViewInventory => Api.HasPermission(PermissionsInventoryView);
+
+    private bool CanSeeCost => Api.HasPermission("product.cost.view");
+
+    private static string Greeting => DateTime.Now.Hour switch
+    {
+        < 12 => "Good morning",
+        < 18 => "Good afternoon",
+        _ => "Good evening",
+    };
+
+    private string FirstName => (Register.Current?.DisplayName ?? "there").Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "there";
 
     protected override async Task OnInitializedAsync()
     {
-        if (!Api.HasPermission(PermissionsInventoryView))
+        if (CanViewInventory)
         {
-            return;
-        }
-
-        ApiResult<PosInventoryOverview> result = await Api.GetInventoryOverviewAsync(CancellationToken.None);
-        if (result.IsSuccess)
-        {
-            _overview = result.Value;
-        }
-        else
-        {
-            _error = result.Error;
+            await LoadAsync();
         }
     }
 
-    private void OpenTill() => Navigation.NavigateTo("/register");
-    private void OpenCounts() => Navigation.NavigateTo("/inventory/counts");
-    private void OpenTransfers() => Navigation.NavigateTo("/transfers");
-    private void OpenReceiving() => Navigation.NavigateTo("/purchasing/orders");
-    private void OpenReports() => Navigation.NavigateTo("/reports");
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            // The totals endpoint explains plainly when an account is not
+            // assigned to this register's store; ask it first for that reason.
+            ApiResult<PosInventoryOverview> access = await Api.GetInventoryOverviewAsync(CancellationToken.None);
+            if (!access.IsSuccess)
+            {
+                _error = access.Error;
+                _stock = null;
+                return;
+            }
 
-    private static string FormatQuantity(decimal quantity)
-        => quantity == 0 ? "0" : quantity.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+            ApiResult<PosStockLevelReport> stock = await Api.GetStoreStockLevelsAsync(CancellationToken.None);
+            _stock = stock.Value;
+            _error = stock.IsSuccess ? null : stock.Error;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Head office could not be reached. Stock figures need a connection.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Go(string path) => Navigation.NavigateTo(path);
+
+    private static string Pct(int part, int whole)
+        => (whole == 0 ? 0 : part * 100m / whole).ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string HealthSummary(PosStockLevelReport stock)
+        => string.Join(", ", StockText.Statuses.Select(s => $"{stock.Products.Count(p => p.Status == s)} {StockText.Label(s).ToLowerInvariant()}"));
 }

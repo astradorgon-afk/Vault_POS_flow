@@ -178,6 +178,21 @@ public interface IUnitOfWork
 
     /// <summary>Gets a value indicating whether a transaction is already open.</summary>
     bool HasActiveTransaction { get; }
+
+    /// <summary>
+    /// Whether a failure means the operation lost a race with a concurrent writer
+    /// over a shared record (two branches selling the same product at the same
+    /// moment, say), so running it again against the current state may succeed.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    /// <returns>True when the failure is contention rather than a fault.</returns>
+    bool IsConcurrencyConflict(Exception exception) => exception is ConcurrencyConflictException;
+
+    /// <summary>Forgets every change and read tracked so far, so a retried
+    /// operation starts from what the database holds now.</summary>
+    void DiscardChanges()
+    {
+    }
 }
 
 /// <summary>An open transaction.</summary>
@@ -288,6 +303,15 @@ public interface IAuditWriter
 /// <param name="ReferenceDocumentType">The related document type, if any.</param>
 /// <param name="ReferenceDocumentId">The related document identifier, if any.</param>
 /// <param name="LocationId">The location the action applies to, if any.</param>
+/// <param name="ActorUserId">
+/// Who acted, for an action taken before the caller is authenticated. Ignored
+/// once there is an authenticated caller, so it can never be used to record
+/// someone else as having acted.
+/// </param>
+/// <param name="ActorRoleSnapshot">
+/// The authority that actor held, comma separated, on the same terms as
+/// <paramref name="ActorUserId"/>.
+/// </param>
 public sealed record AuditEntry(
     string Action,
     string EntityType,
@@ -297,4 +321,6 @@ public sealed record AuditEntry(
     string? Reason = null,
     ReferenceDocumentType? ReferenceDocumentType = null,
     Guid? ReferenceDocumentId = null,
-    LocationId? LocationId = null);
+    LocationId? LocationId = null,
+    UserId? ActorUserId = null,
+    string? ActorRoleSnapshot = null);

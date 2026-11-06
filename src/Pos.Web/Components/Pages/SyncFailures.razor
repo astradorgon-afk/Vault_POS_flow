@@ -8,7 +8,7 @@
 <PageTitle>Sync failures · VaultFlow</PageTitle>
 
 <section class="sync-page-head">
-    <div><span class="eyebrow">Operations · synchronization</span><h1>Failure review</h1><p>Retry recoverable events or record why a failure was dismissed. Nothing is removed from the audit trail.</p></div>
+    <div><span class="eyebrow">Operations · synchronization</span><h1>Sync failures</h1><p>Retry recoverable events or record why a failure was dismissed. Nothing is removed from the audit trail.</p></div>
     <a class="quiet-link" href="/">Back to overview →</a>
 </section>
 
@@ -44,7 +44,7 @@ else
                     }
                     else
                     {
-                        <footer><small>Created @failure.CreatedAtUtc.ToLocalTime().ToString("g")</small><div><button type="button" class="sync-button secondary" @onclick="() => RetryAsync(failure.Id)" disabled="@busy">Schedule retry</button><button type="button" class="sync-button danger" @onclick="() => BeginDismiss(failure.Id)">Dismiss</button></div></footer>
+                        <footer><small>Created @failure.CreatedAtUtc.InStoreTime().ToString("g")</small><div><button type="button" class="sync-button secondary" @onclick="() => RetryAsync(failure.Id)" disabled="@busy">Schedule retry</button><button type="button" class="sync-button danger" @onclick="() => BeginDismiss(failure.Id)">Dismiss</button></div></footer>
                     }
                 </article>
             }

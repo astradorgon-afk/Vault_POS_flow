@@ -21,6 +21,7 @@ public sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         builder.Property(d => d.ShortCode).HasColumnName("short_code").HasMaxLength(6).IsRequired();
         builder.Property(d => d.Name).HasColumnName("name").HasMaxLength(128).IsRequired();
         builder.Property(d => d.LocationId).HasColumnName("location_id").IsRequired();
+        builder.Property(d => d.AllowedLocationIdsJson).HasColumnName("allowed_location_ids_json").HasMaxLength(4096).IsRequired();
         builder.Property(d => d.Platform).HasColumnName("platform").HasConversion<short>().IsRequired();
         builder.Property(d => d.AppVersion).HasColumnName("app_version").HasMaxLength(64);
         builder.Property(d => d.OsVersion).HasColumnName("os_version").HasMaxLength(64);
@@ -43,6 +44,7 @@ public sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         builder.HasIndex(d => new { d.LocationId, d.Status }).HasDatabaseName("ix_device_location_status");
 
         builder.Ignore(d => d.IsOperational);
+        builder.Ignore(d => d.AllowedLocationIds);
         builder.Ignore(d => d.DomainEvents);
     }
 }
@@ -151,5 +153,10 @@ public sealed class AuditLogEntryConfiguration : IEntityTypeConfiguration<AuditL
         builder.HasIndex(a => new { a.UserId, a.OccurredAtUtc }).HasDatabaseName("ix_audit_log_user");
         builder.HasIndex(a => a.CorrelationId).HasDatabaseName("ix_audit_log_correlation");
         builder.HasIndex(a => new { a.Action, a.OccurredAtUtc }).HasDatabaseName("ix_audit_log_action");
+
+        // "What happened lately", the activity log's default and its every
+        // page. The indexes above all lead with something else, so without
+        // this the newest-first ordering is a scan and sort of the whole table.
+        builder.HasIndex(a => a.OccurredAtUtc).HasDatabaseName("ix_audit_log_occurred");
     }
 }

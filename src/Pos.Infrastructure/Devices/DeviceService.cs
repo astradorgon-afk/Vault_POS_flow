@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Auditing;
 using Pos.Domain.Common;
@@ -20,11 +21,13 @@ namespace Pos.Infrastructure.Devices;
 /// terminals activate on registration and receive no code.
 /// </param>
 /// <param name="ExpiresAtUtc">When the code stops working, or <see langword="null"/> when no code was issued.</param>
+/// <param name="AllowedLocationIds">Locations assigned to this device.</param>
 public sealed record DeviceRegistration(
     DeviceId DeviceId,
     string ShortCode,
     string? EnrolmentCode,
-    DateTimeOffset? ExpiresAtUtc);
+    DateTimeOffset? ExpiresAtUtc,
+    IReadOnlyList<LocationId> AllowedLocationIds);
 
 /// <summary>The details a device reports when it enrols.</summary>
 /// <param name="EnrolmentCode">The one-time code.</param>
@@ -48,13 +51,15 @@ public interface IDeviceService
     /// <param name="locationId">The location it belongs to.</param>
     /// <param name="platform">The platform it runs on.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="allowedLocationIds">Additional locations the device may open.</param>
     /// <returns>The registration, including the code, or the reason it was refused.</returns>
     Task<Result<DeviceRegistration>> RegisterAsync(
         string shortCode,
         string name,
         LocationId locationId,
         DevicePlatform platform,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<LocationId>? allowedLocationIds = null);
 
     /// <summary>Issues a fresh enrolment code for a device that has not enrolled.</summary>
     /// <param name="deviceId">The device.</param>
@@ -69,6 +74,9 @@ public interface IDeviceService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The enrolled device's identifier, or the reason it was refused.</returns>
     Task<Result<DeviceId>> EnrolAsync(DeviceEnrolmentRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Replaces the locations an enrolled device may operate at.</summary>
+    Task<Result> SetAllowedLocationsAsync(DeviceId deviceId, IReadOnlyCollection<LocationId> locationIds, CancellationToken cancellationToken);
 
     /// <summary>Temporarily blocks a device.</summary>
     /// <param name="deviceId">The device.</param>
@@ -114,7 +122,8 @@ public sealed class DeviceService(
         string name,
         LocationId locationId,
         DevicePlatform platform,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<LocationId>? allowedLocationIds = null)
     {
         UserId actor = RequireActor();
         DateTimeOffset now = clock.UtcNow;
@@ -139,6 +148,24 @@ public sealed class DeviceService(
         if (device.IsFailure)
         {
             return Result<DeviceRegistration>.Failure(device.Errors);
+        }
+
+        Result assignments = device.Value.SetAllowedLocationIds(allowedLocationIds ?? [locationId]);
+        if (assignments.IsFailure)
+        {
+            return Result<DeviceRegistration>.Failure(assignments.Error);
+        }
+
+        HashSet<Guid> allowedIds = device.Value.AllowedLocationIds.Select(id => id.Value).ToHashSet();
+        List<LocationId> activeLocationIds = await context.Locations.AsNoTracking()
+            .Where(location => location.IsActive && location.Kind != Pos.Domain.Locations.LocationKind.External)
+            .Select(location => location.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (activeLocationIds.Count(location => allowedIds.Contains(location.Value)) != allowedIds.Count)
+        {
+            return Result<DeviceRegistration>.Failure(Error.Validation(
+                "device.location_assignment_invalid", "Choose active stores or warehouses only."));
         }
 
         context.Devices.Add(device.Value);
@@ -167,7 +194,7 @@ public sealed class DeviceService(
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
             return Result<DeviceRegistration>.Success(new DeviceRegistration(
-                device.Value.Id, normalised, EnrolmentCode: null, ExpiresAtUtc: null));
+                device.Value.Id, normalised, EnrolmentCode: null, ExpiresAtUtc: null, device.Value.AllowedLocationIds));
         }
 
         DeviceRegistration registration = await IssueCodeAsync(device.Value, actor, now, cancellationToken)
@@ -309,6 +336,51 @@ public sealed class DeviceService(
     }
 
     /// <inheritdoc />
+    public async Task<Result> SetAllowedLocationsAsync(
+        DeviceId deviceId,
+        IReadOnlyCollection<LocationId> locationIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(locationIds);
+        UserId actor = RequireActor();
+        Device? device = await context.Devices.AsTracking()
+            .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken).ConfigureAwait(false);
+        if (device is null)
+        {
+            return Result.Failure(Error.NotFound("device.not_found", "No such device."));
+        }
+
+        List<LocationId> normalized = [.. locationIds.Distinct()];
+        HashSet<Guid> ids = normalized.Select(id => id.Value).ToHashSet();
+        List<LocationId> activeLocationIds = await context.Locations.AsNoTracking()
+            .Where(location => location.IsActive && location.Kind != Pos.Domain.Locations.LocationKind.External)
+            .Select(location => location.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (normalized.Count == 0 || activeLocationIds.Count(location => ids.Contains(location.Value)) != normalized.Count)
+        {
+            return Result.Failure(Error.Validation("device.location_assignment_invalid", "Choose one or more active stores or warehouses."));
+        }
+
+        string previous = JsonSerializer.Serialize(device.AllowedLocationIds.Select(id => id.Value));
+        Result changed = device.SetAllowedLocationIds(normalized);
+        if (changed.IsFailure)
+        {
+            return changed;
+        }
+
+        await audit.WriteAsync(new AuditEntry(
+            AuditActions.Devices.LocationsChanged,
+            nameof(Device),
+            deviceId.Value,
+            PreviousValueJson: previous,
+            NewValueJson: device.AllowedLocationIdsJson,
+            LocationId: device.LocationId), cancellationToken).ConfigureAwait(false);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return Result.Success();
+    }
+
+    /// <inheritdoc />
     public async Task<Result> SuspendAsync(DeviceId deviceId, string reason, CancellationToken cancellationToken)
     {
         UserId actor = RequireActor();
@@ -437,7 +509,7 @@ public sealed class DeviceService(
 
         await Task.CompletedTask.ConfigureAwait(false);
 
-        return new DeviceRegistration(device.Id, device.ShortCode, material.Value, code.ExpiresAtUtc);
+        return new DeviceRegistration(device.Id, device.ShortCode, material.Value, code.ExpiresAtUtc, device.AllowedLocationIds);
     }
 
     private async Task RevokeDeviceTokensAsync(

@@ -48,65 +48,14 @@ public sealed class PosLocation
 
     /// <summary>Gets or sets the numeric location kind.</summary>
     public int Kind { get; set; }
+    public bool IsActive { get; set; }
 }
 
-/// <summary>A product returned by catalog search or barcode lookup.</summary>
-public sealed class PosProduct
-{
-    /// <summary>Gets or sets the product identifier.</summary>
-    public Guid Id { get; set; }
+/// <summary>A physical location shown in the optional pre-sign-in chooser.</summary>
+public sealed record PosSignInLocation(Guid Id, string Code, string Name, int Kind);
 
-    /// <summary>Gets or sets the SKU.</summary>
-    public string Sku { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the product display name.</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the base unit identifier used by sale lines.</summary>
-    public Guid BaseUnitOfMeasureId { get; set; }
-
-    /// <summary>Gets or sets whether the product is VAT exempt.</summary>
-    public bool IsVatExempt { get; set; }
-
-    /// <summary>Gets or sets active barcodes, primary first.</summary>
-    public IReadOnlyList<string> Barcodes { get; set; } = [];
-}
-
-/// <summary>An effective-dated price returned by the catalog API.</summary>
-public sealed class PosProductPrice
-{
-    /// <summary>Gets or sets the price row identifier.</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Gets or sets the location override, or null for the organization price.</summary>
-    public Guid? LocationId { get; set; }
-
-    /// <summary>Gets or sets the selling amount.</summary>
-    public decimal Amount { get; set; }
-
-    /// <summary>Gets or sets when the price takes effect.</summary>
-    public DateTimeOffset EffectiveFromUtc { get; set; }
-
-    /// <summary>Gets or sets when the temporary price stops, if applicable.</summary>
-    public DateTimeOffset? EffectiveToUtc { get; set; }
-
-    /// <summary>Gets or sets why this price was scheduled.</summary>
-    public string? Reason { get; set; }
-
-    /// <summary>Gets or sets whether the row is effective now.</summary>
-    public bool IsCurrent { get; set; }
-}
-
-/// <summary>The body used to schedule a product selling price.</summary>
-public sealed record PosSchedulePriceRequest(
-    decimal Amount,
-    string Reason,
-    Guid? LocationId,
-    DateTimeOffset? EffectiveFromUtc,
-    DateTimeOffset? EffectiveToUtc);
-
-/// <summary>The body used to cancel a future product price.</summary>
-public sealed record PosCancelPriceRequest(string Reason);
+/// <summary>One page of a store's sales and how many matched in all.</summary>
+public sealed record PosSalePage(IReadOnlyList<PosSaleSummary> Sales, int Total);
 
 /// <summary>One completed sale as returned by the sales search.</summary>
 public sealed class PosSaleSummary
@@ -165,40 +114,6 @@ public sealed class PosInventoryOverview
     public int LowStockItems { get; set; }
     public int OutOfStockItems { get; set; }
     public int OverStockItems { get; set; }
-}
-
-/// <summary>The movement chain for one inventory document.</summary>
-public sealed class PosInventoryTimeline
-{
-    public string DocumentType { get; set; } = string.Empty;
-    public Guid DocumentId { get; set; }
-    public string ReferenceNumber { get; set; } = string.Empty;
-    public List<PosInventoryTimelineGroup> Groups { get; set; } = [];
-}
-
-public sealed class PosInventoryTimelineGroup
-{
-    public Guid MovementGroupId { get; set; }
-    public string MovementType { get; set; } = string.Empty;
-    public string ReferenceNumber { get; set; } = string.Empty;
-    public DateTimeOffset OccurredAtUtc { get; set; }
-    public DateTimeOffset RecordedAtUtc { get; set; }
-    public List<PosInventoryTimelineLeg> Legs { get; set; } = [];
-}
-
-public sealed class PosInventoryTimelineLeg
-{
-    public Guid MovementId { get; set; }
-    public short LegNumber { get; set; }
-    public Guid ProductId { get; set; }
-    public string ProductName { get; set; } = string.Empty;
-    public Guid LocationId { get; set; }
-    public string State { get; set; } = string.Empty;
-    public decimal QuantityDelta { get; set; }
-    public decimal UnitCost { get; set; }
-    public Guid? SourceLocationId { get; set; }
-    public Guid? DestinationLocationId { get; set; }
-    public Guid? ReversesMovementGroupId { get; set; }
 }
 
 /// <summary>An open synchronization failure requiring operator attention.</summary>
@@ -433,131 +348,6 @@ public sealed class PosReference
     public Guid Id { get; set; }
 }
 
-/// <summary>A payment receipt as returned by the receipts list.</summary>
-public sealed class PosReceiptSummary
-{
-    /// <summary>Gets or sets the receipt identifier.</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Gets or sets the RCT number, for example RCT-2026-D03-000012.</summary>
-    public string Number { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the kind name: WalkInSale, BranchExpense or OwnerWithdrawal.</summary>
-    public string Kind { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the store the cash event happened at.</summary>
-    public Guid LocationId { get; set; }
-
-    /// <summary>Gets or sets the amount recorded.</summary>
-    public decimal Amount { get; set; }
-
-    /// <summary>Gets or sets the counterparty, if any.</summary>
-    public string? Counterparty { get; set; }
-
-    /// <summary>Gets or sets who issued the receipt.</summary>
-    public Guid IssuedByUserId { get; set; }
-
-    /// <summary>Gets or sets when the receipt was issued.</summary>
-    public DateTimeOffset IssuedAtUtc { get; set; }
-}
-
-/// <summary>An inventory count as listed in the dashboard.</summary>
-public sealed record PosInventoryCountSummary(
-    Guid Id,
-    string Number,
-    Guid LocationId,
-    string Kind,
-    string Status,
-    int Lines,
-    int CountedLines,
-    decimal TotalAbsoluteVarianceValue,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? PostedAtUtc);
-
-/// <summary>An inventory count with its recorded lines.</summary>
-public sealed record PosInventoryCountDetail(
-    PosInventoryCountSummary Count,
-    string? Note,
-    DateTimeOffset SnapshotTakenAtUtc,
-    Guid CreatedByUserId,
-    Guid? SubmittedByUserId,
-    Guid? ApprovedByUserId,
-    string? LastRejectionReason,
-    string? CancellationReason,
-    IReadOnlyList<PosInventoryCountLineView> Lines);
-
-/// <summary>One counted bucket on an inventory count sheet.</summary>
-public sealed record PosInventoryCountLineView(
-    int LineNo,
-    Guid ProductId,
-    Guid? BatchId,
-    decimal SystemQuantity,
-    decimal? PhysicalQuantity,
-    decimal? Variance,
-    decimal UnitCost,
-    decimal? VarianceValue,
-    bool IsRepeatVariance,
-    DateTimeOffset? CountedAtUtc);
-
-/// <summary>A product master row used to name count-sheet lines.</summary>
-public sealed record PosProductSummary(
-    Guid Id,
-    string Sku,
-    string Name,
-    bool IsActive);
-
-/// <summary>A transfer as listed in the transfers dashboard.</summary>
-public sealed record PosTransferSummary(
-    Guid Id,
-    string Number,
-    string Status,
-    Guid SourceLocationId,
-    Guid DestinationLocationId,
-    Guid CreatedByUserId,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? DispatchedAtUtc,
-    DateTimeOffset? ReceivedAtUtc,
-    decimal TotalValue,
-    int LineCount);
-
-/// <summary>A transfer with its lines, allocations and arrival state.</summary>
-public sealed record PosTransferDetail(
-    PosTransferSummary Transfer,
-    string Kind,
-    string Mode,
-    string? ReviewNote,
-    IReadOnlyList<PosTransferLineView> Lines);
-
-/// <summary>One line of a transfer detail.</summary>
-public sealed record PosTransferLineView(
-    int LineNo,
-    Guid ProductId,
-    string? ProductName,
-    decimal RequestedQuantity,
-    decimal PickedQuantity,
-    decimal ReceivedQuantity,
-    decimal DamagedQuantity,
-    string? Note,
-    string? DiscrepancyState,
-    IReadOnlyList<PosTransferAllocationView> Allocations);
-
-/// <summary>One picked lot within a transfer line.</summary>
-public sealed record PosTransferAllocationView(
-    Guid? BatchId,
-    decimal PickedQuantity,
-    decimal ReceivedQuantity,
-    decimal DamagedQuantity);
-
-/// <summary>One step in a transfer's custody timeline.</summary>
-public sealed record PosTransferCustodyEventSummary(
-    int Sequence,
-    string Kind,
-    Guid ActorUserId,
-    DateTimeOffset OccurredAtUtc,
-    string? Note);
-
-// ---- People & roles ----
-
 /// <summary>An account as listed for administration.</summary>
 public sealed record PosUserSummary(
     Guid Id,
@@ -661,6 +451,28 @@ public sealed record PosPermissionView(
     bool IsReadOnly,
     bool IsPrivileged);
 
+/// <summary>A page of filtered business audit activity.</summary>
+public sealed record PosAuditLogPage(IReadOnlyList<PosAuditLogItem> Items, int Total, int Offset, int Limit);
+
+/// <summary>One recorded activity entry.</summary>
+public sealed record PosAuditLogItem(
+    Guid Id,
+    DateTimeOffset OccurredAtUtc,
+    string Action,
+    string EntityType,
+    string? RecordSummary,
+    Guid? EntityId,
+    Guid? UserId,
+    string ActorName,
+    string? RoleSnapshot,
+    string? LocationName,
+    string? Reason,
+    string? ReferenceDocumentType,
+    Guid? ReferenceDocumentId,
+    string? PreviousValueJson,
+    string? NewValueJson,
+    Guid CorrelationId);
+
 // ---- Devices ----
 
 /// <summary>A registered terminal as shown in the fleet console.</summary>
@@ -675,21 +487,24 @@ public sealed record PosDeviceSummary(
     DateTimeOffset? LastSeenAtUtc,
     DateTimeOffset? LastSyncAtUtc,
     decimal? ClockSkewSeconds,
-    string? StatusReason);
+    string? StatusReason,
+    IReadOnlyList<Guid> AllowedLocationIds);
 
 /// <summary>The body used to register a terminal.</summary>
 public sealed record PosRegisterDeviceRequest(
     string ShortCode,
     string Name,
     Guid LocationId,
-    int Platform);
+    int Platform,
+    IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 /// <summary>The one-time result of registering or reissuing a terminal enrolment.</summary>
 public sealed record PosDeviceRegistration(
     Guid DeviceId,
     string ShortCode,
     string? EnrolmentCode,
-    DateTimeOffset? ExpiresAtUtc);
+    DateTimeOffset? ExpiresAtUtc,
+    IReadOnlyList<Guid>? AllowedLocationIds = null);
 
 // ---- Locations ----
 
@@ -726,6 +541,16 @@ public sealed record PosCreateLocationRequest(
     int Kind,
     string TimeZoneId,
     PosLocationSettings? Settings = null);
+
+/// <summary>The descriptive details that replace a location's own.</summary>
+public sealed record PosUpdateLocationRequest(
+    string Code,
+    string Name,
+    int Kind,
+    string TimeZoneId);
+
+/// <summary>The business date a location stops operating.</summary>
+public sealed record PosCloseLocationRequest(DateOnly ClosingDate);
 
 // ---- Reports ----
 
@@ -771,118 +596,6 @@ public sealed record PosDailyShiftSummary(
     decimal CashRefundsTotal);
 
 // ---- Stock adjustments ----
-
-/// <summary>A stock adjustment as listed.</summary>
-public sealed record PosStockAdjustmentSummary(
-    Guid Id,
-    string Number,
-    Guid LocationId,
-    string Reason,
-    string Status,
-    decimal TotalAbsoluteValue,
-    Guid CreatedByUserId,
-    DateTimeOffset CreatedAtUtc);
-
-/// <summary>A stock adjustment with its lines.</summary>
-public sealed record PosStockAdjustmentDetail(
-    PosStockAdjustmentSummary Adjustment,
-    string? Notes,
-    DateTimeOffset? SubmittedAtUtc,
-    Guid? DecidedByUserId,
-    DateTimeOffset? DecidedAtUtc,
-    string? RejectionReason,
-    Guid? ReversedByUserId,
-    DateTimeOffset? ReversedAtUtc,
-    string? ReversalReason,
-    IReadOnlyList<PosStockAdjustmentLineView> Lines);
-
-/// <summary>One line of a stock adjustment.</summary>
-public sealed record PosStockAdjustmentLineView(
-    int LineNo,
-    Guid ProductId,
-    Guid? BatchId,
-    string State,
-    decimal QuantityDelta,
-    decimal UnitCost,
-    decimal AbsoluteValue,
-    string MovementType);
-
-// ---- Quarantine ----
-
-/// <summary>A quarantine incident as listed.</summary>
-public sealed record PosQuarantineIncidentSummary(
-    Guid Id,
-    string Number,
-    string Status,
-    Guid LocationId,
-    Guid CreatedByUserId,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? InvestigatedAtUtc,
-    DateTimeOffset? ResolvedAtUtc,
-    decimal TotalValue,
-    int LineCount,
-    int OpenLineCount);
-
-/// <summary>One line of a quarantine incident.</summary>
-public sealed record PosQuarantineLineSummary(
-    int LineNo,
-    string Barcode,
-    decimal Quantity,
-    decimal UnitCost,
-    decimal RemainingQuantity,
-    string? ClaimedProductName,
-    Guid? ProductId,
-    Guid? BatchId,
-    string Disposition,
-    Guid? DispositionedByUserId,
-    DateTimeOffset? DispositionedAtUtc,
-    string? DispositionNote);
-
-/// <summary>One photograph of an incident, without the image bytes.</summary>
-public sealed record PosQuarantinePhotoSummary(
-    Guid Id,
-    string FileName,
-    string ContentType,
-    string? Note,
-    Guid UploadedByUserId,
-    DateTimeOffset UploadedAtUtc);
-
-/// <summary>One step in an incident's audit timeline.</summary>
-public sealed record PosQuarantineEventSummary(
-    int Sequence,
-    string Kind,
-    Guid ActorUserId,
-    DateTimeOffset OccurredAtUtc,
-    decimal? Quantity,
-    string? Note);
-
-/// <summary>A quarantine incident with its lines, photos and timeline.</summary>
-public sealed record PosQuarantineIncidentDetail(
-    Guid Id,
-    string Number,
-    string Status,
-    Guid LocationId,
-    Guid CreatedByUserId,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? InvestigatedAtUtc,
-    DateTimeOffset? ResolvedAtUtc,
-    string? Note,
-    decimal TotalValue,
-    IReadOnlyList<PosQuarantineLineSummary> Lines,
-    IReadOnlyList<PosQuarantinePhotoSummary> Photos,
-    IReadOnlyList<PosQuarantineEventSummary> Timeline);
-
-// ---- Replenishment & inventory exceptions ----
-
-/// <summary>A suggested restock for one product at one location.</summary>
-public sealed record PosReplenishmentRecommendation(
-    Guid LocationId,
-    Guid ProductId,
-    decimal Available,
-    decimal Deficit,
-    string Urgency,
-    Guid? SuggestedSourceLocationId,
-    decimal SuggestedQuantity);
 
 /// <summary>One stock draw the ledger refused.</summary>
 public sealed record PosNegativeStockAttemptView(
@@ -944,10 +657,70 @@ public sealed record PosStorePerformance(
     IReadOnlyList<PosStoreTopProduct> TopProducts);
 
 /// <summary>One business date's completed sales at a store.</summary>
-public sealed record PosStoreDailySales(DateOnly Date, decimal NetSales, int Transactions);
+public sealed record PosStoreDailySales(DateOnly Date, decimal NetSales, int Transactions, decimal GrossSales);
 
 /// <summary>One of a store's best sellers over the period.</summary>
 public sealed record PosStoreTopProduct(Guid ProductId, string Name, decimal Quantity, decimal NetSales);
+
+/// <summary>Every store's dispatched product movement and restock requests.</summary>
+public sealed record PosStoreMovementReport(
+    DateOnly From,
+    DateOnly To,
+    int DispatchedTransferCount,
+    IReadOnlyList<PosStoreMovement> Stores,
+    IReadOnlyList<PosStoreMovementActivity> RecentActivity);
+
+/// <summary>
+/// A store's product movement over the period: transfers dispatched in and out,
+/// supplier deliveries received in, and its restock requests.
+/// </summary>
+public sealed record PosStoreMovement(
+    Guid LocationId,
+    string Code,
+    string Name,
+    decimal IncomingUnits,
+    int InboundTransfers,
+    int InboundReceipts,
+    decimal OutgoingUnits,
+    int OutboundTransfers,
+    int RestockRequests,
+    int PendingApprovalRequests,
+    int AwaitingDispatchRequests,
+    DateTimeOffset? LastIncomingAtUtc,
+    DateTimeOffset? LastOutgoingAtUtc,
+    IReadOnlyList<PosStoreMovementItem> RecentItems,
+    IReadOnlyList<PosStoreMovementChartPoint> DailyMovement);
+
+/// <summary>A product line from a recent store request or completed movement.</summary>
+public sealed record PosStoreMovementItem(
+    string ProductName,
+    string Reference,
+    string Direction,
+    decimal Units,
+    DateTimeOffset OccurredAtUtc);
+
+/// <summary>One of seven buckets across a selected movement period.</summary>
+public sealed record PosStoreMovementChartPoint(
+    int Bucket,
+    decimal IncomingUnits,
+    decimal OutgoingUnits);
+
+/// <summary>A restock request or dispatch in the selected period.</summary>
+public sealed record PosStoreMovementActivity(
+    Guid TransferId,
+    string Reference,
+    string Kind,
+    string Status,
+    Guid SourceLocationId,
+    string SourceLocationName,
+    Guid DestinationLocationId,
+    string DestinationLocationName,
+    decimal ProductUnits,
+    DateTimeOffset OccurredAtUtc)
+{
+    /// <summary>The DR number issued when the stock was released, when dispatched.</summary>
+    public string? DeliveryReceiptNumber { get; init; }
+}
 
 /// <summary>A location's stock per product, scarcest first.</summary>
 public sealed record PosStockLevelReport(
@@ -973,4 +746,54 @@ public sealed record PosStockLevel(
     decimal? MaximumStock,
     decimal DailySales,
     decimal? DaysOfCover,
-    string Status);
+    string Status,
+    DateOnly? LastSoldOn = null);
+
+/// <summary>How much a location moved under one movement type.</summary>
+public sealed record PosLocationHistoryMovement(
+    string MovementType,
+    int Movements,
+    decimal UnitsIn,
+    decimal UnitsOut);
+
+/// <summary>One product still on a location's books.</summary>
+public sealed record PosLocationHistoryStock(
+    Guid ProductId,
+    string Sku,
+    string Name,
+    decimal Quantity,
+    decimal Value);
+
+/// <summary>Someone who worked at a location, and how much.</summary>
+public sealed record PosLocationHistoryPerson(
+    Guid UserId,
+    string Name,
+    int Actions,
+    DateTimeOffset LastActionAtUtc);
+
+/// <summary>Everything one location did, over its whole life.</summary>
+public sealed record PosLocationHistory(
+    Guid LocationId,
+    string Code,
+    string Name,
+    string Kind,
+    bool IsActive,
+    DateOnly OpenedOn,
+    DateOnly? ClosedOn,
+    DateTimeOffset? FirstActivityAtUtc,
+    DateTimeOffset? LastActivityAtUtc,
+    decimal UnitsIn,
+    decimal UnitsOut,
+    int MovementCount,
+    int SaleCount,
+    decimal SalesNetTotal,
+    int TransfersIn,
+    int TransfersOut,
+    int GoodsReceipts,
+    int StockCounts,
+    int StockAdjustments,
+    decimal StockRemaining,
+    decimal StockRemainingValue,
+    IReadOnlyList<PosLocationHistoryMovement> Movements,
+    IReadOnlyList<PosLocationHistoryStock> Stock,
+    IReadOnlyList<PosLocationHistoryPerson> People);

@@ -39,12 +39,18 @@ public sealed class SyncBaselineService(
         }
 
         List<SyncBaselineItem> items = [];
-        List<ProductBaselineRow> products = await context.Products
+        Dictionary<CategoryId, string> categories = await context.Categories
             .AsNoTracking()
-            .Select(p => new ProductBaselineRow(
-                p.Id.Value, p.Sku.Value, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc))
-            .ToListAsync(cancellationToken)
+            .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken)
             .ConfigureAwait(false);
+        List<ProductBaselineRow> products = [.. (await context.Products
+            .AsNoTracking()
+            .Select(p => new { p.Id, Sku = p.Sku.Value, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc, p.CategoryId })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .Select(p => new ProductBaselineRow(
+                p.Id.Value, p.Sku, p.Name, p.IsActive, p.TracksBatches, p.TracksExpiry, p.UpdatedAtUtc,
+                categories.GetValueOrDefault(p.CategoryId)))];
         foreach (ProductBaselineRow product in products)
         {
             items.Add(Item("ProductChanged", product.ProductId, new
@@ -57,6 +63,7 @@ public sealed class SyncBaselineService(
                 tracksExpiry = product.TracksExpiry,
                 sourceVersion = 0L,
                 updatedAtUtc = product.UpdatedAtUtc,
+                category = product.Category,
             }));
         }
 
@@ -77,14 +84,37 @@ public sealed class SyncBaselineService(
             }));
         }
 
-        List<PriceBaselineRow> prices = await context.ProductPrices
+// The Npgsql provider cannot translate `.Value` member access on a
+        // strongly-typed identifier inside a query filter, so every location
+        // filter below compares `LocationId` against `LocationId` and lets the
+        // value converter do the mapping to the uuid column. Where an inner Guid
+        // is genuinely needed it is unwrapped only after the rows materialize.
+        LocationId[] scopedDeviceLocations = [.. device.AllowedLocationIds];
+        LocationId?[] nullableScopedDeviceLocations = [.. device.AllowedLocationIds.Select(location => (LocationId?)location)];
+
+        List<PriceBaselineRow> prices = [.. (await context.ProductPrices
             .AsNoTracking()
-            .Where(p => p.LocationId == null || p.LocationId == device.LocationId)
-            .Select(p => new PriceBaselineRow(
-                p.Id.Value, p.ProductId.Value, p.LocationId.HasValue ? p.LocationId.Value.Value : (Guid?)null,
-                p.Amount, p.Price.Currency, p.EffectiveFromUtc, p.EffectiveToUtc))
+            .Where(p => p.LocationId == null || nullableScopedDeviceLocations.Contains(p.LocationId))
+            .Select(p => new
+            {
+                p.Id,
+                p.ProductId,
+                p.LocationId,
+                p.Amount,
+                p.Price.Currency,
+                p.EffectiveFromUtc,
+                p.EffectiveToUtc,
+            })
             .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false))
+            .Select(p => new PriceBaselineRow(
+                p.Id.Value,
+                p.ProductId.Value,
+                p.LocationId.HasValue ? p.LocationId.Value.Value : null,
+                p.Amount,
+                p.Currency,
+                p.EffectiveFromUtc,
+                p.EffectiveToUtc))];
         foreach (PriceBaselineRow price in prices)
         {
             items.Add(Item("ProductPriceChanged", price.PriceId, new
@@ -99,17 +129,17 @@ public sealed class SyncBaselineService(
             }));
         }
 
-        Location? location = await context.Locations
+List<Location> locations = await context.Locations
             .AsNoTracking()
-            .Where(l => l.Id == device.LocationId)
-            .SingleOrDefaultAsync(cancellationToken)
+            .Where(l => scopedDeviceLocations.Contains(l.Id))
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        if (location is not null)
+        foreach (Location location in locations)
         {
             string currencyCode = await context.Organizations
                 .Where(o => o.Id == location.OrganizationId)
                 .Select(o => o.CurrencyCode)
-                .SingleOrDefaultAsync(cancellationToken)
+                .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false) ?? "PHP";
             items.Add(Item("LocationChanged", location.Id.Value, new
             {
@@ -124,7 +154,7 @@ public sealed class SyncBaselineService(
             }));
         }
 
-        await AddSignedInUserAsync(items, currentUser.UserId.Value, device.LocationId, cancellationToken)
+        await AddSignedInUserAsync(items, currentUser.UserId.Value, device.AllowedLocationIds, cancellationToken)
             .ConfigureAwait(false);
 
         long cursor = await context.SyncChangeLog
@@ -146,7 +176,7 @@ public sealed class SyncBaselineService(
     private async Task AddSignedInUserAsync(
         List<SyncBaselineItem> items,
         UserId userId,
-        LocationId deviceLocation,
+        IReadOnlyList<LocationId> deviceLocations,
         CancellationToken cancellationToken)
     {
         AppUser? user = await context.Users
@@ -173,9 +203,9 @@ public sealed class SyncBaselineService(
 
         // Someone not assigned to this store is given nothing to hold here, even
         // if their permissions would allow it somewhere else.
-        bool atThisStore = authority.IsActive
-            && (authority.HasAllLocations || authority.Locations.Contains(deviceLocation));
-        string[] offline = atThisStore
+        LocationId[] assignedDeviceLocations = [.. deviceLocations.Where(location =>
+            authority.HasAllLocations || authority.Locations.Contains(location))];
+        string[] offline = authority.IsActive && assignedDeviceLocations.Length > 0
             ? [.. authority.Permissions
                 .Where(p => Permissions.Find(p)?.IsOfflineCapable == true)
                 .Order(StringComparer.Ordinal)]
@@ -190,14 +220,15 @@ public sealed class SyncBaselineService(
             policyVersion = version,
             issuedAtUtc = issuedAt,
             expiresAtUtc = issuedAt.AddHours(security.Value.PermissionSnapshotHours),
-            grants = offline.Select(p => new { permission = p, locationId = (Guid?)deviceLocation.Value }).ToArray(),
+            grants = offline.SelectMany(permission => assignedDeviceLocations.Select(location =>
+                new { permission, locationId = (Guid?)location.Value })).ToArray(),
         }));
     }
 
     private static SyncBaselineItem Item<T>(string type, object key, T payload)
         => new(type, key.ToString() ?? string.Empty, JsonSerializer.SerializeToElement(payload));
 
-    private sealed record ProductBaselineRow(Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry, DateTimeOffset UpdatedAtUtc);
+    private sealed record ProductBaselineRow(Guid ProductId, string Sku, string Name, bool IsActive, bool TracksBatches, bool TracksExpiry, DateTimeOffset UpdatedAtUtc, string? Category);
     private sealed record BarcodeBaselineRow(string Barcode, Guid ProductId, bool IsPrimary, bool IsActive);
     private sealed record PriceBaselineRow(Guid PriceId, Guid ProductId, Guid? LocationId, decimal Amount, string Currency, DateTimeOffset EffectiveFromUtc, DateTimeOffset? EffectiveToUtc);
 }

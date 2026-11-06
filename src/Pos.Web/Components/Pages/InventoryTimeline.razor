@@ -1,15 +1,15 @@
 @page "/inventory/timeline/{DocumentType}/{DocumentId:guid}"
-@using System.Globalization
-@attribute [Authorize(Policy = "inventory.view")]
+@attribute [Authorize]
 @rendermode InteractiveServer
+@using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 
 <PageTitle>Movement chain · VaultFlow</PageTitle>
+<div class="inventory-workflow web-workflow">
 
 <section class="timeline-head">
     <div><span class="eyebrow">Inventory ledger · trace</span><h1>@(timeline?.ReferenceNumber ?? "Movement chain")</h1><p>Follow every signed ledger leg that explains this document. The chain is read-only and scoped to your location authority.</p></div>
-    <a class="quiet-link" href="/">Back to overview →</a>
 </section>
 
 @if (!CanViewInventory)
@@ -33,8 +33,8 @@ else if (timeline is not null)
             {
                 <article class="timeline-event">
                     <div class="timeline-pin" aria-hidden="true"></div>
-                    <header><div><span>@group.MovementType</span><h2>@group.ReferenceNumber</h2></div><time datetime="@group.RecordedAtUtc.ToString("O")">@group.RecordedAtUtc.ToLocalTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</time></header>
-                    <p class="timeline-occurred">Occurred @group.OccurredAtUtc.ToLocalTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) · group @group.MovementGroupId</p>
+                    <header><div><span>@group.MovementType</span><h2>@group.ReferenceNumber</h2></div><time datetime="@group.RecordedAtUtc.ToString("O")">@group.RecordedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</time></header>
+                    <p class="timeline-occurred">Occurred @group.OccurredAtUtc.InStoreTime().ToString("MMM d, HH:mm", CultureInfo.InvariantCulture) · group @group.MovementGroupId</p>
                     <div class="timeline-legs">
                         @foreach (PosInventoryTimelineLeg leg in group.Legs)
                         {
@@ -50,6 +50,8 @@ else if (timeline is not null)
         </div>
     </section>
 }
+
+</div>
 
 @code {
     [Parameter] public string DocumentType { get; set; } = string.Empty;
@@ -77,4 +79,3 @@ else if (timeline is not null)
 
     private static string Money(decimal amount) => amount.ToString("₱#,##0.00;[₱#,##0.00]", CultureInfo.InvariantCulture);
 }
-

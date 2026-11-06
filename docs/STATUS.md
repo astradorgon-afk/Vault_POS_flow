@@ -1,6 +1,8 @@
 # Project Status
 
-**Last updated:** 2026-09-20 · **Milestone:** Phase 17 complete (C63); Phase 18 is the active deployment track. Synchronization transport, replay, conflict handling, remediation, gap recovery and operator workflow are complete. The desktop register shipped through C67 (daily-ops: till returns, shift close, receipt reprint, customer lookup). The web UI gap-fill from `VaultFlow-UI-Gaps.txt` is underway: **P0 (stock counts, transfers) is closed** and the first **P1 page (People & roles administration)** is implemented and browser-verified; Devices, Reports and Locations (P1) and the P2 list remain. Details in `SESSION-2026-09-20-web-ui-gaps-p0-p1.md`.
+**Last updated:** 2026-09-25 · **Latest session:** the desktop register trades offline, the owner console is trimmed, and development now seeds a realistic demo business (749 products, three branches, a month of trading). Four production bugs that turned up along the way are fixed: cross-store balance races, a per-IP rate limit, returns refused at another register, and server-stamped shift times. **What to do next is in [`SESSION-2026-09-25-offline-register-demo-business.md`](SESSION-2026-09-25-offline-register-demo-business.md) §3**; the earlier milestone notes follow.
+
+**Previous milestone (2026-09-20):** Phase 17 complete (C63); Phase 18 is the active deployment track. Synchronization transport, replay, conflict handling, remediation, gap recovery and operator workflow are complete. The desktop register shipped through C67 (daily-ops: till returns, shift close, receipt reprint, customer lookup). The web UI gap-fill from `VaultFlow-UI-Gaps.txt` is underway: **P0 (stock counts, transfers) is closed** and the first **P1 page (People & roles administration)** is implemented and browser-verified; Devices, Reports and Locations (P1) and the P2 list remain. Details in `SESSION-2026-09-20-web-ui-gaps-p0-p1.md`.
 
 This is the working status document. [ROADMAP.md](ROADMAP.md) holds the full
 item-by-item plan; this file says where things actually stand, what was learned,
@@ -1362,6 +1364,20 @@ Stated plainly so they are not mistaken for finished work:
 ---
 
 ## 5. What to do next
+
+**Start here (2026-09-25):** the prioritised list in
+[`SESSION-2026-09-25-offline-register-demo-business.md`](SESSION-2026-09-25-offline-register-demo-business.md) §3.
+In short:
+
+1. Build and run `Pos.Client` on Windows (so far only compile-checked).
+2. Reset the development database and load the demo business.
+3. Run the Docker PostgreSQL suites, and add a cross-store concurrency test.
+4. Add the missing `ThrottlingTests`.
+5. Publish master-data changes to registers between sign-ins.
+6. Model the senior citizen/PWD discount's VAT exemption.
+7. Add a seeder test.
+
+The notes below are the earlier plan and remain valid for the phases they name.
 
 Phase 13 was held after C43 by direction. C54 resumes the sync dashboard work
 while the remaining conflict matrix is implemented in contained slices.

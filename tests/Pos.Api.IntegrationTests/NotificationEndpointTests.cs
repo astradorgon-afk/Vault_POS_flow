@@ -7,9 +7,12 @@ using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Pos.Api.Notifications;
+using Pos.Application.Common.Abstractions;
 using Pos.Application.Identity;
 using Pos.Application.Notifications;
 using Pos.Domain.Common;
+using Pos.Domain.Inventory;
+using Pos.Domain.Locations;
 using Pos.Domain.Notifications;
 using Pos.Infrastructure.Persistence;
 
@@ -135,6 +138,67 @@ public sealed class NotificationEndpointTests(PosApiFactory factory)
         delivered.LocationId.Should().Be(location.Value);
         delivered.ReadAtUtc.Should().BeNull();
     }
+
+    [Fact]
+    public async Task Hub_AnnouncesCommittedStockMovement_OnlyToThoseWhoCanSeeTheLocation()
+    {
+        string suffix = Guid.NewGuid().ToString("N")[..8];
+        LocationId store = await factory.CreateLocationAsync($"IH{suffix[..4]}", "Live stock store");
+        LocationId elsewhere = await factory.CreateLocationAsync($"IE{suffix[..4]}", "Other live stock store");
+        await factory.CreateUserAsync($"stock-live-{suffix}", Roles.StoreManager, [store]);
+        await factory.CreateUserAsync($"stock-other-{suffix}", Roles.StoreManager, [elsewhere]);
+        using HttpClient client = factory.CreateClient();
+        string watcher = await SignInAsync(client, $"stock-live-{suffix}");
+        string outsider = await SignInAsync(client, $"stock-other-{suffix}");
+
+        TaskCompletionSource<Guid[]> received = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<Guid[]> leaked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection watching = Connect(client, watcher);
+        await using HubConnection other = Connect(client, outsider);
+        watching.On<Guid[]>(NotificationHub.InventoryChangedEvent, ids => received.TrySetResult(ids));
+        other.On<Guid[]>(NotificationHub.InventoryChangedEvent, ids => leaked.TrySetResult(ids));
+        await watching.StartAsync();
+        await other.StartAsync();
+
+        LocationId supplier = await factory.CreateExternalLocationAsync(SystemLocationCodes.ExternalSupplier);
+        ProductId product = await factory.CreateProductAsync(
+            $"LIVE-{suffix}", "Live stock product", $"77{Random.Shared.NextInt64(10_000_000_000, 99_999_999_999)}", defaultPurchaseCost: 10m);
+        UserId actor = UserId.New();
+        await factory.WithServiceAsync<IInventoryLedger>(async ledger =>
+        {
+            Result<PostedMovementGroup> posted = await ledger.PostAsync(
+                new MovementGroupSpec(
+                    EventId.New(),
+                    InventoryMovementType.SupplierReceipt,
+                    ReferenceDocumentType.GoodsReceipt,
+                    Guid.CreateVersion7(),
+                    $"GRN-{suffix}",
+                    [
+                        new(product, null, supplier, LocationKind.External, InventoryState.External, -5m, 10m, false),
+                        new(product, null, store, LocationKind.Store, InventoryState.Available, 5m, 10m, false),
+                    ],
+                    new LedgerActor(actor, actor, null, CorrelationId.New()),
+                    DateTimeOffset.UtcNow,
+                    DateOnly.FromDateTime(DateTime.UtcNow)),
+                CancellationToken.None);
+            posted.IsSuccess.Should().BeTrue(string.Join("; ", posted.Errors.Select(e => e.Code)));
+        });
+
+        Guid[] announced = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        announced.Should().Equal(store.Value);
+
+        Func<Task> outsiderHears = () => leaked.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await outsiderHears.Should().ThrowAsync<TimeoutException>(because: "a manager of another store must not hear about this one");
+    }
+
+    private HubConnection Connect(HttpClient client, string token) => new HubConnectionBuilder()
+        .WithUrl(new Uri(client.BaseAddress!, NotificationHub.Route), options =>
+        {
+            options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+            options.Transports = HttpTransportType.LongPolling;
+            options.HttpMessageHandlerFactory = _ => factory.Server.CreateHandler();
+        })
+        .Build();
 
     private static Notification Create(string key, LocationId? locationId) => Notification.Create(
         NotificationKind.BatchExpiringSoon,

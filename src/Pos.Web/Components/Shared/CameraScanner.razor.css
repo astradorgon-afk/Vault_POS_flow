@@ -1,0 +1,18 @@
+.camera-scanner { margin: .65rem 0; }
+.camera-open { min-height: 44px; padding: 0 .95rem; border: 0; border-radius: 9px; background: #1e6848; color: #fff; font: 700 .88rem 'DM Sans', sans-serif; cursor: pointer; }
+.camera-open:hover:not(:disabled) { background: #174f37; }
+.camera-open:disabled { opacity: .55; cursor: not-allowed; }
+.camera-panel { width: min(100%, 600px); padding: .8rem; border: 1px solid #b8d9c4; border-radius: 12px; background: #f3faf5; }
+.camera-panel-head { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: .65rem; }
+.camera-panel-head button { min-height: 38px; padding: 0 .7rem; border: 1px solid #9db8a6; border-radius: 8px; background: #fff; color: #174f37; font-weight: 700; cursor: pointer; }
+.camera-panel video { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 8px; background: #12221a; }
+.camera-panel p, .camera-error { margin: .65rem 0 0; font-size: .83rem; }
+.camera-tools { display: flex; align-items: end; flex-wrap: wrap; gap: .55rem; margin-top: .7rem; }
+.camera-tools label { display: grid; gap: .2rem; min-width: 12rem; color: #365946; font-size: .76rem; font-weight: 700; }
+.camera-tools select { min-height: 38px; max-width: 100%; padding: 0 .55rem; border: 1px solid #9db8a6; border-radius: 8px; background: #fff; color: #174f37; }
+.camera-tools button { min-height: 38px; padding: 0 .7rem; border: 1px solid #9db8a6; border-radius: 8px; background: #fff; color: #174f37; font-weight: 700; cursor: pointer; }
+.camera-tools button:disabled { opacity: .5; cursor: default; }
+.camera-zoom { display: flex; align-items: center; gap: .35rem; }
+.camera-zoom span { min-width: 2.5rem; text-align: center; font-size: .82rem; font-weight: 700; }
+.camera-repeat { min-height: 38px; margin-top: .6rem; padding: 0 .7rem; border: 1px solid #1e6848; border-radius: 8px; background: #fff; color: #174f37; font-weight: 700; cursor: pointer; }
+.camera-error { color: #a32f30; }

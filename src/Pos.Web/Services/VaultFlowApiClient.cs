@@ -1,10 +1,17 @@
 namespace Pos.Web.Services;
 
 /// <summary>Calls the VaultFlow HTTP API for the interactive web application.</summary>
-public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
+public sealed partial class VaultFlowApiClient(HttpClient http, UserSession session)
 {
     /// <summary>Signs in with a username, password and optional two-factor code.</summary>
-    public async Task<ApiResult<SignInResponse>> SignInAsync(
+    public Task<ApiResult<SignInResponse>> SignInAsync(
+        string userName,
+        string password,
+        string? twoFactorCode,
+        CancellationToken cancellationToken)
+        => GuardAsync(() => SignInCoreAsync(userName, password, twoFactorCode, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<SignInResponse>> SignInCoreAsync(
         string userName,
         string password,
         string? twoFactorCode,
@@ -39,6 +46,25 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
     }
 
     /// <summary>Creates an authorized request for future API operations.</summary>
+    /// <summary>Adds request headers, skipping any with no value.</summary>
+    /// <param name="request">The request being built.</param>
+    /// <param name="headers">The headers to add, if any.</param>
+    private static void Apply(HttpRequestMessage request, IReadOnlyDictionary<string, string>? headers)
+    {
+        if (headers is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<string, string> header in headers)
+        {
+            if (!string.IsNullOrWhiteSpace(header.Value))
+            {
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+    }
+
     public HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
         HttpRequestMessage request = new(method, new Uri(path, UriKind.Relative));
@@ -52,17 +78,180 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return request;
     }
 
-    /// <summary>Gets and deserializes an authenticated API resource.</summary>
-    public async Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
+    private const string SessionExpiredText = "Your session has expired. Reload the page to sign in again.";
+    private const string UnreachableText = "VaultFlow could not reach the server. Check the connection, then try again.";
+    private const string TimedOutText = "The server took too long to answer. Try again in a moment.";
+    private const string UnreadableText = "The server sent a response VaultFlow could not read.";
+
+    /// <summary>
+    /// Turns a transport failure into a result the screen can show. A timeout
+    /// reads as its own message, because "try again in a moment" is true of a
+    /// slow server and misleading for an unreachable one.
+    /// </summary>
+    /// <remarks>
+    /// Cancellation the caller asked for — a component disposed, a newer load
+    /// started — is rethrown: the screen is gone and has nothing to show. Only
+    /// the HttpClient's own timeout, which cancels a token the caller never
+    /// signalled, becomes a message.
+    /// </remarks>
+    private static async Task<ApiResult<T>> GuardAsync<T>(
+        Func<Task<ApiResult<T>>> call,
+        CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return ApiResult<T>.Failure(TimedOutText);
+        }
+        catch (HttpRequestException)
+        {
+            return ApiResult<T>.Failure(UnreachableText);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return ApiResult<T>.Failure(UnreadableText);
+        }
+    }
+
+    /// <summary>Sends an authorized request, refreshing the circuit's access
+    /// token shortly before it expires and retrying once when the API rejects
+    /// it. Returns <see langword="null"/> when the session has expired and
+    /// cannot be renewed; the caller reports <see cref="SessionExpiredText"/>.</summary>
+    private async Task<HttpResponseMessage?> SendAuthorizedAsync(
+        Func<HttpRequestMessage> createRequest,
+        CancellationToken cancellationToken)
+    {
+        // Best effort: a fresh session skips this without touching the network.
+        _ = await RefreshSessionAsync(force: false, cancellationToken).ConfigureAwait(false);
+
+        HttpResponseMessage response = await http
+            .SendAsync(createRequest(), cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized || session.Current is null)
+        {
+            return response;
+        }
+
+        // The access token was rejected; exchange the refresh token once and retry.
+        response.Dispose();
+        if (!await RefreshSessionAsync(force: true, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return await http.SendAsync(createRequest(), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Keeps the session alive by refreshing the access token before
+    /// it expires. Safe to call from anywhere; concurrent callers share one
+    /// exchange through the session gate, so a single-use refresh token is
+    /// never spent twice.</summary>
+    public Task<bool> EnsureFreshSessionAsync(CancellationToken cancellationToken)
+        => RefreshSessionAsync(force: false, cancellationToken);
+
+    private async Task<bool> RefreshSessionAsync(bool force, CancellationToken cancellationToken)
+    {
+        if (session.Current is not { } requested)
+        {
+            return false;
+        }
+
+        if (!force && requested.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddSeconds(60))
+        {
+            return true;
+        }
+
+        if (requested.RefreshTokenExpiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            return false;
+        }
+
+        await session.RefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Another caller may have refreshed while this one waited.
+            if (session.Current is not { } current)
+            {
+                return false;
+            }
+
+            if (!string.Equals(current.AccessToken, requested.AccessToken, StringComparison.Ordinal)
+                && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddSeconds(30))
+            {
+                return true;
+            }
+
+            if (!force && current.AccessTokenExpiresAtUtc > DateTimeOffset.UtcNow.AddSeconds(60))
+            {
+                return true;
+            }
+
+            using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/api/v1/auth/refresh", UriKind.Relative));
+            request.Content = JsonContent.Create(new { current.RefreshToken });
+            using HttpResponseMessage response = await http
+                .SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            SignInResponse? refreshed = await response.Content
+                .ReadFromJsonAsync<SignInResponse>(cancellationToken).ConfigureAwait(false);
+            if (refreshed is null || refreshed.User.Id != current.User.Id)
+            {
+                return false;
+            }
+
+            // Only the credentials rotate; the chosen work location survives.
+            session.UpdateCredentials(refreshed);
+            return true;
+        }
+        finally
+        {
+            session.RefreshGate.Release();
+        }
+    }
+
+    /// <summary>Builds the message for a failed load: the API's own detail when
+    /// it sent one, a session-expired hint for a 401, the generic fallback else.</summary>
+    private static string LoadFailureText(HttpResponseMessage response, ApiProblem? problem)
+        => problem?.Detail
+        ?? (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+            ? SessionExpiredText
+            : "VaultFlow could not load the requested information.");
+
+    /// <summary>Builds the message for a failed action, mirroring
+    /// <see cref="LoadFailureText"/> with the action's fallback wording.</summary>
+    private static string ActionFailureText(HttpResponseMessage response, ApiProblem? problem)
+        => problem?.Detail
+        ?? (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+            ? SessionExpiredText
+            : "VaultFlow could not complete that operation.");
+
+    /// <summary>Gets and deserializes an authenticated API resource.</summary>
+    public Task<ApiResult<T>> GetAsync<T>(string path, CancellationToken cancellationToken)
+        => GuardAsync(() => GetCoreAsync<T>(path, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<T>> GetCoreAsync<T>(string path, CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<T>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<T>.Failure(
-                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                LoadFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -70,20 +259,83 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return value is null
             ? ApiResult<T>.Failure("The API returned an unreadable response.")
             : ApiResult<T>.Success(value);
+    }
+
+    /// <summary>
+    /// Reads a response along with one of its headers, for endpoints that
+    /// report paging counts outside the body.
+    /// </summary>
+    /// <typeparam name="T">The response shape.</typeparam>
+    /// <param name="path">The request path.</param>
+    /// <param name="header">The response header to return.</param>
+    /// <param name="cancellationToken">Propagates cancellation.</param>
+    /// <returns>The result, and the header's value when the server sent one.</returns>
+    public async Task<(ApiResult<T> Result, string? Header)> GetWithHeaderAsync<T>(
+        string path, string header, CancellationToken cancellationToken)
+    {
+        string? captured = null;
+        ApiResult<T> result = await GuardAsync(
+            async () =>
+            {
+                using HttpResponseMessage? response = await SendAuthorizedAsync(
+                    () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+                if (response is null)
+                {
+                    return ApiResult<T>.Failure(SessionExpiredText);
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
+                    return ApiResult<T>.Failure(LoadFailureText(response, problem), problem?.ErrorCode);
+                }
+
+                if (response.Headers.TryGetValues(header, out IEnumerable<string>? values))
+                {
+                    captured = values.FirstOrDefault();
+                }
+
+                T? value = await response.Content.ReadFromJsonAsync<T>(cancellationToken).ConfigureAwait(false);
+                return value is null
+                    ? ApiResult<T>.Failure("The API returned an unreadable response.")
+                    : ApiResult<T>.Success(value);
+            }, cancellationToken).ConfigureAwait(false);
+
+        return (result, captured);
     }
 
     /// <summary>Posts a JSON body through the register and reads the response.</summary>
-    public async Task<ApiResult<T>> PostAsync<T>(string path, object body, CancellationToken cancellationToken)
+    public Task<ApiResult<T>> PostAsync<T>(
+        string path,
+        object body,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? headers = null)
+        => GuardAsync(() => PostCoreAsync<T>(path, body, headers, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<T>> PostCoreAsync<T>(
+        string path,
+        object body,
+        IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
-        request.Content = JsonContent.Create(body);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () =>
+            {
+                HttpRequestMessage request = CreateRequest(HttpMethod.Post, path);
+                request.Content = JsonContent.Create(body);
+                Apply(request, headers);
+                return request;
+            }, cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<T>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<T>.Failure(
-                problem?.Detail ?? "VaultFlow could not complete that operation.",
+                ActionFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -92,22 +344,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             ? ApiResult<T>.Failure("The API returned an unreadable response.")
             : ApiResult<T>.Success(value);
     }
-
-    /// <summary>Schedules an effective-dated product price.</summary>
-    public Task<ApiResult<PosReference>> SchedulePriceAsync(
-        Guid productId, PosSchedulePriceRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/catalog/products/{productId:D}/prices"),
-            request,
-            cancellationToken);
-
-    /// <summary>Cancels a future product price with its recorded reason.</summary>
-    public Task<ApiResult<PosReference>> CancelScheduledPriceAsync(
-        Guid productId, Guid priceId, PosCancelPriceRequest request, CancellationToken cancellationToken)
-        => PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/catalog/products/{productId:D}/prices/{priceId:D}/cancel"),
-            request,
-            cancellationToken);
 
     /// <summary>Loads the authenticated operator's durable notification feed.</summary>
     public Task<ApiResult<PosNotificationFeed>> GetNotificationsAsync(
@@ -135,16 +371,23 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             cancellationToken);
 
     /// <summary>Gets a plain-text body from an authenticated API resource.</summary>
-    public async Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
+    public Task<ApiResult<string>> GetTextAsync(string path, CancellationToken cancellationToken)
+        => GuardAsync(() => GetTextCoreAsync(path, cancellationToken), cancellationToken);
+
+    private async Task<ApiResult<string>> GetTextCoreAsync(string path, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, path);
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<string>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<string>.Failure(
-                problem?.Detail ?? "VaultFlow could not load the requested information.",
+                LoadFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -152,12 +395,28 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
         return ApiResult<string>.Success(text);
     }
 
-    /// <summary>Finds completed sales by store and a business-date window.
+    /// <summary>Gets what each store the operator may see sold and took in over
+    /// a period of business dates, summed over every sale by the API.</summary>
+    public Task<ApiResult<PosStorePerformanceReport>> GetStorePerformanceAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken)
+        => GetAsync<PosStorePerformanceReport>(
+            FormattableString.Invariant($"/api/v1/dashboard/store-performance?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
+            cancellationToken);
+
+    /// <summary>Gets dispatched product movement and restock requests for each store over a business-date period.</summary>
+    public Task<ApiResult<PosStoreMovementReport>> GetStoreMovementsAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken)
+        => GetAsync<PosStoreMovementReport>(
+            FormattableString.Invariant($"/api/v1/dashboard/store-movements?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"),
+            cancellationToken);
+
+    /// <summary>Finds one page of a store's sales in a business-date window, newest
+    /// first, with the total that matched so a list can page through all of them.
     /// Pass a store the operator may operate; the API re-checks <c>sale.view</c>.</summary>
-    public Task<ApiResult<List<PosSaleSummary>>> SearchSalesAsync(
-        Guid locationId, DateOnly? from, DateOnly? to, CancellationToken cancellationToken)
+    public async Task<ApiResult<PosSalePage>> SearchSalesAsync(
+        Guid locationId, DateOnly? from, DateOnly? to, int offset, int limit, CancellationToken cancellationToken)
     {
-        string path = FormattableString.Invariant($"/api/v1/sales?locationId={locationId:D}");
+        string path = FormattableString.Invariant($"/api/v1/sales?locationId={locationId:D}&offset={offset}&limit={limit}");
         if (from is { } fromDate)
         {
             path += FormattableString.Invariant($"&from={fromDate:yyyy-MM-dd}");
@@ -168,55 +427,34 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             path += FormattableString.Invariant($"&to={toDate:yyyy-MM-dd}");
         }
 
-        return GetAsync<List<PosSaleSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Lists payment receipts newest first, optionally filtered by store,
-    /// kind or an issued-window. The API re-checks <c>receipt.view</c>.</summary>
-    public Task<ApiResult<List<PosReceiptSummary>>> GetReceiptsAsync(
-        Guid? locationId,
-        string? kindName,
-        DateTimeOffset? from,
-        DateTimeOffset? to,
-        int limit,
-        CancellationToken cancellationToken)
-    {
-        string path = "/api/v1/receipts?";
-        if (locationId is { } location)
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () => CreateRequest(HttpMethod.Get, path), cancellationToken).ConfigureAwait(false);
+        if (response is null)
         {
-            path += FormattableString.Invariant($"locationId={location:D}&");
+            return ApiResult<PosSalePage>.Failure(SessionExpiredText);
         }
 
-        if (!string.IsNullOrWhiteSpace(kindName))
+        if (!response.IsSuccessStatusCode)
         {
-            path += $"kind={Uri.EscapeDataString(kindName)}&";
+            ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
+            return ApiResult<PosSalePage>.Failure(
+                LoadFailureText(response, problem),
+                problem?.ErrorCode);
         }
 
-        if (from is { } fromDate)
+        List<PosSaleSummary>? sales = await response.Content
+            .ReadFromJsonAsync<List<PosSaleSummary>>(cancellationToken)
+            .ConfigureAwait(false);
+        if (sales is null)
         {
-            path += $"from={QueryTimestamp(fromDate)}&";
+            return ApiResult<PosSalePage>.Failure("The API returned an unreadable response.");
         }
 
-        if (to is { } toDate)
-        {
-            path += $"to={QueryTimestamp(toDate)}&";
-        }
-
-        path += FormattableString.Invariant($"limit={limit}");
-        return GetAsync<List<PosReceiptSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Renders a payment receipt as printable plain text (or HTML when requested).</summary>
-    public Task<ApiResult<string>> GetReceiptPrintTextAsync(
-        Guid receiptId, string? format, CancellationToken cancellationToken)
-    {
-        string path = FormattableString.Invariant($"/api/v1/receipts/{receiptId:D}/print");
-        if (!string.IsNullOrWhiteSpace(format))
-        {
-            path += $"?format={Uri.EscapeDataString(format)}";
-        }
-
-        return GetTextAsync(path, cancellationToken);
+        int total = response.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? values)
+            && int.TryParse(values.FirstOrDefault(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int count)
+                ? count
+                : offset + sales.Count;
+        return ApiResult<PosSalePage>.Success(new PosSalePage(sales, total));
     }
 
     /// <summary>Gets the highest repeated negative-stock attempts in the last window.</summary>
@@ -237,14 +475,9 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
     public Task<ApiResult<PosInventoryOverview>> GetInventoryOverviewAsync(
         CancellationToken cancellationToken)
         => GetAsync<PosInventoryOverview>(
-            "/api/v1/dashboard/inventory-overview", cancellationToken);
-
-    /// <summary>Gets the authorization-scoped movement chain for a document.</summary>
-    public Task<ApiResult<PosInventoryTimeline>> GetInventoryTimelineAsync(
-        string documentType, Guid documentId, CancellationToken cancellationToken)
-        => GetAsync<PosInventoryTimeline>(
-            FormattableString.Invariant($"/api/v1/inventory/timeline/{Uri.EscapeDataString(documentType)}/{documentId:D}"),
-            cancellationToken);
+            session.WorkLocationId is { } locationId
+                ? FormattableString.Invariant($"/api/v1/dashboard/inventory-overview?locationId={locationId:D}")
+                : "/api/v1/dashboard/inventory-overview", cancellationToken);
 
     /// <summary>Gets open synchronization failures for authorized operators.</summary>
     public Task<ApiResult<List<PosSyncFailure>>> GetSyncFailuresAsync(
@@ -310,83 +543,44 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
 
     // ---- Inventory counts ----
 
-    /// <summary>Lists counts at the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosInventoryCountSummary>>> GetInventoryCountsAsync(
-        Guid? locationId, string? statusName, CancellationToken cancellationToken)
-    {
-        string path = "/api/v1/inventory/counts?offset=0&limit=200";
-        if (locationId is { } location)
-        {
-            path += FormattableString.Invariant($"&locationId={location:D}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(statusName))
-        {
-            path += $"&status={Uri.EscapeDataString(statusName)}";
-        }
-
-        return GetAsync<List<PosInventoryCountSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Gets one count with its recorded lines.</summary>
-    public Task<ApiResult<PosInventoryCountDetail>> GetInventoryCountAsync(
-        Guid countId, CancellationToken cancellationToken)
-        => GetAsync<PosInventoryCountDetail>(
-            FormattableString.Invariant($"/api/v1/inventory/counts/{countId:D}"),
-            cancellationToken);
-
-    /// <summary>Lists product master rows by name, SKU or barcode, paged.</summary>
-    public Task<ApiResult<List<PosProductSummary>>> GetProductsAsync(
-        string? query, int offset, int limit, CancellationToken cancellationToken)
-    {
-        string path = $"/api/v1/catalog/products?offset={offset}&limit={limit}";
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            path += $"&q={Uri.EscapeDataString(query)}";
-        }
-
-        return GetAsync<List<PosProductSummary>>(path, cancellationToken);
-    }
-
-    // ---- Transfers ----
-
-    /// <summary>Lists transfers touching the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosTransferSummary>>> GetTransfersAsync(CancellationToken cancellationToken)
-        => GetAsync<List<PosTransferSummary>>("/api/v1/transfers", cancellationToken);
-
-    /// <summary>Gets one transfer with its lines, allocations and arrival state.</summary>
-    public Task<ApiResult<PosTransferDetail>> GetTransferAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => GetAsync<PosTransferDetail>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}"),
-            cancellationToken);
-
-    /// <summary>Gets a transfer's custody timeline.</summary>
-    public Task<ApiResult<List<PosTransferCustodyEventSummary>>> GetTransferCustodyAsync(
-        Guid transferId, CancellationToken cancellationToken)
-        => GetAsync<List<PosTransferCustodyEventSummary>>(
-            FormattableString.Invariant($"/api/v1/transfers/{transferId:D}/custody"),
-            cancellationToken);
-
-    // ---- People & roles ----
-
     /// <summary>Sends a command whose response is empty on success (204).</summary>
-    public async Task<ApiResult<string>> SendCommandAsync(
-        HttpMethod method, string path, object? body, CancellationToken cancellationToken)
-    {
-        using HttpRequestMessage request = CreateRequest(method, path);
-        if (body is not null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
+    public Task<ApiResult<string>> SendCommandAsync(
+        HttpMethod method,
+        string path,
+        object? body,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? headers = null)
+        => GuardAsync(() => SendCommandCoreAsync(method, path, body, headers, cancellationToken), cancellationToken);
 
-        using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    private async Task<ApiResult<string>> SendCommandCoreAsync(
+        HttpMethod method,
+        string path,
+        object? body,
+        IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage? response = await SendAuthorizedAsync(
+            () =>
+            {
+                HttpRequestMessage request = CreateRequest(method, path);
+                if (body is not null)
+                {
+                    request.Content = JsonContent.Create(body);
+                }
+
+                Apply(request, headers);
+                return request;
+            }, cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return ApiResult<string>.Failure(SessionExpiredText);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             ApiProblem? problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
             return ApiResult<string>.Failure(
-                problem?.Detail ?? "VaultFlow could not complete that operation.",
+                ActionFailureText(response, problem),
                 problem?.ErrorCode);
         }
 
@@ -549,6 +743,14 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             new { },
             cancellationToken);
 
+    /// <summary>Sets the locations a registered terminal may open.</summary>
+    public Task<ApiResult<PosReference>> SetDeviceLocationsAsync(
+        Guid deviceId, IReadOnlyList<Guid> locationIds, CancellationToken cancellationToken)
+        => PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/devices/{deviceId:D}/locations"),
+            new { locationIds },
+            cancellationToken);
+
     /// <summary>Temporarily blocks a terminal and ends its sessions.</summary>
     public Task<ApiResult<string>> SuspendDeviceAsync(
         Guid deviceId, string reason, CancellationToken cancellationToken)
@@ -581,12 +783,41 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
     /// <summary>Lists physical locations and their operating policies.</summary>
     public Task<ApiResult<List<PosLocationAdmin>>> GetLocationAdministrationAsync(
         CancellationToken cancellationToken)
-        => GetAsync<List<PosLocationAdmin>>("/api/v1/locations", cancellationToken);
+        => GetAsync<List<PosLocationAdmin>>("/api/v1/locations/administration", cancellationToken);
+
+    /// <summary>Lists physical locations for device assignment without exposing operating settings.</summary>
+    public Task<ApiResult<List<PosLocation>>> GetDeviceLocationChoicesAsync(CancellationToken cancellationToken)
+        => GetAsync<List<PosLocation>>("/api/v1/locations/device-choices", cancellationToken);
 
     /// <summary>Adds a warehouse or store.</summary>
     public Task<ApiResult<PosReference>> CreateLocationAsync(
         PosCreateLocationRequest request, CancellationToken cancellationToken)
         => PostAsync<PosReference>("/api/v1/locations", request, cancellationToken);
+
+    /// <summary>Gets one location, including one that has been closed.</summary>
+    public Task<ApiResult<PosLocationAdmin>> GetLocationAsync(
+        Guid locationId, CancellationToken cancellationToken)
+        => GetAsync<PosLocationAdmin>(
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}"),
+            cancellationToken);
+
+    /// <summary>Changes a location's code, name, kind and timezone.</summary>
+    public Task<ApiResult<string>> UpdateLocationAsync(
+        Guid locationId, PosUpdateLocationRequest request, CancellationToken cancellationToken)
+        => SendCommandAsync(
+            HttpMethod.Put,
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}"),
+            request,
+            cancellationToken);
+
+    /// <summary>Closes a location; locations are retired, never deleted.</summary>
+    public Task<ApiResult<string>> CloseLocationAsync(
+        Guid locationId, DateOnly closingDate, CancellationToken cancellationToken)
+        => SendCommandAsync(
+            HttpMethod.Post,
+            FormattableString.Invariant($"/api/v1/locations/{locationId:D}/close"),
+            new PosCloseLocationRequest(closingDate),
+            cancellationToken);
 
     /// <summary>Replaces a location's operational policy.</summary>
     public Task<ApiResult<string>> UpdateLocationSettingsAsync(
@@ -608,52 +839,6 @@ public sealed class VaultFlowApiClient(HttpClient http, UserSession session)
             cancellationToken);
 
     // ---- Stock adjustments ----
-
-    /// <summary>Lists adjustments at the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosStockAdjustmentSummary>>> GetStockAdjustmentsAsync(
-        Guid? locationId, string? statusName, CancellationToken cancellationToken)
-    {
-        string path = "/api/v1/inventory/adjustments?offset=0&limit=200";
-        if (locationId is { } location)
-        {
-            path += FormattableString.Invariant($"&locationId={location:D}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(statusName))
-        {
-            path += $"&status={Uri.EscapeDataString(statusName)}";
-        }
-
-        return GetAsync<List<PosStockAdjustmentSummary>>(path, cancellationToken);
-    }
-
-    /// <summary>Gets one adjustment with its lines.</summary>
-    public Task<ApiResult<PosStockAdjustmentDetail>> GetStockAdjustmentAsync(
-        Guid adjustmentId, CancellationToken cancellationToken)
-        => GetAsync<PosStockAdjustmentDetail>(
-            FormattableString.Invariant($"/api/v1/inventory/adjustments/{adjustmentId:D}"),
-            cancellationToken);
-
-    // ---- Quarantine ----
-
-    /// <summary>Lists quarantine incidents at the caller's locations, newest first.</summary>
-    public Task<ApiResult<List<PosQuarantineIncidentSummary>>> GetQuarantineIncidentsAsync(
-        CancellationToken cancellationToken)
-        => GetAsync<List<PosQuarantineIncidentSummary>>("/api/v1/quarantine", cancellationToken);
-
-    /// <summary>Gets one incident with its lines, photos and timeline.</summary>
-    public Task<ApiResult<PosQuarantineIncidentDetail>> GetQuarantineIncidentAsync(
-        Guid incidentId, CancellationToken cancellationToken)
-        => GetAsync<PosQuarantineIncidentDetail>(
-            FormattableString.Invariant($"/api/v1/quarantine/{incidentId:D}"),
-            cancellationToken);
-
-    // ---- Replenishment & inventory exceptions ----
-
-    /// <summary>Recommends replenishment quantities for the caller's stocked locations.</summary>
-    public Task<ApiResult<List<PosReplenishmentRecommendation>>> GetReplenishmentRecommendationsAsync(
-        CancellationToken cancellationToken)
-        => GetAsync<List<PosReplenishmentRecommendation>>("/api/v1/replenishment/recommendations", cancellationToken);
 
     /// <summary>Lists stock draws the ledger refused, newest first.</summary>
     public Task<ApiResult<List<PosNegativeStockAttemptView>>> GetNegativeStockAttemptsAsync(

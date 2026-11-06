@@ -236,15 +236,28 @@ public static class SaleEndpoints
             : ProblemDetailsMapping.ToProblem(result, currentUser.CorrelationId.Value);
     }
 
+    private const int DefaultSalesPage = 200;
+    private const int MaxSalesPage = 1000;
+
     private static async Task<IResult> SearchSalesAsync(
         [FromQuery] Guid locationId,
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
         [FromQuery] Guid? cashierId,
+        [FromQuery] string? number,
+        [FromQuery] int? offset,
+        [FromQuery] int? limit,
         [FromServices] PosDbContext context,
+        HttpResponse response,
         CancellationToken cancellationToken)
     {
         LocationId scope = new(locationId);
+
+        // A page of the newest sales. The total goes in X-Total-Count so a list
+        // can say how many there are and page through them, instead of quietly
+        // stopping at the first page.
+        int skip = Math.Max(0, offset ?? 0);
+        int take = Math.Clamp(limit ?? DefaultSalesPage, 1, MaxSalesPage);
 
         IQueryable<Sale> query = context.Sales
             .AsNoTracking()
@@ -266,9 +279,21 @@ public static class SaleEndpoints
             query = query.Where(s => s.CompletedByUserId == cashierAccount);
         }
 
+        // Part of a receipt number, as a cashier types or scans it.
+        if (!string.IsNullOrWhiteSpace(number))
+        {
+            string term = number.Trim().ToUpperInvariant();
+            query = query.Where(s => s.Number.Contains(term));
+        }
+
+        int total = await query.CountAsync(cancellationToken).ConfigureAwait(false);
+        response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
         var rows = await query
             .OrderByDescending(s => s.CompletedAtUtc)
-            .Take(200)
+            .ThenByDescending(s => s.Number)
+            .Skip(skip)
+            .Take(take)
             .Select(s => new
             {
                 s.Id,
@@ -396,20 +421,28 @@ public static class SaleEndpoints
         var location = await context.Locations
             .AsNoTracking()
             .Where(l => l.Id == sale.LocationId)
-            .Select(l => new { l.Name, l.TimeZoneId })
+            .Select(l => new { l.Name, l.TimeZoneId, l.Settings })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // The cashier's name as the rest of the system shows it, not their login.
         string? cashierName = await context.Users
             .AsNoTracking()
             .Where(u => u.Id == sale.CompletedByUserId.Value)
-            .Select(u => u.UserName)
+            .Select(u => string.IsNullOrEmpty(u.DisplayName) ? u.UserName : u.DisplayName)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // The branch's own header and footer, as configured on the Locations page.
         ReceiptFormat requestedFormat = format ?? ReceiptFormat.Plain;
         string text = SaleReceiptRenderer.Render(
-            sale, location?.Name ?? string.Empty, location?.TimeZoneId, cashierName, requestedFormat);
+            sale,
+            location?.Name ?? string.Empty,
+            location?.TimeZoneId,
+            cashierName,
+            requestedFormat,
+            header: location?.Settings.ReceiptHeader,
+            footer: location?.Settings.ReceiptFooter);
 
         Result<SaleReceiptPrint> print = SaleReceiptPrint.Create(
             saleId,

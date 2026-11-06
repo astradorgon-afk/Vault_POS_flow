@@ -41,14 +41,6 @@ internal static class ReturnCommandErrors
         "sale.return.location_mismatch",
         FormattableString.Invariant($"Return {returnId} does not belong to location {locationId.Value}."));
 
-    /// <summary>The return acts on a sale not accepted on the same device.</summary>
-    /// <param name="returnId">The return.</param>
-    /// <param name="deviceId"> the device the return was accepted on.</param>
-    /// <returns>The error.</returns>
-    public static Error DeviceMismatch(SalesReturnId returnId, DeviceId deviceId) => Error.Conflict(
-        "sale.return.device_mismatch",
-        FormattableString.Invariant($"Return {returnId} was not accepted on device {deviceId.Value}."));
-
     /// <summary>A return line references a product that is not on the original sale.</summary>
     /// <param name="productId">The unknown product.</param>
     /// <returns>The error.</returns>

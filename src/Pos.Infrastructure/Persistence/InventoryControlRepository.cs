@@ -45,7 +45,10 @@ public sealed class InventoryControlRepository(PosDbContext context) : IInventor
 
         return location is null
             ? null
-            : new InventoryControlLocation(location.Kind, string.IsNullOrWhiteSpace(location.TimeZoneId) ? null : location.TimeZoneId);
+            : new InventoryControlLocation(
+                location.Kind,
+                string.IsNullOrWhiteSpace(location.TimeZoneId) ? null : location.TimeZoneId,
+                location.IsActive);
     }
 
     /// <inheritdoc />

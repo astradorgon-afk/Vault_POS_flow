@@ -14,11 +14,13 @@ namespace Pos.Application.Transfers;
 /// handler validates its scope and value, and a tokenless transfer runs the
 /// ordinary review workflow.
 /// </param>
+/// <param name="Mode">Normal transfer or an owner-approved store restock request.</param>
 public sealed record CreateTransferCommand(
     LocationId SourceLocationId,
     LocationId DestinationLocationId,
     IReadOnlyList<TransferLineSpec> Lines,
-    PreApprovalTokenId? PreApprovalTokenId = null)
+    PreApprovalTokenId? PreApprovalTokenId = null,
+    TransferMode Mode = TransferMode.Normal)
     : ICommand<TransferOrderId>, IAuthorizedMessage
 {
     /// <inheritdoc />
@@ -131,6 +133,22 @@ public sealed record CancelTransferDispatchCommand(TransferOrderId TransferId, s
 {
     /// <inheritdoc />
     public string RequiredPermission => Permissions.Transfer.Dispatch;
+}
+
+/// <summary>
+/// Abandons a transfer that has not been dispatched. Nothing has reached the
+/// ledger yet, so there is nothing to reverse — the request is simply dropped.
+/// </summary>
+/// <param name="TransferId">The transfer.</param>
+/// <param name="Reason">Why it is being abandoned.</param>
+public sealed record CancelTransferBeforeDispatchCommand(TransferOrderId TransferId, string Reason)
+    : ICommand<TransferOrderId>, IAuthorizedMessage
+{
+    /// <summary>
+    /// The same right as picking it: whoever prepares a transfer at the source
+    /// is who discovers it can no longer go.
+    /// </summary>
+    public string RequiredPermission => Permissions.Transfer.Pick;
 }
 
 /// <summary>

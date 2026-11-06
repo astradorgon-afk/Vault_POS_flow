@@ -1,6 +1,7 @@
 using Pos.Application.Common.Abstractions;
 using Pos.Application.Common.Messaging;
 using Pos.Application.Identity;
+using Pos.Domain.Auditing;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
 using Pos.Domain.Inventory;
@@ -28,6 +29,7 @@ public sealed class CreateGoodsReceiptCommandHandler(
     IDocumentNumberGenerator numbers,
     IApprovalGate approvalGate,
     IPermissionEvaluator permissions,
+    IAuditWriter audit,
     ICurrentUser currentUser,
     ISystemClock clock) : ICommandHandler<CreateGoodsReceiptCommand, GoodsReceiptId>
 {
@@ -83,6 +85,19 @@ public sealed class CreateGoodsReceiptCommandHandler(
                 PurchasingErrors.ReceiptLocationTimeZoneMissing(order.DestinationLocationId));
         }
 
+        if (order.OrderedAtUtc is not { } orderedAt)
+        {
+            return Result<GoodsReceiptId>.Failure(Error.Conflict(
+                "purchasing.order_not_sent", "Send the order to the supplier before recording a delivery."));
+        }
+
+        if (clock.UtcNow < orderedAt)
+        {
+            return Result<GoodsReceiptId>.Failure(Error.Conflict(
+                "purchasing.receiving_before_order",
+                "A delivery cannot be recorded before the order was sent. Check the order date and server clock."));
+        }
+
         ProductId[] productIds = [.. order.Lines.Select(l => l.ProductId).Distinct()];
         IReadOnlyList<Product> products = await orders
             .GetProductsForReceivingAsync(productIds, cancellationToken)
@@ -128,7 +143,10 @@ public sealed class CreateGoodsReceiptCommandHandler(
             command.DocumentsMissing,
             clock.BusinessDateFor(context.DestinationTimeZoneId),
             receiver,
-            clock.UtcNow);
+            clock.UtcNow,
+            command.SupplierDeliveryReceiptNumber,
+            command.SupplierOfficialReceiptNumber,
+            command.SupplierReleasedAtUtc);
 
         if (planned.IsFailure)
         {
@@ -261,10 +279,11 @@ public sealed class CreateGoodsReceiptCommandHandler(
 
         Dictionary<PurchaseOrderLineId, decimal> cumulativeAfter = new(context.CumulativeReceivedByLine);
 
+        // Only good units fill the order; refused ones leave the line still due.
         foreach (GoodsReceiptLine line in receipt.Lines)
         {
             cumulativeAfter[line.PurchaseOrderLineId] =
-                cumulativeAfter.GetValueOrDefault(line.PurchaseOrderLineId) + line.QuantityReceived;
+                cumulativeAfter.GetValueOrDefault(line.PurchaseOrderLineId) + line.QuantityReceived - line.QuantityRejected;
         }
 
         Result reconciled = order.RecordReceipt(cumulativeAfter);
@@ -274,9 +293,71 @@ public sealed class CreateGoodsReceiptCommandHandler(
             return Result<GoodsReceiptId>.Failure(reconciled.Errors);
         }
 
-        return await orders
+        Result<GoodsReceiptId> stored = await orders
             .AddReceiptAsync(receipt, newBatches, cancellationToken)
             .ConfigureAwait(false);
+
+        if (stored.IsFailure)
+        {
+            return stored;
+        }
+
+        // The moment stock enters the business from outside. The entry names the
+        // order it settles and the supplier's own paperwork, so a delivery can be
+        // traced back to what was agreed and what the driver handed over.
+        await PurchasingAudit
+            .WriteAsync(
+                audit,
+                AuditActions.Purchasing.GoodsReceived,
+                nameof(GoodsReceipt),
+                receipt.Id.Value,
+                receipt.DestinationLocationId,
+                new
+                {
+                    receipt.Number,
+                    PurchaseOrderNumber = order.Number,
+                    PurchaseOrderId = order.Id.Value,
+                    SupplierId = order.SupplierId.Value,
+                    Lines = receipt.Lines.Count,
+                    UnitsAccepted = receipt.Lines.Sum(line => line.QuantityAccepted),
+                    UnitsRejected = receipt.Lines.Sum(line => line.QuantityRejected),
+                    receipt.SupplierDeliveryReceiptNumber,
+                    receipt.DocumentsMissing,
+                },
+                reason: null,
+                ReferenceDocumentType.GoodsReceipt,
+                receipt.Id.Value,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        // A short, damaged or wrong delivery is the thing an owner most needs to
+        // find later, so it is called out on its own rather than left to be read
+        // off the quantities.
+        if (receipt.Discrepancies.Count > 0)
+        {
+            await PurchasingAudit
+                .WriteAsync(
+                    audit,
+                    AuditActions.Purchasing.DiscrepancyRaised,
+                    nameof(GoodsReceipt),
+                    receipt.Id.Value,
+                    receipt.DestinationLocationId,
+                    new
+                    {
+                        receipt.Number,
+                        PurchaseOrderNumber = order.Number,
+                        Discrepancies = receipt.Discrepancies.Count,
+                        Units = receipt.Discrepancies.Sum(d => d.Quantity),
+                        Value = receipt.Discrepancies.Sum(d => d.ValueImpact),
+                    },
+                    reason: null,
+                    ReferenceDocumentType.GoodsReceipt,
+                    receipt.Id.Value,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return stored;
     }
 
     /// <summary>

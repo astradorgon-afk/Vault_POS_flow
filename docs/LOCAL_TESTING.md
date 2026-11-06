@@ -88,6 +88,54 @@ dotnet user-secrets set 'ConnectionStrings:Postgres' `
 
 The API applies migrations and seeds the development users on first start.
 
+## Test web camera scanning on Android
+
+For the simplest phone test, keep the local API and Web UI running, start the
+Docker ngrok tunnel, and open the printed HTTPS URL on the phone:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-phone-ngrok.ps1
+```
+
+On first use, the script asks for an ngrok authtoken and saves it in the ignored
+`.secrets/ngrok.env` file. The token is never passed on the Docker command line.
+The phone can use any internet connection; it needs no local CA certificate or
+Windows inbound firewall rule. Continue past ngrok's one-time browser notice,
+sign in, and tap **Scan with camera** on the purchase order or receiving page.
+The tunnel exposes this development site to the internet while it runs; stop it
+after testing with `docker stop vaultflow-phone-ngrok`.
+
+The LAN-only Caddy option below remains available if a public tunnel is not
+suitable:
+
+Camera access needs a trusted HTTPS page when a phone uses this computer's LAN
+address. With the API and Web UI running, connect the phone to the same Wi-Fi
+and run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-phone-https.ps1
+```
+
+The script prints the current LAN address. On the phone, download the public
+certificate from `http://<printed-ip>:8445/phone-ca.crt`. In Android Settings,
+search for **Install a certificate**, choose **CA certificate**, and select the
+downloaded file. Then open `https://<printed-ip>:8444` in Chrome, sign in, and
+use **Scan with camera**. The private signing key stays in the local Docker
+volume; only the public certificate is downloadable. You can transfer the
+`.secrets/vaultflow-phone-ca.crt` file by USB instead of downloading it over
+the LAN.
+
+If either address times out on the phone, run the relevant `New-NetFirewallRule`
+commands printed by the script in an Administrator PowerShell, then retry on
+the same Wi-Fi. The script detects whether Windows labels that Wi-Fi **Public**
+or **Private** and restricts the rules to the local subnet. The HTTPS app uses
+port 8444 because port 8443 timed out on the test Android phone while HTTP on
+8444 worked. Do not continue past a browser certificate warning: the phone
+must trust the installed CA before camera access can work. Remove the
+**VaultFlow local/Caddy** CA from Android's user-installed certificates after
+testing; a trusted CA can validate other sites too. Stop the proxy with
+`docker stop vaultflow-phone-https` when finished.
+
 ## Run the desktop register (Windows)
 
 The desktop register is the .NET MAUI Blazor Hybrid app in `src/Pos.Client`. It
@@ -118,30 +166,36 @@ Visual Studio works too: set **Pos.Client** as the startup project, pick
    pick a store, name the register and give it an unused 2–6 character code;
    the issued code fills in, then enrol.
 2. **Sign in** as a user assigned to the register's store, for example
-   `cashier` or `manager` for Store One (any development account signs in with
-   the shared password `cash1234`). Signing in downloads the store's
+   `cashier` or `manager` for Legazpi Village (any development account signs
+   in with the shared password `cash1234`). Signing in downloads the store's
    products and the user's offline permissions; the banner turns **Ready**.
-3. The catalogue lists the store's products. The development seed creates a
-   selling price for every product and an opening stock balance at the Main
-   Warehouse and each store, so a sale completes against real
-   availability. See [Load the demo business](#load-the-demo-business) for a
-   month of history on top.
+3. The till groups the store's products by category (Rice & Grains, Beverages,
+   Personal Care, …); search by name, SKU or barcode reaches all of them. The
+   development seed creates a selling price for every product and an opening
+   stock balance at the distribution centre and each store, so a sale
+   completes against real availability. See
+   [Load the demo business](#load-the-demo-business) for a month of history on
+   top.
 
 The development accounts share the password `cash1234`. Store staff work the
 registers; the owner, administrator and auditor use the web UI to monitor:
 
-| Username    | Role               | Scope                                  |
-|-------------|--------------------|----------------------------------------|
-| `owner`     | Owner              | Business-wide                          |
-| `admin`     | Administrator      | Business-wide                          |
-| `manager`   | Store Manager      | Store One                              |
-| `cashier`   | Cashier            | Store One                              |
-| `manager2`  | Store Manager      | Store Two                              |
-| `cashier2`  | Cashier            | Store Two                              |
-| `manager3`  | Store Manager      | Store Three                            |
-| `cashier3`  | Cashier            | Store Three                            |
-| `inventory` | Inventory Staff    | Main Warehouse                         |
-| `auditor`   | Auditor            | Business-wide (read-only)              |
+| Username    | Name                | Role                   | Scope                                         |
+|-------------|---------------------|------------------------|-----------------------------------------------|
+| `owner`     | Ramon Dela Cruz     | Owner                  | Business-wide                                 |
+| `admin`     | Patricia Lim        | Administrator          | Business-wide                                 |
+| `auditor`   | Teresa Gonzales     | Auditor                | Business-wide (read-only)                     |
+| `warehouse` | Ernesto Villanueva  | Main Inventory Manager | MAIN — Valenzuela Distribution Center         |
+| `inventory` | Jonathan Cruz       | Inventory Staff        | MAIN — Valenzuela Distribution Center         |
+| `manager`   | Carmela Reyes       | Store Manager          | STORE01 — Legazpi Village, Makati             |
+| `cashier`   | Joy Mendoza         | Cashier                | STORE01 — Legazpi Village, Makati             |
+| `cashier1b` | Mark Anthony Santos | Cashier                | STORE01 — Legazpi Village, Makati             |
+| `manager2`  | Dennis Aquino       | Store Manager          | STORE02 — Tomas Morato, Quezon City           |
+| `cashier2`  | Kristine Bautista   | Cashier                | STORE02 — Tomas Morato, Quezon City           |
+| `cashier2b` | Rowena Garcia       | Cashier                | STORE02 — Tomas Morato, Quezon City           |
+| `manager3`  | Lourdes Navarro     | Store Manager          | STORE03 — Kapitolyo, Pasig                    |
+| `cashier3`  | Paolo Ramos         | Cashier                | STORE03 — Kapitolyo, Pasig                    |
+| `cashier3b` | Janine Torres       | Cashier                | STORE03 — Kapitolyo, Pasig                    |
 
 To set a register up again, close the app and delete
 `%LOCALAPPDATA%\User Name\com.vaultflow.pos\Data\device.db`, then use a new
@@ -158,32 +212,52 @@ register code: codes are unique even after a register is revoked.
 
 ## Load the demo business
 
-The development seed gives the API a full catalogue (43 products across eight
-categories, five suppliers, twelve named customers), per-store restock levels,
-and prices and opening stock dated 35 days back. `tools/Pos.DemoData` then
-fills that catalogue with a month of activity through the public API, the same
-way the store registers and the web UI call it, so every record passes the
-normal validation, ledger posting and audit:
+The development seed builds **Suki Mart**, a neighbourhood grocery chain with a
+distribution centre in Valenzuela and three branches (Legazpi Village in
+Makati, Tomas Morato in Quezon City, Kapitolyo in Pasig):
+
+- **749 products** in 18 categories from 59 brands and 12 suppliers, each with a
+  valid EAN-13 barcode, a cost and a selling price at local market levels, and
+  a few price rises part-way through the month. The catalogue is generated
+  deterministically (`DevelopmentCatalogue`), so every machine seeds the same.
+- **Opening stock sized for a month of sales,** with restock levels per store
+  set from each product's sales rate, so after the demo month most shelves are
+  healthy, some are low and a few have sold out.
+- **67 customers** (regulars and businesses that buy on account), the staff
+  accounts above, and a receipt header and return-policy footer per branch.
+
+`tools/Pos.DemoData` then trades a month through the public API, the same way
+the store registers and the web UI call it, so every record passes the normal
+validation, ledger posting and audit:
 
 ```powershell
 .\scripts\dev-desktop.ps1                               # API and Web UI running
 dotnet run --project tools/Pos.DemoData -- --days 30    # in a second terminal
 ```
 
-It posts:
+It takes about five minutes and posts:
 
-- **30 days of trading at all three stores,** through one enrolled register
-  per store: `W02` (a second Windows counter at Store One), `W03` (Store Two)
-  and `A01` (an Android phone till at Store Three). The store's cashier signs
-  in at the register, the register numbers its own documents as it does
-  offline, and the store manager voids and refunds. Each day has a shift with
-  cash, card and e-wallet sales, customer-attached sales, the odd void and
-  return, and a cash count, some with small variances. The real desktop
-  register `W01` is never used, so its own numbering is unaffected.
+- **About 25,000 sales over 31 days** (roughly 800 checkouts and ₱300,000 of
+  sales a day across the chain), through two enrolled registers per store:
+  `W02`/`W04` at Legazpi Village, `W03`/`W05` at Tomas Morato and the Android
+  phone tills `A01`/`A02` at Kapitolyo. The morning cashier opens the first
+  counter before 7:00 and counts the drawer mid-afternoon; the afternoon
+  cashier runs the second until after 22:00. Shoppers arrive on a realistic
+  daily curve (a lunchtime peak and a bigger evening one), weekends and
+  paydays are busier, baskets range from a single item to a weekly shop, and
+  each product sells at the rate its opening stock was planned for. Payment
+  is mostly cash, then e-wallet, then card; about one shopper in 25 gets the
+  senior citizen/PWD 20% discount, authorised by the store manager. About one
+  sale in 400 is voided and one in 350 comes back within the 7-day return
+  window and is refunded the way it was paid. Registers number their own documents as they do
+  offline. The real desktop register `W01` is never used, so its numbering is
+  unaffected.
 - **Back-office work at every stage:**
-  - Purchase orders: received in full, received short with damage, awaiting
-    approval, and a draft.
-  - Transfers: received, in transit, approved, awaiting approval, and a draft.
+  - Purchase orders to the distribution centre, sized to two weeks of the
+    chain's sales: received in full, received short with a damaged case, sent,
+    awaiting approval, and a draft.
+  - Restock transfers for what each store actually ran low on: received, in
+    transit, approved, awaiting approval, and a draft.
   - Stock counts: one approved, one in progress.
   - Stock adjustments: approved, awaiting approval, and a draft.
   - Payment receipts and a quarantine incident.
@@ -196,6 +270,25 @@ anything you want to keep:
 ```powershell
 docker exec vaultflow-dev-pg pg_dump -U pos_migrator -d vaultflow --format=custom > backups\before-demo.dump
 ```
+
+### Start over with fresh demo data
+
+The seeder only adds what is missing, so a database created before this demo
+business keeps its old products alongside the new ones (the API logs a
+warning when it finds the old catalogue). To start clean, remove the
+development database and let the script recreate it; the API migrates and
+seeds it on start:
+
+```powershell
+docker rm -f vaultflow-dev-pg
+docker volume rm vaultflow-dev-pgdata
+.\scripts\dev-desktop.ps1
+dotnet run --project tools/Pos.DemoData -- --days 30    # in a second terminal
+```
+
+The desktop register's enrolment belonged to the old database, so set it up
+again as described under [Run the desktop register](#run-the-desktop-register-windows)
+(delete its `device.db` and enrol with a new code).
 
 Selling happens only at the store registers: they work offline and sync to
 head office. The web UI is read-only for store records. The owner monitors each
@@ -218,6 +311,22 @@ appear in the web **Sales ledger** once they sync.
 
 Use a disposable local database for the restore rehearsal. Do not use these
 commands against a shared or production database.
+
+## Install and test the offline browser app on a phone
+
+With the API running on port 5177:
+
+```powershell
+.\scripts\start-phone-pwa.ps1
+```
+
+This publishes the web host in Release, starts it on local port 5321, and prints an ngrok HTTPS URL ending in `/login`. Open that link in Android Chrome and click through ngrok's one-time notice. Sign in online with a work location; enter the one-time installation enrollment code if this browser has not been enrolled. Sign-in opens the workspace in one step and shows **Offline access is ready on this device** in a banner there; use its **Install VaultFlow** button if the app is not yet installed, then dismiss the banner. Enable airplane mode, reopen the same `/login` URL, sign in with the account password, and test purchasing, receiving, and downloaded inventory. Reconnect and review each queued operation's confirmation.
+
+The script saves host/tunnel process IDs and the URL in ignored `artifacts/phone-pwa/pilot.json`; its output includes the stop command. Use `-SkipPublish` to reuse an already published build. Use `-ReuseTunnel` to publish a replacement and restart only the web host while keeping the existing phone address. Keep the tunnel running during the pilot. Free ngrok tunnel URLs change on restart, and device enrollment/data are origin-bound: use a permanent HTTPS domain before real deployment. Do not clear the old origin's storage while it holds pending work.
+
+To issue the code, open the website's **Administration → Devices**, register **Offline browser app (PWA)** for the work location, and enter its one-time enrollment code in the installed app. A browser lane is a different device type and does not provide this offline enrollment.
+
+Do not use a `dotnet run` development worker to verify installation/offline behavior, and do not rely on a temporary free tunnel address for real deployment. A shortcut alone does not prove offline readiness. The existing server-rendered website still needs a connection; the browser-run PWA currently provides purchasing, receiving and downloaded inventory. Cash sales and shifts remain outside its scope.
 
 ## Deferred for now
 

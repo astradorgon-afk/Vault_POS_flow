@@ -1,0 +1,24 @@
+{
+  "id": "session-1791368664066",
+  "startedAt": "2026-10-07T10:24:24.066Z",
+  "cwd": "C:\\Users\\WALDO\\Desktop\\VaultFlow",
+  "context": {
+    "lastMatchedPatterns": [
+      "mem-second-vaultflow-checkout-----0",
+      "mem-MEMORY----bash-heredocs-are-unreliabl-0",
+      "mem-bash-heredoc-unreliable-----0",
+      "mem-docker-desktop-stale-sockets-----0",
+      "mem-hook-stray-redirect-files-----0"
+    ]
+  },
+  "metrics": {
+    "edits": 27,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "updatedAt": "2026-10-07T16:21:29.713Z",
+  "restoredAt": "2026-10-07T16:21:29.299Z",
+  "endedAt": "2026-10-07T16:22:35.400Z",
+  "duration": 21491334
+}

@@ -1,0 +1,159 @@
+@page "/restock/fulfillment"
+@attribute [Authorize(Policy = "transfer.view")]
+@rendermode InteractiveServer
+@implements IDisposable
+@inject NotificationStore Notifications
+@using System.Globalization
+@inject VaultFlowApiClient Api
+@inject UserSession Session
+
+<PageTitle>Restock fulfillment · VaultFlow</PageTitle>
+
+<section class="restock-page">
+    <SectionTabs Items="@SectionTabSets.Movement(Session)" Label="Movement" />
+    <header class="restock-head">
+        <div><span class="eyebrow">Main warehouse · store supplies</span><h1>Restock fulfillment</h1><p>Open an approved request to pick its products, mark it ready, and dispatch it to the store.</p></div>
+        <button type="button" class="restock-refresh refresh-action" @onclick="() => LoadAsync()" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
+    </header>
+    @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
+
+    <nav class="restock-filters" aria-label="Filter warehouse requests">
+        <button type="button" class="@(selectedView == "fulfill" ? "active" : null)" @onclick='() => selectedView = "fulfill"'>To fulfill <span>@Active.Count</span></button>
+        <button type="button" class="@(selectedView == "approval" ? "active" : null)" @onclick='() => selectedView = "approval"'>Waiting for owner <span>@WaitingForOwner.Count</span></button>
+        <button type="button" class="@(selectedView == "all" ? "active" : null)" @onclick='() => selectedView = "all"'>All assigned <span>@requests.Count</span></button>
+    </nav>
+
+    <section class="restock-card">
+        <header><div><span class="eyebrow">Warehouse dispatch</span><h2>@ViewTitle</h2></div><p>@ViewDescription</p></header>
+        @if (loading)
+        {
+            <p class="restock-empty">Loading store requests…</p>
+        }
+        else if (Visible.Count == 0)
+        {
+            <p class="restock-empty">@EmptyMessage</p>
+        }
+        else
+        {
+            <div class="restock-list">
+                @foreach (PosTransferSummary request in Visible)
+                {
+                    <a class="restock-row" href="@($"/transfers/{request.Id:D}")" @key="request.Id">
+                        <div><strong>@RequestLabel(request)</strong><small>To @StoreName(request.DestinationLocationId) · @request.LineCount line@(request.LineCount == 1 ? "" : "s") · @request.CreatedAtUtc.InStoreTime().ToString("MMM d, yyyy · HH:mm", CultureInfo.InvariantCulture)</small><small class="restock-row-hint">@StatusHint(request)</small></div>
+                        <span class="restock-status @(request.Status is "Approved" or "Picking" or "Ready" ? "pending" : "")">@SplitWords(request.Status)</span><span class="restock-row-action">@ActionLabel(request)</span>
+                    </a>
+                }
+            </div>
+        }
+    </section>
+</section>
+
+@code {
+    private readonly List<PosTransferSummary> requests = [];
+    private readonly Dictionary<Guid, string> storeNames = [];
+    private bool loading = true;
+    private string selectedView = "all";
+    private string? message;
+
+    private List<PosTransferSummary> Active => [.. requests.Where(request => request.Status is "Approved" or "Picking" or "Ready")];
+    private List<PosTransferSummary> WaitingForOwner => [.. requests.Where(request => request.Status is "Submitted" or "InReview")];
+    private List<PosTransferSummary> Visible => selectedView switch
+    {
+        "fulfill" => Active,
+        "approval" => WaitingForOwner,
+        _ => requests,
+    };
+    private string ViewTitle => selectedView switch
+    {
+        "fulfill" => "Ready for warehouse action",
+        "approval" => "Waiting for owner approval",
+        _ => "All assigned warehouse requests",
+    };
+    private string ViewDescription => selectedView switch
+    {
+        "fulfill" => "Open an approved request to pick the products, then mark it ready and dispatch it.",
+        "approval" => "These requests become available to pick after the owner reviews and approves them.",
+        _ => "Open any request to see its status and the next step.",
+    };
+    private string EmptyMessage => selectedView switch
+    {
+        "fulfill" when WaitingForOwner.Count > 0 => $"No requests are approved for picking yet. {WaitingForOwner.Count} request(s) are waiting for owner approval.",
+        "fulfill" => "No approved requests need warehouse action.",
+        "approval" => "No requests are waiting for owner approval.",
+        _ => "No restock requests are assigned to your warehouse yet.",
+    };
+
+    private RefreshThrottle? liveRefresh;
+
+    protected override Task OnInitializedAsync()
+    {
+        // The queue changes when a store submits, the owner decides or the
+        // warehouse acts. Each end announces it, so the list follows along
+        // without Refresh, and without blanking while it reloads.
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(async () =>
+        {
+            await LoadAsync(quiet: true);
+            StateHasChanged();
+        }));
+        Notifications.TransfersChanged += OnTransfersChanged;
+        return LoadAsync();
+    }
+
+    private void OnTransfersChanged(IReadOnlyList<Guid> changed) => liveRefresh?.Request();
+
+    public void Dispose()
+    {
+        Notifications.TransfersChanged -= OnTransfersChanged;
+        liveRefresh?.Dispose();
+    }
+
+    private Task LoadAsync() => LoadAsync(quiet: false);
+
+    private async Task LoadAsync(bool quiet)
+    {
+        loading = !quiet;
+        message = null;
+        try
+        {
+            ApiResult<List<PosLocation>> locations = await Api.GetLocationsAsync(CancellationToken.None);
+            if (!locations.IsSuccess || locations.Value is null) { message = locations.Error ?? "Locations could not be loaded."; return; }
+
+            HashSet<Guid> warehouses = [.. locations.Value.Where(location => location.Kind == 0 && location.IsActive &&
+                Session.CanUseInventoryLocation(location.Id)).Select(location => location.Id)];
+            storeNames.Clear();
+            foreach (PosLocation location in locations.Value.Where(location => location.Kind == 1)) { storeNames[location.Id] = location.Name; }
+
+            ApiResult<List<PosTransferSummary>> result = await Api.GetTransfersAsync(CancellationToken.None);
+            if (!result.IsSuccess || result.Value is null) { message = result.Error ?? "Requests could not be loaded."; return; }
+            requests.Clear();
+            requests.AddRange(result.Value.Where(request => request.Mode == "StoreRestock" &&
+                warehouses.Contains(request.SourceLocationId)).OrderByDescending(request => request.CreatedAtUtc));
+        }
+        catch (HttpRequestException) { message = "The inventory service is unavailable. Try again shortly."; }
+        finally { loading = false; }
+    }
+
+    private string StoreName(Guid id) => storeNames.GetValueOrDefault(id, "Store");
+    private static string StatusHint(PosTransferSummary request) => request.Status switch
+    {
+        "Submitted" => "Waiting for the owner to review this request.",
+        "InReview" => "The owner is reviewing this request.",
+        "Approved" => "Approved. Open to accept the request and record the picked quantities.",
+        "Picking" => "Picking in progress. Open to finish picking and mark ready.",
+        "Ready" => "Picking is complete. Open to dispatch the products to the store.",
+        "Dispatched" => "Dispatched from the main warehouse. The store can now receive it.",
+        "Received" or "Closed" => "The store has received this request.",
+        _ => "Open to review request details.",
+    };
+    private static string ActionLabel(PosTransferSummary request) => request.Status switch
+    {
+        "Approved" => "Accept request →",
+        "Picking" => "Accept request →",
+        "Ready" => "Open to dispatch →",
+        _ => "View request →",
+    };
+    private static string RequestLabel(PosTransferSummary request) => string.IsNullOrWhiteSpace(request.Number)
+        ? $"Restock request {TransferLabels.ShortId(request.Id)}"
+        : request.Number;
+    private static string SplitWords(string value) => System.Text.RegularExpressions.Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+}

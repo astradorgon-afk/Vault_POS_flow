@@ -53,6 +53,16 @@ public static class TransferErrors
         "transfer.destination_location_external",
         $"Location '{locationId.Value}' is an external counterparty and cannot receive stock.");
 
+    /// <summary>A closed location cannot ship stock.</summary>
+    public static Error SourceLocationClosed(LocationId locationId) => Error.Validation(
+        "transfer.source_location_closed",
+        $"Location '{locationId.Value}' is closed and cannot send stock. Its records stay available to read.");
+
+    /// <summary>A closed location cannot take delivery.</summary>
+    public static Error DestinationLocationClosed(LocationId locationId) => Error.Validation(
+        "transfer.destination_location_closed",
+        $"Location '{locationId.Value}' is closed and cannot receive stock. Its records stay available to read.");
+
     /// <summary>The source location's timezone must be configured for the ledger's business date.</summary>
     public static Error SourceTimeZoneMissing(LocationId locationId) => Error.Conflict(
         "transfer.source_timezone_missing",
