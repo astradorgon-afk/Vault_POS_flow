@@ -60,7 +60,7 @@ else
         <div class="transfer-route-stop"><span>Deliver to</span><strong>@DestinationCode</strong><small>@DestinationName</small></div>
     </section>
 
-    @if (detail.Transfer.DispatchedAtUtc is not null && detail.Transfer.ReceivedAtUtc is null)
+    @if (InTransit)
     {
         <section class="tr-notice" role="status">
             <div class="tr-notice-row">
@@ -73,7 +73,8 @@ else
         </section>
     }
 
-    @if (IsStoreRestock && Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) && !string.IsNullOrWhiteSpace(WarehouseStepMessage))
+    @* Once in transit the notice above already says it; one message, not two. *@
+    @if (!InTransit && IsStoreRestock && Session.CanUseInventoryLocation(detail.Transfer.SourceLocationId) && !string.IsNullOrWhiteSpace(WarehouseStepMessage))
     {
         <section class="restock-warehouse-step" role="status">
             <strong>@WarehouseStepTitle</strong>
@@ -755,6 +756,8 @@ else
     private string SourceName => LocationName(detail?.Transfer.SourceLocationId);
     private string DestinationCode => LocationCode(detail?.Transfer.DestinationLocationId);
     private string DestinationName => LocationName(detail?.Transfer.DestinationLocationId);
+
+    private bool InTransit => detail?.Transfer is { DispatchedAtUtc: not null, ReceivedAtUtc: null };
 
     private string DispatchedNoticeTitle => detail is { Kind: "WarehouseToStore" }
         ? "Products have left the main warehouse"

@@ -19,7 +19,9 @@
         <button class="nav-scrim" type="button" aria-label="Close navigation" @onclick="CloseNavigation"></button>
     }
 
-    <main class="app-main">
+    @* Top-level pages are named by the app bar; on a phone they need not repeat
+       the name. Detail pages keep theirs: it carries the document's identity. *@
+    <main class="app-main @(Trail.Current.Parent is null ? "is-top" : "is-detail")">
         <header class="top-row">
             <button class="menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="@(navigationOpen ? "true" : "false")" @onclick="ToggleNavigation">
                 <AppIcon Name="menu" />

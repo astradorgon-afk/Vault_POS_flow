@@ -401,6 +401,119 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
     .app-main .content .action-panel .open-count-actions > * { flex: 1 1 auto; }
 }
 
+/* A grid's auto column grows to its widest child; on a phone the Activity
+   log's filters pushed the whole page sideways. */
+.app-main .content .audit-page { grid-template-columns: minmax(0, 1fr); }
+
+/* ---- Phone: calm, one thing at a time --------------------------------------
+   On a phone the app bar already names the page and the tab bar says where
+   you are. List pages therefore skip their kicker, title and description
+   (the title stays for screen readers), helper prose that explains the
+   desktop layout is dropped, Refresh buttons go (lists update live and
+   pull-to-refresh reloads), and control groups lose their boxes. Detail
+   pages keep their title: it carries the document's identity. */
+@media (max-width: 650px) {
+    .page-trail ol li:not(:last-child) { display: none; }
+    .page-trail strong { font: 700 1.02rem/1.2 'Manrope', sans-serif; letter-spacing: -.01em; }
+
+    .app-main.is-top .content h1:not(.ov-hero-copy h1) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+    }
+    .app-main.is-top .content :is(.eyebrow, .office-kicker):has(+ h1),
+    .app-main.is-top .content h1 + p,
+    .app-main .content .office-lead { display: none; }
+    .app-main.is-top .content :is(.office-head, .restock-head, .qr-head, .pos-head, .po-heading, .sync-page-head,
+        .receiving-head, .audit-head, .fleet-head, .report-page-head, .pa-head, .lx-top, .st-head) {
+        margin-bottom: 12px;
+        padding-bottom: 0;
+        border-bottom: 0;
+        gap: 10px;
+    }
+    .restock-page { gap: 12px; }
+
+    /* Explanations that only make sense with a desktop's room to spare. */
+    .app-main .content :is(.search-note, .restock-card > header p, .restock-card > header .eyebrow,
+        .open-count-title > span:not(.open-count-hint), .ov-card-head p, .scanner-help, .damage-help,
+        .cs-help, .st-quiet-banner p) { display: none; }
+    .refresh-action { display: none !important; }
+
+    /* Filters and actions sit on the page, not in another box. */
+    .app-main .content .head-pickers {
+        width: 100%;
+        padding: 0;
+        gap: 8px;
+        border: 0;
+        background: none;
+        box-shadow: none;
+    }
+    .app-main .content .head-pickers .head-primary { flex: 1 1 0; width: auto; }
+    .app-main .content .head-pickers .location-picker { flex: 1 1 100%; min-width: 0; }
+    .app-main .content .head-pickers .location-picker:has(input[type="date"]) { flex: 1 1 calc(50% - 4px); }
+    .app-main .content .search-strip { margin-bottom: 10px; padding: 8px 12px; font-size: .8rem; }
+
+    /* Cards breathe without a second frame of padding. */
+    .app-main .content .restock-card > header { padding: 14px 16px; }
+    .app-main .content .restock-steps { gap: 20px; padding: 16px; }
+    .app-main .content .open-count { padding: 14px; }
+
+    /* Overview: a greeting, not a banner. */
+    .app-main .content .ov-hero { min-height: 0; padding: 2px 2px 0; border: 0; background: none; box-shadow: none; }
+    .app-main .content .ov-hero .eyebrow { display: none; }
+    .app-main .content .ov-hero h1 { margin: 0; font-size: 1.25rem; }
+    .app-main .content .ov-card { padding: 14px; }
+
+    /* Delivery rows: name and route on full width, the state underneath. */
+    .app-main .content .receiving-row {
+        min-height: 0;
+        padding: 12px 14px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas: "mark main arrow" "mark state arrow";
+        align-items: center;
+        gap: 6px 12px;
+    }
+    .app-main .content .receiving-row-mark { grid-area: mark; align-self: start; width: 32px; height: 32px; }
+    .app-main .content .receiving-row-main { grid-area: main; }
+    .app-main .content .receiving-row-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app-main .content .receiving-row .receiving-state { grid-area: state; justify-self: start; margin-left: 0; }
+
+    /* Restock rows: details across the full width, state and next step below. */
+    .app-main .content .restock-row {
+        min-height: 0;
+        padding: 12px 16px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas: "main main" "state action";
+        align-items: center;
+        gap: 8px 10px;
+    }
+    .app-main .content .restock-row > div { grid-area: main; }
+    .app-main .content .restock-row > .restock-status { grid-area: state; justify-self: start; }
+    .app-main .content .restock-row > .restock-row-action,
+    .app-main .content .restock-row > .restock-status + span[aria-hidden="true"] { grid-area: action; justify-self: end; }
+    .app-main .content .receiving-row-arrow { grid-area: arrow; }
+
+    /* Store cards: the headline figures, without the small print under each. */
+    .app-main .content .st-stats { min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+    .app-main .content .st-stats small,
+    .app-main .content .sk-live { display: none; }
+
+    /* Notifications: the tabs already filter unread, all and read. */
+    .nt-hero,
+    .nt-side > h3:first-child,
+    .nt-side > h3:first-child + .nt-side-list { display: none; }
+    .app-main .content .nt-side > h3:nth-of-type(2) { margin-top: 0; padding-top: 0; border-top: 0; }
+    .app-main .content .nt-toolbar { margin-top: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .start-task, .start-task:hover { transition: none; transform: none; }
 }

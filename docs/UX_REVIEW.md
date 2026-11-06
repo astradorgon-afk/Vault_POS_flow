@@ -64,6 +64,31 @@ The eight items first flagged for a decision were then implemented.
 | G | Low | **"Failed attempts"** was unclear. | Renamed **Stock exceptions** in the menu, page, breadcrumb and Overview. |
 | H | Low | **Sync failures page was titled "Failure review".** | Titled **Sync failures**. |
 
+## Phone view: less crowded (follow-up)
+
+At phone width (650px and below; desktop is unchanged):
+
+- **One name per page.** The app bar names the page, so list pages drop their
+  kicker, title and description (the title stays for screen readers). Detail
+  pages keep their title because it carries the document number.
+- **Less prose.** Helper paragraphs written for desktop (card descriptions,
+  scanner and damage explanations, search-strip notes, "Live" hints) are hidden.
+- **No Refresh buttons** on lists that update live; pull-to-refresh still reloads.
+- **Controls without boxes.** Filters and actions sit directly on the page,
+  buttons share a row (*Request stock* / *Send stock*), date filters sit side by side.
+- **Calmer lists.** Delivery and restock rows put the details on full width with
+  the state and next step underneath; store cards show headline figures only.
+- **Overview** opens with a one-line greeting instead of a banner card.
+- **Notifications** drops its decorative banner and the *Quick filters* that
+  repeated the Unread / All / Read tabs.
+- **Stock counts** opens on the list; *Open a count* reveals the form (all
+  sizes, as on Transfers), and the duplicate "No counts matched" notice is gone.
+- **Transfer detail** shows one in-transit notice instead of two (all sizes).
+- **Activity log** no longer scrolls sideways (its grid column now shrinks).
+
+Checked on a Pixel 7 viewport for owner, warehouse and store manager across 22
+pages: no horizontal overflow, titles hidden only where the app bar names the page.
+
 ## Verification
 
 Follow-up (flagged items):

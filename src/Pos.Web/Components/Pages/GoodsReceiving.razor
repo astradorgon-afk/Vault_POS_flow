@@ -13,7 +13,7 @@
 <section class="receiving-page">
     <header class="receiving-head">
         <div><span class="eyebrow">Inventory · inbound stock</span><h1>Goods receiving</h1><p>Record deliveries headed to your assigned locations — from suppliers and from other locations.</p></div>
-        <button type="button" class="receiving-secondary" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
+        <button type="button" class="receiving-secondary refresh-action" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
 
     @if (!string.IsNullOrWhiteSpace(message))

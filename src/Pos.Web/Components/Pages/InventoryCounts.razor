@@ -18,6 +18,12 @@
         <p class="office-lead">Open a count, record the sheet, then submit it for approval. Approving the count posts the variance to stock.</p>
     </div>
     <div class="head-pickers">
+        @if (CanViewInventory && CanCount)
+        {
+            <button type="button" class="search-action head-primary" aria-expanded="@(showOpenForm ? "true" : "false")" aria-controls="open-count-form" @onclick="() => showOpenForm = !showOpenForm">
+                @(showOpenForm ? "Close form" : "Open a count")
+            </button>
+        }
         <label class="location-picker">
             <span>Store</span>
             <select value="@(selectedLocationId?.ToString() ?? string.Empty)"
@@ -60,7 +66,7 @@ else
                 <b class="awaiting-flag">@AwaitingApproval awaiting approval</b>
             }
         </span>
-        <button type="button" class="search-action" @onclick="LoadCountsAsync"
+        <button type="button" class="search-action refresh-action" @onclick="LoadCountsAsync"
                 disabled="@(loading || selectedLocationId is null)">
             @(loading ? "Loading…" : "Refresh")
         </button>
@@ -71,9 +77,10 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
-    @if (CanCount)
+    @* Opening a count is a task, not the page: the list comes first. *@
+    @if (CanCount && showOpenForm)
     {
-        <section class="open-count">
+        <section class="open-count" id="open-count-form">
             <div class="open-count-title">
                 <strong>Open a count</strong>
                 <span>Pick what the sheet covers. A manager can count and approve their own store end-to-end.</span>
@@ -127,7 +134,7 @@ else
         }
         else if (counts.Count == 0)
         {
-            <div class="results-empty"><strong>No counts yet.</strong><span>Choose a store, then open a count or find existing sheets.</span></div>
+            <div class="results-empty"><strong>No counts match.</strong><span>@(CanCount ? "Select Open a count to start a sheet, or choose another store or status." : "Choose another store or status.")</span></div>
         }
         else
         {
@@ -187,6 +194,7 @@ else
 
     private bool loadingLocations = true;
     private bool loading;
+    private bool showOpenForm;
     private bool opening;
     private string? message;
     private string searchedLabel = string.Empty;
@@ -356,10 +364,6 @@ else
             searchedLabel = string.IsNullOrWhiteSpace(selectedStatus)
                 ? "all states"
                 : SplitWords(selectedStatus);
-            if (counts.Count == 0)
-            {
-                message = "No counts matched that store and state.";
-            }
         }
         catch (HttpRequestException)
         {
