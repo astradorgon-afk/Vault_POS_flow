@@ -103,7 +103,7 @@
             <nav class="tabbar" aria-label="Main">
                 @foreach (Tab tab in Tabs)
                 {
-                    <NavLink class="tab-item" href="@tab.Href" Match="@(tab.Href.Length == 0 ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                    <NavLink class="tab-item" href="@tab.Href" Match="@(tab.Href.Length == 0 || tab.Href == "restock" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
                         <AppIcon Name="@tab.Icon" />
                         <span>@tab.Label</span>
                     </NavLink>
@@ -170,29 +170,17 @@
 
     private void ToggleNavigation() => navigationOpen = !navigationOpen;
 
-    // The four places this person uses most, by what they may do; the rest sit under More.
+    // The four places this person uses most, by what they may do; the rest sit
+    // under More. The role's own daily task comes straight after Home so the
+    // four-tab cut never drops it (it used to lose an owner's Approvals tab).
     private IEnumerable<Tab> Tabs
     {
         get
         {
+            bool owner = Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true;
             List<Tab> tabs = [new(string.Empty, "home", "Home")];
-            if (Session.HasPermission("transfer.view"))
-            {
-                tabs.Add(new("stores", "location", "Movement"));
-            }
 
-            if (Session.HasPermission("sale.view"))
-            {
-                tabs.Add(new("analytics/products", "trend-up", "Analytics"));
-            }
-
-            if (Session.HasPermission("inventory.view"))
-            {
-                tabs.Add(new("inventory/stock", "box", "Stock"));
-            }
-
-            if (Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true &&
-                Session.HasPermission("transfer.approve"))
+            if (owner && Session.HasPermission("transfer.approve"))
             {
                 tabs.Add(new("restock/approvals", "check", "Approvals"));
             }
@@ -208,15 +196,29 @@
                 tabs.Add(new("restock", "box-in", "Restock"));
             }
 
-            if (Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive"))
+            if (Session.HasPermission("inventory.view"))
+            {
+                tabs.Add(new("inventory/stock", "box", "Stock"));
+            }
+
+            if (!owner && Session.HasPermission("purchase.view") && Session.HasPermission("purchase.receive"))
             {
                 tabs.Add(new("receiving", "receipt", "Receiving"));
             }
 
-            if (Session.HasPermission("purchase.view") &&
-                Session.Current?.User.Roles.Contains("Owner", StringComparer.Ordinal) == true)
+            if (Session.HasPermission("sale.view"))
+            {
+                tabs.Add(new("analytics/products", "trend-up", "Analytics"));
+            }
+
+            if (owner && Session.HasPermission("purchase.view"))
             {
                 tabs.Add(new("purchasing", "list", "Orders"));
+            }
+
+            if (Session.HasPermission("transfer.view"))
+            {
+                tabs.Add(new("transfers", "transfer", "Transfers"));
             }
 
             if (Session.HasAnyPermission("user.manage", "role.manage"))

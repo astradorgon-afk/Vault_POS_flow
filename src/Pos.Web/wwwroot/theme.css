@@ -1,0 +1,334 @@
+/* VaultFlow theme layer ----------------------------------------------------------
+   Loaded after every other stylesheet. The pages grew their own headings,
+   buttons, fields, cards and chips over time (titles from 27px to 2.3rem, controls
+   from 37px to 44px tall, card corners from 2px to 20px). This layer gives them
+   one set of decisions without rewriting each page's own stylesheet:
+
+     type      page title 1.65rem Manrope · lead .9rem · kicker .68rem caps
+     controls  40px tall, 9px corners, one focus ring
+     surfaces  white, 1px line, 12px corners, a quiet two-layer shadow
+     tables    one header style, tabular figures, a light row hover
+
+   Selectors are prefixed with .app-main .content where a page's scoped
+   stylesheet (.x[b-…]) would otherwise outrank them. */
+
+:root {
+    --paper: #f4f6f3;
+    --panel: #ffffff;
+    --line: #e1e7e1;
+    --line-strong: #cbd5cd;
+    --muted: #5f6d65;
+    --sidebar: #10291e;
+    --sidebar-ink: #c6d8ce;
+    --sidebar-muted: #7d9d8d;
+    --focus-ring: 0 0 0 3px rgba(36, 90, 66, .18);
+    --radius-card: 12px;
+    --radius-control: 9px;
+    --control-height: 40px;
+    --shadow-card: 0 1px 2px rgba(16, 41, 30, .05), 0 1px 4px rgba(16, 41, 30, .04);
+    --shadow-lift: 0 2px 6px rgba(16, 41, 30, .06), 0 12px 28px -14px rgba(16, 41, 30, .22);
+    --title-size: 1.65rem;
+}
+
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* ---- Shell: sidebar ------------------------------------------------------ */
+
+/* Desktop only: below 900px the sidebar is a drawer and the shell is one column. */
+@media (min-width: 901px) {
+    .app-shell { grid-template-columns: 252px minmax(0, 1fr); }
+}
+.sidebar { background: var(--sidebar); box-shadow: none; border-right: 1px solid rgba(0, 0, 0, .2); }
+.brand-block { min-height: 60px; padding: 12px 18px; border-bottom-color: rgba(255, 255, 255, .07); }
+.brand-glyph { width: 34px; height: 34px; border-radius: 9px; font-size: .95rem; }
+.brand strong { font-size: 1rem; letter-spacing: -.01em; }
+.brand small { color: var(--sidebar-muted); font-size: .68rem; }
+
+.nav-stack { gap: 0; padding: 10px 10px 16px; scrollbar-color: #2f4f40 transparent; }
+.nav-group { gap: 1px; margin-bottom: 6px; }
+.nav-group + .nav-group { padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .05); }
+.nav-heading { margin: 8px 10px 4px; color: var(--sidebar-muted); font-size: .62rem; letter-spacing: .12em; }
+.nav-link { position: relative; min-height: 36px; gap: 10px; padding: 0 10px; border-radius: 8px; color: var(--sidebar-ink); font-size: .84rem; font-weight: 600; }
+.nav-link svg { width: 18px; height: 18px; flex-basis: 18px; color: #86a898; }
+.nav-link:hover { background: rgba(255, 255, 255, .06); color: #fff; transform: none; }
+.nav-link.active { background: rgba(185, 243, 205, .13); color: #fff; font-weight: 700; box-shadow: none; }
+.nav-link.active::before { content: ""; position: absolute; left: -10px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--mint); }
+.nav-link.active svg { color: var(--mint); }
+.nav-link small { padding: 1px 7px; font-size: .64rem; }
+
+.sidebar-footer { padding: 10px 14px 14px; border-top-color: rgba(255, 255, 255, .07); }
+.sidebar-footer > div { margin-bottom: 8px; }
+.sidebar-footer span { color: var(--sidebar-muted); }
+.sign-out { min-height: 36px; border-color: rgba(255, 255, 255, .12); border-radius: 8px; font-size: .82rem; }
+
+/* ---- Shell: top bar and breadcrumb ------------------------------------- */
+
+.top-row { min-height: 60px; background: rgba(255, 255, 255, .9); border-bottom-color: var(--line); box-shadow: none; }
+.workspace-context { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.page-back { height: 34px; padding: 0 11px 0 9px; border-color: var(--line-strong); border-radius: 8px; font-size: .8rem; box-shadow: none; }
+.page-trail ol { gap: 8px; color: var(--muted); font-size: .84rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.page-trail li { display: inline-flex; align-items: center; white-space: nowrap; }
+.page-trail li + li::before { margin-right: 8px; color: #a7b3ab; }
+.page-trail a { color: var(--muted); text-decoration: none; }
+.page-trail a:hover { color: var(--forest); text-decoration: underline; text-underline-offset: 3px; }
+.page-trail strong { color: var(--ink); font-weight: 700; text-overflow: ellipsis; overflow: hidden; }
+.notification-bell { width: 38px; height: 38px; border-radius: 9px; }
+.operator-mark { width: 34px; height: 34px; font-size: .68rem; }
+.operator strong { font-size: .8rem; }
+.operator small { font-size: .7rem; }
+
+.content { width: min(100%, 1440px); padding: 28px clamp(18px, 2.4vw, 34px) 40px; }
+
+/* ---- Page headings --------------------------------------------------------
+   Every page's own header wrapper keeps its layout; the type inside it is one. */
+
+.app-main .content h1 {
+    margin: .3rem 0 .35rem;
+    color: var(--ink);
+    font: 750 var(--title-size)/1.2 'Manrope', sans-serif;
+    letter-spacing: -.022em;
+}
+.app-main .content h1 + p,
+.app-main .content .office-lead,
+.app-main .content .po-heading p {
+    max-width: 68ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: .9rem;
+    line-height: 1.5;
+}
+.app-main .content .eyebrow,
+.app-main .content .office-kicker,
+.app-main .content .cs-eyebrow,
+.app-main .content .po-page .eyebrow {
+    color: #4b6a5a;
+    font-size: .68rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+.app-main .content h2 { letter-spacing: -.012em; }
+.restock-head { padding-bottom: 18px; }
+.office-head { margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+
+/* ---- Surfaces --------------------------------------------------------------- */
+
+.app-main .content :is(
+    .restock-card, .qr-card, .results-panel, .open-count, .action-panel, .ov-card,
+    .ov-kpi, .st-card, .st-activity, .dashboard-section, .detail-panel, .nt-list,
+    .nt-side, .nt-toolbar, .sync-card, .cs-card, .location-ledger, .attention-list) {
+    border-color: var(--line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+}
+.app-main .content .search-strip,
+.app-main .content .head-pickers {
+    border-color: var(--line);
+    border-radius: var(--radius-card);
+    box-shadow: none;
+}
+.app-main .content .head-pickers { padding: 10px; }
+.app-main .content .restock-card > header { background: #fafbfa; }
+
+/* ---- Controls --------------------------------------------------------------- */
+
+.app-main .content :is(.search-action, .restock-refresh, .ov-button, .sync-button, .po-page .po-primary, .po-page .po-outline) {
+    min-height: var(--control-height);
+    border-radius: var(--radius-control);
+    font-size: .84rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.app-main .content .search-action { height: auto; min-width: 0; padding: 0 16px; }
+.app-main .content .search-action:not(:disabled):hover { background: var(--forest-bright); }
+.app-main .content .search-action:disabled { opacity: .45; cursor: not-allowed; }
+.app-main .content .search-action.secondary {
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--forest);
+}
+.app-main .content .search-action.secondary:not(:disabled):hover { border-color: #9cbfaa; background: var(--mint-soft); }
+.app-main .content .search-action.danger:not(:disabled):hover { background: #fbe2df; color: var(--danger); }
+.app-main .content .restock-refresh { padding: 0 14px; }
+
+.app-main .content :is(.location-picker select, .location-picker input, .reason-input, .qr-field, .restock-field > input, .restock-field > select, .line-product-search, .line-quantity) {
+    min-height: var(--control-height);
+    height: var(--control-height);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-control);
+    background-color: #fff;
+    color: var(--ink);
+    font-size: .86rem;
+    transition: border-color .15s, box-shadow .15s;
+}
+.app-main .content :is(input, select, textarea):focus-visible {
+    border-color: var(--forest-bright);
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+.app-main .content .location-picker > span,
+.app-main .content .decision-note > span {
+    color: var(--muted);
+    font-size: .68rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+/* Two-choice filters that act as tabs read as one segmented control. */
+.app-main .content .restock-filters button { min-height: 36px; border-radius: 8px; font-size: .82rem; }
+
+/* ---- Tables ------------------------------------------------------------------ */
+
+.app-main .content :is(.sales-table, .qr-table, .st-ledger, .lines-table, .payments-table) th {
+    background: #f8faf8;
+    color: #5f6d65;
+    font-size: .66rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.app-main .content :is(.sales-table, .qr-table, .st-ledger) tbody tr:hover { background: #f6f9f7; }
+.app-main .content :is(.sales-table, .qr-table) td { font-size: .86rem; }
+
+/* ---- Status pills: one size, one palette ----------------------------------- */
+
+.app-main .content :is(.ov-pill, .status-chip, .st-activity-status, .restock-status) {
+    padding: 3px 9px;
+    border-radius: 99px;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .01em;
+    white-space: nowrap;
+}
+
+/* ---- Overview ------------------------------------------------------------------ */
+
+.app-main .content .ov-hero {
+    min-height: 0;
+    padding: 20px 24px;
+    border-radius: var(--radius-card);
+    background: linear-gradient(100deg, #fff 0%, #f7faf8 55%, #e8f3ec 100%);
+    box-shadow: var(--shadow-card);
+}
+.app-main .content .ov-hero h1 { font-size: 1.5rem; }
+.app-main .content .ov-hero p { font-size: .88rem; }
+.ov-hero-art { width: clamp(130px, 13vw, 180px); margin: -10px 0 -22px; }
+
+.start-tasks {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+}
+.start-task {
+    min-height: 68px;
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: #fff;
+    color: var(--ink);
+    text-decoration: none;
+    box-shadow: var(--shadow-card);
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.start-task:hover { border-color: #a9c9b5; box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+.start-task-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: var(--mint-soft); color: var(--forest); }
+.start-task-icon svg { width: 19px; height: 19px; }
+.start-task-copy { display: grid; gap: 2px; min-width: 0; }
+.start-task-copy strong { font: 700 .9rem/1.25 'Manrope', sans-serif; }
+.start-task-copy small { overflow: hidden; color: var(--muted); font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.start-task-arrow { width: 16px; color: #8a978f; }
+.start-task.is-primary { border-color: var(--forest); background: var(--forest); color: #fff; }
+.start-task.is-primary .start-task-icon { background: var(--mint); }
+.start-task.is-primary .start-task-copy small { color: #bcd2c5; }
+.start-task.is-primary .start-task-arrow { color: var(--mint); }
+.start-task.is-primary:hover { background: var(--forest-bright); }
+
+.app-main .content .ov-kpis { gap: 14px; margin-top: 14px; }
+.app-main .content .ov-kpi { min-height: 0; padding: 16px 18px; }
+.app-main .content .ov-kpi-icon { width: 36px; height: 36px; margin-bottom: 10px; border-radius: 9px; }
+.app-main .content .ov-kpi-icon svg { width: 18px; }
+.app-main .content .ov-kpi-label { font-size: .8rem; }
+.app-main .content .ov-kpi strong { margin: 6px 0 10px; font-size: 1.65rem; }
+.app-main .content .ov-grid,
+.app-main .content .ov-main { gap: 14px; }
+.app-main .content .ov-grid { margin-top: 14px; }
+.app-main .content .dashboard-section { margin-top: 14px; padding: 20px 22px; }
+.app-main .content .section-heading h2 { font-size: 1.1rem; }
+
+/* ---- Transfer decision ----------------------------------------------------- */
+
+.decision-note { display: grid; gap: 6px; margin-bottom: 12px; }
+.decision-note small { margin-left: 6px; color: #8a978f; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.app-main .content .decision-note .reason-input { width: 100%; max-width: none; }
+.app-main .content .action-panel .open-count-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* ---- Transfers list ---------------------------------------------------------- */
+
+.app-main .content .head-pickers .head-primary { align-self: flex-end; }
+.open-count-hint { margin-top: 4px; color: var(--muted); font-size: .8rem; }
+.open-count-hint a { color: var(--forest); font-weight: 700; }
+.advanced-options { margin-top: 12px; }
+.advanced-options > summary {
+    width: fit-content;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.advanced-options > summary:hover { color: var(--forest); }
+.advanced-options[open] > summary { margin-bottom: 8px; }
+.advanced-options .location-picker { max-width: 320px; }
+
+/* ---- Sign-in ----------------------------------------------------------------- */
+
+.login-panel h2 { font-size: 2rem; letter-spacing: -.03em; }
+.login-panel .option-note { margin: 6px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.45; }
+
+/* ---- Phone ------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+    .top-row { background: rgba(255, 255, 255, .94); }
+    .content { padding: 16px 16px calc(96px + env(safe-area-inset-bottom)); }
+    .sidebar { background: var(--sidebar); }
+    .nav-link.active::before { left: -10px; }
+}
+
+@media (max-width: 650px) {
+    :root { --title-size: 1.4rem; }
+    .app-main .content .ov-hero { padding: 16px 18px; }
+    .app-main .content .ov-hero h1 { font-size: 1.3rem; }
+    .start-tasks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .start-task { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-height: 0; padding: 12px; }
+    .start-task-copy small, .start-task-arrow { display: none; }
+    .start-task-copy strong { font-size: .84rem; }
+    .start-task-icon { width: 32px; height: 32px; }
+
+    /* Two stylesheets disagreed here (a 2-column grid vs. a swipe carousel
+       whose negative margin missed the page gutter). A 2x2 grid shows all
+       four figures at once and lines up with everything above and below. */
+    .app-main .content .ov-kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-inline: 0;
+        padding: 0;
+        overflow: visible;
+    }
+    .app-main .content .ov-kpi { flex: initial; min-height: 0; padding: 12px; }
+    .app-main .content .ov-kpi-label { align-items: flex-start; font-size: .74rem; line-height: 1.25; white-space: normal; }
+    .app-main .content .ov-kpi strong { margin: 4px 0 2px; font-size: 1.15rem; }
+    .app-main .content .ov-kpi-foot small { display: none; }
+
+    .app-main .content .action-panel .open-count-actions > * { flex: 1 1 auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .start-task, .start-task:hover { transition: none; transform: none; }
+}

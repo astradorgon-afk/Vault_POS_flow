@@ -1,6 +1,16 @@
 const { chromium } = require(process.env.VAULTFLOW_PLAYWRIGHT_PACKAGE || 'playwright');
 
 const origin = process.argv[2] || 'http://127.0.0.1:5436';
+
+// Work location sits under "Additional sign-in options" as a select. A user with
+// one assigned location gets it automatically; choosing it explicitly still works.
+async function chooseLocation(page) {
+  await page.getByRole('button', { name: 'Additional sign-in options' }).click();
+  const select = page.getByLabel('Work location');
+  await select.locator('option', { hasText: 'PILOT' }).first().waitFor({ state: 'attached' });
+  const value = await select.locator('option', { hasText: 'PILOT' }).first().getAttribute('value');
+  await select.selectOption(value);
+}
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -13,20 +23,14 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
     await page.goto(origin + '/login');
     await page.getByRole('heading', { name: 'Welcome back' }).waitFor();
     await page.waitForTimeout(1000);
-    if (await page.getByLabel('Installation enrollment code').count())
-      throw new Error('Enrollment code appeared before a successful login.');
+    if (await page.getByLabel(/enrollment code/i).count())
+      throw new Error('Enrollment code appeared before the sign-in options were opened.');
     await page.getByLabel('Username or email').fill('pilot');
     await page.getByLabel('Password', { exact: true }).fill('account-password');
-    await page.getByRole('button', { name: 'Choose work location' }).click();
-    await page.getByLabel(/PILOT Pilot store/).check();
+    await chooseLocation(page);
+    // Enrolling is opt-in: the code goes in with the other sign-in options.
+    await page.getByLabel('Offline enrollment code').fill('pilot-enrolment');
     await page.getByRole('button', { name: 'Open workspace' }).click();
-    const setup = page.locator('.offline-setup-dialog');
-    await setup.waitFor();
-    await setup.getByRole('heading', { name: 'Set up offline access' }).waitFor();
-    await setup.getByText('You can use your online workspace now.', { exact: false }).waitFor();
-    await setup.getByRole('button', { name: 'Continue online without enrolling' }).waitFor();
-    await setup.getByLabel('Installation enrollment code').fill('pilot-enrolment');
-    await setup.getByRole('button', { name: 'Enroll and prepare offline access' }).click();
     await page.waitForURL(origin + '/', { timeout: 60000 });
     const banner = page.locator('.offline-ready-banner');
     await banner.waitFor({ timeout: 60000 });
@@ -61,18 +65,17 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
     await page.getByLabel('Username or email').fill('pilot');
     await page.getByLabel('Password', { exact: true }).fill('account-password');
     await page.getByRole('button', { name: 'Open workspace' }).click();
-    await page.getByRole('heading', { name: 'Welcome, Pilot User' }).waitFor();
+    await page.getByRole('heading', { name: 'Welcome back, Pilot.' }).waitFor();
     await page.evaluate(() => localStorage.removeItem('vaultflow-app-installed'));
     await context.setOffline(false);
     await page.goto(origin + '/login');
     await page.getByRole('heading', { name: 'Welcome back' }).waitFor();
     await page.waitForTimeout(1000);
-    if (await page.getByLabel('Installation enrollment code').count())
-      throw new Error('Enrollment was requested again for an enrolled installation.');
     await page.getByLabel('Username or email').fill('pilot');
     await page.getByLabel('Password', { exact: true }).fill('account-password');
-    await page.getByRole('button', { name: 'Choose work location' }).click();
-    await page.getByLabel(/PILOT Pilot store/).check();
+    await chooseLocation(page);
+    if (await page.getByLabel(/enrollment code/i).count())
+      throw new Error('Enrollment was requested again for an enrolled installation.');
     await page.getByRole('button', { name: 'Open workspace' }).click();
     const secondBanner = page.locator('.offline-ready-banner');
     try {
@@ -80,21 +83,37 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
     } catch (error) {
       throw new Error(`${error.message}; page=${(await page.locator('body').innerText()).slice(-900)}; requests=${failedRequests.join('; ')}`);
     }
-    if (await page.getByLabel('Installation enrollment code').count())
+    if (await page.getByLabel(/enrollment code/i).count())
       throw new Error('Previously enrolled device was asked for a second enrollment code.');
     await secondBanner.getByRole('button', { name: 'Dismiss offline notice' }).click();
     if (errors.length) throw new Error(errors.join('; '));
+    // An ordinary browser tab that is not enrolled goes straight to the
+    // workspace: nobody there is waiting to enrol, so no dialog interrupts.
     const onlineOnlyContext = await browser.newContext();
-    await onlineOnlyContext.route('**/_content/Pos.SharedUI/login.css', route => route.abort());
     const onlineOnly = await onlineOnlyContext.newPage();
     await onlineOnly.goto(origin + '/login');
     await onlineOnly.waitForTimeout(1000);
     await onlineOnly.getByLabel('Username or email').fill('pilot');
     await onlineOnly.getByLabel('Password', { exact: true }).fill('account-password');
-    await onlineOnly.getByRole('button', { name: 'Choose work location' }).click();
-    await onlineOnly.getByLabel(/PILOT Pilot store/).check();
+    await chooseLocation(onlineOnly);
     await onlineOnly.getByRole('button', { name: 'Open workspace' }).click();
-    const overlay = onlineOnly.locator('.offline-setup-backdrop');
+    await onlineOnly.waitForURL(origin + '/');
+    if (await onlineOnly.locator('.offline-setup-backdrop').count())
+      throw new Error('A browser tab was interrupted by the offline setup dialog.');
+    await onlineOnlyContext.close();
+
+    // The installed app still offers enrollment, even without the shared stylesheet.
+    const installedContext = await browser.newContext();
+    await installedContext.addInitScript(() => localStorage.setItem('vaultflow-app-installed', 'true'));
+    await installedContext.route('**/_content/Pos.SharedUI/login.css', route => route.abort());
+    const installedApp = await installedContext.newPage();
+    await installedApp.goto(origin + '/login');
+    await installedApp.waitForTimeout(1000);
+    await installedApp.getByLabel('Username or email').fill('pilot');
+    await installedApp.getByLabel('Password', { exact: true }).fill('account-password');
+    await chooseLocation(installedApp);
+    await installedApp.getByRole('button', { name: 'Open workspace' }).click();
+    const overlay = installedApp.locator('.offline-setup-backdrop');
     await overlay.waitFor();
     const overlayPosition = await overlay.evaluate(element => {
       const bounds = element.getBoundingClientRect();
@@ -104,11 +123,11 @@ const origin = process.argv[2] || 'http://127.0.0.1:5436';
     });
     if (overlayPosition.position !== 'fixed' || !overlayPosition.coversViewport)
       throw new Error(`Offline prompt fell below the login form without the shared stylesheet: ${JSON.stringify(overlayPosition)}`);
-    await onlineOnly.getByRole('dialog', { name: 'Set up offline access' })
+    await installedApp.getByRole('dialog', { name: 'Set up offline access' })
       .getByRole('button', { name: 'Continue online without enrolling' }).click();
-    await onlineOnly.waitForURL(origin + '/');
-    await onlineOnlyContext.close();
-    console.log('Online preparation passed: enrollment required once, account unlocked offline, later sign-in refreshed the saved profile.');
+    await installedApp.waitForURL(origin + '/');
+    await installedContext.close();
+    console.log('Online preparation passed: opt-in enrollment, account unlocked offline, later sign-in refreshed the saved profile, browser tabs not interrupted, installed app still prompted.');
   } finally {
     await browser.close();
   }

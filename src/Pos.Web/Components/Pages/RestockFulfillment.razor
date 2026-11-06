@@ -1,6 +1,8 @@
 @page "/restock/fulfillment"
 @attribute [Authorize(Policy = "transfer.view")]
 @rendermode InteractiveServer
+@implements IDisposable
+@inject NotificationStore Notifications
 @using System.Globalization
 @inject VaultFlowApiClient Api
 @inject UserSession Session
@@ -10,7 +12,7 @@
 <section class="restock-page">
     <header class="restock-head">
         <div><span class="eyebrow">Main warehouse · store supplies</span><h1>Restock fulfillment</h1><p>Open an approved request to pick its products, mark it ready, and dispatch it to the store.</p></div>
-        <button type="button" class="restock-refresh" @onclick="LoadAsync" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
+        <button type="button" class="restock-refresh" @onclick="() => LoadAsync()" disabled="@loading">@(loading ? "Refreshing…" : "Refresh")</button>
     </header>
 
     @if (!string.IsNullOrWhiteSpace(message)) { <div class="restock-message" role="status">@message</div> }
@@ -81,11 +83,35 @@
         _ => "No restock requests are assigned to your warehouse yet.",
     };
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    private RefreshThrottle? liveRefresh;
 
-    private async Task LoadAsync()
+    protected override Task OnInitializedAsync()
     {
-        loading = true;
+        // The queue changes when a store submits, the owner decides or the
+        // warehouse acts. Each end announces it, so the list follows along
+        // without Refresh, and without blanking while it reloads.
+        liveRefresh = new RefreshThrottle(TimeSpan.FromSeconds(2), () => InvokeAsync(async () =>
+        {
+            await LoadAsync(quiet: true);
+            StateHasChanged();
+        }));
+        Notifications.TransfersChanged += OnTransfersChanged;
+        return LoadAsync();
+    }
+
+    private void OnTransfersChanged(IReadOnlyList<Guid> changed) => liveRefresh?.Request();
+
+    public void Dispose()
+    {
+        Notifications.TransfersChanged -= OnTransfersChanged;
+        liveRefresh?.Dispose();
+    }
+
+    private Task LoadAsync() => LoadAsync(quiet: false);
+
+    private async Task LoadAsync(bool quiet)
+    {
+        loading = !quiet;
         message = null;
         try
         {

@@ -12,7 +12,7 @@ const cacheable = /\.(?:dll|pdb|wasm|html|js|json|css|woff2?|png|jpe?g|gif|ico|b
 // asset-manifest version that names this cache. They were therefore frozen at
 // whatever an installed device downloaded first; refreshing them on activation
 // is what lets a restyle reach devices already in the field.
-const shellAssets = ['/app.css', '/fonts/dm-sans-latin.woff2', '/fonts/manrope-latin.woff2'];
+const shellAssets = ['/app.css', '/theme.css', '/fonts/dm-sans-latin.woff2', '/fonts/manrope-latin.woff2'];
 
 // Fetched one at a time with a retry rather than through cache.addAll, which
 // rejects the whole batch if any single asset fails. On a store's connection
@@ -128,7 +128,7 @@ self.addEventListener('fetch', event => {
         return;
     }
     if (url.pathname.startsWith('/offline/') || url.pathname.startsWith('/_content/Pos.SharedUI/') ||
-        url.pathname === '/app.css' || url.pathname.startsWith('/fonts/'))
+        url.pathname === '/app.css' || url.pathname === '/theme.css' || url.pathname.startsWith('/fonts/'))
         event.respondWith((async () => {
             const cache = await caches.open(cacheName);
             const alias = url.pathname.replace(/\.[a-z0-9]{10,}\.(js|css)$/i, '.$1');

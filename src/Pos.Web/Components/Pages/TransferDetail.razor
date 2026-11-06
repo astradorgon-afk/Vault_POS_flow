@@ -106,7 +106,7 @@ else
 
     <section class="tr-section">
         <div class="tr-section-title">
-            <h2>Items in transit</h2>
+            <h2>@(detail.Transfer.DispatchedAtUtc is null ? "Requested items" : "Items in transit")</h2>
             <span>@detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s")</span>
         </div>
         <p class="tr-hint">@(detail.Transfer.DispatchedAtUtc is null
@@ -162,21 +162,13 @@ else
         </section>
     }
 
-    @if (ShowReview)
+    @* One place to decide. A submitted request no longer has to be marked
+       "under review" first: approving records the review and the approval as
+       two custody events, exactly as the two separate clicks did. *@
+    @if (ShowDecision)
     {
         <section class="action-panel">
-            <div class="action-title"><strong>Start the review</strong><span>Mark the request as being examined; you can still reject it afterwards.</span></div>
-            <input type="text" class="reason-input" placeholder="Review note (optional)" @bind="reviewNote" />
-            <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="ReviewAsync" disabled="@acting">@(acting ? "Reviewing…" : "Mark under review")</button>
-            </div>
-        </section>
-    }
-
-    @if (ShowApprove)
-    {
-        <section class="action-panel">
-            <div class="action-title"><strong>Decide the request</strong><span>Approval moves it to picking; rejection sends it back.</span></div>
+            <div class="action-title"><strong>Decide the request</strong><span>Approval moves it to picking; rejection returns it to the requester as a draft.</span></div>
             @if (IsStoreRestock)
             {
                 <div class="restock-approval-lines">
@@ -192,21 +184,17 @@ else
                 </div>
                 <p class="restock-approval-hint">Adjust quantities before approving. Each approved quantity must be greater than zero.</p>
             }
-            <input type="text" class="reason-input" placeholder="Approval note (optional)" @bind="approvalNote" />
+            <label class="decision-note">
+                <span>Note <small>optional to approve · required to reject</small></span>
+                <input type="text" class="reason-input" placeholder="Add context for the requester" @bind="decisionNote" @bind:event="oninput" />
+            </label>
             <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="ApproveAsync" disabled="@(acting || (IsStoreRestock && !CanApproveQuantities))">Approve</button>
-                <button type="button" class="search-action danger" @onclick="RejectAsync" disabled="@acting">Reject with reason</button>
-            </div>
-        </section>
-    }
-
-    @if (ShowReject)
-    {
-        <section class="action-panel">
-            <div class="action-title"><strong>Reject the request</strong><span>A reason is required; the transfer returns to draft.</span></div>
-            <input type="text" class="reason-input" placeholder="Reason…" @bind="rejectionReason" />
-            <div class="open-count-actions">
-                <button type="button" class="search-action danger" @onclick="RejectAsync" disabled="@(acting || string.IsNullOrWhiteSpace(rejectionReason))">Reject</button>
+                @if (Status == "Submitted")
+                {
+                    <button type="button" class="search-action secondary" @onclick="ReviewAsync" disabled="@acting" title="Tell others you are looking at it without deciding yet">Mark under review</button>
+                }
+                <button type="button" class="search-action danger" @onclick="RejectAsync" disabled="@(acting || string.IsNullOrWhiteSpace(decisionNote))" title="@(string.IsNullOrWhiteSpace(decisionNote) ? "Write a note explaining the rejection first" : null)">Reject</button>
+                <button type="button" class="search-action" @onclick="ApproveAsync" disabled="@(acting || (IsStoreRestock && !CanApproveQuantities))">@(acting ? "Saving…" : "Approve")</button>
             </div>
         </section>
     }
@@ -312,9 +300,19 @@ else
     @if (ShowReady)
     {
         <section class="action-panel">
-            <div class="action-title"><strong>Picking complete</strong><span>Once ready, the transfer can be dispatched and the ledger moves the stock.</span></div>
+            <div class="action-title"><strong>Picking complete</strong><span>@(CanDispatchOnceReady
+                ? "Dispatch now to post the movement to the ledger, or mark it ready for a colleague to dispatch."
+                : "Once ready, the transfer can be dispatched and the ledger moves the stock.")</span></div>
             <div class="open-count-actions">
-                <button type="button" class="search-action" @onclick="ReadyAsync" disabled="@acting">@(acting ? "Marking…" : "Mark ready for dispatch")</button>
+                @if (CanDispatchOnceReady)
+                {
+                    <button type="button" class="search-action secondary" @onclick="ReadyAsync" disabled="@acting">Mark ready only</button>
+                    <button type="button" class="search-action" @onclick="ReadyAndDispatchAsync" disabled="@acting">@(acting ? "Working…" : "Mark ready and dispatch")</button>
+                }
+                else
+                {
+                    <button type="button" class="search-action" @onclick="ReadyAsync" disabled="@acting">@(acting ? "Marking…" : "Mark ready for dispatch")</button>
+                }
             </div>
         </section>
     }
@@ -657,9 +655,8 @@ else
 
     private PosTransferDetail? detail;
     private string? message;
-    private string approvalNote = string.Empty;
-    private string reviewNote = string.Empty;
-    private string rejectionReason = string.Empty;
+    // One note for the decision: optional on approval, the reason on rejection.
+    private string decisionNote = string.Empty;
     private string cancelReason = string.Empty;
     private string centralNote = string.Empty;
 
@@ -686,15 +683,15 @@ else
     private bool IsStoreRestock => Mode == "StoreRestock";
 
     private bool ShowSubmit => Status == "Draft" && CanRequest && (!IsStoreRestock || detail?.Transfer.CreatedByUserId == Session.Current?.User.Id);
-    private bool ShowReview => Status == "Submitted" && CanApprove && (!IsStoreRestock || IsOwner);
-    private bool ShowApprove => Status == "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
-    private bool ShowReject => Status is "Submitted" or "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
+    private bool ShowDecision => Status is "Submitted" or "InReview" && CanApprove && (!IsStoreRestock || IsOwner);
     // The pick panel stays visible for the source side from the moment the        // request is approved; its rows start at zero, so the quantity inputs must
     // be on screen before any picking can be recorded. The "Accept request"
     // button itself stays disabled until a quantity is entered (CanPickNow).
     private bool ShowPick => Status is "Approved" or "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowReady => Status == "Picking" && CanPick && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     private bool ShowDispatch => Status == "Ready" && CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
+    // The same rule ShowDispatch applies once the transfer is Ready.
+    private bool CanDispatchOnceReady => CanDispatch && (!IsStoreRestock || Session.CanUseInventoryLocation(detail!.Transfer.SourceLocationId));
     // Picking does not move stock, so anything short of Dispatched can simply be
     // dropped. Without this a transfer whose stock was consumed elsewhere after
     // picking is stranded: it cannot dispatch, and the only cancel on offer
@@ -1100,19 +1097,28 @@ else
 
     private async Task ReviewAsync() => await RunActionAsync("Reviewing…", async () =>
     {
-        ApiResult<PosReference> response = await Api.PostAsync<PosReference>(
-            FormattableString.Invariant($"/api/v1/transfers/{TransferId:D}/review"),
-            new PosTransferReasonRequest(string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim()),
-            CancellationToken.None);
-        if (!response.IsSuccess)
+        string? failure = await MarkReviewedAsync(DecisionNoteOrNull);
+        if (failure is not null)
         {
-            return response.Error;
+            return failure;
         }
 
-        reviewNote = string.Empty;
+        decisionNote = string.Empty;
         await LoadDetailAsync();
         return null;
     });
+
+    private string? DecisionNoteOrNull => string.IsNullOrWhiteSpace(decisionNote) ? null : decisionNote.Trim();
+
+    /// <summary>Records the review step the server requires before approval.</summary>
+    private async Task<string?> MarkReviewedAsync(string? note)
+    {
+        ApiResult<PosReference> response = await Api.PostAsync<PosReference>(
+            FormattableString.Invariant($"/api/v1/transfers/{TransferId:D}/review"),
+            new PosTransferReasonRequest(note),
+            CancellationToken.None);
+        return response.IsSuccess ? null : response.Error;
+    }
 
     private async Task ApproveAsync() => await RunActionAsync("Approving…", async () =>
     {
@@ -1121,32 +1127,51 @@ else
             ? [.. approvalRows.Where(row => row.Approved != row.Requested)
                 .Select(row => new PosTransferAmendment(row.LineNo, row.Approved))]
             : null;
+        if (Status == "Submitted")
+        {
+            // Approving a submitted request is the reviewer's decision too;
+            // record the review first so the custody trail keeps both steps.
+            string? reviewFailure = await MarkReviewedAsync(null);
+            if (reviewFailure is not null)
+            {
+                await LoadDetailAsync();
+                return reviewFailure;
+            }
+        }
+
         ApiResult<PosReference> response = await Api.ApproveTransferAsync(
             TransferId,
-            new PosApproveTransferRequest(amendments, string.IsNullOrWhiteSpace(approvalNote) ? null : approvalNote.Trim()),
+            new PosApproveTransferRequest(amendments, DecisionNoteOrNull),
             CancellationToken.None);
         if (!response.IsSuccess)
         {
+            // The review may have been recorded; show the state as it now is.
+            await LoadDetailAsync();
             return response.Error;
         }
 
-        approvalNote = string.Empty;
+        decisionNote = string.Empty;
         await LoadDetailAsync();
         return null;
     });
 
     private async Task RejectAsync() => await RunActionAsync("Rejecting…", async () =>
     {
+        if (DecisionNoteOrNull is not { } reason)
+        {
+            return "Write a note explaining why the request is rejected.";
+        }
+
         ApiResult<PosReference> response = await Api.RejectTransferAsync(
             TransferId,
-            string.IsNullOrWhiteSpace(rejectionReason) ? null : rejectionReason.Trim(),
+            reason,
             CancellationToken.None);
         if (!response.IsSuccess)
         {
             return response.Error;
         }
 
-        rejectionReason = string.Empty;
+        decisionNote = string.Empty;
         await LoadDetailAsync();
         return null;
     });
@@ -1211,6 +1236,20 @@ else
         await LoadDetailAsync();
         return null;
     });
+
+    /// <summary>
+    /// Ready and dispatch in one go for someone allowed to do both. Still two
+    /// server transitions, so the custody trail is unchanged; an owner still
+    /// gets the dispatch confirmation.
+    /// </summary>
+    private async Task ReadyAndDispatchAsync()
+    {
+        await ReadyAsync();
+        if (Status == "Ready" && message is null)
+        {
+            await BeginDispatchAsync();
+        }
+    }
 
     private async Task BeginDispatchAsync()
     {

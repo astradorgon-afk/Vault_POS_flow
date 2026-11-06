@@ -16,7 +16,7 @@
 
 <LoginSurface>
         <form @onsubmit="SignInAsync" @onsubmit:preventDefault="true">
-            <header><span class="eyebrow">Secure workspace</span><h2>Welcome back <span class="wave" aria-hidden="true">👋</span></h2><p>Use your VaultFlow account to open the operations console.</p></header>
+            <header><span class="eyebrow">Secure workspace</span><h2>Welcome back</h2><p>Use your VaultFlow account to open the operations console.</p></header>
             @if (!showOfflineSetupModal && !string.IsNullOrWhiteSpace(error)) { <div class="form-error" role="alert">@error</div> }
             <label for="username">Username or email</label>
             <input id="username" name="username" autocomplete="username" required autofocus @bind="userName" @bind:event="oninput" disabled="@busy" />
@@ -53,7 +53,7 @@
                             <label for="work-location">Work location</label>
                             <select id="work-location" name="work-location" value="@(selectedLocationId?.ToString() ?? string.Empty)" @onchange="OnLocationChanged" disabled="@(busy || loadingLocations)">
                                 <option value="">@(loadingLocations ? "Loading locations…" : "Select work location")</option>
-                                @foreach (PosSignInLocation location in locationChoices)
+                                @foreach (PosSignInLocation location in VisibleLocationChoices)
                                 {
                                     <option value="@location.Id">@location.Code · @location.Name (@(location.Kind == 0 ? "Warehouse" : "Store"))</option>
                                 }
@@ -62,7 +62,19 @@
                             {
                                 <p class="option-note">@locationMessage <button type="button" class="linkish" @onclick="LoadLocationChoicesAsync">Try again</button></p>
                             }
+                            else
+                            {
+                                <p class="option-note">Only needed if you work at more than one location. A single assigned location is chosen for you.</p>
+                            }
                         </div>
+                        @if (!deviceEnrolled)
+                        {
+                            <div class="field">
+                                <label for="enrol-code-inline">Offline enrollment code <span>(optional)</span></label>
+                                <input id="enrol-code-inline" name="enrol-code-inline" autocomplete="off" placeholder="Only when registering this device" @bind="enrolmentCode" @bind:event="oninput" disabled="@busy" />
+                                <p class="option-note">An administrator issues this code in Administration → Devices. Leave it blank to work online.</p>
+                            </div>
+                        }
                     </div>
                 }
             </div>
@@ -127,6 +139,17 @@
     private string? locationMessage;
     private Guid? selectedLocationId;
     private readonly List<PosSignInLocation> locationChoices = [];
+
+    /// <summary>
+    /// The locations the account that last passed the password check works at,
+    /// or null before any check. The sign-in list is public, so until then it
+    /// has to offer every location; afterwards it offers only the valid ones.
+    /// </summary>
+    private HashSet<Guid>? assignedLocationIds;
+
+    private IEnumerable<PosSignInLocation> VisibleLocationChoices => assignedLocationIds is null
+        ? locationChoices
+        : locationChoices.Where(location => assignedLocationIds.Contains(location.Id));
 
     /// <remarks>
     /// The page is prerendered, so its first paint is plain HTML with no
@@ -245,11 +268,26 @@
                 return;
             }
 
+            if (!Session.CanWorkAcrossLocations && Session.Current is { } signedIn)
+            {
+                assignedLocationIds = signedIn.User.HasAllLocations
+                    ? [.. locationChoices.Select(location => location.Id)]
+                    : [.. signedIn.User.Locations.Where(id => locationChoices.Any(location => location.Id == id))];
+
+                // Someone who works at one place should never have to say so.
+                if (selectedLocationId is null && assignedLocationIds.Count == 1)
+                {
+                    selectedLocationId = assignedLocationIds.First();
+                }
+            }
+
             if (selectedLocationId is null && !Session.CanWorkAcrossLocations)
             {
                 Session.Clear();
                 optionsOpen = true;
-                error = "Choose a work location before signing in.";
+                error = assignedLocationIds is { Count: 0 }
+                    ? "No active work location is assigned to this account. Ask an administrator to assign one."
+                    : "You work at more than one location. Choose today's location below, then select Open workspace.";
                 return;
             }
 
@@ -297,7 +335,18 @@
             {
                 if (string.IsNullOrWhiteSpace(enrolmentCode))
                 {
-                    showOfflineSetupModal = true;
+                    // In an ordinary browser tab nobody is waiting to enrol, so a
+                    // dialog asking for a code they do not have only stands between
+                    // them and their work. The installed app still asks, and the
+                    // code can always be entered under Additional sign-in options.
+                    if (await IsInstalledAppAsync())
+                    {
+                        showOfflineSetupModal = true;
+                    }
+                    else
+                    {
+                        await ContinueOnlineAsync();
+                    }
                     return;
                 }
                 await offlineStore.InvokeAsync<PwaDevice>("enrol", enrolmentCode.Trim());
@@ -342,6 +391,12 @@
             showOfflineSetupModal = true;
         }
         finally { busy = false; }
+    }
+
+    private async Task<bool> IsInstalledAppAsync()
+    {
+        try { return await JS.InvokeAsync<bool>("vaultFlowInstall.isInstalled"); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException) { return false; }
     }
 
     /// <summary>Strips the JS "Error: " prefix and stack trace Blazor appends to a thrown message.</summary>

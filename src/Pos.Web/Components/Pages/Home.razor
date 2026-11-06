@@ -43,6 +43,19 @@
     </svg>
 </section>
 
+@* The sidebar already lists every page. This row offers only the few jobs
+   this role starts most often, as verbs, where they are seen first. *@
+<nav class="start-tasks" aria-label="Start a task">
+    @foreach (DashboardAction action in Actions)
+    {
+        <a class="start-task @(action == Actions[0] ? "is-primary" : string.Empty)" href="@action.Href">
+            <span class="start-task-icon"><AppIcon Name="@action.Icon" /></span>
+            <span class="start-task-copy"><strong>@action.Title</strong><small>@action.Description</small></span>
+            <AppIcon Name="arrow" CssClass="start-task-arrow" />
+        </a>
+    }
+</nav>
+
 @if (loadingDashboard || loadingStores)
 {
     <section class="dashboard-loading" aria-live="polite">
@@ -272,24 +285,6 @@ else
     }
 }
 
-<section class="workbench" aria-labelledby="workbench-title">
-    <div class="section-heading">
-        <div><span class="eyebrow">Your tools</span><h2 id="workbench-title">Quick actions</h2></div>
-        <span class="permission-note">Only actions assigned to you are shown</span>
-    </div>
-
-    <div class="task-grid">
-        @foreach (DashboardAction action in Actions)
-        {
-            <a class="task-card @(action == Actions[0] ? "task-primary" : string.Empty)" href="@action.Href">
-                <span class="task-icon"><AppIcon Name="@action.Icon" /></span>
-                <span class="task-copy"><strong>@action.Title</strong><small>@action.Description</small></span>
-                <AppIcon Name="arrow" CssClass="task-arrow" />
-            </a>
-        }
-    </div>
-</section>
-
 @code {
     private const int PeriodDays = 7;
 
@@ -381,23 +376,19 @@ else
         get
         {
             List<DashboardAction> actions = [];
-            if (CanViewInventory) actions.Add(new("box", "Stock levels", "See each store's stock, from what is running out to what is piling up.", "/inventory/stock"));
-            if (CanViewInventory) actions.Add(new("ledger", "Stock counts", "Count physical stock, submit it, and review variances.", "/inventory/counts"));
-            if (CanViewTransfers) actions.Add(new("location", "Transfers", "Request and track stock moving between locations.", "/transfers"));
-            if (CanApproveRestock) actions.Add(new("ledger", "Restock approvals", "Decide store supply requests before warehouse picking.", "/restock/approvals"));
-            if (CanFulfillRestock) actions.Add(new("box", "Restock fulfillment", "Pick and dispatch approved store requests.", "/restock/fulfillment"));
-            if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock) actions.Add(new("ledger", "Restock requests", "Ask the main warehouse to supply your store.", "/restock"));
-            if (CanReceivePurchasing) actions.Add(new("receipt", "Goods receiving", "Check supplier deliveries into your assigned locations.", "/receiving"));
-            if (CanViewPurchasing) actions.Add(new("receipt", "Purchase orders", "Order stock and record goods received from suppliers.", "/purchasing"));
-            if (CanViewSales) actions.Add(new("coins", "Store performance", "See what each store sold and took in, and its best sellers.", "/stores"));
-            if (CanViewSales) actions.Add(new("trend-up", "Best & worst sellers", "Which products sell best, and which are not selling, in each store.", "/analytics/products"));
-            if (CanViewSales) actions.Add(new("ledger", "Review sales", "Browse each store's transactions, returns and receipts.", "/sales"));
-            if (CanViewReports) actions.Add(new("report", "Open daily reports", "Reconcile trade, payment methods and drawer shifts.", "/reports"));
-            if (CanManageUsers) actions.Add(new("people", "Manage people & roles", "Control accounts, access and location assignments.", "/admin/users"));
-            if (CanManageDevices) actions.Add(new("device", "Manage devices", "Enrol, suspend and inspect the terminal fleet.", "/admin/devices"));
-            if (CanManageSync) actions.Add(new("sync", "Resolve sync failures", "Retry or dismiss device synchronization conflicts.", "/sync/failures"));
-            if (actions.Count == 0) actions.Add(new("bell", "Review notifications", "See activity and exceptions addressed to you.", "/notifications"));
-            return actions;
+            if (CanApproveRestock) actions.Add(new("check", "Review restock requests", "Approve or adjust what stores asked for.", "/restock/approvals"));
+            if (CanFulfillRestock) actions.Add(new("box-out", "Fulfill store requests", "Pick and dispatch approved requests.", "/restock/fulfillment"));
+            if (CanRequestRestock && !CanApproveRestock && !CanFulfillRestock) actions.Add(new("box-in", "Request stock", "Start from what is running low here.", "/restock"));
+            if (CanReceivePurchasing && !CanViewPurchasing) actions.Add(new("receipt", "Receive a delivery", "Check a supplier delivery into stock.", "/receiving"));
+            if (CanViewPurchasing) actions.Add(new("receipt", "New purchase order", "Order stock from a supplier.", "/purchasing/new"));
+            if (CanViewInventory) actions.Add(new("count", "Count stock", "Open or continue a physical count.", "/inventory/counts"));
+            if (CanViewInventory) actions.Add(new("box", "Check stock levels", "See what is running out or piling up.", "/inventory/stock"));
+            if (CanViewSales) actions.Add(new("ledger", "Review sales", "Transactions, returns and receipts.", "/sales"));
+            if (CanViewReports) actions.Add(new("report", "Daily reports", "Reconcile trade and payment methods.", "/reports"));
+            if (CanManageUsers) actions.Add(new("people", "Manage people", "Accounts, roles and locations.", "/admin/users"));
+            if (CanManageSync) actions.Add(new("sync", "Resolve sync failures", "Retry or dismiss device conflicts.", "/sync/failures"));
+            if (actions.Count == 0) actions.Add(new("bell", "Review notifications", "Activity and exceptions addressed to you.", "/notifications"));
+            return [.. actions.Take(4)];
         }
     }
 

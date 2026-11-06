@@ -6,12 +6,15 @@
 @inject VaultFlowApiClient Api
 @inject UserSession Session
 @inject NotificationStore Notifications
+@inject PageTrail Trail
 
-<PageTitle>Restock requests · VaultFlow</PageTitle>
+<PageTitle>@PageHeading · VaultFlow</PageTitle>
 
 <section class="restock-page">
     <header class="restock-head">
-        <div><span class="eyebrow">Inventory · store supplies</span><h1>Restock requests</h1><p>Ask the main warehouse for the products your store needs. The owner reviews the request before stock is picked.</p></div>
+        <div><span class="eyebrow">@(AtWarehouse ? "Main warehouse · supplier stock" : "Inventory · store supplies")</span><h1>@PageHeading</h1><p>@(AtWarehouse
+            ? "Ask the owner to buy what the warehouse is running out of. The owner turns approved requests into purchase orders."
+            : "Ask the main warehouse for the products your store needs. The owner reviews the request before stock is picked.")</p></div>
         <div class="restock-tabs" role="tablist" aria-label="Restock request views">
             <button type="button" role="tab" id="restock-tab-new" aria-controls="restock-panel-new" aria-selected="@(activeTab == "new" ? "true" : "false")" class="@(activeTab == "new" ? "active" : null)" @onclick='() => activeTab = "new"'>New request</button>
             <button type="button" role="tab" id="restock-tab-history" aria-controls="restock-panel-history" aria-selected="@(activeTab == "history" ? "true" : "false")" class="@(activeTab == "history" ? "active" : null)" @onclick='() => activeTab = "history"'>
@@ -288,6 +291,10 @@
     private readonly List<PosSupplyRequest> supplyRequests = [];
 
     /// <summary>Whether the chosen destination is the warehouse, which is bought for rather than transferred to.</summary>
+    // Signed in at the warehouse, this page asks the owner to buy; at a store it asks the warehouse.
+    private bool AtWarehouse => Session.WorkLocationKind == 0;
+    private string PageHeading => AtWarehouse ? "Supply requests" : "Restock requests";
+
     private bool IsWarehouseRequest => selectedStoreId is { } chosen && warehouses.Any(w => w.Id == chosen);
     private Guid? savedDraftId;
     private Guid? justSentId;
@@ -382,6 +389,11 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (AtWarehouse)
+        {
+            Trail.Name(PageHeading);
+        }
+
         // A request's status moves when the owner decides and when the
         // warehouse acts; both ends announce the change, so the history
         // follows along without anyone pressing Refresh.

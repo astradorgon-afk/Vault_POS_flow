@@ -6,16 +6,22 @@
 @inject UserSession Session
 @inject NavigationManager Navigation
 
-<PageTitle>Transfers · VaultFlow</PageTitle>
+<PageTitle>All transfers · VaultFlow</PageTitle>
 <div class="inventory-workflow web-workflow">
 
 <div class="office-head">
     <div>
-        <p class="office-kicker">Inventory command</p>
-        <h1 class="office-title">Transfers</h1>
+        <p class="office-kicker">Movement</p>
+        <h1 class="office-title">All transfers</h1>
         <p class="office-lead">Move stock between your stores and the main warehouse, and record what arrives at the door.</p>
     </div>
     <div class="head-pickers">
+        @if (CanRequestTransfers)
+        {
+            <button type="button" class="search-action head-primary" aria-expanded="@(showRequestForm ? "true" : "false")" aria-controls="transfer-request-form" @onclick="ToggleRequestForm">
+                @(showRequestForm ? "Close form" : "New transfer")
+            </button>
+        }
         <label class="location-picker">
             <span>State</span>
             <select @bind="selectedStatus">
@@ -49,9 +55,9 @@ else
         <div class="pos-message" role="status">@message</div>
     }
 
-    @if (CanRequestTransfers)
+    @if (CanRequestTransfers && showRequestForm)
     {
-        <section class="open-count">
+        <section class="open-count" id="transfer-request-form">
             <div class="open-count-title">
                 <strong>Request a transfer</strong>
                 <span>
@@ -59,6 +65,10 @@ else
                         ? $"Shipping from {SourceLabel} — pick a destination, then search what's in stock here to add it."
                         : "Choose the route, then add the lines.") The transfer is created as a draft for someone to review.
                 </span>
+                @if (Session.WorkLocationKind == 1 && Session.HasPermission("transfer.request"))
+                {
+                    <span class="open-count-hint">Need stock from the main warehouse? <a href="restock">Use a restock request</a> — it starts from what is running low.</span>
+                }
             </div>
             <div class="open-count-fields">
                 @if (SourceKnown)
@@ -91,13 +101,16 @@ else
                         }
                     </select>
                 </label>
+            </div>
+            <details class="advanced-options" open="@(!string.IsNullOrWhiteSpace(preApprovalTokenId))">
+                <summary>Advanced: pre-approval token</summary>
                 <label class="location-picker">
                     <span>Pre-approval token</span>
-                    <input type="text" placeholder="Optional token id"
+                    <input type="text" placeholder="Only if a manager issued one"
                            value="@preApprovalTokenId"
                            @onchange="OnTokenChangedAsync" />
                 </label>
-            </div>
+            </details>
             <ScanTarget OnScan="OnScannedAsync" Enabled="@(CanScanIntoDraft && !creating)" />
             <CameraScanner Enabled="@(CanScanIntoDraft && !creating)" />
             <div class="scan-strip" role="status">
@@ -186,7 +199,7 @@ else
         }
         else if (visibleTransfers.Count == 0)
         {
-            <div class="results-empty"><strong>No transfers yet.</strong><span>Request one, or wait for a dispatch to arrive at your store.</span></div>
+            <div class="results-empty"><strong>No transfers yet.</strong><span>@(CanRequestTransfers ? "Select New transfer to request one, or wait for a dispatch to arrive at your store." : "Transfers to and from your locations will appear here.")</span></div>
         }
         else
         {
@@ -248,6 +261,9 @@ else
     private bool locationsLoading = true;
     private bool loading;
     private bool creating;
+    // The request form is a task, not the page: closed until asked for.
+    private bool showRequestForm;
+    private void ToggleRequestForm() => showRequestForm = !showRequestForm;
     private string? message;
     private long nextMarker = 1;
 

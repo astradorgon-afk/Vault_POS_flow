@@ -8,11 +8,11 @@
 @inject UserSession Session
 @inject NavigationManager Navigation
 
-<PageTitle>Store inventory · VaultFlow</PageTitle>
+<PageTitle>Stock levels · VaultFlow</PageTitle>
 
 <header class="qr-head sk-head">
     <span class="eyebrow">Monitoring</span>
-    <h1>Store inventory</h1>
+    <h1>Stock levels</h1>
     <p>What each location holds, from the items running out to the ones piling up.</p>
     @if (Notifications.IsLive)
     {
@@ -512,7 +512,14 @@ else if (report is not null)
             }
 
             report = response.Value;
-            Navigation.NavigateTo(FormattableString.Invariant($"inventory/stock?store={locationId:D}"), replace: true);
+            // Keep the chosen store in the address so a refresh or shared link
+            // reopens it. Only once interactive, and only when it changed: during
+            // prerender NavigateTo becomes an HTTP redirect, and redirecting to
+            // this same page again on every load never ends.
+            if (RendererInfo.IsInteractive && QueryStore != locationId)
+            {
+                Navigation.NavigateTo(FormattableString.Invariant($"inventory/stock?store={locationId:D}"), replace: true);
+            }
         }
         catch (HttpRequestException)
         {
