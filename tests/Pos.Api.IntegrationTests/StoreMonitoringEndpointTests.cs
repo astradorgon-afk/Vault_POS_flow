@@ -210,6 +210,9 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
         picked.StatusCode.Should().Be(HttpStatusCode.OK, await picked.Content.ReadAsStringAsync());
         using HttpResponseMessage ready = await PostWithTokenAsync(client, $"/api/v1/transfers/{transferId:D}/ready", approver);
         ready.StatusCode.Should().Be(HttpStatusCode.OK, await ready.Content.ReadAsStringAsync());
+        // The count is business-wide and every API test shares one database, so
+        // other tests' dispatches are in it too: measure this test's own dispatch.
+        int dispatchedBefore = await DispatchedTransferCountAsync(client, owner);
         using HttpResponseMessage dispatched = await PostWithTokenAsync(client, $"/api/v1/transfers/{transferId:D}/dispatch", approver);
         dispatched.StatusCode.Should().Be(HttpStatusCode.OK, await dispatched.Content.ReadAsStringAsync());
 
@@ -252,7 +255,7 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         JsonElement report = document.RootElement;
-        report.GetProperty("dispatchedTransferCount").GetInt32().Should().Be(1);
+        report.GetProperty("dispatchedTransferCount").GetInt32().Should().Be(dispatchedBefore + 1);
         JsonElement[] stores = [.. report.GetProperty("stores").EnumerateArray()];
         stores.Select(store => store.GetProperty("locationId").GetGuid())
             .Should().Contain([activeStore.Value, quietStore.Value]);
@@ -441,5 +444,13 @@ public sealed class StoreMonitoringEndpointTests(PosApiFactory factory)
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return await client.SendAsync(request, CancellationToken.None);
+    }
+
+    private static async Task<int> DispatchedTransferCountAsync(HttpClient client, string token)
+    {
+        using HttpResponseMessage response = await GetAsync(client, "/api/v1/dashboard/store-movements", token);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("dispatchedTransferCount").GetInt32();
     }
 }

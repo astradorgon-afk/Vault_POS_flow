@@ -10,7 +10,8 @@ namespace Pos.Application.Tests.Catalog;
 /// <summary>
 /// The gate that holds a product change for the owner: it must let an approver
 /// straight through, hold everybody else's change rather than applying it,
-/// insist on a reason, and never touch a command that is not a product change.
+/// insist on a reason, refuse a product that does not exist rather than queue
+/// it, and never touch a command that is not a product change.
 /// </summary>
 public sealed class ProductChangeApprovalBehaviourTests
 {
@@ -96,6 +97,27 @@ public sealed class ProductChangeApprovalBehaviourTests
         requests.Added.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task AChangeToAnUnknownProduct_IsNotQueued_AndTheHandlerRefusesIt()
+    {
+        FakeRequests requests = new();
+        bool ranHandler = false;
+        var behaviour = NewBehaviour(requests, mayApprove: false, reason: "Supplier changed the pack size", productExists: false);
+
+        Result<ProductId> result = await behaviour.HandleAsync(
+            Change(),
+            () =>
+            {
+                ranHandler = true;
+                return Task.FromResult(Result<ProductId>.Failure(CatalogErrors.ProductUnknown(Product)));
+            },
+            CancellationToken.None);
+
+        ranHandler.Should().BeTrue("the handler is what reports the product as unknown");
+        result.Errors.Should().ContainSingle().Which.Code.Should().Be("catalog.product_unknown");
+        requests.Added.Should().BeEmpty("a request for a missing product could never be applied");
+    }
+
     private static SetProductActivationCommand Change()
         => new(Product, Active: false, Reason: "Discontinued");
 
@@ -103,9 +125,11 @@ public sealed class ProductChangeApprovalBehaviourTests
         FakeRequests requests,
         bool mayApprove,
         string? reason,
-        ProductChangeReplayScope? replay = null)
+        ProductChangeReplayScope? replay = null,
+        bool productExists = true)
         => new(
             requests,
+            new FakeProducts(productExists),
             new FakePermissions(mayApprove),
             new FakeCurrentUser(Staff),
             new ProductChangeReason { Reason = reason },
@@ -117,11 +141,18 @@ public sealed class ProductChangeApprovalBehaviourTests
         bool mayApprove)
         => new(
             requests,
+            new FakeProducts(exists: true),
             new FakePermissions(mayApprove),
             new FakeCurrentUser(Staff),
             new ProductChangeReason(),
             new ProductChangeReplayScope(),
             new FakeClock());
+
+    private sealed class FakeProducts(bool exists) : IProductExistence
+    {
+        public Task<bool> ProductExistsAsync(ProductId productId, CancellationToken cancellationToken)
+            => Task.FromResult(exists);
+    }
 
     private sealed class FakeRequests : IProductChangeRequestRepository
     {

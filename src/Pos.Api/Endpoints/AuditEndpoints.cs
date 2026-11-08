@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 using System.Text.Json;
+using Pos.Api.Common;
 using Pos.Api.Authorization;
 using Pos.Application.Identity;
 using Pos.Domain.Auditing;
@@ -125,25 +127,30 @@ public static class AuditEndpoints
             // The UI shows actions as "Transfer Approved" but stores "transfer.approved"; also match the dotted form.
             string dotted = string.Join('.', term.Split(' ', StringSplitOptions.RemoveEmptyEntries));
             string dottedPattern = $"%{dotted.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal)}%";
-            query = query.Where(entry =>
+            // ILike runs on PostgreSQL; ForProvider turns it into SQLite's
+            // already case-insensitive LIKE on the SQLite host.
+            bool sqlite = context.IsSqlite;
+            Expression<Func<AuditLogEntry, bool>> auditMatch = entry =>
                 EF.Functions.ILike(entry.Action, pattern, "\\") ||
                 (dotted != term && EF.Functions.ILike(entry.Action, dottedPattern, "\\")) ||
                 EF.Functions.ILike(entry.EntityType, pattern, "\\") ||
                 (entry.Reason != null && EF.Functions.ILike(entry.Reason, pattern, "\\")) ||
                 (entry.UserRoleSnapshot != null && EF.Functions.ILike(entry.UserRoleSnapshot, pattern, "\\")) ||
                 (entry.PreviousValueJson != null && EF.Functions.ILike(entry.PreviousValueJson, pattern, "\\")) ||
-                (entry.NewValueJson != null && EF.Functions.ILike(entry.NewValueJson, pattern, "\\")));
+                (entry.NewValueJson != null && EF.Functions.ILike(entry.NewValueJson, pattern, "\\"));
+            query = query.Where(auditMatch.ForProvider(sqlite));
 
             TransferCustodyEventKind[] matchingKinds = Enum.GetValues<TransferCustodyEventKind>()
                 .Where(kind =>
                     TransferAction(kind).Contains(term, StringComparison.OrdinalIgnoreCase) ||
                     (dotted != term && TransferAction(kind).Contains(dotted, StringComparison.OrdinalIgnoreCase)))
                 .ToArray();
+            Expression<Func<TransferLine, bool>> lineMatch = line => context.Products.AsNoTracking().Any(product =>
+                product.Id == line.ProductId && EF.Functions.ILike(product.Name, pattern, "\\"));
             IQueryable<TransferOrderId> productMatches = context.TransferLines.AsNoTracking()
-                .Where(line => context.Products.AsNoTracking().Any(product =>
-                    product.Id == line.ProductId && EF.Functions.ILike(product.Name, pattern, "\\")))
+                .Where(lineMatch.ForProvider(sqlite))
                 .Select(line => line.TransferOrderId);
-            transferEvents = transferEvents.Where(entry =>
+            Expression<Func<TransferCustodyEvent, bool>> eventMatch = entry =>
                 (entry.Note != null && EF.Functions.ILike(entry.Note, pattern, "\\")) ||
                 matchingKinds.Contains(entry.Kind) ||
                 productMatches.Contains(entry.TransferOrderId) ||
@@ -151,7 +158,8 @@ public static class AuditEndpoints
                     transfer.Id == entry.TransferOrderId &&
                     (EF.Functions.ILike(transfer.Number, pattern, "\\") ||
                      (transfer.ShipmentNumber != null && EF.Functions.ILike(transfer.ShipmentNumber, pattern, "\\")) ||
-                     (transfer.ReceiptNumber != null && EF.Functions.ILike(transfer.ReceiptNumber, pattern, "\\")))));
+                     (transfer.ReceiptNumber != null && EF.Functions.ILike(transfer.ReceiptNumber, pattern, "\\"))));
+            transferEvents = transferEvents.Where(eventMatch.ForProvider(sqlite));
         }
 
         int total = await query.CountAsync(cancellationToken).ConfigureAwait(false);

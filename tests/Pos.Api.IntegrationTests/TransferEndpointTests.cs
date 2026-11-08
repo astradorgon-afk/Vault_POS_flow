@@ -321,8 +321,9 @@ public sealed class TransferEndpointTests(PosApiFactory factory)
 
         TransferDbo closed = await TransferDboAsync(transferId);
         closed.Status.Should().Be(TransferStatus.Closed);
+        // Marking the pick ready is its own custody step, as in the warehouse-to-store lifecycle above.
         closed.CustodyKinds.Should().Equal(
-            "Created", "Submitted", "Reviewed", "Approved", "Picked", "Dispatched", "Received", "Verified");
+            "Created", "Submitted", "Reviewed", "Approved", "Picked", "Ready", "Dispatched", "Received", "Verified");
         BalanceSnapshot warehouseAvailable = await BalanceSnapshotAsync(
             seed.Warehouse, seed.Product, null, InventoryState.Available);
         warehouseAvailable.Quantity.Should().Be(6m);
