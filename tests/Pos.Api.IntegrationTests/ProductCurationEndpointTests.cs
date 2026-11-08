@@ -26,11 +26,13 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
     {
         ProductId product = await factory.CreateProductAsync("CUR-EDIT-01", "Corn Chips", "4800000200017", defaultPurchaseCost: 10m);
         CategoryId snacks = await factory.CreateCategoryAsync("CUR-SNACKS", "Snacks");
+        await factory.CreateUserAsync("cur-edit-owner", Roles.Owner);
         await factory.CreateUserAsync("cur-edit-mgr", Roles.MainInventoryManager);
         await factory.CreateUserAsync("cur-edit-store", Roles.StoreManager);
         await factory.CreateUserAsync("cur-edit-cashier", Roles.Cashier);
         using HttpClient client = factory.CreateClient();
 
+        string owner = await SignInAsync(client, "cur-edit-owner");
         string manager = await SignInAsync(client, "cur-edit-mgr");
         string storeManager = await SignInAsync(client, "cur-edit-store");
         string cashier = await SignInAsync(client, "cur-edit-cashier");
@@ -47,7 +49,31 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
             refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         }
 
-        using (HttpResponseMessage edited = await SendAsync(client, HttpMethod.Put, Path(product), manager, edit))
+        // Someone who cannot approve catalogue changes has theirs held for the
+        // owner: it needs a reason, and nothing about the product changes yet.
+        using (HttpResponseMessage noReason = await SendAsync(client, HttpMethod.Put, Path(product), manager, edit))
+        {
+            noReason.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await ReadErrorCodeAsync(noReason)).Should().Be("catalog.change_reason_required");
+        }
+
+        using (HttpRequestMessage reasoned = new(HttpMethod.Put, new Uri(Path(product), UriKind.Relative)))
+        {
+            reasoned.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", manager);
+            reasoned.Headers.Add("X-Change-Reason", "Supplier renamed the pack on the new delivery");
+            reasoned.Content = System.Net.Http.Json.JsonContent.Create(edit);
+            using HttpResponseMessage held = await client.SendAsync(reasoned);
+            held.StatusCode.Should().Be(HttpStatusCode.Conflict, await held.Content.ReadAsStringAsync());
+            (await ReadErrorCodeAsync(held)).Should().Be("catalog.change_awaiting_approval");
+        }
+
+        using (JsonDocument unchanged = await GetJsonAsync(client, Path(product), manager))
+        {
+            unchanged.RootElement.GetProperty("name").GetString().Should().Be("Corn Chips", "a held change is not applied");
+        }
+
+        // The owner may approve changes, so theirs applies directly.
+        using (HttpResponseMessage edited = await SendAsync(client, HttpMethod.Put, Path(product), owner, edit))
         {
             edited.StatusCode.Should().Be(HttpStatusCode.NoContent, await edited.Content.ReadAsStringAsync());
         }
@@ -67,7 +93,7 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
         }
 
         using (HttpResponseMessage unknownCategory = await SendAsync(
-            client, HttpMethod.Put, Path(product), manager, new { name = "X", categoryId = Guid.CreateVersion7() }))
+            client, HttpMethod.Put, Path(product), owner, new { name = "X", categoryId = Guid.CreateVersion7() }))
         {
             unknownCategory.StatusCode.Should().Be(HttpStatusCode.Conflict);
             (await ReadErrorCodeAsync(unknownCategory)).Should().Be("catalog.category_unknown");
@@ -85,11 +111,13 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
     {
         ProductId product = await factory.CreateProductAsync("CUR-CODE-01", "Instant Noodles", "4800000200024");
         ProductId other = await factory.CreateProductAsync("CUR-CODE-02", "Instant Noodles Spicy", "4800000200031");
-        await factory.CreateUserAsync("cur-code-mgr", Roles.MainInventoryManager);
+        await factory.CreateUserAsync("cur-code-owner", Roles.Owner);
         await factory.CreateUserAsync("cur-code-cashier", Roles.Cashier);
         using HttpClient client = factory.CreateClient();
 
-        string manager = await SignInAsync(client, "cur-code-mgr");
+        // Product changes apply directly only for someone who may approve them;
+        // anyone else's change is held for the owner (see the edit test).
+        string editor = await SignInAsync(client, "cur-code-owner");
         string cashier = await SignInAsync(client, "cur-code-cashier");
         string barcodes = Path(product, "/barcodes");
 
@@ -100,12 +128,12 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
         }
 
         using (HttpResponseMessage added = await SendAsync(
-            client, HttpMethod.Post, barcodes, manager, new { barcode = "4800000200048", packQuantity = 12m, isPrimary = true }))
+            client, HttpMethod.Post, barcodes, editor, new { barcode = "4800000200048", packQuantity = 12m, isPrimary = true }))
         {
             added.StatusCode.Should().Be(HttpStatusCode.Created, await added.Content.ReadAsStringAsync());
         }
 
-        using (JsonDocument listed = await GetJsonAsync(client, barcodes, manager))
+        using (JsonDocument listed = await GetJsonAsync(client, barcodes, editor))
         {
             listed.RootElement.EnumerateArray()
                 .Select(b => (b.GetProperty("barcode").GetString(), b.GetProperty("isPrimary").GetBoolean()))
@@ -113,19 +141,19 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
         }
 
         using (HttpResponseMessage noReason = await SendAsync(
-            client, HttpMethod.Post, barcodes + "/4800000200048/retire", manager, new { reason = (string?)null }))
+            client, HttpMethod.Post, barcodes + "/4800000200048/retire", editor, new { reason = (string?)null }))
         {
             noReason.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await ReadErrorCodeAsync(noReason)).Should().Be("catalog.reason_required");
         }
 
         using (HttpResponseMessage retired = await SendAsync(
-            client, HttpMethod.Post, barcodes + "/4800000200048/retire", manager, new { reason = "Case barcode replaced by supplier" }))
+            client, HttpMethod.Post, barcodes + "/4800000200048/retire", editor, new { reason = "Case barcode replaced by supplier" }))
         {
             retired.StatusCode.Should().Be(HttpStatusCode.NoContent, await retired.Content.ReadAsStringAsync());
         }
 
-        using (JsonDocument listed = await GetJsonAsync(client, barcodes, manager))
+        using (JsonDocument listed = await GetJsonAsync(client, barcodes, editor))
         {
             JsonElement[] rows = [.. listed.RootElement.EnumerateArray()];
             rows[0].GetProperty("barcode").GetString().Should().Be("4800000200024");
@@ -146,9 +174,9 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
                 .Should().Equal("4800000200024");
         }
 
-        await ExpectConflictAsync(client, barcodes, manager, "4800000200048", "catalog.barcode_retired");
-        await ExpectConflictAsync(client, Path(other, "/barcodes"), manager, "4800000200048", "catalog.barcode_already_attached");
-        await ExpectConflictAsync(client, Path(other, "/barcodes"), manager, "4800000200024", "catalog.barcode_already_attached");
+        await ExpectConflictAsync(client, barcodes, editor, "4800000200048", "catalog.barcode_retired");
+        await ExpectConflictAsync(client, Path(other, "/barcodes"), editor, "4800000200048", "catalog.barcode_already_attached");
+        await ExpectConflictAsync(client, Path(other, "/barcodes"), editor, "4800000200024", "catalog.barcode_already_attached");
 
         int audited = await factory.WithServiceAsync(context => context.AuditLog
             .CountAsync(a => a.EntityId == product.Value && a.Action == AuditActions.Catalog.BarcodeChanged));
@@ -159,29 +187,31 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
     public async Task Deactivation_RequiresAReason_HidesTheProductFromTheDefaultList_AndCanBeUndone()
     {
         ProductId product = await factory.CreateProductAsync("CUR-ACT-01", "Discontinued Soda", "4800000200055");
-        await factory.CreateUserAsync("cur-act-mgr", Roles.MainInventoryManager);
+        await factory.CreateUserAsync("cur-act-owner", Roles.Owner);
         using HttpClient client = factory.CreateClient();
 
-        string manager = await SignInAsync(client, "cur-act-mgr");
+        // Product changes apply directly only for someone who may approve them;
+        // anyone else's change is held for the owner (see the edit test).
+        string editor = await SignInAsync(client, "cur-act-owner");
 
-        using (HttpResponseMessage noReason = await SendAsync(client, HttpMethod.Post, Path(product, "/deactivate"), manager, new { }))
+        using (HttpResponseMessage noReason = await SendAsync(client, HttpMethod.Post, Path(product, "/deactivate"), editor, new { }))
         {
             noReason.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await ReadErrorCodeAsync(noReason)).Should().Be("catalog.reason_required");
         }
 
         using (HttpResponseMessage deactivated = await SendAsync(
-            client, HttpMethod.Post, Path(product, "/deactivate"), manager, new { reason = "Supplier discontinued the line" }))
+            client, HttpMethod.Post, Path(product, "/deactivate"), editor, new { reason = "Supplier discontinued the line" }))
         {
             deactivated.StatusCode.Should().Be(HttpStatusCode.NoContent, await deactivated.Content.ReadAsStringAsync());
         }
 
-        using (JsonDocument active = await GetJsonAsync(client, "/api/v1/catalog/products?q=CUR-ACT-01", manager))
+        using (JsonDocument active = await GetJsonAsync(client, "/api/v1/catalog/products?q=CUR-ACT-01", editor))
         {
             active.RootElement.GetArrayLength().Should().Be(0);
         }
 
-        using (JsonDocument all = await GetJsonAsync(client, "/api/v1/catalog/products?q=CUR-ACT-01&includeInactive=true", manager))
+        using (JsonDocument all = await GetJsonAsync(client, "/api/v1/catalog/products?q=CUR-ACT-01&includeInactive=true", editor))
         {
             JsonElement row = all.RootElement.EnumerateArray().Should().ContainSingle().Subject;
             row.GetProperty("isActive").GetBoolean().Should().BeFalse();
@@ -189,18 +219,18 @@ public sealed class ProductCurationEndpointTests(PosApiFactory factory)
         }
 
         using (HttpResponseMessage again = await SendAsync(
-            client, HttpMethod.Post, Path(product, "/deactivate"), manager, new { reason = "Pressed twice by mistake" }))
+            client, HttpMethod.Post, Path(product, "/deactivate"), editor, new { reason = "Pressed twice by mistake" }))
         {
             again.StatusCode.Should().Be(HttpStatusCode.Conflict);
             (await ReadErrorCodeAsync(again)).Should().Be("catalog.product_already_inactive");
         }
 
-        using (HttpResponseMessage activated = await SendAsync(client, HttpMethod.Post, Path(product, "/activate"), manager))
+        using (HttpResponseMessage activated = await SendAsync(client, HttpMethod.Post, Path(product, "/activate"), editor))
         {
             activated.StatusCode.Should().Be(HttpStatusCode.NoContent, await activated.Content.ReadAsStringAsync());
         }
 
-        using JsonDocument detail = await GetJsonAsync(client, Path(product), manager);
+        using JsonDocument detail = await GetJsonAsync(client, Path(product), editor);
         detail.RootElement.GetProperty("isActive").GetBoolean().Should().BeTrue();
         detail.RootElement.GetProperty("discontinuedOn").ValueKind.Should().Be(JsonValueKind.Null);
     }

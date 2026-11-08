@@ -64,6 +64,7 @@ public static class DependencyInjection
 
         services.TryAddScoped<IUnitOfWork, UnitOfWork>();
         services.TryAddScoped<IMasterDataRepository, MasterDataRepository>();
+        services.TryAddScoped<IProductExistence, MasterDataRepository>();
         services.TryAddSingleton<ISystemClock, SystemClock>();
         services.TryAddScoped<IAuditWriter, AuditWriter>();
         // Real policies now come from each location's own settings. The strict

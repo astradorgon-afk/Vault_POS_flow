@@ -150,6 +150,21 @@ public static class ProductChangeRegistry
     }
 }
 
+/// <summary>Answers whether a product exists.</summary>
+/// <remarks>
+/// The approval step asks before it queues a change: a request against a product
+/// that does not exist could never be applied, so it is refused as unknown instead
+/// of reaching the owner's queue.
+/// </remarks>
+public interface IProductExistence
+{
+    /// <summary>Determines whether a product, active or retired, exists.</summary>
+    /// <param name="productId">The product.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true"/> when it exists.</returns>
+    Task<bool> ProductExistsAsync(ProductId productId, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Holds a product change for the owner unless the caller may approve changes
 /// themselves.
@@ -171,6 +186,7 @@ public static class ProductChangeRegistry
 /// <typeparam name="TResult">The value produced on success.</typeparam>
 public sealed class ProductChangeApprovalBehaviour<TMessage, TResult>(
     IProductChangeRequestRepository requests,
+    IProductExistence products,
     IPermissionEvaluator permissions,
     ICurrentUser currentUser,
     ProductChangeReason reason,
@@ -207,6 +223,13 @@ public sealed class ProductChangeApprovalBehaviour<TMessage, TResult>(
             .ConfigureAwait(false);
 
         if (mayApprove)
+        {
+            return await next().ConfigureAwait(false);
+        }
+
+        // Nothing to approve on a product that does not exist. The handler
+        // refuses it as unknown, without writing anything.
+        if (!await products.ProductExistsAsync(change.ProductId, cancellationToken).ConfigureAwait(false))
         {
             return await next().ConfigureAwait(false);
         }

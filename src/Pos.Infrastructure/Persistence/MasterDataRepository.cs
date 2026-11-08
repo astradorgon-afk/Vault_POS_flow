@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Pos.Application.Catalog;
 using Pos.Application.Common.Abstractions;
 using Pos.Domain.Catalog;
 using Pos.Domain.Common;
@@ -13,7 +14,7 @@ namespace Pos.Infrastructure.Persistence;
 /// the same save that inserts the row, so a conflict can never be saved.
 /// </summary>
 /// <param name="context">The database context.</param>
-public sealed class MasterDataRepository(PosDbContext context) : IMasterDataRepository
+public sealed class MasterDataRepository(PosDbContext context) : IMasterDataRepository, IProductExistence
 {
     /// <inheritdoc />
     public async Task<Result<LocationId>> CreateLocationAsync(
@@ -319,6 +320,10 @@ public sealed class MasterDataRepository(PosDbContext context) : IMasterDataRepo
             .Include(p => p.Suppliers)
             .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == productId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ProductExistsAsync(ProductId productId, CancellationToken cancellationToken)
+        => context.Products.AsNoTracking().AnyAsync(p => p.Id == productId, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> BarcodeInUseAsync(string value, CancellationToken cancellationToken)

@@ -145,22 +145,24 @@ public sealed class ProductStockingEndpointTests(PosApiFactory factory)
         ProductId product = await factory.CreateProductAsync("CUR-STOCK-01", "Bottled Water", "4800000300021");
         LocationId store = await factory.CreateLocationAsync("CUR-STOCK-S", "Stocking Store");
         LocationId external = await factory.CreateExternalLocationAsync("EXT-WRITEOFF");
-        await factory.CreateUserAsync("cur-stock-mgr", Roles.MainInventoryManager);
+        await factory.CreateUserAsync("cur-stock-owner", Roles.Owner);
         using HttpClient client = factory.CreateClient();
 
-        string manager = await SignInAsync(client, "cur-stock-mgr");
+        // Product changes apply directly only for someone who may approve them;
+        // anyone else's change is held for the owner (see the edit test).
+        string editor = await SignInAsync(client, "cur-stock-owner");
         string setting = Path(product, "/location-settings/" + store.Value);
 
-        await ExpectPutAsync(client, setting, manager, Thresholds(true, 5m, 10m, 20m, 30m, 12m), HttpStatusCode.NoContent);
-        await ExpectPutAsync(client, setting, manager, Thresholds(false, 0m, 4m, 8m, 16m, 6m), HttpStatusCode.NoContent);
+        await ExpectPutAsync(client, setting, editor, Thresholds(true, 5m, 10m, 20m, 30m, 12m), HttpStatusCode.NoContent);
+        await ExpectPutAsync(client, setting, editor, Thresholds(false, 0m, 4m, 8m, 16m, 6m), HttpStatusCode.NoContent);
         await ExpectPutAsync(
-            client, setting, manager, Thresholds(true, 9m, 1m, 8m, 16m, 6m),
+            client, setting, editor, Thresholds(true, 9m, 1m, 8m, 16m, 6m),
             HttpStatusCode.BadRequest, "product_location.thresholds_unordered");
         await ExpectPutAsync(
-            client, Path(product, "/location-settings/" + external.Value), manager, Thresholds(true, 0m, 1m, 2m, 3m, 1m),
+            client, Path(product, "/location-settings/" + external.Value), editor, Thresholds(true, 0m, 1m, 2m, 3m, 1m),
             HttpStatusCode.Conflict, "catalog.location_unknown");
 
-        using JsonDocument listed = await GetJsonAsync(client, Path(product, "/location-settings"), manager);
+        using JsonDocument listed = await GetJsonAsync(client, Path(product, "/location-settings"), editor);
         JsonElement row = listed.RootElement.EnumerateArray().Should().ContainSingle().Subject;
         row.GetProperty("isStocked").GetBoolean().Should().BeFalse();
         row.GetProperty("reorderPoint").GetDecimal().Should().Be(4m);
@@ -173,16 +175,18 @@ public sealed class ProductStockingEndpointTests(PosApiFactory factory)
         UnitOfMeasureId caseUnit = await factory.CreateUnitOfMeasureAsync("CUR-CASE", "Case");
         SupplierId first = await factory.CreateSupplierAsync("CUR-SUP-1", "Condiments Trading");
         SupplierId second = await factory.CreateSupplierAsync("CUR-SUP-2", "Pantry Wholesale");
-        await factory.CreateUserAsync("cur-link-mgr", Roles.MainInventoryManager);
+        await factory.CreateUserAsync("cur-link-owner", Roles.Owner);
         await factory.CreateUserAsync("cur-link-cashier", Roles.Cashier);
         using HttpClient client = factory.CreateClient();
 
-        string manager = await SignInAsync(client, "cur-link-mgr");
+        // Product changes apply directly only for someone who may approve them;
+        // anyone else's change is held for the owner (see the edit test).
+        string editor = await SignInAsync(client, "cur-link-owner");
         string cashier = await SignInAsync(client, "cur-link-cashier");
         string conversions = Path(product, "/unit-conversions");
 
         Guid baseUnit;
-        using (JsonDocument detail = await GetJsonAsync(client, Path(product), manager))
+        using (JsonDocument detail = await GetJsonAsync(client, Path(product), editor))
         {
             baseUnit = detail.RootElement.GetProperty("baseUnitOfMeasureId").GetGuid();
         }
@@ -190,31 +194,31 @@ public sealed class ProductStockingEndpointTests(PosApiFactory factory)
         object conversion = new { fromUnitId = caseUnit.Value, toUnitId = baseUnit, factor = 24m };
         Guid conversionId;
 
-        using (HttpResponseMessage added = await SendAsync(client, HttpMethod.Post, conversions, manager, conversion))
+        using (HttpResponseMessage added = await SendAsync(client, HttpMethod.Post, conversions, editor, conversion))
         {
             added.StatusCode.Should().Be(HttpStatusCode.Created, await added.Content.ReadAsStringAsync());
             conversionId = (await ReadJsonAsync(added)).RootElement.GetProperty("id").GetGuid();
         }
 
-        await ExpectAsync(client, conversions, manager, conversion, HttpStatusCode.Conflict, "catalog.conversion_exists");
+        await ExpectAsync(client, conversions, editor, conversion, HttpStatusCode.Conflict, "catalog.conversion_exists");
         await ExpectAsync(
-            client, conversions, manager, new { fromUnitId = Guid.CreateVersion7(), toUnitId = baseUnit, factor = 6m },
+            client, conversions, editor, new { fromUnitId = Guid.CreateVersion7(), toUnitId = baseUnit, factor = 6m },
             HttpStatusCode.Conflict, "catalog.uom_unknown");
 
-        await ExpectDeleteAsync(client, conversions + "/" + conversionId, manager, HttpStatusCode.NoContent);
-        await ExpectDeleteAsync(client, conversions + "/" + conversionId, manager, HttpStatusCode.NotFound, "catalog.conversion_unknown");
+        await ExpectDeleteAsync(client, conversions + "/" + conversionId, editor, HttpStatusCode.NoContent);
+        await ExpectDeleteAsync(client, conversions + "/" + conversionId, editor, HttpStatusCode.NotFound, "catalog.conversion_unknown");
 
         string suppliers = Path(product, "/suppliers");
         await ExpectPutAsync(
-            client, suppliers + "/" + first.Value, manager, new { supplierSku = "CT-SOY-1L", leadTimeDays = 3, isPreferred = true },
+            client, suppliers + "/" + first.Value, editor, new { supplierSku = "CT-SOY-1L", leadTimeDays = 3, isPreferred = true },
             HttpStatusCode.NoContent);
         await ExpectPutAsync(
-            client, suppliers + "/" + second.Value, manager, new { leadTimeDays = 5, isPreferred = true }, HttpStatusCode.NoContent);
+            client, suppliers + "/" + second.Value, editor, new { leadTimeDays = 5, isPreferred = true }, HttpStatusCode.NoContent);
         await ExpectPutAsync(
-            client, suppliers + "/" + Guid.CreateVersion7(), manager, new { leadTimeDays = 1 },
+            client, suppliers + "/" + Guid.CreateVersion7(), editor, new { leadTimeDays = 1 },
             HttpStatusCode.Conflict, "catalog.supplier_unknown");
 
-        using (JsonDocument links = await GetJsonAsync(client, suppliers, manager))
+        using (JsonDocument links = await GetJsonAsync(client, suppliers, editor))
         {
             JsonElement[] rows = [.. links.RootElement.EnumerateArray()];
             rows.Should().HaveCount(2);
@@ -227,8 +231,8 @@ public sealed class ProductStockingEndpointTests(PosApiFactory factory)
             hidden.StatusCode.Should().Be(HttpStatusCode.Forbidden, "supplier links carry the last purchase cost");
         }
 
-        await ExpectDeleteAsync(client, suppliers + "/" + first.Value, manager, HttpStatusCode.NoContent);
-        await ExpectDeleteAsync(client, suppliers + "/" + first.Value, manager, HttpStatusCode.NotFound, "catalog.supplier_not_linked");
+        await ExpectDeleteAsync(client, suppliers + "/" + first.Value, editor, HttpStatusCode.NoContent);
+        await ExpectDeleteAsync(client, suppliers + "/" + first.Value, editor, HttpStatusCode.NotFound, "catalog.supplier_not_linked");
     }
 
     private static object Thresholds(
